@@ -27,16 +27,17 @@ import shlex
 import shutil
 import subprocess
 import sys
+import time
 from collections.abc import Callable
 from typing import Any
 
 EXIT_USAGE = 64
 OUTILS = ("Bash", "PowerShell")
 PROFONDEUR_MAX = 4
-DELAI = 25
+BUDGET = 20.0  # secondes, pour tous les sous-processus d'une invocation (délai du hook : 30)
+_echeance: float | None = None
 
 ASSIGNATION = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
-SEPARATEURS = set(";|&()\n")
 REDIRECTIONS = set("<>")
 PONCTUATION = ";|&()<>\n"
 
@@ -78,8 +79,9 @@ GRAPHQL_ECRITURE = re.compile(
 class Contexte:
     """Les rappels (branche courante, contrôles) et le dossier courant suivi au fil des `cd`."""
 
-    def __init__(self, branche, branche_courante, checks_verts):
+    def __init__(self, branche, branche_courante, checks_verts, outil=None):
         self.branche = branche
+        self.outil = outil
         self._courante = branche_courante
         self._verts = checks_verts
         self.dossier: str | None = None
@@ -161,15 +163,19 @@ def _segments(commande: str, echappement: bool) -> list[list[str]]:
         return _segments_grossiers(commande)
 
 
-def _variantes(commande: str) -> list[tuple[str, bool]]:
-    """Les lectures possibles d'une commande : l'apostrophe inversée est un séparateur en sh,
-    un caractère d'échappement en PowerShell ; l'antislash échappe en sh, pas dans un chemin
-    Windows. On refuse si une seule lecture refuse."""
-    lectures = []
-    for texte in (commande.replace("`", " "), commande.replace("`", ";")):
-        for echappement in (True, False):
-            lectures.append((texte, echappement))
-    return lectures
+def _variantes(commande: str, outil: str | None = None) -> list[tuple[str, bool]]:
+    """Les lectures d'une commande selon l'outil.
+
+    Bash : l'antislash échappe, l'apostrophe inversée est une substitution (donc un séparateur).
+    PowerShell : l'antislash est un caractère ordinaire (chemins Windows), l'apostrophe inversée
+    est l'échappement, supprimé avant l'analyse. Outil inconnu : toutes les lectures, et on
+    refuse si une seule refuse."""
+    if outil == "PowerShell":
+        return [(commande.replace("`", ""), False)]
+    textes = (commande.replace("`", " "), commande.replace("`", ";"))
+    if outil == "Bash":
+        return [(t, True) for t in textes]
+    return [(t, e) for t in textes for e in (True, False)]
 
 
 def _valeur_suivante(args: list[str], i: int) -> str:
@@ -304,7 +310,15 @@ def _git(args: list[str], ctx: Contexte) -> str | None:
         return "commande git sans hooks (--no-verify)"
     if sous == "config":
         lecture = any(a in ("--get", "--get-all", "--list", "-l") for a in reste)
-        if any(_motif_hooks_git(a) for a in reste) and not lecture:
+        options = [a for a in reste if a.startswith("-")]
+        positions = [a for a in reste if not a.startswith("-")]
+        repare = (  # la réparation prescrite par la méthode : exactement cette valeur
+            set(options) <= {"--local", "--worktree"}
+            and len(positions) == 2
+            and positions[0].lower() == "core.hookspath"
+            and positions[1] == ".githooks"
+        )
+        if any(_motif_hooks_git(a) for a in reste) and not lecture and not repare:
             return "hooks git détournés (core.hooksPath)"
         if any(a.lower().startswith("alias.") for a in reste) and not lecture:
             return "alias git pouvant masquer un push vers la branche principale"
@@ -313,14 +327,14 @@ def _git(args: list[str], ctx: Contexte) -> str | None:
     return None
 
 
-def _gh_merge(args: list[str], ctx: Contexte) -> str | None:
+def _gh_merge(args: list[str], ctx: Contexte, depot: bool = False) -> str | None:
     pr = None
+    if any(a.split("=")[0] == "--admin" for a in args):
+        return "fusion en contournant les règles de protection (--admin)"
     i = 0
     while i < len(args):
         a = args[i]
         nom = a.split("=")[0]
-        if nom == "--admin":
-            return "fusion en contournant les règles de protection (--admin)"
         if nom in ("-R", "--repo"):
             return "fusion dans un autre dépôt : contrôles invérifiables ici"
         if a.startswith("-"):
@@ -329,6 +343,10 @@ def _gh_merge(args: list[str], ctx: Contexte) -> str | None:
         elif pr is None:
             pr = a
         i += 1
+    if depot:
+        return "fusion dans un autre dépôt : contrôles invérifiables ici"
+    if pr is None and ctx.dossier is not None:
+        return "fusion : préciser le numéro de PR après un changement de dossier"
     if not ctx.verts(pr):
         return "fusion avant que tous les contrôles soient verts"
     return None
@@ -336,8 +354,6 @@ def _gh_merge(args: list[str], ctx: Contexte) -> str | None:
 
 def _gh_api(args: list[str]) -> str | None:
     refus = "fusion ou écriture de branche par l'API GitHub, qui contourne la PR"
-    if GRAPHQL_ECRITURE.search(" ".join(args).lower()):
-        return refus
     methode = None
     champs = False
     point = None
@@ -361,6 +377,11 @@ def _gh_api(args: list[str]) -> str | None:
         elif not a.startswith("-") and point is None:
             point = a
         i += 1
+    if point is not None and point.lower() == "graphql":
+        texte = " ".join(args).lower()
+        if "mutation" in texte and GRAPHQL_ECRITURE.search(texte):
+            return refus
+        return None
     effective = (methode or ("POST" if champs else "GET")).upper()
     if effective != "GET" and point is not None and API_ECRITURE.search(point.lower()):
         return refus
@@ -368,12 +389,24 @@ def _gh_api(args: list[str]) -> str | None:
 
 
 def _gh(args: list[str], ctx: Contexte) -> str | None:
-    mots = [a for a in args if not a.startswith("-")][:2]
+    positions = []
+    depot = False
+    i = 0
+    while i < len(args) and len(positions) < 2:
+        a = args[i]
+        if a.split("=")[0] in ("-R", "--repo"):
+            depot = True
+            i += 1 if "=" in a else 2
+            continue
+        if not a.startswith("-"):
+            positions.append(i)
+        i += 1
+    mots = [args[k] for k in positions]
     if mots == ["pr", "merge"]:
-        debut = args.index("merge") + 1
-        return _gh_merge(args[debut:], ctx)
+        reste = args[positions[1] + 1 :]
+        return _gh_merge(reste, ctx, depot)
     if mots[:1] == ["api"]:
-        return _gh_api(args[args.index("api") + 1 :])
+        return _gh_api(args[positions[0] + 1 :])
     return None
 
 
@@ -415,7 +448,7 @@ def _motif_segment(segment: list[str], ctx: Contexte, profondeur: int) -> str | 
 
 
 def _motif_commande(commande: str, ctx: Contexte, profondeur: int = 0) -> str | None:
-    for texte, echappement in _variantes(commande):
+    for texte, echappement in _variantes(commande, ctx.outil if profondeur == 0 else None):
         for segment in _segments(texte, echappement):
             motif = _motif_segment(segment, ctx, profondeur)
             if motif:
@@ -428,17 +461,19 @@ def motif_de_refus(
     branche: str,
     branche_courante: Callable[[str | None], str | None],
     checks_verts: Callable[[str | None], bool],
+    outil: str | None = None,
 ) -> str | None:
     """La raison du refus de `commande`, ou None si elle est admise.
 
     `branche_courante` reçoit le chemin d'un `git -C <chemin>` (ou d'un `cd`), ou None.
     `checks_verts` reçoit l'argument de PR de `gh pr merge`, ou None.
+    `outil` (« Bash » ou « PowerShell ») choisit la lecture ; None les essaie toutes.
     Aucune exception ne sort d'ici : une commande qu'on ne sait pas analyser est refusée.
     """
     try:
         # Le dossier suivi (`cd`) ne doit pas passer d'une lecture à l'autre.
-        ctx = Contexte(branche, branche_courante, checks_verts)
-        for texte, echappement in _variantes(commande):
+        ctx = Contexte(branche, branche_courante, checks_verts, outil)
+        for texte, echappement in _variantes(commande, outil):
             ctx.dossier = None
             for segment in _segments(texte, echappement):
                 motif = _motif_segment(segment, ctx, 0)
@@ -450,6 +485,10 @@ def motif_de_refus(
 
 
 def _executer(cmd: list[str], cwd: str) -> subprocess.CompletedProcess | None:
+    """Lance `cmd` dans le budget de temps restant ; budget épuisé ou erreur : None."""
+    delai = BUDGET if _echeance is None else _echeance - time.monotonic()
+    if delai <= 0:
+        return None
     try:
         return subprocess.run(
             cmd,
@@ -457,7 +496,7 @@ def _executer(cmd: list[str], cwd: str) -> subprocess.CompletedProcess | None:
             cwd=cwd,
             capture_output=True,
             stdin=subprocess.DEVNULL,
-            timeout=DELAI,
+            timeout=delai,
         )
     except (OSError, subprocess.SubprocessError, ValueError):
         return None
@@ -509,6 +548,26 @@ def main(argv: list[str] | None = None) -> int:
     except SystemExit as sortie:
         return 0 if sortie.code in (0, None) else EXIT_USAGE
     try:
+        return _executer_garde(args)
+    except Exception:  # noqa: BLE001 - fail-closed : pas de trace, un refus lisible
+        _refuser("commande impossible à analyser")
+        return 2
+    finally:
+        global _echeance
+        _echeance = None
+
+
+def _refuser(motif: str) -> None:
+    print(
+        f"modele-projet : refusé — {motif}. Voir docs/modele/methode.md, « Les garde-fous ».",
+        file=sys.stderr,
+    )
+
+
+def _executer_garde(args) -> int:
+    global _echeance
+    _echeance = time.monotonic() + BUDGET
+    try:
         donnees = json.loads(sys.stdin.buffer.read().decode("utf-8", errors="replace"))
         outil = donnees["tool_name"]
         entree = donnees.get("tool_input") or {}
@@ -533,13 +592,11 @@ def main(argv: list[str] | None = None) -> int:
         branche,
         lambda chemin: branche_courante_git(chemin, cwd),
         lambda pr: checks_verts_gh(pr, cwd),
+        outil,
     )
     if motif is None:
         return 0
-    print(
-        f"modele-projet : refusé — {motif}. Voir docs/modele/methode.md, « Les garde-fous ».",
-        file=sys.stderr,
-    )
+    _refuser(motif)
     return 2
 
 

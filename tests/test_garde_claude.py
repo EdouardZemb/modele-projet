@@ -261,3 +261,171 @@ def test_settings_rendu(rendre):
     assert "lancer.sh" in commande
     assert "garde_claude.py" in commande
     assert b"\r" not in chemin.read_bytes()
+
+
+# --- ronde de corrections 1 ---
+
+CHEMIN_WIN = r"C:\src\github.com\EdouardZemb\modele-projet.worktrees\lot-1"
+
+
+def refus_outil(commande, outil, courante="lot-1/x", verts=True):
+    """Comme refus(), mais la branche courante n'est lisible que pour le vrai chemin Windows."""
+
+    def lire(chemin):
+        return courante if chemin in (None, CHEMIN_WIN) else None
+
+    return garde_claude.motif_de_refus(commande, BRANCHE, lire, lambda pr: verts, outil)
+
+
+@pytest.mark.parametrize(
+    "commande",
+    [
+        f"git -C {CHEMIN_WIN} push -u origin HEAD",
+        f"git -C {CHEMIN_WIN} push",
+        f"cd {CHEMIN_WIN}; git push -u origin HEAD",
+        f"Set-Location {CHEMIN_WIN}; git push",
+    ],
+)
+def test_powershell_chemin_windows_admis(commande):
+    assert refus_outil(commande, "PowerShell") is None
+
+
+def test_powershell_apostrophe_inversee_est_l_echappement():
+    assert "push vers main" in refus_outil("git push origin ma`in", "PowerShell")
+    assert "push vers main" in refus_outil("git push origin main", "PowerShell")
+
+
+def test_bash_apostrophe_inversee_est_une_substitution():
+    assert "push vers main" in refus_outil("echo `git push origin main`", "Bash")
+
+
+@pytest.mark.parametrize(
+    "commande",
+    ["cd ../lot-2 && gh pr merge --squash", r"Set-Location ..\lot-2; gh pr merge --squash"],
+)
+def test_fusion_sans_numero_apres_changement_de_dossier(commande):
+    for outil in ("Bash", "PowerShell"):
+        motif = refus_outil(commande, outil)
+        assert motif is not None
+        assert "préciser le numéro de PR" in motif
+
+
+def test_fusion_avec_numero_apres_changement_de_dossier():
+    assert refus_outil("cd ../lot-2 && gh pr merge 12 --squash", "Bash") is None
+
+
+@pytest.mark.parametrize(
+    "commande",
+    [
+        "gh api repos/o/x/rulesets",
+        "gh api repos/{owner}/{repo}/rulesets --jq '.[].name'",
+        (
+            "gh api graphql -f query='query { repository(owner:\"o\", name:\"x\") "
+            "{ branchProtectionRules(first: 5) { nodes { pattern } } } }'"
+        ),
+    ],
+)
+def test_api_en_lecture_admise(commande):
+    assert refus(commande) is None
+
+
+def test_api_en_ecriture_refusee():
+    assert "l'API" in refus("gh api -X POST repos/o/x/rulesets --input f.json")
+    mutation = (
+        "gh api graphql -f query='mutation { mergePullRequest(input: {pullRequestId: \"x\"}) "
+        "{ clientMutationId } }'"
+    )
+    assert "l'API" in refus(mutation)
+
+
+@pytest.mark.parametrize(
+    "commande",
+    [
+        "git config core.hooksPath .githooks",
+        "git config --local core.hooksPath .githooks",
+        "git config --worktree core.hooksPath .githooks",
+        "git -C ../autre config core.hooksPath .githooks",
+    ],
+)
+def test_reparation_des_hooks_admise(commande):
+    assert refus(commande) is None
+
+
+@pytest.mark.parametrize(
+    "commande",
+    [
+        "git config core.hooksPath /dev/null",
+        "git config core.hooksPath .githooks-vide",
+        "git config core.hooksPath",
+        "git config --unset core.hooksPath",
+        "git config --global core.hooksPath .githooks",
+        "git config --system core.hooksPath .githooks",
+        "git config --file x core.hooksPath .githooks",
+        "git config core.hooksPath .githooks extra",
+        "git -c core.hooksPath=.githooks-vide commit -m x",
+    ],
+)
+def test_detournement_des_hooks_refuse(commande):
+    assert "hooks" in refus(commande)
+
+
+@pytest.mark.parametrize(
+    "commande",
+    [
+        "gh -R o/r pr merge 12 --admin",
+        "gh pr -R o/r merge 12 --admin",
+        "gh --repo o/r pr merge 12 --admin",
+    ],
+)
+def test_admin_malgre_option_de_depot(commande):
+    assert "contournant" in refus(commande)
+
+
+def test_option_de_depot_sans_admin_refusee():
+    assert "contrôles" in refus("gh -R o/r pr merge 12")
+
+
+def test_gh_api_apres_option_de_depot():
+    assert "l'API" in refus("gh -R o/r api -X PUT repos/o/x/pulls/12/merge")
+
+
+def faux_gh_lent(dossier):
+    if sys.platform == "win32":
+        f = dossier / "gh.cmd"
+        f.write_text("@echo off\r\nping -n 6 127.0.0.1 >nul\r\necho []\r\n", encoding="utf-8")
+    else:
+        f = dossier / "gh"
+        f.write_text("#!/bin/sh\nexec sleep 5\n", encoding="utf-8")
+        f.chmod(0o755)
+
+
+def test_checks_verts_gh_budget_epuise(tmp_path, monkeypatch):
+    faux_gh_lent(tmp_path)
+    monkeypatch.setenv("PATH", str(tmp_path) + os.pathsep + os.environ["PATH"])
+    monkeypatch.setattr(garde_claude, "BUDGET", 0.5)
+    assert garde_claude.checks_verts_gh("12", str(tmp_path)) is False
+
+
+def test_budget_deja_epuise_ne_lance_rien(monkeypatch):
+    monkeypatch.setattr(garde_claude, "_echeance", garde_claude.time.monotonic() - 1)
+    assert garde_claude.branche_courante_git(None, ".") is None
+
+
+def test_main_exception_inattendue_refuse(monkeypatch, capsys):
+    import io
+    import types
+
+    module = types.ModuleType("reglages")
+
+    def explose(nom):
+        raise RuntimeError("boum")
+
+    module.__getattr__ = explose
+    monkeypatch.setitem(sys.modules, "reglages", module)
+    entree = json.dumps({"tool_name": "Bash", "tool_input": {"command": "git status"}, "cwd": "."})
+    monkeypatch.setattr(
+        sys, "stdin", types.SimpleNamespace(buffer=io.BytesIO(entree.encode("utf-8")))
+    )
+    assert garde_claude.main([]) == 2
+    assert "commande impossible à analyser" in capsys.readouterr().err
+    assert garde_claude._echeance is None
