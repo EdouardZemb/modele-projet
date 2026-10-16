@@ -1,0 +1,139 @@
+"""Les hooks git d'un projet rendu : confidentialité, format des commits, branche principale."""
+
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+import pre_push
+import pytest
+from conftest import git
+
+SH = shutil.which("sh") or (
+    r"C:\Program Files\Git\bin\sh.exe" if Path(r"C:\Program Files\Git\bin\sh.exe").exists() else None
+)
+MOTIF = "motif-interdit-essai"
+HOOKS = ("pre-commit", "commit-msg", "pre-push")
+
+
+@pytest.fixture
+def projet(rendre, env_isole):
+    """Un projet rendu, dépôt git initialisé avec les hooks du modèle, et son environnement."""
+    racine = rendre()
+    env = {**env_isole(), "MOTIFS_INTERDITS": MOTIF}
+    git(racine, env, "init", "-q", "-b", "main")
+    git(racine, env, "config", "core.autocrlf", "false")
+    git(racine, env, "config", "core.hooksPath", ".githooks")
+    return racine, env
+
+
+def lancer_git(racine, env, *args):
+    return subprocess.run(
+        ["git", *args],
+        check=False,
+        cwd=racine,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+
+
+def test_hooks_lf_et_executables(rendre):
+    racine = rendre()
+    fichiers = [racine / ".githooks" / h for h in HOOKS] + [racine / "scripts/modele/lancer.sh"]
+    for f in fichiers:
+        assert b"\r" not in f.read_bytes(), f.name
+    if sys.platform != "win32":
+        for h in HOOKS:
+            assert os.access(racine / ".githooks" / h, os.X_OK), h
+
+
+@pytest.mark.skipif(SH is None, reason="aucun sh trouvé")
+def test_lancer_trouve_un_python(rendre):
+    racine = rendre()
+    r = subprocess.run(
+        [SH, str(racine / "scripts/modele/lancer.sh"), "-c", "import sys; print(sys.version_info[0])"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip() == "3"
+
+
+@pytest.mark.skipif(SH is None, reason="aucun sh trouvé")
+def test_commit_message_invalide_refuse(projet):
+    racine, env = projet
+    git(racine, env, "add", "-A")
+    r = lancer_git(racine, env, "commit", "-m", "Ajoute x")
+    assert r.returncode != 0
+    assert "type(portée): sujet" in r.stderr
+
+
+@pytest.mark.skipif(SH is None, reason="aucun sh trouvé")
+def test_commit_motif_prive_refuse(projet):
+    racine, env = projet
+    (racine / "note.txt").write_text(f"voici {MOTIF} ici\n", encoding="utf-8")
+    git(racine, env, "add", "-A")
+    r = lancer_git(racine, env, "commit", "-m", "feat: essai")
+    assert r.returncode != 0
+    assert "motif privé n°1" in r.stderr
+    assert MOTIF not in r.stderr + r.stdout
+
+
+@pytest.mark.skipif(SH is None, reason="aucun sh trouvé")
+def test_commit_conforme_accepte(projet):
+    racine, env = projet
+    git(racine, env, "add", "-A")
+    r = lancer_git(racine, env, "commit", "-m", "feat: premier essai")
+    assert r.returncode == 0, r.stderr
+
+
+@pytest.fixture
+def projet_avec_origin(projet, tmp_path):
+    racine, env = projet
+    origin = tmp_path / "origin.git"
+    origin.mkdir()
+    git(origin, env, "init", "-q", "--bare", "-b", "main")
+    git(racine, env, "add", "-A")
+    git(racine, env, "commit", "-q", "--no-verify", "-m", "feat: base")
+    git(racine, env, "remote", "add", "origin", str(origin))
+    git(racine, env, "push", "-q", "--no-verify", "origin", "main")
+    # Un commit de plus : sans lui, « git push origin main » dirait « up-to-date » sans appeler le hook.
+    git(racine, env, "commit", "-q", "--no-verify", "--allow-empty", "-m", "feat: suite")
+    return racine, env
+
+
+@pytest.mark.skipif(SH is None, reason="aucun sh trouvé")
+def test_push_vers_branche_principale_refuse(projet_avec_origin):
+    racine, env = projet_avec_origin
+    r = lancer_git(racine, env, "push", "origin", "main")
+    assert r.returncode != 0
+    assert "envoi refusé vers refs/heads/main" in r.stderr
+
+
+@pytest.mark.skipif(SH is None, reason="aucun sh trouvé")
+def test_push_branche_de_travail_accepte(projet_avec_origin):
+    racine, env = projet_avec_origin
+    r = lancer_git(racine, env, "push", "origin", "HEAD:refs/heads/lot-1/essai")
+    assert r.returncode == 0, r.stderr
+
+
+@pytest.mark.skipif(SH is None, reason="aucun sh trouvé")
+def test_suppression_branche_principale_refusee(projet_avec_origin):
+    racine, env = projet_avec_origin
+    r = lancer_git(racine, env, "push", "origin", ":main")
+    assert r.returncode != 0
+
+
+def test_refs_refusees():
+    assert pre_push.refs_refusees("refs/heads/x 1 refs/heads/main 2\n", "main") == ["refs/heads/main"]
+    assert pre_push.refs_refusees("refs/heads/x 1 refs/heads/lot-1/x 2\n", "main") == []
+
+
+def test_branche_rendue(rendre):
+    racine = rendre(branche_principale="principal")
+    texte = (racine / "scripts/modele/reglages.py").read_text(encoding="utf-8")
+    assert 'BRANCHE_PRINCIPALE = "principal"' in texte
