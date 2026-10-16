@@ -19,6 +19,9 @@ doit tenir un niveau de qualité qui se voit.
 
 ## Décision
 
+Les règles 1 à 4 ci-dessous reprennent les règles 2 à 5 de l'ADR-0010 ; sa règle 1, propre à la
+veille, n'est que renvoyée.
+
 Quatre règles, valables pour toute application de l'écosystème, y compris celles qui n'existent pas
 encore.
 
@@ -52,7 +55,7 @@ recherche de secrets, aucune donnée réelle dans le dépôt. La norme porte sur
 garde-fous, pas sur l'outillage exact. Pour une application existante, elle s'applique au module
 qu'on y ajoute, pas rétroactivement.
 
-Le modèle outille quatre de ces familles. La mutation reste au projet, avec l'outil de sa stack, dès
+**Ajout de cet ADR, absent de l'ADR-0010 (arbitrage du 16/10) :** le modèle outille quatre de ces familles. La mutation reste au projet, avec l'outil de sa stack, dès
 que le projet a une logique de domaine (voir `docs/modele/methode.md`, « Les familles de garde-fous
 de l'écosystème »).
 
@@ -83,6 +86,4 @@ Cet ADR doit être rouvert si :
 - deux applications doivent reconnaître la même personne pour un besoin réel : l'implémentation
   commune de l'interface fait alors l'objet de son propre ADR ;
 - une application de l'écosystème sert quelqu'un hors du foyer, ou est proposée à des tiers : la
-  question se repose sous l'angle des droits des personnes ;
-- un projet démontre qu'une famille de garde-fous ne peut pas s'appliquer à lui : l'exception est
-  alors écrite ici, pas contournée.
+  question se repose sous l'angle des droits des personnes.
