@@ -13,6 +13,8 @@ _skip_if_exists:
   - docs/decisions/README.md
   - docs/pistes.md
   - docs/registre.md
+  - .github/workflows/ci.yml
+  - .github/dependabot.yml
 nom:
   type: str
   help: Nom du projet, qui est aussi celui du dépôt

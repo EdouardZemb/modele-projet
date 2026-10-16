@@ -1,0 +1,23 @@
+name: ci
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+  push:
+    branches: [{{ branche_principale }}]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: {% raw %}ci-${{ github.ref }}{% endraw %}
+  cancel-in-progress: {% raw %}${{ github.event_name == 'pull_request' }}{% endraw %}
+
+jobs:
+  socle:
+    uses: ./.github/workflows/modele-socle.yml
+    secrets: inherit
+
+# Les vérifications propres au projet (tests, lint, construction) s'ajoutent ici, dans un job `verifier`.
+# Ce fichier est au projet : `copier update` n'y touche plus.
