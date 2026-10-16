@@ -5,7 +5,7 @@ import sys
 
 import confidentialite as c
 import pytest
-from conftest import SCRIPTS
+from conftest import SCRIPTS, depot, git
 
 CLE_AGE = "AGE-SECRET-KEY-1" + "Q" * 58
 SCRIPT = SCRIPTS / "confidentialite.py"
@@ -136,28 +136,6 @@ def test_exiger_prives_sans_liste(tmp_path, env_isole):
 def test_usage(env_isole):
     assert lancer([], env_isole()).returncode == 64
     assert lancer(["--index", "--texte", "x"], env_isole()).returncode == 64
-
-
-def git(cwd, env, *args):
-    r = subprocess.run(
-        ["git", *args],
-        check=False,
-        cwd=cwd,
-        env=env,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-    )
-    assert r.returncode == 0, r.stderr
-    return r.stdout
-
-
-def depot(tmp_path, env):
-    d = tmp_path / "depot"
-    d.mkdir()
-    git(d, env, "init", "-q", "-b", "main")
-    git(d, env, "config", "core.autocrlf", "false")
-    return d
 
 
 def test_index_ne_regarde_que_les_ajouts(tmp_path, env_isole):

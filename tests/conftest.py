@@ -1,6 +1,7 @@
 """Banc d'essai : rend le modèle Copier dans un dossier temporaire."""
 
 import os
+import subprocess
 import sys
 import warnings
 from pathlib import Path
@@ -85,3 +86,25 @@ def env_isole(tmp_path):
         return env
 
     return _env
+
+
+def git(cwd, env, *args):
+    r = subprocess.run(
+        ["git", *args],
+        check=False,
+        cwd=cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    assert r.returncode == 0, r.stderr
+    return r.stdout
+
+
+def depot(tmp_path, env):
+    d = tmp_path / "depot"
+    d.mkdir()
+    git(d, env, "init", "-q", "-b", "main")
+    git(d, env, "config", "core.autocrlf", "false")
+    return d
