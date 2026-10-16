@@ -13,7 +13,7 @@ SCRIPT = SCRIPTS / "confidentialite.py"
 ECHANTILLONS = {
     "adresse IP privée": "serveur 192.168" + ".1.20",
     "adresse Tailscale": "noeud 100.101" + ".2.3",
-    "cible SSH": "ssh " + "-oBatchMode=yes " + "deploy" + "@" + "hote.exemple",
+    "cible SSH": "ssh -p 22 " + "deploy" + "@" + "hote.exemple",
     "cible scp": "scp f " + "deploy" + "@" + "hote:/tmp/f",
     "clé privée age": CLE_AGE,
     "clé privée PEM": "-----BEGIN " + "OPENSSH PRIVATE" + " KEY-----",
@@ -44,6 +44,7 @@ def test_motifs_generiques_detectent(nom):
         "version 10.34.2",
         "@docs/modele/methode.md",
         "age1" + "q" * 58,
+        "ssh -T git@github.com",
     ],
 )
 def test_faux_positifs_ecartes(texte):
@@ -218,3 +219,48 @@ def test_message(tmp_path, env_isole):
     f = tmp_path / "msg.txt"
     f.write_text("feat: truc valeur-privee-xyz\n", encoding="utf-8")
     assert lancer(["--message", str(f)], env).returncode == 1
+
+
+@pytest.mark.parametrize(
+    "commande",
+    [
+        "ssh -p 22 " + "u" + "@" + "machine",
+        "ssh -i ~/.ssh/cle " + "u" + "@" + "machine",
+        "ssh -J saut " + "u" + "@" + "machine",
+        "ssh " + "Deploy" + "@" + "machine",
+    ],
+)
+def test_cible_ssh_formes(commande):
+    constats = c.examiner([("f:1", commande)], c.MOTIFS_GENERIQUES)
+    assert [x.motif for x in constats] == ["cible SSH"]
+
+
+def test_retour_chariot_isole_ne_cache_rien(tmp_path, env_isole):
+    env = env_isole()
+    d = depot(tmp_path, env)
+    (d / "a.txt").write_text("a" + chr(10), encoding="utf-8")
+    git(d, env, "add", "a.txt")
+    git(d, env, "commit", "-qm", "init")
+    git(d, env, "switch", "-qc", "branche")
+    (d / "b.txt").write_bytes(b"abc" + bytes([13]) + CLE_AGE.encode() + bytes([10]))
+    git(d, env, "add", "b.txt")
+    assert lancer(["--index"], env, d).returncode == 1
+    git(d, env, "commit", "-qm", "ajout")
+    assert lancer(["--diff", "main"], env, d).returncode == 1
+
+
+@pytest.mark.parametrize("base", ["", "  ", "-x", "nexistepas"])
+def test_base_invalide(tmp_path, env_isole, base):
+    env = env_isole()
+    d = depot(tmp_path, env)
+    (d / "a.txt").write_text("a" + chr(10), encoding="utf-8")
+    git(d, env, "add", "a.txt")
+    git(d, env, "commit", "-qm", "init")
+    assert lancer(["--diff", base], env, d).returncode == 64
+
+
+def test_chemin_absent_ou_dossier(tmp_path, env_isole):
+    r = lancer(["--fichiers", str(tmp_path / "n-existe-pas.txt")], env_isole())
+    assert r.returncode == 64
+    assert "n-existe-pas" not in r.stdout + r.stderr
+    assert lancer(["--fichiers", str(tmp_path)], env_isole()).returncode == 64

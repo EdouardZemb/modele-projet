@@ -53,7 +53,10 @@ MOTIFS_GENERIQUES: tuple[Motif, ...] = (
         r"\b(?:10(?:\.\d{1,3}){3}|192\.168(?:\.\d{1,3}){2}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2})\b",
     ),
     _g("adresse Tailscale", r"\b100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])(?:\.\d{1,3}){2}\b"),
-    _g("cible SSH", r"\bssh(?:\.exe)?\s+(?:-\S+\s+)*[a-z_][\w.-]*@[\w.-]+"),
+    _g(
+        "cible SSH",
+        r"\bssh(?:\.exe)?\s+(?:-\S+\s+(?:[^\s@-][^\s@]*\s+)?)*(?!git@)[A-Za-z_][\w.-]*@[\w.-]+",
+    ),
     _g("cible scp", r"\b[a-z_][\w.-]*@[a-z0-9][\w-]*:[~/]"),
     _g("clé privée age", r"AGE-SECRET-KEY-1[0-9A-Z]{58}"),
     _g("clé privée PEM", r"-----BEGIN (?:[A-Z]+ )*PRIVATE KEY-----"),
@@ -122,15 +125,14 @@ def _git(*args: str) -> str:
             ["git", "-c", "core.quotepath=false", *args],
             check=False,
             capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
         )
     except OSError:
         raise ErreurUsage("git est introuvable") from None
     if r.returncode != 0:
         raise ErreurUsage("échec de git (dépôt, base ou référence invalide)")
-    return r.stdout
+    # Octets bruts, décodés ici : le mode texte de subprocess transformerait un retour chariot
+    # isolé en saut de ligne et ferait disparaître du contenu ajouté.
+    return r.stdout.decode("utf-8", errors="replace")
 
 
 _ENTETE = re.compile(r"^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
@@ -195,6 +197,16 @@ def _lignes_du_mode(args: argparse.Namespace) -> list[tuple[str, str]]:
         noms = _git("diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR", "--no-renames")
         sortie.extend((f"{c}:0", c) for c in _chemins(noms))
     elif args.diff is not None:
+        if not args.diff.strip() or args.diff.startswith("-"):
+            raise ErreurUsage("base de comparaison vide ou invalide")
+        if set(args.diff) != {"0"}:
+            _git(
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                "--end-of-options",
+                args.diff + "^" + "{" + "commit" + "}",
+            )
         if set(args.diff) == {"0"}:
             base = ["diff", ARBRE_VIDE, "HEAD"]
             noms_base = [ARBRE_VIDE, "HEAD"]
@@ -210,10 +222,11 @@ def _lignes_du_mode(args: argparse.Namespace) -> list[tuple[str, str]]:
     elif args.texte is not None:
         sortie.extend(_lignes_de_texte(args.texte, _lire_octets(args.texte)))
     else:
-        for chemin in args.fichiers:
+        for rang, chemin in enumerate(args.fichiers, start=1):
+            if not Path(chemin).is_file():
+                raise ErreurUsage(f"chemin introuvable ou dossier (argument n°{rang})")
             sortie.append((f"{chemin}:0", chemin))
-            if Path(chemin).is_file():
-                sortie.extend(_lignes_de_texte(chemin, _lire_octets(chemin)))
+            sortie.extend(_lignes_de_texte(chemin, _lire_octets(chemin)))
     return sortie
 
 
