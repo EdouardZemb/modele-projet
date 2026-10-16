@@ -1,0 +1,38 @@
+_min_copier_version: "9.19"
+_subdirectory: template
+_answers_file: .copier-answers.yml
+_templates_suffix: .jinja
+_skip_if_exists:
+  - CLAUDE.md
+  - README.md
+  - .gitattributes
+  - .gitignore
+  - .editorconfig
+  - docs/00-brief-initial.md
+  - docs/cadrage.md
+  - docs/decisions/README.md
+  - docs/pistes.md
+  - docs/registre.md
+nom:
+  type: str
+  help: Nom du projet, qui est aussi celui du dépôt
+  validator: "{% if not (nom | regex_search('^[a-z][a-z0-9-]*$')) %}minuscules, chiffres et tirets, en commençant par une lettre{% endif %}"
+description:
+  type: str
+  help: Le projet en une phrase
+  validator: "{% if not description.strip() %}une phrase est requise{% endif %}"
+visibilite:
+  type: str
+  help: Visibilité du dépôt GitHub
+  choices: {public: public, privé: prive}
+  default: public
+cible:
+  type: str
+  help: Ce que le modèle déploie (les lots 2 et 3 ajouteront statique et serveur)
+  choices: [aucune]
+  default: aucune
+branche_principale:
+  type: str
+  help: Branche par défaut du dépôt
+  default: main
+  validator: "{% if not (branche_principale | regex_search('^[a-z][a-z0-9/-]*$')) %}nom de branche invalide{% endif %}"
