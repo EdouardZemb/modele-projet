@@ -195,7 +195,7 @@ Un `CLAUDE.md` à la fois géré par le modèle et propre au projet ferait un co
   | M-0005 Sauvegardes et restauration | `serveur`, avec sauvegardes | partie générique de l'ADR-0007 d'`ancrage` |
 
   M-0001 répond à une faiblesse que l'ADR-0010 avoue lui-même : *« Cet ADR vit dans le dépôt de
-  Martha mais gouverne des applications qui n'y sont pas »*. Le modèle devient la maison de ces
+  Martha (`creche-planner`) mais gouverne des applications qui n'y sont pas »*. Le modèle devient la maison de ces
   règles.
 - **`pistes.md`** : « notées, pas engagées ». Une piste devient une issue le jour où on la
   travaille.
@@ -451,8 +451,8 @@ Les adresses de ping ne sont jamais journalisées : elles passent à `curl` par 
   montent une version d'action dans un fichier géré se fusionnent normalement.
 - **Semés** (`[S]`, `_skip_if_exists` dans Copier) : créés une fois, puis au projet. Un
   `copier update` ne les touche plus.
-- **Un cas mixte, `.claude/settings.json`.** Le modèle y pose les hooks et la déclaration de
-  *superpowers*. Le projet y ajoute ses réglages : le plugin Nx et ses permissions pour
+- **Un cas mixte, `.claude/settings.json`.** Le modèle y pose le hook du garde (*superpowers* n'y est pas
+  déclaré, voir §5.2). Le projet y ajoute ses réglages : le plugin Nx et ses permissions pour
   `creche-planner`, par exemple. Le fichier passe par la fusion à trois voies de Copier. C'est le
   point de friction connu : un conflit s'y résout à la main, dans la PR de mise à jour.
 - **Changer de cible.** Les fichiers gérés propres à l'ancienne cible disparaissent, ceux de la
@@ -572,7 +572,7 @@ est celui du lot 1.**
 | `pupitre` | Ses 9 documents numérotés de la racine passent dans `docs/` (`git mv`, pour garder l'historique), et il reçoit son `CLAUDE.md`. `CONVENTIONS.md` y est intégré ou reste, au choix du lot | — |
 | `partition` | La méthode. `DECISIONS.md` et `QUESTIONS.md` sont rapprochés de `docs/decisions/` et `pistes.md`. Sa CI propre, qui refuse l'audio et le MIDI, reste | — |
 | `veille-emploi` | La méthode. Son dépôt de travail devient un clone dans `C:\src\github.com\EdouardZemb\veille-emploi`. **Sa branche par défaut est `principal`, pas `main`** : la règle de protection, le hook `pre-push` et le hook Claude doivent prendre la branche par défaut comme paramètre, ce que le lot 1 prévoit | 👤 Committer et pousser le correctif du 15/10, toujours dans l'arbre de travail du serveur |
-| `creche-planner` | La méthode et les ressources partagées. Ses hooks husky et sa porte de confidentialité en Node doublonnent ceux du modèle : le lot décide lesquels il garde. Son ADR-0010 renvoie à M-0001. Il garde `docs/adr/` et son registre doc 34 | Sa clé age tourne d'abord, hors de cette spec. Ce moment est l'occasion de le rattacher aux clés du parc |
+| `creche-planner` | La méthode et les ressources partagées. Ses hooks husky et sa porte de confidentialité en Node doublonnent ceux du modèle : le lot décide lesquels il garde. Son ADR-0010 renvoie à M-0001. Il garde `docs/adr/` et son registre doc 34 | Une décision à part sur ses clés, qui sera l'occasion de le rattacher aux clés du parc |
 
 ---
 
@@ -651,7 +651,7 @@ Ce ne sont pas des décisions : des faits à établir, chacun avec la façon de 
 
 - **Le tri des 67 dépôts GitHub** (le brief, démarche n° 1).
 - **Les trous du serveur** : `analyse-demos`, `test-framework`, `inventaire`.
-- **La rotation de la clé de `creche-planner`**, urgente, mais à part.
+- **La gestion des clés de `creche-planner`**, décision à part.
 - **La mécanique en image versionnée** (approche 3). À rouvrir au quatrième projet `serveur`.
 - **Le déploiement de `creche-planner` par le modèle** (option B de la Q11). À rouvrir quand le
   modèle aura tourné sur trois projets.
