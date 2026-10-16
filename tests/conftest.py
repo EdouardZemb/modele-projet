@@ -14,6 +14,8 @@ SCRIPTS = RACINE / "template/scripts/modele"
 # Les scripts du modèle sont importés directement par les tests.
 sys.path.insert(0, str(SCRIPTS))
 
+REGISTRE_ENTETE = "| N° | Famille | Date | Constat | Motif | Prévention | Critère de sortie | État |"
+
 REPONSES_PAR_DEFAUT = {
     "nom": "essai",
     "description": "Projet d'essai",
