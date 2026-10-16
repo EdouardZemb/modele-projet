@@ -354,12 +354,6 @@ def _gh_merge(args: list[str], ctx: Contexte, depot: bool = False) -> str | None
     return None
 
 
-def _est_graphql(point: str) -> bool:
-    """Vrai si le point d'accès est celui de GraphQL : `graphql`, `/graphql`, URL complète."""
-    chemin = re.sub(r"^https?://[^/]+/(api/)?", "", point.strip().lower()).lstrip("/")
-    return chemin.split("?")[0].rstrip("/").endswith("graphql")
-
-
 def _gh_api(args: list[str]) -> str | None:
     refus = "fusion ou écriture de branche par l'API GitHub, qui contourne la PR"
     methode = None
@@ -385,11 +379,9 @@ def _gh_api(args: list[str]) -> str | None:
         elif not a.startswith("-") and point is None:
             point = a
         i += 1
-    if point is not None and _est_graphql(point):
-        texte = " ".join(args).lower()
-        if "mutation" in texte and GRAPHQL_ECRITURE.search(texte):
-            return refus
-        return None
+    texte = " ".join(args).lower()  # les deux contrôles valent pour tout appel, quel que soit le point
+    if "mutation" in texte and GRAPHQL_ECRITURE.search(texte):
+        return refus
     effective = (methode or ("POST" if champs else "GET")).upper()
     if effective != "GET" and point is not None and API_ECRITURE.search(point.lower()):
         return refus

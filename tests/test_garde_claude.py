@@ -477,3 +477,26 @@ def test_continuation_bash(commande):
 @pytest.mark.parametrize("fin", [NL, CR + NL])
 def test_continuation_powershell(fin):
     assert "push vers main" in refus_outil("git push origin " + BT + fin + "main", "PowerShell")
+
+
+# --- ronde de corrections 3 ---
+
+
+@pytest.mark.parametrize("outil", ["Bash", "PowerShell"])
+@pytest.mark.parametrize(
+    "commande",
+    [
+        "gh api -X PUT repos/o/r/contents/graphql -f content=x",
+        "gh api -X POST repos/o/r/git/refs/heads/graphql -f sha=1",
+        "gh api /graphql?x=1 " + MUTATION,
+    ],
+)
+def test_api_ecriture_sans_egard_au_point(commande, outil):
+    assert "l'API" in refus_outil(commande, outil)
+
+
+def test_api_graphql_lecture_et_get_admis():
+    lecture = "-f query='query { repository(name: 1) { branchProtectionRules(first: 5) { id } } }'"
+    for point in ("graphql", "/graphql", "https://api.github.com/graphql", "/graphql?x=1"):
+        assert refus(f"gh api {point} {lecture}") is None
+    assert refus("gh api repos/o/r/graphql") is None
