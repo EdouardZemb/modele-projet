@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"$CLAUDE_PROJECT_DIR/template/scripts/modele/lancer.sh\" \"$CLAUDE_PROJECT_DIR/template/scripts/modele/garde_claude.py\" --branche main",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
