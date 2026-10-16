@@ -50,7 +50,7 @@ PREFIXES = {
 INTERPRETES = {
     "bash", "sh", "zsh", "dash", "ksh", "pwsh", "powershell", "cmd", "eval", "xargs", "wsl", "start",
 }  # fmt: skip
-CHANGE_DOSSIER = {"cd", "pushd", "chdir", "set-location", "sl"}
+CHANGE_DOSSIER = {"cd", "pushd", "chdir", "set-location", "sl", "push-location"}
 
 SOUS_COMMANDES_HOOKS = {"commit", "merge", "push", "am", "rebase", "cherry-pick", "revert"}
 LONGUES_AVEC_VALEUR = {
@@ -72,7 +72,7 @@ API_ECRITURE = re.compile(
 )
 GRAPHQL_ECRITURE = re.compile(
     r"mergepullrequest|enablepullrequestautomerge|updateref|createref|deleteref"
-    r"|createcommitonbranch|branchprotectionrule|ruleset"
+    r"|createcommitonbranch|branchprotectionrule|ruleset|mergebranch"
 )
 
 
@@ -170,12 +170,14 @@ def _variantes(commande: str, outil: str | None = None) -> list[tuple[str, bool]
     PowerShell : l'antislash est un caractère ordinaire (chemins Windows), l'apostrophe inversée
     est l'échappement, supprimé avant l'analyse. Outil inconnu : toutes les lectures, et on
     refuse si une seule refuse."""
+    powershell = [(re.sub(r"`\r?\n", " ", commande).replace("`", ""), False)]
     if outil == "PowerShell":
-        return [(commande.replace("`", ""), False)]
-    textes = (commande.replace("`", " "), commande.replace("`", ";"))
+        return powershell
+    continue_sh = re.sub(r"\\\r?\n", "", commande)  # continuation : antislash puis saut
+    textes = (continue_sh.replace("`", " "), continue_sh.replace("`", ";"))
     if outil == "Bash":
         return [(t, True) for t in textes]
-    return [(t, e) for t in textes for e in (True, False)]
+    return [(t, e) for t in textes for e in (True, False)] + powershell
 
 
 def _valeur_suivante(args: list[str], i: int) -> str:
@@ -352,6 +354,12 @@ def _gh_merge(args: list[str], ctx: Contexte, depot: bool = False) -> str | None
     return None
 
 
+def _est_graphql(point: str) -> bool:
+    """Vrai si le point d'accès est celui de GraphQL : `graphql`, `/graphql`, URL complète."""
+    chemin = re.sub(r"^https?://[^/]+/(api/)?", "", point.strip().lower()).lstrip("/")
+    return chemin.split("?")[0].rstrip("/").endswith("graphql")
+
+
 def _gh_api(args: list[str]) -> str | None:
     refus = "fusion ou écriture de branche par l'API GitHub, qui contourne la PR"
     methode = None
@@ -377,7 +385,7 @@ def _gh_api(args: list[str]) -> str | None:
         elif not a.startswith("-") and point is None:
             point = a
         i += 1
-    if point is not None and point.lower() == "graphql":
+    if point is not None and _est_graphql(point):
         texte = " ".join(args).lower()
         if "mutation" in texte and GRAPHQL_ECRITURE.search(texte):
             return refus

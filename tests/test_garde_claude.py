@@ -429,3 +429,51 @@ def test_main_exception_inattendue_refuse(monkeypatch, capsys):
     assert garde_claude.main([]) == 2
     assert "commande impossible à analyser" in capsys.readouterr().err
     assert garde_claude._echeance is None
+
+
+# --- ronde de corrections 2 ---
+
+BS, NL, CR, BT = chr(92), chr(10), chr(13), chr(96)
+MUTATION = "-f query='mutation { mergePullRequest(input: {pullRequestId: " + chr(34) + "x" + chr(34) + "}) { id } }'"
+
+
+@pytest.mark.parametrize("outil", ["Bash", "PowerShell", None])
+@pytest.mark.parametrize(
+    "point", ["graphql", "/graphql", "https://api.github.com/graphql", "https://ghe.exemple.fr/api/graphql"]
+)
+def test_graphql_mutation_refusee_quel_que_soit_le_point(point, outil):
+    assert "l'API" in refus_outil(f"gh api {point} {MUTATION}", outil)
+
+
+def test_graphql_lecture_par_chemin_admise():
+    lecture = "-f query='query { repository(name: 1) { branchProtectionRules(first: 5) { id } } }'"
+    for outil in ("Bash", "PowerShell"):
+        assert refus_outil(f"gh api /graphql {lecture}", outil) is None
+
+
+def test_merge_branch_refuse():
+    mutation = "gh api graphql -f query='mutation { mergeBranch(input: {base: 1}) { id } }'"
+    assert "l'API" in refus(mutation)
+
+
+def test_push_location_change_de_dossier():
+    motif = refus_outil(r"Push-Location ..\lot-2; gh pr merge --squash", "PowerShell")
+    assert "préciser le numéro de PR" in motif
+
+
+@pytest.mark.parametrize(
+    "commande",
+    [
+        "git push origin " + BS + NL + "main",
+        "git push origin ma" + BS + NL + "in",
+        "git push origin " + BS + CR + NL + "main",
+    ],
+)
+def test_continuation_bash(commande):
+    assert "push vers main" in refus_outil(commande, "Bash")
+    assert "push vers main" in refus_outil(commande, None)
+
+
+@pytest.mark.parametrize("fin", [NL, CR + NL])
+def test_continuation_powershell(fin):
+    assert "push vers main" in refus_outil("git push origin " + BT + fin + "main", "PowerShell")
