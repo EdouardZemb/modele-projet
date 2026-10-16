@@ -126,6 +126,7 @@ def test_suppression_branche_principale_refusee(projet_avec_origin):
     racine, env = projet_avec_origin
     r = lancer_git(racine, env, "push", "origin", ":main")
     assert r.returncode != 0
+    assert "envoi refusé vers refs/heads/main" in r.stderr
 
 
 def test_refs_refusees():
@@ -137,3 +138,12 @@ def test_branche_rendue(rendre):
     racine = rendre(branche_principale="principal")
     texte = (racine / "scripts/modele/reglages.py").read_text(encoding="utf-8")
     assert 'BRANCHE_PRINCIPALE = "principal"' in texte
+
+
+def test_entree_mal_formee_refusee(monkeypatch, capsys):
+    import io
+
+    monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(b"trop court\n")))
+    assert pre_push.main(["--branche", "main"]) == 1
+    assert "ligne d'entrée mal formée, envoi refusé" in capsys.readouterr().err
+    assert pre_push.refs_refusees("\r\n\nrefs/heads/x 1 refs/heads/y 2\r\n", "main") == []

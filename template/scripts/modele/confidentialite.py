@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Porte de confidentialité : refuse les secrets et les identifiants privés.
 
 Bibliothèque standard seule, Python 3.10 ou plus.

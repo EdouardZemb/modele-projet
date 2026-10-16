@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Refus de tout envoi (création, mise à jour, suppression) vers la branche principale.
 
 Bibliothèque standard seule, Python 3.10 ou plus.
@@ -23,7 +22,11 @@ def refs_refusees(entree: str, branche: str) -> list[str]:
     refus = []
     for ligne in entree.split("\n"):
         champs = ligne.split()
-        if len(champs) >= 3 and champs[2] == cible and champs[2] not in refus:
+        if not champs:
+            continue
+        if len(champs) < 4:
+            raise ValueError("ligne d'entrée mal formée")
+        if champs[2] == cible and champs[2] not in refus:
             refus.append(champs[2])
     return refus
 
@@ -53,7 +56,11 @@ def main(argv: list[str] | None = None) -> int:
             print("pre-push : réglages introuvables et aucun --branche donné.", file=sys.stderr)
             return EXIT_USAGE
     entree = sys.stdin.buffer.read().decode("utf-8", errors="replace")
-    refus = refs_refusees(entree, branche)
+    try:
+        refus = refs_refusees(entree, branche)
+    except ValueError:
+        print("pre-push : ligne d'entrée mal formée, envoi refusé", file=sys.stderr)
+        return 1
     for ref in refus:
         print(
             f"pre-push : envoi refusé vers {ref} — passer par une PR "

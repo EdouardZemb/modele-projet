@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Contrôle du format des commits : Conventional Commits, en-tête de 100 caractères au plus.
 
 Bibliothèque standard seule, Python 3.10 ou plus.
