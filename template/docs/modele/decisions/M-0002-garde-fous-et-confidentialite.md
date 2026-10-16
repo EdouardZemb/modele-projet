@@ -31,7 +31,8 @@ pas de la discipline de celui qui travaille ?
 - **La porte de confidentialité est obligatoire**, dans tous les projets. Ses motifs génériques sont
   versionnés ; ses motifs privés (noms de machines, d'utilisateurs, chemins) sont gardés hors dépôt,
   sur le poste et dans un secret de la CI. Une session à distance n'a pas la liste privée : la CI
-  rattrape le reste.
+  rattrape le reste. Ce secret est posé deux fois par dépôt, comme secret Actions et comme secret Dependabot,
+  car les exécutions de Dependabot ne reçoivent pas les secrets Actions.
 - **Le modèle lui-même est public.** Rien de ce qu'il contient ne nomme le serveur, son utilisateur
   ou son réseau.
 - **Un refus se corrige, il ne se contourne jamais.**
