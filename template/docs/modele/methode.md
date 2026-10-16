@@ -79,6 +79,13 @@ sessions à distance.
 | CI de base | gitleaks sur tout l'historique ; confidentialité du diff et du texte de la PR ; format des commits ; actions épinglées par SHA |
 | règle de protection GitHub | PR obligatoire, contrôles requis, ni force-push ni suppression de la branche principale. Posée sur les dépôts publics |
 
+Le secret `MOTIFS_INTERDITS` (la liste privée) est posé **deux fois** par dépôt : comme secret
+Actions et comme secret Dependabot (`gh secret set MOTIFS_INTERDITS --app dependabot`). Les
+exécutions lancées par Dependabot ne reçoivent pas les secrets Actions : sans le second, la
+confidentialité échouerait sur chacune de ses PR. Une PR venue d'un fork ne peut pas passer ce
+contrôle, faute de secret ; aucun fork n'est attendu, et une telle PR se rouvre depuis une branche
+du dépôt.
+
 `core.hooksPath` n'est pas versionné : il doit valoir `.githooks`, chemin **relatif**, dans chaque
 clone et chaque worktree.
 
