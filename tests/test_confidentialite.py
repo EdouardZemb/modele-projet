@@ -454,13 +454,13 @@ def test_depot_prive_ne_divulgue_rien(rendre, tmp_path, env_isole):
     f = tmp_path / "f.txt"
     f.write_text(f"a valeur-privee-xyz\n{CLE_AGE}\n", encoding="utf-8")
     r = lancer_porte(script, ["--fichiers", str(f)], env)
-    assert r.returncode == 0
+    assert r.returncode == 1  # la clé est un secret : elle refuse même en privé
     sortie = r.stdout + r.stderr
     assert "valeur-privee-xyz" not in sortie
     assert CLE_AGE not in sortie
     assert "motif privé n°1" in sortie
     assert "clé privée age" in sortie
-    assert "2 constat(s), dépôt privé : avertissement, pas de refus" in sortie
+    assert "2 constat(s), refus : 1 secret(s), qui refusent même dans un dépôt privé." in sortie
 
 
 def test_depot_prive_erreurs_toujours_64(rendre, tmp_path, env_isole):
@@ -498,3 +498,54 @@ def test_visibilite_reelle_en_ci(rendre, tmp_path, env_isole, visibilite, depot_
     r = lancer_porte(script, ["--fichiers", str(f)], env)
     assert r.returncode == attendu, r.stderr
     assert ("avertissement" in r.stderr) is (attendu == 0)
+
+
+# --- relecture de la vague : les secrets refusent partout, ce qui identifie avertit en privé ---
+
+SECRETS = {
+    "clé privée age",
+    "clé privée PEM",
+    "jeton GitHub",
+    "JWT",
+    "jeton de tunnel Cloudflare",
+    "adresse de ping Healthchecks",
+}
+
+
+def test_deux_familles():
+    familles = {m.nom: m.famille for m in c.MOTIFS_GENERIQUES}
+    assert set(familles.values()) == {c.SECRET, c.IDENTIFICATION}
+    assert {nom for nom, f in familles.items() if f == c.SECRET} == SECRETS
+    assert all(m.famille == c.IDENTIFICATION for m in c.charger_motifs_prives("a\nre:b+\n"))
+    constat = c.examiner([("f:1", CLE_AGE)], c.MOTIFS_GENERIQUES)[0]
+    assert constat.famille == c.SECRET
+
+
+def test_depot_prive_les_secrets_refusent(rendre, tmp_path, env_isole):
+    """Famille « secret » : chaque motif refuse, même dans un dépôt privé."""
+    script = rendre(visibilite="prive") / "scripts/modele/confidentialite.py"
+    noms = sorted(SECRETS)
+    f = tmp_path / "f.txt"
+    f.write_text("".join(ECHANTILLONS[nom] + chr(10) for nom in noms), encoding="utf-8")
+    r = lancer_porte(script, ["--fichiers", str(f)], env_isole())
+    assert r.returncode == 1, r.stderr
+    for i, nom in enumerate(noms, start=1):
+        assert f"{f}:{i} — {nom}" in r.stderr
+        assert ECHANTILLONS[nom] not in r.stdout + r.stderr
+    assert f"{len(noms)} secret(s), qui refusent même dans un dépôt privé." in r.stderr
+
+
+def test_depot_prive_ce_qui_identifie_avertit(rendre, tmp_path, env_isole):
+    """Famille « identification » : génériques et motifs privés avertissent dans un dépôt privé."""
+    script = rendre(visibilite="prive") / "scripts/modele/confidentialite.py"
+    env = {**env_isole(), "MOTIFS_INTERDITS": "valeur-privee-xyz"}
+    noms = sorted({m.nom for m in c.MOTIFS_GENERIQUES} - SECRETS)
+    lignes = [ECHANTILLONS[nom] for nom in noms] + ["a valeur-privee-xyz"]
+    f = tmp_path / "f.txt"
+    f.write_text("".join(ligne + chr(10) for ligne in lignes), encoding="utf-8")
+    r = lancer_porte(script, ["--fichiers", str(f)], env)
+    assert r.returncode == 0, r.stderr
+    for i, nom in enumerate([*noms, "motif privé n°1"], start=1):
+        assert f"{f}:{i} — {nom}" in r.stderr
+    assert f"{len(lignes)} constat(s), dépôt privé : avertissement, pas de refus" in r.stderr
+    assert "valeur-privee-xyz" not in r.stdout + r.stderr

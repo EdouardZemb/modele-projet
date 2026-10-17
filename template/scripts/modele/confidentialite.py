@@ -39,20 +39,28 @@ LISTE_PAR_DEFAUT = ".config/modele-projet/motifs-interdits.txt"
 EXIT_USAGE = 64
 
 
+# Deux familles. Un secret (clé, jeton) refuse toujours, même dans un dépôt privé. Ce qui identifie
+# (adresse, cible, nom de machine, motif privé) avertit seulement dans un dépôt privé.
+SECRET = "secret"
+IDENTIFICATION = "identification"
+
+
 @dataclass(frozen=True)
 class Motif:
     nom: str
     expression: re.Pattern[str]
+    famille: str = IDENTIFICATION
 
 
 @dataclass(frozen=True)
 class Constat:
     emplacement: str
     motif: str
+    famille: str = IDENTIFICATION
 
 
-def _g(nom: str, expression: str) -> Motif:
-    return Motif(nom, re.compile(expression))
+def _g(nom: str, expression: str, famille: str = IDENTIFICATION) -> Motif:
+    return Motif(nom, re.compile(expression), famille)
 
 
 MOTIFS_GENERIQUES: tuple[Motif, ...] = (
@@ -69,12 +77,17 @@ MOTIFS_GENERIQUES: tuple[Motif, ...] = (
     _g("cible scp à hôte pointé", r"\b[a-z_][\w.-]*@[a-z0-9][\w-]*(?:\.[\w-]+)+:[~/]"),
     _g("adresse IPv6 Tailscale", r"(?i)\bfd7a:115c:a1e0:"),
     _g("nom MagicDNS Tailscale", r"(?i)\b[a-z0-9-]+\.[a-z0-9-]+\.ts\.net\b"),
-    _g("clé privée age", r"AGE-SECRET-KEY-1[0-9A-Z]{58}"),
-    _g("clé privée PEM", r"-----BEGIN (?:[A-Z]+ )*PRIVATE KEY-----"),
-    _g("jeton GitHub", r"\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{60,})\b"),
-    _g("JWT", r"\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"),
-    _g("jeton de tunnel Cloudflare", r"\beyJ[A-Za-z0-9+/=]{100,}"),
-    _g("adresse de ping Healthchecks", r"hc-ping\.com/[A-Za-z0-9_-]{20,}"),
+    _g("clé privée age", r"AGE-SECRET-KEY-1[0-9A-Z]{58}", SECRET),
+    _g("clé privée PEM", r"-----BEGIN (?:[A-Z]+ )*PRIVATE KEY-----", SECRET),
+    _g(
+        "jeton GitHub",
+        r"\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{60,})\b",
+        SECRET,
+    ),
+    _g("JWT", r"\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}", SECRET),
+    _g("jeton de tunnel Cloudflare", r"\beyJ[A-Za-z0-9+/=]{100,}", SECRET),
+    # l'adresse de ping porte la clé du contrôle : qui la connaît peut le faire mentir
+    _g("adresse de ping Healthchecks", r"hc-ping\.com/[A-Za-z0-9_-]{20,}", SECRET),
 )
 
 
@@ -120,7 +133,7 @@ def examiner(lignes: Iterable[tuple[str, str]], motifs: Sequence[Motif]) -> list
     for emplacement, texte in lignes:
         for motif in motifs:
             if motif.expression.search(texte):
-                constats.append(Constat(emplacement, motif.nom))
+                constats.append(Constat(emplacement, motif.nom, motif.famille))
     return constats
 
 
@@ -389,13 +402,21 @@ def main(argv: list[str] | None = None) -> int:
         )
     if not constats:
         return 0
-    if visibilite() == "prive":  # un dépôt privé peut nommer son serveur : il est averti
+    if visibilite() == "prive":
+        secrets = sum(1 for c in constats if c.famille == SECRET)
+        if not secrets:  # un dépôt privé peut nommer son serveur : il est averti
+            print(
+                f"confidentialité : {len(constats)} constat(s), "
+                "dépôt privé : avertissement, pas de refus",
+                file=sys.stderr,
+            )
+            return 0
         print(
-            f"confidentialité : {len(constats)} constat(s), "
-            "dépôt privé : avertissement, pas de refus",
+            f"confidentialité : {len(constats)} constat(s), refus : "
+            f"{secrets} secret(s), qui refusent même dans un dépôt privé.",
             file=sys.stderr,
         )
-        return 0
+        return 1
     print(f"confidentialité : {len(constats)} constat(s), refus.", file=sys.stderr)
     return 1
 

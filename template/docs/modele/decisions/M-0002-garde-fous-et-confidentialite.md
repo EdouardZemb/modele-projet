@@ -2,7 +2,7 @@
 
 - **Statut** : accepté le 2026-10-16
 - **Amendé** le 2026-10-17, après la revue finale du lot 1 : dans un dépôt privé, la porte de
-  confidentialité avertit sans refuser (décision d'Edouard)
+  confidentialité avertit sur ce qui identifie et refuse toujours les secrets (décision d'Edouard)
 - **Contexte amont** : M-0001 (les garde-fous de qualité comme condition d'entrée)
 
 ## Contexte
@@ -40,12 +40,14 @@ pas de la discipline de celui qui travaille ?
   sur le poste et dans un secret de la CI. Une session à distance n'a pas la liste privée : la CI
   rattrape le reste. Ce secret est posé deux fois par dépôt, comme secret Actions et comme secret Dependabot,
   car les exécutions de Dependabot ne reçoivent pas les secrets Actions.
-- **Dans un dépôt public, la porte refuse ; dans un dépôt privé, elle avertit sans refuser**
-  (amendement du 2026-10-17). Un dépôt privé peut ainsi nommer son propre serveur : chaque constat
-  s'affiche, avec son emplacement et le nom du motif, jamais la valeur, et le code de retour vaut 0.
-  La règle vaut pour tous les motifs, génériques et privés. Les erreurs d'usage et l'absence de la
-  liste privée exigée refusent toujours. gitleaks n'est pas concerné : les secrets bloquent toujours.
-  En CI, la visibilité réelle du dépôt (`github.event.repository.private`) l'emporte sur celle que
+- **Dans un dépôt public, la porte refuse ; dans un dépôt privé, elle avertit sur ce qui identifie
+  et refuse toujours les secrets** (amendement du 2026-10-17). Un dépôt privé peut ainsi nommer son
+  propre serveur. Ce qui identifie (adresses privées et Tailscale, cibles SSH et scp, noms MagicDNS,
+  motifs de la liste privée) s'affiche, avec son emplacement et le nom du motif, jamais la valeur, et
+  ne refuse pas. Un secret (clé privée age ou PEM, jeton GitHub, JWT, jeton de tunnel, adresse de
+  ping) refuse partout, au `pre-commit` comme en CI : une clé ne part jamais sur le dépôt distant
+  avec un simple avertissement. gitleaks les cherche aussi, en CI, donc après l'envoi. Les erreurs
+  d'usage et l'absence de la liste privée exigée refusent toujours. En CI, la visibilité réelle du dépôt (`github.event.repository.private`) l'emporte sur celle que
   déclare `reglages.py` : un dépôt passé public sans `copier update`, ou une PR qui réécrit
   `VISIBILITE`, refuse comme tout dépôt public.
 - **Avant de passer un dépôt privé en public**, trois étapes obligatoires : la porte
@@ -64,7 +66,7 @@ pas de la discipline de celui qui travaille ?
   hooks. C'est un risque accepté : le garde de Claude est alors la seule serrure côté agent, et la
   CI du socle le seul filet.
 - Dans un dépôt privé, la porte n'empêche plus un nom de serveur ou une adresse d'entrer dans
-  l'historique : elle le signale. L'historique d'un dépôt privé n'est donc pas prêt à être publié ;
+  l'historique : elle le signale. Elle y refuse toujours les secrets. L'historique d'un dépôt privé n'est donc pas prêt à être publié ;
   son passage en public demande l'examen complet décrit plus haut, et un dépôt passé public sans
   lui exposerait tout ce qui a été averti.
 - Les journaux d'Actions d'un dépôt public sont publics : la porte n'y affiche jamais la valeur

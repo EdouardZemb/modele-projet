@@ -72,7 +72,7 @@ sessions à distance.
 
 | Où | Quoi |
 |---|---|
-| hook git `pre-commit` | confidentialité du contenu indexé, fichiers UTF-16 compris ; un autre binaire est signalé « non examiné ». La porte refuse dans un dépôt public et avertit sans refuser dans un dépôt privé (voir plus bas), au hook comme en CI |
+| hook git `pre-commit` | confidentialité du contenu indexé, fichiers UTF-16 compris ; un autre binaire est signalé « non examiné ». La porte refuse dans un dépôt public ; dans un dépôt privé, elle avertit sur ce qui identifie et refuse toujours les secrets (voir plus bas), au hook comme en CI |
 | hook git `commit-msg` | format Conventional Commits, confidentialité du message |
 | hook git `pre-push` | refus d'envoyer sur la branche principale |
 | hook Claude `PreToolUse` (outils `Bash`, `PowerShell`, `Monitor`, et tout outil MCP qui porte une commande) | bloque `git push` vers la branche principale, tout force-push vers elle, `--no-verify`, toute modification de `core.hooksPath` sauf la réparation `git config core.hooksPath .githooks` (variables `GIT_CONFIG_*` comprises), `gh pr merge` tant que les contrôles ne sont pas tous verts, `gh pr merge --admin`, les alias et extensions de `gh`, ce qui affiche le jeton de `gh` (`gh auth token`, `gh auth status --show-token`), et l'effacement, le déplacement ou le renommage de `.githooks` et de `scripts/modele` (`rm`, `mv`, `Remove-Item`, `git rm`…). Il lit aussi les substitutions `$(…)`, même entre guillemets, et les enveloppes (`timeout`, `Start-Process`, `Invoke-Expression`…) |
@@ -83,12 +83,16 @@ sessions à distance.
 **Dépôt public, dépôt privé.** La visibilité est une réponse du modèle (`visibilite` dans
 `.copier-answers.yml`, `VISIBILITE` dans `scripts/modele/reglages.py`). Dans un dépôt **public**, un
 constat de la porte de confidentialité refuse, à chaque hook comme en CI. Dans un dépôt **privé**,
-qui peut nommer son propre serveur, elle **avertit sans refuser** : chaque constat s'affiche, avec
-son emplacement et le nom du motif, jamais la valeur, et le code de retour vaut 0. **En CI, c'est
-la visibilité réelle du dépôt qui s'applique** (`github.event.repository.private`, passée à la porte
-par `DEPOT_PRIVE`) : un dépôt public refuse, quoi que dise `reglages.py`. Les erreurs d'usage et
-l'absence de la liste privée exigée refusent toujours ; gitleaks bloque toujours les secrets. Un dépôt privé n'a pas de règle de protection : le garde de Claude y est la seule serrure
-côté agent, et la CI du socle le seul filet.
+qui peut nommer son propre serveur, **la porte avertit sur ce qui identifie et refuse toujours les
+secrets**. Ce qui identifie (adresses privées et Tailscale, cibles SSH et scp, noms MagicDNS,
+motifs de la liste privée) s'affiche, avec son emplacement et le nom du motif, jamais la valeur, et
+ne refuse pas. Un secret (clé privée age ou PEM, jeton GitHub, JWT, jeton de tunnel, adresse de
+ping) refuse partout, au `pre-commit` comme en CI ; gitleaks les cherche aussi, en CI. **En CI,
+c'est la visibilité réelle du dépôt qui s'applique** (`github.event.repository.private`, passée à
+la porte par `DEPOT_PRIVE`) : un dépôt public refuse, quoi que dise `reglages.py`. Les erreurs
+d'usage et l'absence de la liste privée exigée refusent toujours. Un dépôt privé n'a pas de règle
+de protection : le garde de Claude y est la seule serrure côté agent, et la CI du socle le seul
+filet.
 
 **Avant de passer un dépôt privé en public**, trois étapes obligatoires, dans cet ordre :
 

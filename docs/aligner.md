@@ -120,7 +120,8 @@ Une sonde ne prouve rien si un autre mécanisme refuse à la place de celui qu'e
 
 ## Avant de passer un dépôt privé en public
 
-Dans un dépôt privé, la porte de confidentialité avertit sans refuser : des constats ont pu entrer
+Dans un dépôt privé, la porte de confidentialité avertit sur ce qui identifie (elle ne refuse que
+les secrets) : des constats ont pu entrer
 dans l'historique. Avant de changer la visibilité, trois étapes, obligatoires et dans cet ordre :
 
 1. [ ] `python scripts/modele/confidentialite.py --exiger-prives --fichiers <la liste de git ls-files>`

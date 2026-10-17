@@ -119,7 +119,8 @@ def test_garde_fous_a_jour():
         "des messages de commit",
         "| Dependabot |",
         "un envoi direct de cette tête est accepté et marque la PR fusionnée, sans squash",
-        "avertit sans refuser",
+        "avertit sur ce qui identifie et refuse toujours les secrets",
+        "`DEPOT_PRIVE`",
         "Avant de passer un dépôt privé en public",
     ):
         assert fragment in section, fragment
@@ -130,6 +131,9 @@ def test_m0002_amende():
     texte = lire(DECISIONS / "M-0002-garde-fous-et-confidentialite.md")
     assert "le contrôle de dérive en tient compte" not in texte
     assert "le garde de Claude est alors la seule serrure côté agent" in texte
-    assert "elle avertit sans refuser" in texte
+    assert "elle avertit sur ce qui identifie" in texte
+    assert "refuse toujours les secrets" in texte
+    assert "gitleaks n'est pas concerné" not in texte
+    assert "github.event.repository.private" in texte
     assert "`Monitor`" in texte
     assert "PR obligatoire" not in texte
