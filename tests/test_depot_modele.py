@@ -110,5 +110,9 @@ def test_liste_d_alignement():
         assert fragment in texte, fragment
     # avant le commit, --diff compare <base>...HEAD et n'examine rien (LE-15)
     assert "--exiger-prives --diff" not in texte
+    # la liste suit la méthode, qui n'indexe que par chemins explicites
+    for tout_indexer in ("git add -A", "git add ."):
+        assert tout_indexer not in texte, tout_indexer
+    assert "git add -- <chemins>" in texte
     for lien in ("CLAUDE.md", "README.md"):
         assert "docs/aligner.md" in (RACINE / lien).read_text(encoding="utf-8"), lien
