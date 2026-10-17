@@ -130,6 +130,9 @@ REFUS = [
     ("gh m 12 --squash", "commande gh inconnue", "lot-1/x", True),
     # e. le jeton de gh, qui ouvrirait l'API sans passer par gh
     ("gh auth token", "jeton gh", "lot-1/x", True),
+    ("gh auth status --show-token", "jeton gh", "lot-1/x", True),
+    ("gh auth status -t", "jeton gh", "lot-1/x", True),
+    ("gh auth status -at --hostname github.com", "jeton gh", "lot-1/x", True),
     (
         'curl -X PUT -H "Authorization: token $(gh auth token)" '
         + "https://api.github.com/repos/o/r/pulls/12/merge",
@@ -167,6 +170,7 @@ ADMIS = [
     ("gh help", "lot-1/x", True),
     ("gh --version", "lot-1/x", True),
     ("gh auth status", "lot-1/x", True),
+    ("gh auth status --active --hostname github.com", "lot-1/x", True),
     ("gh alias list", "lot-1/x", True),
     ("gh co 12", "lot-1/x", True),
     ("timeout 5 git status", "lot-1/x", True),

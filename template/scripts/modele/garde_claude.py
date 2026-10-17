@@ -426,6 +426,13 @@ def _gh_api(args: list[str]) -> str | None:
     return None
 
 
+def _montre_le_jeton(arg: str) -> bool:
+    """`--show-token`, `-t`, ou `-t` dans un groupe d'options courtes (`-at`)."""
+    if arg.split("=")[0] == "--show-token":
+        return True
+    return bool(re.fullmatch(r"-[a-z]*t[a-z]*", arg))
+
+
 def _gh(args: list[str], ctx: Contexte) -> str | None:
     positions = []
     depot = False
@@ -446,6 +453,10 @@ def _gh(args: list[str], ctx: Contexte) -> str | None:
         return "alias gh pouvant masquer une fusion"
     if mots == ["auth", "token"]:
         return "jeton gh exposé (gh auth token), qui permettrait de contourner le garde"
+    if mots == ["auth", "status"] and any(_montre_le_jeton(a) for a in args):
+        return (
+            "jeton gh exposé (gh auth status --show-token), qui permettrait de contourner le garde"
+        )
     if mots == ["pr", "merge"]:
         reste = args[positions[1] + 1 :]
         return _gh_merge(reste, ctx, depot)
