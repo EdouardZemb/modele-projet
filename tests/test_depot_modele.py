@@ -103,7 +103,12 @@ def test_liste_d_alignement():
         "git log -p --all --no-textconv --no-ext-diff --format='%H%n%B'",
         "--exiger-prives --public --texte",
         "commit unique propre",
+        "gh run list --branch",
+        "--exiger-prives --index",
+        ".gitleaksignore",
     ):
         assert fragment in texte, fragment
+    # avant le commit, --diff compare <base>...HEAD et n'examine rien (LE-15)
+    assert "--exiger-prives --diff" not in texte
     for lien in ("CLAUDE.md", "README.md"):
         assert "docs/aligner.md" in (RACINE / lien).read_text(encoding="utf-8"), lien
