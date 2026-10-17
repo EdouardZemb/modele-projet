@@ -34,6 +34,11 @@ copier update --vcs-ref <étiquette>
 Les fichiers gérés par le modèle sont réécrits, les fichiers semés ne sont pas touchés. Un conflit
 dans un fichier géré se résout en faveur du modèle.
 
+## Aligner un projet existant
+
+Un dépôt né avant le modèle le reçoit par `copier copy`, puis quelques reports à la main : la liste
+de contrôle est dans [`docs/aligner.md`](docs/aligner.md).
+
 ## Contribuer
 
 Le dépôt applique ses propres garde-fous : voir [`CLAUDE.md`](CLAUDE.md). Tests : `python -m pytest -q`,

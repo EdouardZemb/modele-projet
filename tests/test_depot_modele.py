@@ -76,3 +76,31 @@ def test_ci_du_depot_modele_suit_le_socle():
         for e in socle["jobs"]["confidentialite"]["steps"]
     ]
     assert racine["jobs"]["confidentialite"]["steps"] == attendues
+
+
+def test_liste_d_alignement():
+    texte = (RACINE / "docs/aligner.md").read_text(encoding="utf-8")
+    assert texte.splitlines()[0] == "# Aligner un projet existant sur le modèle"
+    for fragment in (
+        "copier copy --defaults --vcs-ref",
+        "git diff --name-only",
+        "@docs/modele/methode.md",
+        "needs:",
+        "edited",
+        "`.claude/settings.local.json` et `__pycache__/`",
+        "`.githooks` et `scripts/modele`",
+        "excluent les chemins",
+        "extensions.worktreeConfig",
+        "--app dependabot",
+        "squash_merge_commit_title=PR_TITLE -f squash_merge_commit_message=PR_BODY",
+        "ruleset-main.json",
+        "gh workflow run modele-historique.yml",
+        "en avance rapide",
+        "--dry-run",
+        "aucune PR",
+        "## Avant de passer un dépôt privé en public",
+        "visibilite=public",
+    ):
+        assert fragment in texte, fragment
+    for lien in ("CLAUDE.md", "README.md"):
+        assert "docs/aligner.md" in (RACINE / lien).read_text(encoding="utf-8"), lien

@@ -87,3 +87,49 @@ def test_modele_de_pr():
         "## Pour un fix : cause racine et prévention",
     ):
         assert titre in texte.splitlines(), titre
+
+
+# --- revue finale du lot 1 ---
+
+CHEMINS_GERES = (
+    "`.githooks/`",
+    "`scripts/modele/`",
+    "`docs/modele/`",
+    "`.github/modele/`",
+    "`.github/workflows/modele-*.yml`",
+    "`.claude/skills/consigner/`",
+)
+
+
+def test_chemins_geres_exclus_des_formateurs():
+    texte = lire(METHODE)
+    section = texte.split("## Les fichiers gérés par le modèle", 1)[1].split("\n## ", 1)[0]
+    assert "exclus des formateurs et des linters" in section
+    for chemin in CHEMINS_GERES:
+        assert chemin in section, chemin
+
+
+def test_garde_fous_a_jour():
+    section = lire(METHODE).split("## Les garde-fous", 1)[1].split("\n## ", 1)[0]
+    for fragment in (
+        "`Monitor`",
+        "tout outil MCP",
+        "sauf la réparation `git config core.hooksPath .githooks`",
+        "tout l'historique chaque semaine et à la demande (`modele-historique.yml`)",
+        "des messages de commit",
+        "| Dependabot |",
+        "un envoi direct de cette tête est accepté et marque la PR fusionnée, sans squash",
+        "avertit sans refuser",
+        "Avant de passer un dépôt privé en public",
+    ):
+        assert fragment in section, fragment
+    assert "gitleaks sur tout l'historique ;" not in section
+
+
+def test_m0002_amende():
+    texte = lire(DECISIONS / "M-0002-garde-fous-et-confidentialite.md")
+    assert "le contrôle de dérive en tient compte" not in texte
+    assert "le garde de Claude est alors la seule serrure côté agent" in texte
+    assert "elle avertit sans refuser" in texte
+    assert "`Monitor`" in texte
+    assert "PR obligatoire" not in texte

@@ -72,12 +72,29 @@ sessions à distance.
 
 | Où | Quoi |
 |---|---|
-| hook git `pre-commit` | confidentialité du contenu indexé |
+| hook git `pre-commit` | confidentialité du contenu indexé, fichiers UTF-16 compris ; un autre binaire est signalé « non examiné » |
 | hook git `commit-msg` | format Conventional Commits, confidentialité du message |
 | hook git `pre-push` | refus d'envoyer sur la branche principale |
-| hook Claude `PreToolUse` (outils `Bash` et `PowerShell`) | bloque `git push` vers la branche principale, tout force-push vers elle, `--no-verify`, toute modification de `core.hooksPath`, `gh pr merge` tant que les contrôles ne sont pas tous verts, et `gh pr merge --admin` |
-| CI de base | gitleaks sur tout l'historique ; confidentialité du diff et du texte de la PR ; format des commits ; actions épinglées par SHA |
-| règle de protection GitHub | PR obligatoire, contrôles requis, ni force-push ni suppression de la branche principale. Posée sur les dépôts publics |
+| hook Claude `PreToolUse` (outils `Bash`, `PowerShell`, `Monitor`, et tout outil MCP qui porte une commande) | bloque `git push` vers la branche principale, tout force-push vers elle, `--no-verify`, toute modification de `core.hooksPath` sauf la réparation `git config core.hooksPath .githooks` (variables `GIT_CONFIG_*` comprises), `gh pr merge` tant que les contrôles ne sont pas tous verts, `gh pr merge --admin`, les alias et extensions de `gh`, et `gh auth token`. Il lit aussi les substitutions `$(…)`, même entre guillemets, et les enveloppes (`timeout`, `Start-Process`, `Invoke-Expression`…) |
+| CI de base | gitleaks examine les commits de chaque PR et de chaque envoi, et tout l'historique chaque semaine et à la demande (`modele-historique.yml`) ; confidentialité du diff, des messages de commit et du texte de la PR ; format des commits ; le garde de Claude toujours branché dans `.claude/settings.json` ; actions épinglées par SHA |
+| Dependabot | chaque lundi, les versions des actions épinglées (`.github/dependabot.yml`), après trois jours de recul |
+| règle de protection GitHub | tout commit qui arrive sur la branche principale est la tête d'une PR dont les contrôles requis sont verts ; un envoi direct de cette tête est accepté et marque la PR fusionnée, sans squash. Côté agent, c'est le refus de pousser vers la branche principale par le garde qui ferme ce chemin. Ni force-push ni suppression de la branche principale. Posée sur les dépôts publics |
+
+**Dépôt public, dépôt privé.** La visibilité est une réponse du modèle (`visibilite` dans
+`.copier-answers.yml`, `VISIBILITE` dans `scripts/modele/reglages.py`). Dans un dépôt **public**, un
+constat de la porte de confidentialité refuse, à chaque hook comme en CI. Dans un dépôt **privé**,
+qui peut nommer son propre serveur, elle **avertit sans refuser** : chaque constat s'affiche, avec
+son emplacement et le nom du motif, jamais la valeur, et le code de retour vaut 0. Les erreurs
+d'usage et l'absence de la liste privée exigée refusent toujours ; gitleaks bloque toujours les
+secrets. Un dépôt privé n'a pas de règle de protection : le garde de Claude y est la seule serrure
+côté agent, et la CI du socle le seul filet.
+
+**Avant de passer un dépôt privé en public**, trois étapes obligatoires, dans cet ordre :
+
+1. `python scripts/modele/confidentialite.py --exiger-prives --fichiers <la liste de git ls-files>`
+   est propre ;
+2. un passage complet de `modele-historique.yml` est vert ;
+3. `copier update` avec `visibilite=public`, puis la règle de protection.
 
 Le secret `MOTIFS_INTERDITS` (la liste privée) est posé **deux fois** par dépôt : comme secret
 Actions et comme secret Dependabot (`gh secret set MOTIFS_INTERDITS --app dependabot`). Les
@@ -100,6 +117,10 @@ modifié.
   touche plus.
 - Un cas mixte, `.claude/settings.json` : le modèle y pose ses hooks, le projet y ajoute ses
   réglages. Un conflit s'y résout à la main, dans la PR de mise à jour.
+- **Les chemins gérés sont exclus des formateurs et des linters du projet** (Prettier, biome,
+  ruff…) : `.githooks/`, `scripts/modele/`, `docs/modele/`, `.github/modele/`,
+  `.github/workflows/modele-*.yml`, `.claude/skills/consigner/`. Un formateur qui les réécrirait
+  ferait d'une modification locale un conflit à chaque `copier update`.
 - Changer de cible, c'est changer une réponse puis lancer `copier update`. Les fichiers gérés de
   l'ancienne cible disparaissent, ceux de la nouvelle arrivent. Les fichiers semés de l'ancienne
   cible restent : le projet les retire à la main dans la même PR.
