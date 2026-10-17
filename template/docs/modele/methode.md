@@ -72,7 +72,7 @@ sessions à distance.
 
 | Où | Quoi |
 |---|---|
-| hook git `pre-commit` | confidentialité du contenu indexé, fichiers UTF-16 compris ; un autre binaire est signalé « non examiné » |
+| hook git `pre-commit` | confidentialité du contenu indexé, fichiers UTF-16 compris ; un autre binaire est signalé « non examiné ». La porte refuse dans un dépôt public et avertit sans refuser dans un dépôt privé (voir plus bas), au hook comme en CI |
 | hook git `commit-msg` | format Conventional Commits, confidentialité du message |
 | hook git `pre-push` | refus d'envoyer sur la branche principale |
 | hook Claude `PreToolUse` (outils `Bash`, `PowerShell`, `Monitor`, et tout outil MCP qui porte une commande) | bloque `git push` vers la branche principale, tout force-push vers elle, `--no-verify`, toute modification de `core.hooksPath` sauf la réparation `git config core.hooksPath .githooks` (variables `GIT_CONFIG_*` comprises), `gh pr merge` tant que les contrôles ne sont pas tous verts, `gh pr merge --admin`, les alias et extensions de `gh`, et `gh auth token`. Il lit aussi les substitutions `$(…)`, même entre guillemets, et les enveloppes (`timeout`, `Start-Process`, `Invoke-Expression`…) |
