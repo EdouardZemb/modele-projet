@@ -302,10 +302,16 @@ REFUS_OUTILS = [
     # un argv est joint par des espaces ; tout autre type non chaîne est refusé
     ("mcp__autre__shell", {"command": ["git", "commit", "--no-verify", "-m", "x"]}, "sans hooks"),
     ("mcp__autre__outil", {"command": ["git", "push", "origin", "main"]}, "push vers main"),
-    ("mcp__autre__shell", {"command": 12, "cmd": "git status"}, "type inattendu"),
-    ("mcp__autre__shell", {"command": None}, "type inattendu"),
-    ("mcp__autre__shell", {"input": {"texte": "git status"}}, "type inattendu"),
-    ("mcp__autre__shell", {"script": ["git", 1]}, "type inattendu"),
+    # Bash, PowerShell et Monitor : la commande doit être un texte, tout autre type est refusé
+    ("Bash", {"command": 12}, "type inattendu"),
+    ("Bash", {"command": None}, "type inattendu"),
+    ("Bash", {"command": {"texte": "git status"}}, "type inattendu"),
+    ("PowerShell", {"command": ["git", 1]}, "type inattendu"),
+    ("Monitor", {"command": 12, "cmd": "git status"}, "type inattendu"),
+    # tout autre outil : un champ d'un autre type est ignoré, le suivant est lu
+    ("mcp__exemple__outil", {"input": {"a": 1}, "command": "git push origin main"}, "push vers main"),
+    ("mcp__exemple__outil", {"command": 12, "cmd": "git push origin main"}, "push vers main"),
+    ("mcp__exemple__outil", {"input": {"a": 1}, "script": ["git", "commit", "--no-verify"]}, "sans hooks"),
 ]
 
 
@@ -335,6 +341,9 @@ def test_cli_lecture_selon_l_outil(outil, attendu):
         ("mcp__autre__outil", {}),
         ("mcp__autre__outil", {"command": ["git", "status", "--short"]}),
         ("mcp__autre__outil", {"command": []}),
+        ("mcp__exemple__outil", {"input": {"a": 1}}),
+        ("mcp__exemple__outil", {"command": None, "input": 12, "script": ["git", 1]}),
+        ("mcp__exemple__outil", {"input": {"a": 1}, "cmd": "git status"}),
         ("Monitor", {"command": "git status"}),
         ("mcp__desktop-commander__start_process", {"command": "git status"}),
     ],
@@ -348,6 +357,8 @@ def test_cli_outil_sans_commande_ne_lance_rien():
     # Sans --branche ni réglages, un outil qui porte une commande sortirait en 64 : celui-ci sort
     # en 0, preuve que rien n'a été chargé ni lancé.
     entree = json.dumps({"tool_name": "mcp__autre__outil", "tool_input": {"query": "x"}, "cwd": "."})
+    assert lancer(entree).returncode == 0
+    entree = json.dumps({"tool_name": "mcp__exemple__outil", "tool_input": {"input": {"a": 1}}})
     assert lancer(entree).returncode == 0
     entree = json.dumps({"tool_name": "Monitor", "tool_input": {"command": "git status"}, "cwd": "."})
     assert lancer(entree).returncode == 64
@@ -696,6 +707,10 @@ def test_commande_de():
     for illisible in ({"command": 1, "input": "c"}, {"cmd": None}, {"input": ["a", 2]}, {"script": {}}):
         with pytest.raises(garde_claude.CommandeIllisible):
             garde_claude.commande_de(illisible)
+    # hors de Bash, PowerShell et Monitor : un champ d'un autre type est ignoré
+    assert garde_claude.commande_de({"command": 1, "input": "c"}, stricte=False) == "c"
+    assert garde_claude.commande_de({"input": {"a": 1}}, stricte=False) is None
+    assert garde_claude.commande_de({"cmd": None, "script": ["x", "y"]}, stricte=False) == "x y"
 
 
 @pytest.mark.parametrize(

@@ -12,9 +12,10 @@ Usage : garde_claude.py [--branche NOM]  (lit sur l'entrée standard le JSON du 
 
 Outils surveillés : `Bash` et `Monitor` (lecture Bash), `PowerShell` (lecture PowerShell), et
 tout autre outil qui porte une commande, un outil MCP par exemple (toutes les lectures). La
-commande est le premier champ présent de `tool_input` parmi `command`, `cmd`, `input`, `script` :
-un texte, ou une liste de textes (argv) jointe par des espaces ; tout autre type est refusé. Un
-outil qui n'en porte aucun passe sans que rien soit lancé.
+commande est le premier champ utilisable de `tool_input` parmi `command`, `cmd`, `input`,
+`script` : un texte, ou une liste de textes (argv) jointe par des espaces. Pour `Bash`,
+`PowerShell` et `Monitor`, un champ d'un autre type est refusé ; pour tout autre outil, il est
+ignoré. Un outil sans champ utilisable passe sans que rien soit lancé.
 
 Retour : 0 rien refusé, 2 commande refusée (Claude Code affiche l'erreur à l'agent),
 1 entrée illisible (erreur non bloquante), 64 erreur d'usage (branche inconnue).
@@ -677,11 +678,14 @@ class CommandeIllisible(Exception):
     """Un champ de commande d'un type que le garde ne sait pas lire."""
 
 
-def commande_de(entree: dict) -> str | None:
-    """La commande du premier champ présent de `tool_input` parmi CHAMPS_COMMANDE, ou None.
+def commande_de(entree: dict, stricte: bool = True) -> str | None:
+    """La commande du premier champ utilisable de `tool_input` parmi CHAMPS_COMMANDE, ou None.
 
-    Une liste de chaînes (un argv) est jointe par des espaces. Tout autre type lève
-    CommandeIllisible : dans le doute, refuser plutôt que laisser passer."""
+    Un texte est pris tel quel ; une liste de textes (un argv) est jointe par des espaces. Un
+    champ d'un autre type lève CommandeIllisible en lecture stricte (Bash, PowerShell, Monitor,
+    dont la commande doit être un texte) ; pour tout autre outil, il est ignoré, et le champ
+    suivant est essayé : un outil MCP peut avoir un `input` structuré qui n'est pas une
+    commande."""
     for champ in CHAMPS_COMMANDE:
         if champ not in entree:
             continue
@@ -690,7 +694,8 @@ def commande_de(entree: dict) -> str | None:
             return valeur
         if isinstance(valeur, list) and all(isinstance(v, str) for v in valeur):
             return " ".join(valeur)
-        raise CommandeIllisible(champ)
+        if stricte:
+            raise CommandeIllisible(champ)
     return None
 
 
@@ -708,7 +713,7 @@ def _executer_garde(args) -> int:
         print("garde-claude : entrée du hook illisible, rien vérifié.", file=sys.stderr)
         return 1
     try:
-        commande = commande_de(entree)
+        commande = commande_de(entree, stricte=outil in LECTURES)
     except CommandeIllisible:
         _refuser("champ de commande d'un type inattendu, impossible à analyser")
         return 2
