@@ -84,9 +84,10 @@ sessions à distance.
 `.copier-answers.yml`, `VISIBILITE` dans `scripts/modele/reglages.py`). Dans un dépôt **public**, un
 constat de la porte de confidentialité refuse, à chaque hook comme en CI. Dans un dépôt **privé**,
 qui peut nommer son propre serveur, elle **avertit sans refuser** : chaque constat s'affiche, avec
-son emplacement et le nom du motif, jamais la valeur, et le code de retour vaut 0. Les erreurs
-d'usage et l'absence de la liste privée exigée refusent toujours ; gitleaks bloque toujours les
-secrets. Un dépôt privé n'a pas de règle de protection : le garde de Claude y est la seule serrure
+son emplacement et le nom du motif, jamais la valeur, et le code de retour vaut 0. **En CI, c'est
+la visibilité réelle du dépôt qui s'applique** (`github.event.repository.private`, passée à la porte
+par `DEPOT_PRIVE`) : un dépôt public refuse, quoi que dise `reglages.py`. Les erreurs d'usage et
+l'absence de la liste privée exigée refusent toujours ; gitleaks bloque toujours les secrets. Un dépôt privé n'a pas de règle de protection : le garde de Claude y est la seule serrure
 côté agent, et la CI du socle le seul filet.
 
 **Avant de passer un dépôt privé en public**, trois étapes obligatoires, dans cet ordre :

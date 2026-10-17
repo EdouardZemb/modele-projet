@@ -328,10 +328,17 @@ def _masquer(emplacement: str, motifs: Sequence[Motif]) -> str:
 
 
 def visibilite() -> str:
-    """La visibilité posée au rendu (`reglages.VISIBILITE`) : `prive` ou `public`.
+    """La visibilité qui s'applique : `prive` ou `public`.
 
-    Sans réglages (c'est le cas du dépôt modèle lui-même), ou pour toute autre valeur que
-    `prive` : `public`, où un constat refuse."""
+    En CI, la variable DEPOT_PRIVE porte la visibilité réelle du dépôt
+    (`github.event.repository.private`) et l'emporte : toute autre valeur que `true` donne
+    `public`, quoi que dise reglages.py. Un dépôt passé public sans `copier update`, ou une PR qui
+    réécrit VISIBILITE, ne s'ouvre donc pas. Sans la variable (le poste, les hooks), c'est la
+    visibilité posée au rendu (`reglages.VISIBILITE`) qui décide. Sans réglages (le dépôt modèle
+    lui-même), ou pour toute autre valeur que `prive` : `public`, où un constat refuse."""
+    depot_prive = os.environ.get("DEPOT_PRIVE")
+    if depot_prive is not None and depot_prive.strip().lower() != "true":
+        return "public"
     try:
         from reglages import VISIBILITE
     except ImportError:

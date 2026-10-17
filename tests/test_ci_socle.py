@@ -93,7 +93,10 @@ def etape(rendu, nom):
 
 def test_messages_de_commit_examines(rendre):
     e = etape(rendre(), "Confidentialité des messages de commit")
-    assert e["env"] == {"MOTIFS_INTERDITS": "${{ secrets.MOTIFS_INTERDITS }}"}
+    assert e["env"] == {
+        "MOTIFS_INTERDITS": "${{ secrets.MOTIFS_INTERDITS }}",
+        "DEPOT_PRIVE": "${{ github.event.repository.private }}",
+    }
     assert 'git log --format=%B "$BASE..HEAD" > "$RUNNER_TEMP/messages.txt"' in e["run"]
     assert 'git log --format=%B HEAD > "$RUNNER_TEMP/messages.txt"' in e["run"]
     assert 'confidentialite.py --exiger-prives --texte "$RUNNER_TEMP/messages.txt"' in e["run"]
@@ -208,3 +211,16 @@ def test_historique_hors_contextes_requis(rendre):
     regles = {r["type"]: r for r in ruleset["rules"]}
     contextes = {c["context"] for c in regles["required_status_checks"]["parameters"]["required_status_checks"]}
     assert contextes == {"socle / secrets", "socle / confidentialite"}
+
+
+def test_la_porte_recoit_la_visibilite_reelle(rendre):
+    """En CI, la visibilité réelle du dépôt l'emporte sur reglages.py (relecture de la vague, n1)."""
+    etapes = charger(rendre(), SOCLE)["jobs"]["confidentialite"]["steps"]
+    portes = [e for e in etapes if "confidentialite.py" in e.get("run", "")]
+    assert [e["name"] for e in portes] == [
+        "Confidentialité du diff",
+        "Confidentialité des messages de commit",
+        "Confidentialité et format du titre et du corps de la PR",
+    ]
+    for e in portes:
+        assert e["env"]["DEPOT_PRIVE"] == "${{ github.event.repository.private }}", e["name"]

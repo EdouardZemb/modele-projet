@@ -46,6 +46,7 @@ jobs:
       - name: Confidentialité du diff
         env:
           MOTIFS_INTERDITS: ${{ secrets.MOTIFS_INTERDITS }}
+          DEPOT_PRIVE: ${{ github.event.repository.private }}
         run: python scripts/modele/confidentialite.py --exiger-prives --diff "$BASE"
       - name: Format des commits
         run: |
@@ -56,6 +57,7 @@ jobs:
       - name: Confidentialité des messages de commit
         env:
           MOTIFS_INTERDITS: ${{ secrets.MOTIFS_INTERDITS }}
+          DEPOT_PRIVE: ${{ github.event.repository.private }}
         run: |
           case "$BASE" in
             *[!0]*) git log --format=%B "$BASE..HEAD" > "$RUNNER_TEMP/messages.txt" ;;
@@ -66,6 +68,7 @@ jobs:
         if: github.event_name == 'pull_request'
         env:
           MOTIFS_INTERDITS: ${{ secrets.MOTIFS_INTERDITS }}
+          DEPOT_PRIVE: ${{ github.event.repository.private }}
           TITRE: ${{ github.event.pull_request.title }}
           CORPS: ${{ github.event.pull_request.body }}
         run: |

@@ -45,6 +45,9 @@ pas de la discipline de celui qui travaille ?
   s'affiche, avec son emplacement et le nom du motif, jamais la valeur, et le code de retour vaut 0.
   La règle vaut pour tous les motifs, génériques et privés. Les erreurs d'usage et l'absence de la
   liste privée exigée refusent toujours. gitleaks n'est pas concerné : les secrets bloquent toujours.
+  En CI, la visibilité réelle du dépôt (`github.event.repository.private`) l'emporte sur celle que
+  déclare `reglages.py` : un dépôt passé public sans `copier update`, ou une PR qui réécrit
+  `VISIBILITE`, refuse comme tout dépôt public.
 - **Avant de passer un dépôt privé en public**, trois étapes obligatoires : la porte
   `--exiger-prives --fichiers` sur `git ls-files` est propre ; un passage complet de
   `modele-historique.yml` est vert ; `copier update` avec `visibilite=public`, puis la règle de

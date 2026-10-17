@@ -77,6 +77,7 @@ def env_isole(tmp_path):
         env["HOME"] = str(home)
         env["USERPROFILE"] = str(home)
         env.pop("MOTIFS_INTERDITS", None)
+        env.pop("DEPOT_PRIVE", None)  # en CI, la visibilité réelle ; ici, celle des réglages
         env.update(
             GIT_AUTHOR_NAME="Essai",
             GIT_AUTHOR_EMAIL="essai@example.com",

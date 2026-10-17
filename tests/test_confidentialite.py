@@ -474,3 +474,27 @@ def test_depot_prive_erreurs_toujours_64(rendre, tmp_path, env_isole):
     assert lancer_porte(script, ["--fichiers", str(f)], env).returncode == 64
     absent = str(tmp_path / "absent.txt")
     assert lancer_porte(script, ["--fichiers", absent], env_isole()).returncode == 64
+
+
+# --- relecture de la vague, n1 : en CI, la visibilité réelle l'emporte ---
+
+
+@pytest.mark.parametrize(
+    ("visibilite", "depot_prive", "attendu"),
+    [
+        ("prive", "false", 1),
+        ("prive", "true", 0),
+        ("prive", "True", 0),
+        ("prive", "", 1),
+        ("public", "true", 1),
+        ("public", "false", 1),
+    ],
+)
+def test_visibilite_reelle_en_ci(rendre, tmp_path, env_isole, visibilite, depot_prive, attendu):
+    script = rendre(visibilite=visibilite) / "scripts/modele/confidentialite.py"
+    f = tmp_path / "f.txt"
+    f.write_text(IP + chr(10), encoding="utf-8")
+    env = {**env_isole(), "DEPOT_PRIVE": depot_prive}
+    r = lancer_porte(script, ["--fichiers", str(f)], env)
+    assert r.returncode == attendu, r.stderr
+    assert ("avertissement" in r.stderr) is (attendu == 0)
