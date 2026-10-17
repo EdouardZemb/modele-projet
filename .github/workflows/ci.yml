@@ -97,22 +97,39 @@ jobs:
         run: |
           python - <<'FIN'
           import json
+          import re
           import sys
+
+          OUTILS = ("Bash", "PowerShell", "Monitor")
+
+
+          def couvre(matcher, outil):
+              if matcher in (None, "", "*"):
+                  return True
+              try:
+                  return re.fullmatch(matcher, outil) is not None
+              except (re.error, TypeError):
+                  return False
+
 
           try:
               with open(".claude/settings.json", encoding="utf-8") as f:
                   reglages = json.load(f)
-              branche = any(
-                  "garde_claude.py" in crochet.get("command", "")
+              branche = reglages.get("disableAllHooks") is not True and any(
+                  all(couvre(groupe.get("matcher"), outil) for outil in OUTILS)
+                  and any(
+                      "garde_claude.py" in crochet.get("command", "")
+                      for crochet in groupe.get("hooks", [])
+                  )
                   for groupe in reglages["hooks"]["PreToolUse"]
-                  for crochet in groupe.get("hooks", [])
               )
           except (OSError, ValueError, KeyError, TypeError, AttributeError):
               branche = False
           if not branche:
               print(
-                  "garde : .claude/settings.json est illisible (conflit de copier update ?) "
-                  "ou n'a plus de hook PreToolUse qui appelle garde_claude.py",
+                  "garde : .claude/settings.json est illisible (conflit de copier update ?), "
+                  "coupe les hooks (disableAllHooks), ou n'a plus de hook PreToolUse qui "
+                  "appelle garde_claude.py pour Bash, PowerShell et Monitor",
                   file=sys.stderr,
               )
               sys.exit(1)

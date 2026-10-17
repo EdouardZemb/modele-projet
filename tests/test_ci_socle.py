@@ -155,34 +155,48 @@ def script_du_garde(rendu):
     return run.split("\n", 1)[1].rsplit("FIN", 1)[0]
 
 
-@pytest.mark.parametrize(
-    ("alteration", "attendu"),
-    [
-        (None, 0),
-        ("conflit", 1),
-        ("sans-garde", 1),
-        ("absent", 1),
-    ],
-)
-def test_etape_du_garde_branche(rendre, alteration, attendu):
+def _avec_matcher(original, matcher):
+    doc = json.loads(original)
+    doc["hooks"]["PreToolUse"][0]["matcher"] = matcher
+    return json.dumps(doc)
+
+
+def _desactive(original):
+    doc = json.loads(original)
+    doc["disableAllHooks"] = True
+    return json.dumps(doc)
+
+
+def test_etape_du_garde_branche(rendre):
     rendu = rendre()
     reglages = rendu / ".claude/settings.json"
-    if alteration == "conflit":
-        texte = reglages.read_text(encoding="utf-8")
-        reglages.write_text("<<<<<<< avant\n" + texte + "=======\n{}\n>>>>>>> après\n", encoding="utf-8")
-    elif alteration == "sans-garde":
-        reglages.write_text('{"hooks": {"PreToolUse": []}}', encoding="utf-8")
-    elif alteration == "absent":
-        reglages.unlink()
-    r = subprocess.run(
-        [sys.executable, "-"],
-        input=script_du_garde(rendu),
-        check=False,
-        cwd=rendu,
-        capture_output=True,
-        text=True,
-    )
-    assert r.returncode == attendu, r.stderr
+    original = reglages.read_text(encoding="utf-8")
+    cas = [
+        ("intact", original, 0),
+        ("conflit", "<<<<<<< avant\n" + original + "=======\n{}\n>>>>>>> après\n", 1),
+        ("sans garde", '{"hooks": {"PreToolUse": []}}', 1),
+        ("absent", None, 1),
+        # relecture de la vague, n5 : l'ancien matcher, ou les hooks coupés, ne passent plus
+        ("ancien matcher", _avec_matcher(original, "Bash|PowerShell"), 1),
+        ("matcher Bash seul", _avec_matcher(original, "Bash"), 1),
+        ("matcher universel", _avec_matcher(original, "*"), 0),
+        ("matcher sans MCP", _avec_matcher(original, "Bash|PowerShell|Monitor"), 0),
+        ("hooks coupés", _desactive(original), 1),
+    ]
+    for nom, contenu, attendu in cas:
+        if contenu is None:
+            reglages.unlink(missing_ok=True)
+        else:
+            reglages.write_text(contenu, encoding="utf-8")
+        r = subprocess.run(
+            [sys.executable, "-"],
+            input=script_du_garde(rendu),
+            check=False,
+            cwd=rendu,
+            capture_output=True,
+            text=True,
+        )
+        assert r.returncode == attendu, (nom, r.stderr)
 
 
 def test_historique_complet(rendre):
