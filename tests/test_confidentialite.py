@@ -267,14 +267,14 @@ def utf16(texte, ordre="le"):
 def test_source_motifs_prives_bom_en_variable(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
-    monkeypatch.setenv("MOTIFS_INTERDITS", "﻿motif-essai\n")
+    monkeypatch.setenv("MOTIFS_INTERDITS", "\ufeffmotif-essai\n")
     m = c.charger_motifs_prives(c.source_motifs_prives(None))
     assert [x.motif for x in c.examiner([("f:1", "un motif-essai ici")], m)] == ["motif privé n°1"]
 
 
 def test_bom_en_variable_detecte(tmp_path, env_isole):
     env = env_isole()
-    env["MOTIFS_INTERDITS"] = "﻿motif-essai"
+    env["MOTIFS_INTERDITS"] = "\ufeffmotif-essai"
     f = tmp_path / "f.txt"
     f.write_text("un motif-essai ici\n", encoding="utf-8")
     assert lancer(["--fichiers", str(f)], env).returncode == 1

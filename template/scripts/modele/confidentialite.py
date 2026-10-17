@@ -105,7 +105,7 @@ def source_motifs_prives(chemin: str | None) -> str | None:
     if chemin:
         return _lire_liste(Path(chemin))
     # Un secret posé depuis un fichier enregistré avec un BOM le garde en tête de la variable.
-    env = (os.environ.get("MOTIFS_INTERDITS") or "").removeprefix("﻿")
+    env = (os.environ.get("MOTIFS_INTERDITS") or "").removeprefix("\ufeff")
     if env.strip():
         return env.replace("\r", "")
     defaut = Path.home() / LISTE_PAR_DEFAUT
