@@ -121,6 +121,12 @@ clone et chaque worktree.
 **Un refus se corrige, il ne se contourne jamais** : pas de `--no-verify`, pas de `core.hooksPath`
 modifié.
 
+**Un texte qui cite une commande refusée se passe par fichier.** Le garde lit un message de commit
+ou un corps de PR donné en ligne de commande comme il lit une commande, substitutions et
+apostrophes inversées comprises : un message qui cite `git push origin main` est refusé comme le
+serait la commande. Écrire le texte dans un fichier, puis `git commit -F <fichier>` ou
+`gh pr create --body-file <fichier>`.
+
 ## Les fichiers gérés par le modèle
 
 - Les fichiers **gérés** sont réécrits par chaque `copier update`. On ne les modifie jamais dans le

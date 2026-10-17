@@ -123,6 +123,8 @@ def test_garde_fous_a_jour():
         "`DEPOT_PRIVE`",
         "Avant de passer un dépôt privé en public",
         "quatre étapes obligatoires",
+        "`git commit -F <fichier>`",
+        "`gh pr create --body-file <fichier>`",
         "git log -p --all --no-textconv --no-ext-diff --format='%H%n%B'",
         "--exiger-prives --public --fichiers",
     ):
