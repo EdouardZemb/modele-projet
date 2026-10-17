@@ -154,6 +154,12 @@ REFUS = [
     (r"move .githooks C:\ailleurs", "garde-fous", "lot-1/x", True),
     ("ren .githooks h", "garde-fous", "lot-1/x", True),
     ('bash -c "rm -rf .githooks"', "garde-fous", "lot-1/x", True),
+    # here-string : pour un interprète, le texte est une commande
+    ("bash <<< 'git commit --no-verify -m x'", "sans hooks", "lot-1/x", True),
+    ('sh <<<"git push origin main"', "push vers main", "lot-1/x", True),
+    ("pwsh -NoProfile <<< 'git push --no-verify origin lot-1/x'", "sans hooks", "lot-1/x", True),
+    ("xargs git commit <<< --no-verify", "sans hooks", "lot-1/x", True),
+    ('cat <<< "$(git push origin main)"', "push vers main", "lot-1/x", True),
     (
         'curl -X PUT -H "Authorization: token $(gh auth token)" '
         + "https://api.github.com/repos/o/r/pulls/12/merge",
@@ -200,6 +206,9 @@ ADMIS = [
     ("Remove-Item -Recurse dist", "lot-1/x", True),
     ("git mv scripts/a.sh scripts/b.sh", "lot-1/x", True),
     ("rm -rf apps/web/scripts", "lot-1/x", True),
+    ("cat <<< 'git push origin main'", "lot-1/x", True),
+    ("grep -c x <<< 'texte'", "lot-1/x", True),
+    ("bash <<< 'git status'", "lot-1/x", True),
     ("mv tools/scripts tools/bin", "lot-1/x", True),
     ("gh alias list", "lot-1/x", True),
     ("gh co 12", "lot-1/x", True),

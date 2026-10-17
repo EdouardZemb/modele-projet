@@ -49,6 +49,9 @@ _echeance: float | None = None
 ASSIGNATION = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 REDIRECTIONS = set("<>")
 PONCTUATION = ";|&()<>\n"
+# Marque le texte d'une here-string (`<<<`) parmi les jetons : un octet nul ne vient jamais d'une
+# commande. Pour un interprète, ce texte est une commande ; pour tout autre, c'est une donnée.
+ICI = chr(0) + "<<<"
 # Configuration git passée par l'environnement : elle prime sur le core.hooksPath du dépôt.
 CONFIG_PAR_ENVIRONNEMENT = re.compile(r"git_config_(?:count|key_|parameters)", re.IGNORECASE)
 REFUS_CONFIG_ENVIRONNEMENT = (
@@ -167,17 +170,21 @@ def _segments_shlex(commande: str, echappement: bool, virgules: bool) -> list[li
         lex.escape = ""
     segments: list[list[str]] = [[]]
     sauter = False
+    chaine = False
     for jeton in lex:
         if _est_operateur(jeton):
             if any(c in jeton for c in ";|()\n") or not (set(jeton) & REDIRECTIONS):
                 segments.append([])
             else:  # redirection : l'opérateur et sa cible ne sont pas des arguments
                 sauter = True
+                chaine = jeton == "<<<"
                 if segments[-1] and segments[-1][-1].isdigit():
                     segments[-1].pop()
             continue
         if sauter:
             sauter = False
+            if chaine:  # here-string : son texte est gardé, marqué, pour _motif_segment
+                segments[-1].append(ICI + jeton)
             continue
         segments[-1].append(jeton)
     return [s for s in segments if s]
@@ -492,10 +499,12 @@ def _gh(args: list[str], ctx: Contexte) -> str | None:
 
 
 def _motif_segment(segment: list[str], ctx: Contexte, profondeur: int) -> str | None:
+    ici = [jeton[len(ICI) :] for jeton in segment if jeton.startswith(ICI)]
+    segment = [jeton for jeton in segment if not jeton.startswith(ICI)]
     # Une substitution `$(…)` ou `…` s'exécute même entre guillemets doubles (Bash), et "$(…)"
     # aussi en PowerShell : le contenu d'un tel jeton est réanalysé comme une commande.
     if profondeur < PROFONDEUR_MAX:
-        for jeton in segment:
+        for jeton in [*segment, *ici]:
             if "$(" in jeton or "`" in jeton:
                 motif = _motif_commande(jeton.replace("`", ";"), ctx, profondeur + 1)
                 if motif:
@@ -543,7 +552,10 @@ def _motif_segment(segment: list[str], ctx: Contexte, profondeur: int) -> str | 
         utiles = list(reste)
         while utiles and (utiles[0].startswith("-") or utiles[0].startswith("/")):
             utiles.pop(0)
-        for candidat in [*reste, " ".join(utiles)]:
+        candidats = [*reste, " ".join(utiles)]
+        if ici:  # `bash <<< 'cmd'` exécute le texte ; `xargs git commit <<< x` l'ajoute à la fin
+            candidats += [*ici, " ".join([*utiles, *ici])]
+        for candidat in candidats:
             if candidat.strip():
                 motif = _motif_commande(candidat, ctx, profondeur + 1)
                 if motif:
