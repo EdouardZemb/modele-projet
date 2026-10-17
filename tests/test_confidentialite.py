@@ -15,6 +15,9 @@ ECHANTILLONS = {
     "adresse Tailscale": "noeud 100.101" + ".2.3",
     "cible SSH": "ssh -p 22 " + "deploy" + "@" + "hote.exemple",
     "cible scp": "scp f " + "deploy" + "@" + "hote:/tmp/f",
+    "cible scp à hôte pointé": "scp f " + "deploy" + "@" + "hote" + ".lan:/tmp/f",
+    "adresse IPv6 Tailscale": "noeud fd7a" + ":115c" + ":a1e0::1",
+    "nom MagicDNS Tailscale": "https://machine" + ".tailnet-ab12" + ".ts" + ".net/",
     "clé privée age": CLE_AGE,
     "clé privée PEM": "-----BEGIN " + "OPENSSH PRIVATE" + " KEY-----",
     "jeton GitHub": "ghp_" + "A" * 36,
@@ -45,6 +48,10 @@ def test_motifs_generiques_detectent(nom):
         "@docs/modele/methode.md",
         "age1" + "q" * 58,
         "ssh -T git@github.com",
+        "essai@example.com",
+        "les noms *.ts" + ".net de Tailscale",
+        "https://docs.ts" + ".network/x",
+        "fd7a:1",
     ],
 )
 def test_faux_positifs_ecartes(texte):
@@ -185,10 +192,13 @@ def test_diff_depuis_base(tmp_path, env_isole):
     assert "b.txt:1" in r.stderr
 
 
-def test_fichier_binaire_ignore(tmp_path, env_isole):
+def test_fichier_binaire_signale_sans_refus(tmp_path, env_isole):
     f = tmp_path / "b.bin"
     f.write_bytes(b"\0" + CLE_AGE.encode())
-    assert lancer(["--fichiers", str(f)], env_isole()).returncode == 0
+    r = lancer(["--fichiers", str(f)], env_isole())
+    assert r.returncode == 0
+    assert f"confidentialité : fichier binaire non examiné : {f}" in r.stderr
+    assert CLE_AGE not in r.stdout + r.stderr
 
 
 def test_message(tmp_path, env_isole):
@@ -242,3 +252,149 @@ def test_chemin_absent_ou_dossier(tmp_path, env_isole):
     assert r.returncode == 64
     assert "n-existe-pas" not in r.stdout + r.stderr
     assert lancer(["--fichiers", str(tmp_path)], env_isole()).returncode == 64
+
+
+# --- revue finale du lot 1 : binaires, UTF-16, textconv (I3, L.13, L.14), BOM en variable (m1) ---
+
+IP = "hote 192.168" + ".1.20"
+
+
+def utf16(texte, ordre="le"):
+    bom = b"\xff\xfe" if ordre == "le" else b"\xfe\xff"
+    return bom + texte.encode(f"utf-16-{ordre}")
+
+
+def test_source_motifs_prives_bom_en_variable(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setenv("MOTIFS_INTERDITS", "﻿motif-essai\n")
+    m = c.charger_motifs_prives(c.source_motifs_prives(None))
+    assert [x.motif for x in c.examiner([("f:1", "un motif-essai ici")], m)] == ["motif privé n°1"]
+
+
+def test_bom_en_variable_detecte(tmp_path, env_isole):
+    env = env_isole()
+    env["MOTIFS_INTERDITS"] = "﻿motif-essai"
+    f = tmp_path / "f.txt"
+    f.write_text("un motif-essai ici\n", encoding="utf-8")
+    assert lancer(["--fichiers", str(f)], env).returncode == 1
+
+
+@pytest.mark.parametrize("ordre", ["le", "be"])
+def test_utf16_examine_fichiers(tmp_path, env_isole, ordre):
+    f = tmp_path / "reseau.txt"
+    f.write_bytes(utf16("entete\r\n" + IP + "\r\n", ordre))
+    r = lancer(["--fichiers", str(f)], env_isole())
+    assert r.returncode == 1
+    assert f"{f}:2 — adresse IP privée" in r.stderr
+    assert "192.168" not in r.stdout + r.stderr
+
+
+def _depot_avec_base(tmp_path, env):
+    d = depot(tmp_path, env)
+    (d / "a.txt").write_text("a\n", encoding="utf-8")
+    git(d, env, "add", "a.txt")
+    git(d, env, "commit", "-qm", "init")
+    git(d, env, "switch", "-qc", "branche")
+    return d
+
+
+def test_utf16_examine_index_et_diff(tmp_path, env_isole):
+    env = env_isole()
+    d = _depot_avec_base(tmp_path, env)
+    (d / "reseau.txt").write_bytes(utf16(IP + "\n"))
+    git(d, env, "add", "reseau.txt")
+    r = lancer(["--index"], env, d)
+    assert r.returncode == 1
+    assert "reseau.txt:1 — adresse IP privée" in r.stderr
+    git(d, env, "commit", "-qm", "ajout")
+    r = lancer(["--diff", "main"], env, d)
+    assert r.returncode == 1
+    assert "reseau.txt:1 — adresse IP privée" in r.stderr
+    assert lancer(["--diff", "0" * 40], env, d).returncode == 1
+
+
+def test_binaire_signale_index_et_diff(tmp_path, env_isole):
+    env = env_isole()
+    d = _depot_avec_base(tmp_path, env)
+    (d / "b.dat").write_bytes(b"\0" + IP.encode())
+    git(d, env, "add", "b.dat")
+    r = lancer(["--index"], env, d)
+    assert r.returncode == 0
+    assert "confidentialité : fichier binaire non examiné : b.dat" in r.stderr
+    git(d, env, "commit", "-qm", "ajout")
+    r = lancer(["--diff", "main"], env, d)
+    assert r.returncode == 0
+    assert "fichier binaire non examiné : b.dat" in r.stderr
+
+
+def test_binaire_au_chemin_prive_masque(tmp_path, env_isole):
+    env = env_isole()
+    env["MOTIFS_INTERDITS"] = "nom-prive"
+    d = _depot_avec_base(tmp_path, env)
+    (d / "nom-prive.dat").write_bytes(b"\0x")
+    git(d, env, "add", "nom-prive.dat")
+    r = lancer(["--index"], env, d)
+    assert "fichier binaire non examiné : <chemin masqué>" in r.stderr
+    assert "nom-prive" not in r.stdout + r.stderr
+
+
+def test_textconv_ne_vide_rien(tmp_path, env_isole):
+    env = env_isole()
+    d = _depot_avec_base(tmp_path, env)
+    git(d, env, "config", "diff.vide.textconv", "sh -c ':'")
+    (d / ".gitattributes").write_text("*.cfg diff=vide\n", encoding="utf-8")
+    (d / "c.cfg").write_text(IP + "\n", encoding="utf-8")
+    git(d, env, "add", ".gitattributes", "c.cfg")
+    r = lancer(["--index"], env, d)
+    assert r.returncode == 1
+    assert "c.cfg:1 — adresse IP privée" in r.stderr
+    git(d, env, "commit", "-qm", "ajout")
+    assert lancer(["--diff", "main"], env, d).returncode == 1
+
+
+@pytest.mark.parametrize("attribut", ["-diff", "binary"])
+def test_texte_marque_binaire_examine(tmp_path, env_isole, attribut):
+    env = env_isole()
+    d = _depot_avec_base(tmp_path, env)
+    (d / ".gitattributes").write_text(f"*.txt {attribut}\n", encoding="utf-8")
+    (d / "note.txt").write_text("rien\n" + IP + "\n", encoding="utf-8")
+    git(d, env, "add", ".gitattributes", "note.txt")
+    r = lancer(["--index"], env, d)
+    assert r.returncode == 1
+    assert "note.txt:2 — adresse IP privée" in r.stderr
+    git(d, env, "commit", "-qm", "ajout")
+    assert lancer(["--diff", "main"], env, d).returncode == 1
+
+
+DIFF_PLUSIEURS_HUNKS = [
+    "diff --git a/x y.txt b/x y.txt",
+    "--- a/x y.txt",
+    "+++ b/x y.txt",
+    "@@ -1 +1 @@",
+    "-ancien",
+    "+nouveau",
+    "@@ -10,0 +11,2 @@",
+    "++double plus",
+    "+deux",
+    "@@ -20,3 +23 @@",
+    "-a",
+    "-b",
+    "-c",
+    "+seul",
+    "diff --git a/z b/z",
+    "--- a/z",
+    "+++ /dev/null",
+    "@@ -1 +0,0 @@",
+    "-supprimé",
+]
+
+
+def test_lignes_ajoutees():
+    diff = chr(10).join(DIFF_PLUSIEURS_HUNKS)
+    assert list(c.lignes_ajoutees(diff)) == [
+        ("x y.txt:1", "nouveau"),
+        ("x y.txt:11", "+double plus"),
+        ("x y.txt:12", "deux"),
+        ("x y.txt:23", "seul"),
+    ]
