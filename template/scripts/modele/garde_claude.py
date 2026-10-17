@@ -231,17 +231,20 @@ def _motif_hooks_git(jeton: str) -> bool:
 
 
 def _vise_garde_fous(arg: str) -> bool:
-    """Vrai si `arg` désigne `.githooks` ou `scripts/modele`, un chemin en dessous, ou `scripts`
-    qui le contient : séparateur `/` ou `\\`, préfixe quelconque (`./`, `C:\\x\\`), sans égard à la
-    casse. Une option porteuse d'un chemin (`-Path:x`, `--x=y`) est lue par sa valeur."""
+    """Vrai si `arg` désigne `.githooks` ou `scripts/modele`, ou un chemin en dessous : séparateur
+    `/` ou `\\`, préfixe quelconque (`./`, `C:\\x\\`), sans égard à la casse. `scripts` lui-même,
+    qui contient `scripts/modele`, n'est visé qu'à la racine (`scripts`, `./scripts`), pas
+    `apps/web/scripts`. Une option porteuse d'un chemin (`-Path:x`, `--x=y`) est lue par sa
+    valeur."""
     valeur = re.sub(r"^-+[\w-]+[:=]", "", arg) if arg.startswith("-") else arg
     parties = [p for p in re.split(r"[\\/]", valeur.lower()) if p not in ("", ".")]
     for i, partie in enumerate(parties):
         if partie == ".githooks":
             return True
-        if partie == "scripts" and (i + 1 == len(parties) or parties[i + 1] == "modele"):
+        if partie == "scripts" and parties[i + 1 : i + 2] == ["modele"]:
             return True
-    return False
+    absolu = bool(re.match(r"[\\/~]|[A-Za-z]:", valeur))
+    return parties == ["scripts"] and not absolu
 
 
 def _options_git(args: list[str]) -> tuple[str | None, int, str | None]:
