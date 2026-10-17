@@ -36,3 +36,10 @@ def test_hooks_du_depot_modele():
     for hook in hooks:
         assert "template/scripts/modele/" in hook.read_text(encoding="utf-8"), hook.name
     assert "--branche main" in (RACINE / ".githooks/pre-push").read_text(encoding="utf-8")
+
+
+def test_settings_du_depot_modele():
+    reglage = json.loads((RACINE / ".claude/settings.json").read_text(encoding="utf-8"))
+    crochet = reglage["hooks"]["PreToolUse"][0]
+    assert crochet["matcher"] == "Bash|PowerShell|Monitor|mcp__.*"
+    assert "template/scripts/modele/garde_claude.py" in crochet["hooks"][0]["command"]

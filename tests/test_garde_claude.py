@@ -81,6 +81,62 @@ REFUS = [
         "lot-1/x",
         True,
     ),
+    # revue finale du lot 1 (I2) : une ligne par forme
+    # a. substitution dans des guillemets doubles, réanalysée comme une commande
+    ('x="$(gh pr merge 12 --squash)"', "contrôles", "lot-1/x", False),
+    ('echo "$(git commit --no-verify -m x)"', "sans hooks", "lot-1/x", True),
+    ('echo "`git push origin main`"', "push vers main", "lot-1/x", True),
+    ('Write-Output "$(git push --no-verify origin lot-1/x)"', "sans hooks", "lot-1/x", True),
+    # b. core.hooksPath dans n'importe quel jeton ; configuration git par l'environnement
+    (
+        "$env:GIT_CONFIG_COUNT=1; $env:GIT_CONFIG_KEY_0='core.hooksPath'; "
+        + "$env:GIT_CONFIG_VALUE_0='x'; git commit -m x",
+        "hooks",
+        "lot-1/x",
+        True,
+    ),
+    (
+        "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/tmp/v; "
+        + "git commit -m x",
+        "hooks",
+        "lot-1/x",
+        True,
+    ),
+    ("export GIT_CONFIG_PARAMETERS=\"'core.hookspath=/tmp'\"; git commit -m x", "hooks", "lot-1/x", True),
+    ("Set-Item env:GIT_CONFIG_COUNT 1; git commit -m x", "hooks", "lot-1/x", True),
+    ("set GIT_CONFIG_PARAMETERS='core.hookspath=x'", "hooks", "lot-1/x", True),
+    ("$env:git_config_count=1; git commit -m x", "hooks", "lot-1/x", True),
+    ('sed -i "s/hooksPath = .githooks/hooksPath = x/" .git/config', "hooks", "lot-1/x", True),
+    ("git commit -m x --template core.hooksPath", "hooks", "lot-1/x", True),
+    # c. interprètes et enveloppes PowerShell, listes d'arguments, timeout, env -u
+    (
+        "Start-Process git -ArgumentList 'push','--no-verify','origin','lot-1/x' -Wait",
+        "sans hooks",
+        "lot-1/x",
+        True,
+    ),
+    ("Start-Process gh -ArgumentList 'pr','merge','12'", "fusion", "lot-1/x", False),
+    ("saps git -ArgumentList 'commit','--no-verify','-m','x'", "sans hooks", "lot-1/x", True),
+    ("git push origin lot-1/x,main", "push vers main", "lot-1/x", True),
+    ('iex "git push --no-verify origin lot-1/x"', "sans hooks", "lot-1/x", True),
+    ('Invoke-Expression "git commit --no-verify -m x"', "sans hooks", "lot-1/x", True),
+    ("timeout 60 git push --no-verify origin lot-1/x", "sans hooks", "lot-1/x", True),
+    ("timeout -s KILL 60 git push origin main", "push vers main", "lot-1/x", True),
+    ("env -u GIT_DIR git commit --no-verify -m x", "sans hooks", "lot-1/x", True),
+    # d. alias et extensions de gh
+    ("gh alias set m 'pr merge'", "alias gh", "lot-1/x", True),
+    ("gh alias set --shell m 'gh pr merge \"$1\" --squash'", "alias gh", "lot-1/x", True),
+    ("gh alias import alias.yml", "alias gh", "lot-1/x", True),
+    ("gh m 12 --squash", "commande gh inconnue", "lot-1/x", True),
+    # e. le jeton de gh, qui ouvrirait l'API sans passer par gh
+    ("gh auth token", "jeton gh", "lot-1/x", True),
+    (
+        'curl -X PUT -H "Authorization: token $(gh auth token)" '
+        + "https://api.github.com/repos/o/r/pulls/12/merge",
+        "jeton gh",
+        "lot-1/x",
+        True,
+    ),
 ]
 
 ADMIS = [
@@ -104,6 +160,18 @@ ADMIS = [
     ("echo main", "lot-1/x", True),
     ("echo git push origin main", "lot-1/x", True),
     ("", "lot-1/x", True),
+    # revue finale du lot 1
+    ("git config --get core.hooksPath", "lot-1/x", True),
+    ("git -C ../autre config --get core.hooksPath", "lot-1/x", True),
+    ("git config --list", "lot-1/x", True),
+    ("gh help", "lot-1/x", True),
+    ("gh --version", "lot-1/x", True),
+    ("gh auth status", "lot-1/x", True),
+    ("gh alias list", "lot-1/x", True),
+    ("gh co 12", "lot-1/x", True),
+    ("timeout 5 git status", "lot-1/x", True),
+    ('git commit -m "feat: a, b"', "lot-1/x", True),
+    ('echo "$(git status)"', "lot-1/x", True),
 ]
 
 
@@ -190,6 +258,62 @@ def test_cli_autre_outil():
     assert lancer(entree, "--branche", "main").returncode == 0
 
 
+# Les outils qui lancent une commande hors de Bash et de PowerShell (revue finale du lot 1, I1).
+REFUS_OUTILS = [
+    ("Monitor", {"command": "git commit --no-verify -m x"}, "sans hooks"),
+    ("Monitor", {"command": "echo `git push origin main`", "description": "x"}, "push vers main"),
+    ("mcp__desktop-commander__start_process", {"command": "git push origin main", "timeout_ms": 1}, "push vers main"),
+    ("mcp__desktop-commander__start_process", {"command": "git commit --no-verify -m x"}, "sans hooks"),
+    ("mcp__desktop-commander__interact_with_process", {"pid": 1, "input": "git push --no-verify"}, "sans hooks"),
+    ("mcp__autre__shell", {"cmd": "Start-Process git -ArgumentList 'push','--no-verify'"}, "sans hooks"),
+    ("mcp__autre__script", {"script": "git -c core.hooksPath=/dev/null commit -m x"}, "hooks"),
+    ("mcp__autre__shell", {"command": 12, "cmd": "gh auth token"}, "jeton gh"),
+]
+
+
+@pytest.mark.parametrize(("outil", "entree", "fragment"), REFUS_OUTILS)
+def test_cli_outils_qui_lancent_une_commande(outil, entree, fragment):
+    r = lancer(json.dumps({"tool_name": outil, "tool_input": entree, "cwd": "."}), "--branche", "main")
+    assert r.returncode == 2, (outil, entree)
+    assert fragment in r.stderr.decode("utf-8"), (outil, entree)
+
+
+@pytest.mark.parametrize(
+    ("outil", "attendu"),
+    [("Monitor", 0), ("Bash", 0), ("PowerShell", 2), ("mcp__autre__shell", 2)],
+)
+def test_cli_lecture_selon_l_outil(outil, attendu):
+    # « ma`in » vaut « main » pour PowerShell (échappement), pas pour Bash (substitution).
+    # Monitor est lu comme Bash ; un outil inconnu, de toutes les façons.
+    commande = "git push origin ma" + chr(96) + "in"
+    entree = {"tool_name": outil, "tool_input": {"command": commande}, "cwd": "."}
+    assert lancer(json.dumps(entree), "--branche", "main").returncode == attendu
+
+
+@pytest.mark.parametrize(
+    ("outil", "entree"),
+    [
+        ("mcp__claude_ai_Gmail__search_threads", {"query": "git push origin main"}),
+        ("mcp__autre__outil", {}),
+        ("mcp__autre__outil", {"command": ["git", "push", "origin", "main"]}),
+        ("Monitor", {"command": "git status"}),
+        ("mcp__desktop-commander__start_process", {"command": "git status"}),
+    ],
+)
+def test_cli_outils_admis(outil, entree):
+    r = lancer(json.dumps({"tool_name": outil, "tool_input": entree, "cwd": "."}), "--branche", "main")
+    assert r.returncode == 0, (outil, entree, r.stderr)
+
+
+def test_cli_outil_sans_commande_ne_lance_rien():
+    # Sans --branche ni réglages, un outil qui porte une commande sortirait en 64 : celui-ci sort
+    # en 0, preuve que rien n'a été chargé ni lancé.
+    entree = json.dumps({"tool_name": "mcp__autre__outil", "tool_input": {"query": "x"}, "cwd": "."})
+    assert lancer(entree).returncode == 0
+    entree = json.dumps({"tool_name": "Monitor", "tool_input": {"command": "git status"}, "cwd": "."})
+    assert lancer(entree).returncode == 64
+
+
 def test_cli_json_illisible():
     assert lancer("pas du json", "--branche", "main").returncode == 1
     assert lancer("[1, 2]", "--branche", "main").returncode == 1
@@ -256,7 +380,7 @@ def test_settings_rendu(rendre):
     chemin = racine / ".claude/settings.json"
     reglage = json.loads(chemin.read_text(encoding="utf-8"))
     crochet = reglage["hooks"]["PreToolUse"][0]
-    assert crochet["matcher"] == "Bash|PowerShell"
+    assert crochet["matcher"] == "Bash|PowerShell|Monitor|mcp__.*"
     commande = crochet["hooks"][0]["command"]
     assert "lancer.sh" in commande
     assert "garde_claude.py" in commande
@@ -500,3 +624,33 @@ def test_api_graphql_lecture_et_get_admis():
     for point in ("graphql", "/graphql", "https://api.github.com/graphql", "/graphql?x=1"):
         assert refus(f"gh api {point} {lecture}") is None
     assert refus("gh api repos/o/r/graphql") is None
+
+
+# --- revue finale du lot 1 ---
+
+
+def test_powershell_liste_d_arguments():
+    commande = "Start-Process gh -ArgumentList 'pr','merge','12' -Wait"
+    assert "contrôles" in refus_outil(commande, "PowerShell", verts=False)
+    assert refus_outil(commande, "PowerShell", verts=True) is None
+    # une virgule entre guillemets n'est pas un séparateur
+    assert refus_outil("git commit -m 'feat: a,-n'", "PowerShell") is None
+
+
+@pytest.mark.parametrize("outil", ["Bash", "PowerShell", None])
+def test_substitution_entre_guillemets_doubles(outil):
+    assert "sans hooks" in refus_outil('echo "$(git commit --no-verify -m x)"', outil)
+    assert refus_outil('echo "$(git status)"', outil) is None
+
+
+@pytest.mark.parametrize("outil", ["Bash", "PowerShell", None])
+def test_reparation_et_lecture_des_hooks_admises_partout(outil):
+    for commande in ("git config core.hooksPath .githooks", "git config --get core.hooksPath"):
+        assert refus_outil(commande, outil) is None, (commande, outil)
+
+
+def test_commande_de():
+    assert garde_claude.commande_de({"command": "a", "cmd": "b"}) == "a"
+    assert garde_claude.commande_de({"command": 1, "input": "c"}) == "c"
+    assert garde_claude.commande_de({"script": "d"}) == "d"
+    assert garde_claude.commande_de({"query": "e"}) is None
