@@ -83,6 +83,20 @@ EFFACE_OU_DEPLACE = {
     "mv", "move", "move-item", "mi", "ren", "rename", "rename-item", "rni",
 }  # fmt: skip
 REFUS_GARDE_FOUS = "effacement ou déplacement des garde-fous (.githooks, scripts/modele)"
+REFUS_IDENTIFIANTS = (
+    "identifiants affichés (git credential, gh auth git-credential), "
+    "qui permettraient de contourner le garde"
+)
+
+
+def _affiche_identifiants(commande: str, args: list[str]) -> bool:
+    """`git credential fill`, ou `get` d'un assistant (`git credential-manager get`,
+    `git-credential-store get`) : ils impriment l'identifiant enregistré."""
+    if commande == "credential":
+        return "fill" in args
+    return commande.startswith(("credential-", "git-credential-")) and "get" in args
+
+
 # Les commandes de `gh help` (gh 2.93) : de base, d'actions, d'alias et additionnelles. Tout autre
 # premier mot est un alias ou une extension, qui pourrait masquer `gh pr merge`.
 COMMANDES_GH = {
@@ -394,6 +408,8 @@ def _git(args: list[str], ctx: Contexte) -> str | None:
         return REFUS_HOOKS
     if sous in ("rm", "mv") and any(_vise_garde_fous(a) for a in reste):
         return REFUS_GARDE_FOUS
+    if _affiche_identifiants(sous.lower(), reste):
+        return REFUS_IDENTIFIANTS
     if sous == "push":
         return _push(reste, chemin, ctx)
     return None
@@ -486,6 +502,8 @@ def _gh(args: list[str], ctx: Contexte) -> str | None:
         return "alias gh pouvant masquer une fusion"
     if mots == ["auth", "token"]:
         return "jeton gh exposé (gh auth token), qui permettrait de contourner le garde"
+    if mots == ["auth", "git-credential"]:
+        return REFUS_IDENTIFIANTS
     if mots == ["auth", "status"] and any(_montre_le_jeton(a) for a in args):
         return (
             "jeton gh exposé (gh auth status --show-token), qui permettrait de contourner le garde"
@@ -539,6 +557,8 @@ def _motif_segment(segment: list[str], ctx: Contexte, profondeur: int) -> str | 
         return REFUS_HOOKS
     if commande in EFFACE_OU_DEPLACE and any(_vise_garde_fous(a) for a in reste):
         return REFUS_GARDE_FOUS
+    if commande.startswith("git-credential-") and _affiche_identifiants(commande, reste):
+        return REFUS_IDENTIFIANTS
     if commande in CHANGE_DOSSIER:
         cible = next((a for a in reste if not a.startswith("-") or a == "-"), None)
         if cible is not None and cible != "-":

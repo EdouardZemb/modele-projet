@@ -154,6 +154,12 @@ REFUS = [
     (r"move .githooks C:\ailleurs", "garde-fous", "lot-1/x", True),
     ("ren .githooks h", "garde-fous", "lot-1/x", True),
     ('bash -c "rm -rf .githooks"', "garde-fous", "lot-1/x", True),
+    # ce qui affiche les identifiants enregistrés
+    ("git credential fill", "identifiants", "lot-1/x", True),
+    ("printf 'protocol=https' | git credential fill", "identifiants", "lot-1/x", True),
+    ("git credential-manager get", "identifiants", "lot-1/x", True),
+    ("git-credential-manager.exe get", "identifiants", "lot-1/x", True),
+    ("gh auth git-credential get", "identifiants", "lot-1/x", True),
     # here-string : pour un interprète, le texte est une commande
     ("bash <<< 'git commit --no-verify -m x'", "sans hooks", "lot-1/x", True),
     ('sh <<<"git push origin main"', "push vers main", "lot-1/x", True),
@@ -207,6 +213,8 @@ ADMIS = [
     ("git mv scripts/a.sh scripts/b.sh", "lot-1/x", True),
     ("rm -rf apps/web/scripts", "lot-1/x", True),
     ("cat <<< 'git push origin main'", "lot-1/x", True),
+    ("git credential-manager --version", "lot-1/x", True),
+    ("git config --get credential.helper", "lot-1/x", True),
     ("grep -c x <<< 'texte'", "lot-1/x", True),
     ("bash <<< 'git status'", "lot-1/x", True),
     ("mv tools/scripts tools/bin", "lot-1/x", True),
