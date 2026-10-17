@@ -2,7 +2,8 @@
 
 La liste de contrôle des lots d'alignement : un dépôt qui existait avant le modèle reçoit le socle
 par `copier copy`, puis quelques reports à la main. Elle est tirée de l'alignement d'`ancrage`
-(lot 1) et de la revue finale du lot 1. Les étapes 👤 sont à Edouard.
+(lot 1) et de la revue finale du lot 1, puis corrigée par celui de `veille-emploi` (lot 6). Les
+étapes 👤 sont à Edouard.
 
 Chaque case se coche dans la PR d'alignement. Une case qui ne s'applique pas au projet le dit.
 
@@ -10,6 +11,9 @@ Chaque case se coche dans la PR d'alignement. Une case qui ne s'applique pas au 
 
 - [ ] Aucune PR ouverte ne touche `CLAUDE.md` ni `.github/workflows/ci.yml` (`gh pr list --state open`).
       Sinon, s'arrêter : une autre session travaille sur le dépôt.
+- [ ] La CI de la branche principale est verte (`gh run list --branch <branche principale> --limit 5`).
+      Sinon, comprendre le rouge avant d'aligner : il serait pris pour un effet de l'alignement
+      (LE-14).
 - [ ] Un worktree neuf, `<dépôt>.worktrees\modele-alignement`, sur une branche partie de
       `origin/<branche principale>`.
 
@@ -58,8 +62,10 @@ Chaque case se coche dans la PR d'alignement. Une case qui ne s'applique pas au 
 
 ## 5. Vérifier, puis commiter
 
-- [ ] `python scripts/modele/confidentialite.py --exiger-prives --diff origin/<branche principale>`
-      rend 0 (dans un dépôt privé : aucun avertissement qui ne soit pas attendu).
+- [ ] `git add -A`, puis `python scripts/modele/confidentialite.py --exiger-prives --index` rend 0
+      (dans un dépôt privé : aucun avertissement qui ne soit pas attendu). C'est le mode du hook
+      `pre-commit`, sur ce qui est indexé. Pas `--diff` avant le commit : il compare
+      `<base>...HEAD`, n'examine encore rien, et la porte se tait quand elle ne trouve rien (LE-15).
 - [ ] Le lint, les types et les tests du projet passent.
 - [ ] Commit `chore: aligne <nom> sur le socle de modele-projet <étiquette>`. Les hooks tournent sur
       ce commit : c'est leur premier passage réel. Jamais `--no-verify`.
@@ -95,7 +101,9 @@ Chaque case se coche dans la PR d'alignement. Une case qui ne s'applique pas au 
 - [ ] **L'historique complet**, une fois après la fusion : lancer `modele-historique.yml` à la main
       (`gh workflow run modele-historique.yml`, ou l'onglet Actions). gitleaks n'examine sinon que
       les commits de chaque PR et de chaque envoi, et l'historique antérieur à l'alignement
-      attendrait le passage du lundi.
+      attendrait le passage du lundi. Un faux positif ancien s'écarte par `.gitleaksignore`, avec
+      son empreinte (`<commit>:<fichier>:<règle>:<ligne>`) et un commentaire qui dit pourquoi,
+      jamais en réécrivant l'historique.
 
 ## 8. Les sondes négatives, isolées
 
