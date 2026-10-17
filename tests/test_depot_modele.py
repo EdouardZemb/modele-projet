@@ -100,6 +100,9 @@ def test_liste_d_alignement():
         "aucune PR",
         "## Avant de passer un dépôt privé en public",
         "visibilite=public",
+        "git log -p --all --no-textconv --no-ext-diff --format='%H%n%B'",
+        "--exiger-prives --public --texte",
+        "commit unique propre",
     ):
         assert fragment in texte, fragment
     for lien in ("CLAUDE.md", "README.md"):

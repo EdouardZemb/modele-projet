@@ -50,10 +50,13 @@ pas de la discipline de celui qui travaille ?
   d'usage et l'absence de la liste privée exigée refusent toujours. En CI, la visibilité réelle du dépôt (`github.event.repository.private`) l'emporte sur celle que
   déclare `reglages.py` : un dépôt passé public sans `copier update`, ou une PR qui réécrit
   `VISIBILITE`, refuse comme tout dépôt public.
-- **Avant de passer un dépôt privé en public**, trois étapes obligatoires : la porte
-  `--exiger-prives --fichiers` sur `git ls-files` est propre ; un passage complet de
-  `modele-historique.yml` est vert ; `copier update` avec `visibilite=public`, puis la règle de
-  protection.
+- **Avant de passer un dépôt privé en public**, quatre étapes obligatoires, la porte en mode
+  `--public` : elle est propre sur `git ls-files` (`--exiger-prives --public --fichiers`) ; elle est
+  propre sur tout l'historique (`git log -p --all --no-textconv --no-ext-diff --format='%H%n%B'`
+  écrit dans un fichier, puis `--exiger-prives --public --texte`), sans quoi on réécrit
+  l'historique ou l'on publie un nouveau dépôt depuis un commit unique propre ; un passage complet
+  de `modele-historique.yml` est vert ; `copier update` avec `visibilite=public`, puis la règle de
+  protection. Les binaires de l'historique ne sont pas examinés.
 - **Le modèle lui-même est public.** Rien de ce qu'il contient ne nomme le serveur, son utilisateur
   ou son réseau.
 - **Un refus se corrige, il ne se contourne jamais.**

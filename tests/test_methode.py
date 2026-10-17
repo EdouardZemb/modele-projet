@@ -122,6 +122,9 @@ def test_garde_fous_a_jour():
         "avertit sur ce qui identifie et refuse toujours les secrets",
         "`DEPOT_PRIVE`",
         "Avant de passer un dépôt privé en public",
+        "quatre étapes obligatoires",
+        "git log -p --all --no-textconv --no-ext-diff --format='%H%n%B'",
+        "--exiger-prives --public --fichiers",
     ):
         assert fragment in section, fragment
     assert "gitleaks sur tout l'historique ;" not in section
@@ -135,5 +138,7 @@ def test_m0002_amende():
     assert "refuse toujours les secrets" in texte
     assert "gitleaks n'est pas concerné" not in texte
     assert "github.event.repository.private" in texte
+    assert "quatre étapes obligatoires" in texte
+    assert "git log -p --all" in texte
     assert "`Monitor`" in texte
     assert "PR obligatoire" not in texte

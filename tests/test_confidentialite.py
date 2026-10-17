@@ -549,3 +549,49 @@ def test_depot_prive_ce_qui_identifie_avertit(rendre, tmp_path, env_isole):
         assert f"{f}:{i} — {nom}" in r.stderr
     assert f"{len(lignes)} constat(s), dépôt privé : avertissement, pas de refus" in r.stderr
     assert "valeur-privee-xyz" not in r.stdout + r.stderr
+
+
+# --- relecture de la vague, n2 : --public, et l'historique avant un passage en public ---
+
+
+def test_option_public_refuse_dans_un_depot_prive(rendre, tmp_path, env_isole):
+    script = rendre(visibilite="prive") / "scripts/modele/confidentialite.py"
+    f = tmp_path / "f.txt"
+    f.write_text(IP + chr(10), encoding="utf-8")
+    assert lancer_porte(script, ["--fichiers", str(f)], env_isole()).returncode == 0
+    r = lancer_porte(script, ["--public", "--fichiers", str(f)], env_isole())
+    assert r.returncode == 1
+    assert "confidentialité : 1 constat(s), refus." in r.stderr
+
+
+def test_historique_avant_un_passage_en_public(rendre, tmp_path, env_isole):
+    """Un nom privé ajouté puis retiré, ou cité dans un message : l'arbre est propre, l'historique
+    ne l'est pas. La procédure de methode.md le trouve, en mode public."""
+    racine = rendre(visibilite="prive")
+    env = {**env_isole(), "MOTIFS_INTERDITS": "nom-du-serveur"}
+    git(racine, env, "init", "-q", "-b", "main")
+    git(racine, env, "config", "core.autocrlf", "false")
+    git(racine, env, "add", "-A")
+    git(racine, env, "commit", "-q", "-m", "chore: base")
+    (racine / "note.txt").write_text("hote nom-du-serveur" + chr(10), encoding="utf-8")
+    git(racine, env, "add", "note.txt")
+    git(racine, env, "commit", "-q", "-m", "docs: note")
+    git(racine, env, "rm", "-q", "note.txt")
+    git(racine, env, "commit", "-q", "-m", "docs: retire la note")
+    git(racine, env, "commit", "-q", "--allow-empty", "-m", "docs: vu sur nom-du-serveur")
+    script = racine / "scripts/modele/confidentialite.py"
+    suivis = git(racine, env, "ls-files").split()
+    arbre = lancer_porte(script, ["--exiger-prives", "--public", "--fichiers", *suivis], env, racine)
+    assert arbre.returncode == 0, arbre.stderr  # l'arbre seul ne voit rien
+
+    historique = tmp_path / "historique.txt"
+    sortie = git(
+        racine, env, "log", "-p", "--all", "--no-textconv", "--no-ext-diff", "--format=%H%n%B"
+    )
+    historique.write_text(sortie, encoding="utf-8")
+    texte = ["--exiger-prives", "--texte", str(historique)]
+    assert lancer_porte(script, texte, env, racine).returncode == 0  # en privé : averti
+    r = lancer_porte(script, ["--public", *texte], env, racine)
+    assert r.returncode == 1
+    assert r.stderr.count("— motif privé n°1") == 3  # ajout, retrait, message
+    assert "nom-du-serveur" not in r.stdout + r.stderr

@@ -121,11 +121,22 @@ Une sonde ne prouve rien si un autre mécanisme refuse à la place de celui qu'e
 ## Avant de passer un dépôt privé en public
 
 Dans un dépôt privé, la porte de confidentialité avertit sur ce qui identifie (elle ne refuse que
-les secrets) : des constats ont pu entrer
-dans l'historique. Avant de changer la visibilité, trois étapes, obligatoires et dans cet ordre :
+les secrets) : des constats ont pu entrer dans l'historique. Avant de changer la visibilité, quatre
+étapes, obligatoires et dans cet ordre. `--public` fait refuser la porte comme dans un dépôt
+public, puisque le dépôt est encore privé.
 
-1. [ ] `python scripts/modele/confidentialite.py --exiger-prives --fichiers <la liste de git ls-files>`
-       est propre : aucun constat.
-2. [ ] Un passage complet de `modele-historique.yml` est vert.
-3. [ ] `copier update` avec `visibilite=public`, fusionné ; puis, 👤, la visibilité du dépôt et la
+1. [ ] **L'arbre** : `python scripts/modele/confidentialite.py --exiger-prives --public --fichiers
+       <la liste de git ls-files>` est propre : aucun constat.
+2. [ ] **Tout l'historique** :
+
+   ```sh
+   git log -p --all --no-textconv --no-ext-diff --format='%H%n%B' > "$TMP/historique.txt"
+   python scripts/modele/confidentialite.py --exiger-prives --public --texte "$TMP/historique.txt"
+   ```
+
+   est propre : aucun constat, aucune ligne « non examiné ». Les lignes ajoutées et retirées et les
+   messages sont examinés ; les binaires de l'historique ne le sont pas. Si un constat apparaît :
+   réécrire l'historique, ou publier un nouveau dépôt depuis un commit unique propre.
+3. [ ] Un passage complet de `modele-historique.yml` est vert.
+4. [ ] `copier update` avec `visibilite=public`, fusionné ; puis, 👤, la visibilité du dépôt et la
        règle de protection.

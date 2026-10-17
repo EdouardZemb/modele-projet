@@ -9,18 +9,20 @@ Pour la même raison, un chemin de fichier qui correspond lui-même à un motif 
 Un fichier UTF-16 (avec BOM) est examiné comme du texte ; un autre binaire est signalé par une
 ligne « fichier binaire non examiné », sans refus.
 
-Dans un dépôt privé (`VISIBILITE = "prive"` dans reglages.py), chaque constat s'affiche de la
-même façon, puis une ligne d'avertissement, et le retour vaut 0 : la porte avertit sans refuser.
-Sans reglages.py (le dépôt modèle lui-même) ou en `public`, un constat refuse. Les erreurs
-d'usage et l'absence d'une liste privée exigée refusent toujours (64).
+Dans un dépôt privé (`VISIBILITE = "prive"` dans reglages.py), un constat de la famille
+« identification » (adresse, cible, nom de machine, motif privé) s'affiche de la même façon, sans
+refuser ; un constat de la famille « secret » (clé, jeton) refuse toujours. En CI, DEPOT_PRIVE
+(la visibilité réelle) l'emporte sur reglages.py ; --public force le mode public. Sans
+reglages.py (le dépôt modèle lui-même) ou en `public`, tout constat refuse. Les erreurs d'usage et
+l'absence d'une liste privée exigée refusent toujours (64).
 
 Usage (un seul mode) :
     confidentialite.py --index | --message FICHIER | --diff BASE | --texte FICHIER
                        | --fichiers CHEMIN...
-    options : --motifs FICHIER, --exiger-prives
+    options : --motifs FICHIER, --exiger-prives, --public
 
-Retour : 0 rien trouvé (ou dépôt privé), 1 au moins un constat, 64 erreur d'usage ou liste
-privée exigée absente.
+Retour : 0 rien trouvé (ou dépôt privé sans secret), 1 au moins un constat qui refuse, 64 erreur
+d'usage ou liste privée exigée absente.
 """
 
 from __future__ import annotations
@@ -323,6 +325,12 @@ def _analyseur() -> argparse.ArgumentParser:
     mode.add_argument("--fichiers", metavar="CHEMIN", nargs="+", help="fichiers à examiner")
     p.add_argument("--motifs", metavar="FICHIER", help="liste de motifs privés")
     p.add_argument("--exiger-prives", action="store_true", help="échoue sans liste privée")
+    p.add_argument(
+        "--public",
+        action="store_true",
+        help="mode public quelle que soit la visibilité : tout constat refuse (avant un passage "
+        "en public)",
+    )
     return p
 
 
@@ -402,7 +410,7 @@ def main(argv: list[str] | None = None) -> int:
         )
     if not constats:
         return 0
-    if visibilite() == "prive":
+    if not args.public and visibilite() == "prive":
         secrets = sum(1 for c in constats if c.famille == SECRET)
         if not secrets:  # un dépôt privé peut nommer son serveur : il est averti
             print(

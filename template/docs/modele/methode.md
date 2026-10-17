@@ -94,12 +94,19 @@ d'usage et l'absence de la liste privée exigée refusent toujours. Un dépôt p
 de protection : le garde de Claude y est la seule serrure côté agent, et la CI du socle le seul
 filet.
 
-**Avant de passer un dépôt privé en public**, trois étapes obligatoires, dans cet ordre :
+**Avant de passer un dépôt privé en public**, quatre étapes obligatoires, dans cet ordre. `--public`
+fait refuser la porte comme dans un dépôt public, puisque le dépôt est encore privé :
 
-1. `python scripts/modele/confidentialite.py --exiger-prives --fichiers <la liste de git ls-files>`
-   est propre ;
-2. un passage complet de `modele-historique.yml` est vert ;
-3. `copier update` avec `visibilite=public`, puis la règle de protection.
+1. l'arbre : `python scripts/modele/confidentialite.py --exiger-prives --public --fichiers <la liste
+   de git ls-files>` est propre ;
+2. tout l'historique : `git log -p --all --no-textconv --no-ext-diff --format='%H%n%B' > <fichier
+   temporaire>`, puis `python scripts/modele/confidentialite.py --exiger-prives --public --texte
+   <fichier temporaire>` est propre (aucun constat, aucune ligne « non examiné »). Les lignes
+   ajoutées et retirées et les messages sont examinés ; les binaires de l'historique ne le sont
+   pas. Si un constat apparaît : réécrire l'historique, ou publier un nouveau dépôt depuis un
+   commit unique propre ;
+3. un passage complet de `modele-historique.yml` est vert ;
+4. `copier update` avec `visibilite=public`, puis la règle de protection.
 
 Le secret `MOTIFS_INTERDITS` (la liste privée) est posé **deux fois** par dépôt : comme secret
 Actions et comme secret Dependabot (`gh secret set MOTIFS_INTERDITS --app dependabot`). Les
