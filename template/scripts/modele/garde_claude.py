@@ -73,6 +73,12 @@ INTERPRETES = {
     "start-process", "saps", "invoke-expression", "iex",
 }  # fmt: skip
 CHANGE_DOSSIER = {"cd", "pushd", "chdir", "set-location", "sl", "push-location"}
+# Commandes qui effacent, déplacent ou renomment : Bash, cmd, PowerShell et ses alias.
+EFFACE_OU_DEPLACE = {
+    "rm", "rmdir", "del", "erase", "rd", "remove-item", "ri",
+    "mv", "move", "move-item", "mi", "ren", "rename", "rename-item", "rni",
+}  # fmt: skip
+REFUS_GARDE_FOUS = "effacement ou déplacement des garde-fous (.githooks, scripts/modele)"
 # Les commandes de `gh help` (gh 2.93) : de base, d'actions, d'alias et additionnelles. Tout autre
 # premier mot est un alias ou une extension, qui pourrait masquer `gh pr merge`.
 COMMANDES_GH = {
@@ -223,6 +229,20 @@ def _motif_hooks_git(jeton: str) -> bool:
     return "hookspath" in jeton.lower()
 
 
+def _vise_garde_fous(arg: str) -> bool:
+    """Vrai si `arg` désigne `.githooks` ou `scripts/modele`, un chemin en dessous, ou `scripts`
+    qui le contient : séparateur `/` ou `\\`, préfixe quelconque (`./`, `C:\\x\\`), sans égard à la
+    casse. Une option porteuse d'un chemin (`-Path:x`, `--x=y`) est lue par sa valeur."""
+    valeur = re.sub(r"^-+[\w-]+[:=]", "", arg) if arg.startswith("-") else arg
+    parties = [p for p in re.split(r"[\\/]", valeur.lower()) if p not in ("", ".")]
+    for i, partie in enumerate(parties):
+        if partie == ".githooks":
+            return True
+        if partie == "scripts" and (i + 1 == len(parties) or parties[i + 1] == "modele"):
+            return True
+    return False
+
+
 def _options_git(args: list[str]) -> tuple[str | None, int, str | None]:
     """Lit les options globales de git. Rend (chemin de -C, indice de la sous-commande, refus)."""
     chemin = None
@@ -361,6 +381,8 @@ def _git(args: list[str], ctx: Contexte) -> str | None:
             return "alias git pouvant masquer un push vers la branche principale"
     elif _motif_hooks_git(sous) or any(_motif_hooks_git(a) for a in reste):
         return REFUS_HOOKS
+    if sous in ("rm", "mv") and any(_vise_garde_fous(a) for a in reste):
+        return REFUS_GARDE_FOUS
     if sous == "push":
         return _push(reste, chemin, ctx)
     return None
@@ -502,6 +524,8 @@ def _motif_segment(segment: list[str], ctx: Contexte, profondeur: int) -> str | 
     # core.hooksPath dans n'importe quel jeton : seul git (lectures, réparation exacte) en décide.
     if commande != "git" and any(_motif_hooks_git(jeton) for jeton in segment[i:]):
         return REFUS_HOOKS
+    if commande in EFFACE_OU_DEPLACE and any(_vise_garde_fous(a) for a in reste):
+        return REFUS_GARDE_FOUS
     if commande in CHANGE_DOSSIER:
         cible = next((a for a in reste if not a.startswith("-") or a == "-"), None)
         if cible is not None and cible != "-":

@@ -133,6 +133,27 @@ REFUS = [
     ("gh auth status --show-token", "jeton gh", "lot-1/x", True),
     ("gh auth status -t", "jeton gh", "lot-1/x", True),
     ("gh auth status -at --hostname github.com", "jeton gh", "lot-1/x", True),
+    # effacer, déplacer ou renommer .githooks ou scripts/modele
+    ("rm -rf .githooks && git commit -m x", "garde-fous", "lot-1/x", True),
+    ("Remove-Item -Recurse .githooks", "garde-fous", "lot-1/x", True),
+    ("git rm -r scripts/modele", "garde-fous", "lot-1/x", True),
+    ("mv .githooks .h", "garde-fous", "lot-1/x", True),
+    ("rm ./.githooks/pre-commit", "garde-fous", "lot-1/x", True),
+    (r"Remove-Item C:\x\.githooks\pre-commit", "garde-fous", "lot-1/x", True),
+    (r"rd /s /q .githooks", "garde-fous", "lot-1/x", True),
+    (r"ri -Recurse -Force scripts\modele", "garde-fous", "lot-1/x", True),
+    (r"del .githooks\pre-push", "garde-fous", "lot-1/x", True),
+    ("erase .githooks/commit-msg", "garde-fous", "lot-1/x", True),
+    ("rmdir .GITHOOKS", "garde-fous", "lot-1/x", True),
+    ("rm -rf scripts", "garde-fous", "lot-1/x", True),
+    ("git mv scripts/modele/garde_claude.py x.py", "garde-fous", "lot-1/x", True),
+    ("Rename-Item .githooks hooks-off", "garde-fous", "lot-1/x", True),
+    ("rni scripts/modele/lancer.sh x.sh", "garde-fous", "lot-1/x", True),
+    ("Move-Item -Path:scripts/modele -Destination ailleurs", "garde-fous", "lot-1/x", True),
+    ("mi .githooks ailleurs", "garde-fous", "lot-1/x", True),
+    (r"move .githooks C:\ailleurs", "garde-fous", "lot-1/x", True),
+    ("ren .githooks h", "garde-fous", "lot-1/x", True),
+    ('bash -c "rm -rf .githooks"', "garde-fous", "lot-1/x", True),
     (
         'curl -X PUT -H "Authorization: token $(gh auth token)" '
         + "https://api.github.com/repos/o/r/pulls/12/merge",
@@ -171,6 +192,13 @@ ADMIS = [
     ("gh --version", "lot-1/x", True),
     ("gh auth status", "lot-1/x", True),
     ("gh auth status --active --hostname github.com", "lot-1/x", True),
+    ("rm -rf node_modules", "lot-1/x", True),
+    ("cat .githooks/pre-commit", "lot-1/x", True),
+    ("rm scripts/build.sh", "lot-1/x", True),
+    ("git rm docs/vieux.md", "lot-1/x", True),
+    ("mv a.txt b.txt", "lot-1/x", True),
+    ("Remove-Item -Recurse dist", "lot-1/x", True),
+    ("git mv scripts/a.sh scripts/b.sh", "lot-1/x", True),
     ("gh alias list", "lot-1/x", True),
     ("gh co 12", "lot-1/x", True),
     ("timeout 5 git status", "lot-1/x", True),
@@ -668,3 +696,31 @@ def test_commande_de():
     for illisible in ({"command": 1, "input": "c"}, {"cmd": None}, {"input": ["a", 2]}, {"script": {}}):
         with pytest.raises(garde_claude.CommandeIllisible):
             garde_claude.commande_de(illisible)
+
+
+@pytest.mark.parametrize(
+    ("chemin", "vise"),
+    [
+        (".githooks", True),
+        ("./.githooks/pre-commit", True),
+        ("scripts/modele", True),
+        ("scripts/modele/garde_claude.py", True),
+        ("scripts", True),
+        ("scripts/", True),
+        ("-Path:.githooks", True),
+        ("--chemin=scripts/modele", True),
+        ("scripts/build.sh", False),
+        ("node_modules", False),
+        (".githooks-ancien", False),
+        ("-Recurse", False),
+    ],
+)
+def test_vise_garde_fous(chemin, vise):
+    assert garde_claude._vise_garde_fous(chemin) is vise
+    windows = chemin.replace("/", chr(92))
+    assert garde_claude._vise_garde_fous(windows) is vise
+
+
+def test_effacement_des_hooks_en_powershell_par_chemin_absolu():
+    commande = "Remove-Item -Recurse -Force " + chr(92).join(["C:", "src", "x", ".githooks"])
+    assert "garde-fous" in refus_outil(commande, "PowerShell")
