@@ -398,3 +398,79 @@ def test_lignes_ajoutees():
         ("x y.txt:12", "deux"),
         ("x y.txt:23", "seul"),
     ]
+
+
+# --- revue finale du lot 1, section I : un dépôt privé avertit sans refuser ---
+
+AVERTISSEMENT = "1 constat(s), dépôt privé : avertissement, pas de refus"
+
+
+def lancer_porte(script, args, env, cwd=None):
+    return subprocess.run(
+        [sys.executable, str(script), *args],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+        env=env,
+        cwd=cwd,
+    )
+
+
+def test_depot_prive_avertit(rendre, tmp_path, env_isole):
+    script = rendre(visibilite="prive") / "scripts/modele/confidentialite.py"
+    f = tmp_path / "f.txt"
+    f.write_text("rien\n" + IP + "\n", encoding="utf-8")
+    r = lancer_porte(script, ["--fichiers", str(f)], env_isole())
+    assert r.returncode == 0, r.stderr
+    assert f"{f}:2 — adresse IP privée" in r.stderr
+    assert f"confidentialité : {AVERTISSEMENT}" in r.stderr
+    assert "refus." not in r.stderr
+
+
+def test_depot_public_refuse(rendre, tmp_path, env_isole):
+    script = rendre(visibilite="public") / "scripts/modele/confidentialite.py"
+    f = tmp_path / "f.txt"
+    f.write_text(IP + "\n", encoding="utf-8")
+    r = lancer_porte(script, ["--fichiers", str(f)], env_isole())
+    assert r.returncode == 1
+    assert "confidentialité : 1 constat(s), refus." in r.stderr
+    assert "avertissement" not in r.stderr
+
+
+def test_depot_modele_sans_reglages_refuse(tmp_path, env_isole):
+    assert not (SCRIPTS / "reglages.py").exists()
+    f = tmp_path / "f.txt"
+    f.write_text(IP + "\n", encoding="utf-8")
+    r = lancer(["--fichiers", str(f)], env_isole())
+    assert r.returncode == 1
+    assert "refus." in r.stderr
+
+
+def test_depot_prive_ne_divulgue_rien(rendre, tmp_path, env_isole):
+    script = rendre(visibilite="prive") / "scripts/modele/confidentialite.py"
+    env = env_isole()
+    env["MOTIFS_INTERDITS"] = "valeur-privee-xyz"
+    f = tmp_path / "f.txt"
+    f.write_text(f"a valeur-privee-xyz\n{CLE_AGE}\n", encoding="utf-8")
+    r = lancer_porte(script, ["--fichiers", str(f)], env)
+    assert r.returncode == 0
+    sortie = r.stdout + r.stderr
+    assert "valeur-privee-xyz" not in sortie
+    assert CLE_AGE not in sortie
+    assert "motif privé n°1" in sortie
+    assert "clé privée age" in sortie
+    assert "2 constat(s), dépôt privé : avertissement, pas de refus" in sortie
+
+
+def test_depot_prive_erreurs_toujours_64(rendre, tmp_path, env_isole):
+    script = rendre(visibilite="prive") / "scripts/modele/confidentialite.py"
+    f = tmp_path / "f.txt"
+    f.write_text(IP + "\n", encoding="utf-8")
+    exige = lancer_porte(script, ["--exiger-prives", "--fichiers", str(f)], env_isole())
+    assert exige.returncode == 64
+    env = env_isole()
+    env["MOTIFS_INTERDITS"] = "re:(invalide"
+    assert lancer_porte(script, ["--fichiers", str(f)], env).returncode == 64
+    absent = str(tmp_path / "absent.txt")
+    assert lancer_porte(script, ["--fichiers", absent], env_isole()).returncode == 64

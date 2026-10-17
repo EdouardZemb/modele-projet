@@ -9,12 +9,18 @@ Pour la même raison, un chemin de fichier qui correspond lui-même à un motif 
 Un fichier UTF-16 (avec BOM) est examiné comme du texte ; un autre binaire est signalé par une
 ligne « fichier binaire non examiné », sans refus.
 
+Dans un dépôt privé (`VISIBILITE = "prive"` dans reglages.py), chaque constat s'affiche de la
+même façon, puis une ligne d'avertissement, et le retour vaut 0 : la porte avertit sans refuser.
+Sans reglages.py (le dépôt modèle lui-même) ou en `public`, un constat refuse. Les erreurs
+d'usage et l'absence d'une liste privée exigée refusent toujours (64).
+
 Usage (un seul mode) :
     confidentialite.py --index | --message FICHIER | --diff BASE | --texte FICHIER
                        | --fichiers CHEMIN...
     options : --motifs FICHIER, --exiger-prives
 
-Retour : 0 rien trouvé, 1 au moins un constat, 64 erreur d'usage ou liste privée exigée absente.
+Retour : 0 rien trouvé (ou dépôt privé), 1 au moins un constat, 64 erreur d'usage ou liste
+privée exigée absente.
 """
 
 from __future__ import annotations
@@ -321,6 +327,18 @@ def _masquer(emplacement: str, motifs: Sequence[Motif]) -> str:
     return f"{chemin}:{reste}" if reste else chemin
 
 
+def visibilite() -> str:
+    """La visibilité posée au rendu (`reglages.VISIBILITE`) : `prive` ou `public`.
+
+    Sans réglages (c'est le cas du dépôt modèle lui-même), ou pour toute autre valeur que
+    `prive` : `public`, où un constat refuse."""
+    try:
+        from reglages import VISIBILITE
+    except ImportError:
+        return "public"
+    return "prive" if VISIBILITE == "prive" else "public"
+
+
 def main(argv: list[str] | None = None) -> int:
     for flux in (sys.stdout, sys.stderr):
         try:
@@ -363,6 +381,13 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
     if not constats:
+        return 0
+    if visibilite() == "prive":  # un dépôt privé peut nommer son serveur : il est averti
+        print(
+            f"confidentialité : {len(constats)} constat(s), "
+            "dépôt privé : avertissement, pas de refus",
+            file=sys.stderr,
+        )
         return 0
     print(f"confidentialité : {len(constats)} constat(s), refus.", file=sys.stderr)
     return 1
