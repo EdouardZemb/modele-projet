@@ -7,7 +7,9 @@ garde-fous qu'il distribue : hooks git, garde de Claude, CI, règle de protectio
 
 ## État
 
-Lot 1 en cours : le socle (cible `aucune`). Le cadrage est dans `docs/cadrage.md`.
+Lot 1 fait le 17/10/2026 : le socle (cible `aucune`), étiqueté `v0.1.1`. `ancrage` est aligné et à
+jour en `v0.1.1`. Prochain : lot 2, la cible `serveur`. Le cadrage est dans `docs/cadrage.md` ; ce
+que le lot a appris, dans `docs/registre.md`.
 
 ## Commandes
 
