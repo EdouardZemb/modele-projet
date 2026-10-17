@@ -267,7 +267,13 @@ REFUS_OUTILS = [
     ("mcp__desktop-commander__interact_with_process", {"pid": 1, "input": "git push --no-verify"}, "sans hooks"),
     ("mcp__autre__shell", {"cmd": "Start-Process git -ArgumentList 'push','--no-verify'"}, "sans hooks"),
     ("mcp__autre__script", {"script": "git -c core.hooksPath=/dev/null commit -m x"}, "hooks"),
-    ("mcp__autre__shell", {"command": 12, "cmd": "gh auth token"}, "jeton gh"),
+    # un argv est joint par des espaces ; tout autre type non chaîne est refusé
+    ("mcp__autre__shell", {"command": ["git", "commit", "--no-verify", "-m", "x"]}, "sans hooks"),
+    ("mcp__autre__outil", {"command": ["git", "push", "origin", "main"]}, "push vers main"),
+    ("mcp__autre__shell", {"command": 12, "cmd": "git status"}, "type inattendu"),
+    ("mcp__autre__shell", {"command": None}, "type inattendu"),
+    ("mcp__autre__shell", {"input": {"texte": "git status"}}, "type inattendu"),
+    ("mcp__autre__shell", {"script": ["git", 1]}, "type inattendu"),
 ]
 
 
@@ -295,7 +301,8 @@ def test_cli_lecture_selon_l_outil(outil, attendu):
     [
         ("mcp__claude_ai_Gmail__search_threads", {"query": "git push origin main"}),
         ("mcp__autre__outil", {}),
-        ("mcp__autre__outil", {"command": ["git", "push", "origin", "main"]}),
+        ("mcp__autre__outil", {"command": ["git", "status", "--short"]}),
+        ("mcp__autre__outil", {"command": []}),
         ("Monitor", {"command": "git status"}),
         ("mcp__desktop-commander__start_process", {"command": "git status"}),
     ],
@@ -651,6 +658,9 @@ def test_reparation_et_lecture_des_hooks_admises_partout(outil):
 
 def test_commande_de():
     assert garde_claude.commande_de({"command": "a", "cmd": "b"}) == "a"
-    assert garde_claude.commande_de({"command": 1, "input": "c"}) == "c"
     assert garde_claude.commande_de({"script": "d"}) == "d"
+    assert garde_claude.commande_de({"input": ["git", "commit", "-m", "x"]}) == "git commit -m x"
     assert garde_claude.commande_de({"query": "e"}) is None
+    for illisible in ({"command": 1, "input": "c"}, {"cmd": None}, {"input": ["a", 2]}, {"script": {}}):
+        with pytest.raises(garde_claude.CommandeIllisible):
+            garde_claude.commande_de(illisible)

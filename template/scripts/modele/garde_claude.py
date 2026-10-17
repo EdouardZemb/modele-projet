@@ -12,8 +12,9 @@ Usage : garde_claude.py [--branche NOM]  (lit sur l'entrée standard le JSON du 
 
 Outils surveillés : `Bash` et `Monitor` (lecture Bash), `PowerShell` (lecture PowerShell), et
 tout autre outil qui porte une commande, un outil MCP par exemple (toutes les lectures). La
-commande est le premier champ texte de `tool_input` parmi `command`, `cmd`, `input`, `script` ;
-un outil qui n'en porte aucun passe sans que rien soit lancé.
+commande est le premier champ présent de `tool_input` parmi `command`, `cmd`, `input`, `script` :
+un texte, ou une liste de textes (argv) jointe par des espaces ; tout autre type est refusé. Un
+outil qui n'en porte aucun passe sans que rien soit lancé.
 
 Retour : 0 rien refusé, 2 commande refusée (Claude Code affiche l'erreur à l'agent),
 1 entrée illisible (erreur non bloquante), 64 erreur d'usage (branche inconnue).
@@ -637,12 +638,24 @@ def _refuser(motif: str) -> None:
     )
 
 
+class CommandeIllisible(Exception):
+    """Un champ de commande d'un type que le garde ne sait pas lire."""
+
+
 def commande_de(entree: dict) -> str | None:
-    """Le premier champ texte de `tool_input` parmi CHAMPS_COMMANDE, ou None s'il n'y en a pas."""
+    """La commande du premier champ présent de `tool_input` parmi CHAMPS_COMMANDE, ou None.
+
+    Une liste de chaînes (un argv) est jointe par des espaces. Tout autre type lève
+    CommandeIllisible : dans le doute, refuser plutôt que laisser passer."""
     for champ in CHAMPS_COMMANDE:
-        valeur = entree.get(champ)
+        if champ not in entree:
+            continue
+        valeur = entree[champ]
         if isinstance(valeur, str):
             return valeur
+        if isinstance(valeur, list) and all(isinstance(v, str) for v in valeur):
+            return " ".join(valeur)
+        raise CommandeIllisible(champ)
     return None
 
 
@@ -659,7 +672,11 @@ def _executer_garde(args) -> int:
     except (ValueError, KeyError, TypeError, AttributeError):
         print("garde-claude : entrée du hook illisible, rien vérifié.", file=sys.stderr)
         return 1
-    commande = commande_de(entree)
+    try:
+        commande = commande_de(entree)
+    except CommandeIllisible:
+        _refuser("champ de commande d'un type inattendu, impossible à analyser")
+        return 2
     if commande is None:  # un outil sans commande (lecture, recherche, MCP) : rien à lancer
         return 0
     branche = args.branche
