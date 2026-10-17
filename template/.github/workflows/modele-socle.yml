@@ -53,6 +53,15 @@ jobs:
             *[!0]*) python scripts/modele/commits.py --plage "$BASE..HEAD" ;;
             *) echo "Base nulle : plage de commits non contrôlée." ;;
           esac
+      - name: Confidentialité des messages de commit
+        env:
+          MOTIFS_INTERDITS: ${{ secrets.MOTIFS_INTERDITS }}
+        run: |
+          case "$BASE" in
+            *[!0]*) git log --format=%B "$BASE..HEAD" > "$RUNNER_TEMP/messages.txt" ;;
+            *) git log --format=%B HEAD > "$RUNNER_TEMP/messages.txt" ;;
+          esac
+          python scripts/modele/confidentialite.py --exiger-prives --texte "$RUNNER_TEMP/messages.txt"
       - name: Confidentialité et format du titre et du corps de la PR
         if: github.event_name == 'pull_request'
         env:
@@ -60,6 +69,30 @@ jobs:
           TITRE: ${{ github.event.pull_request.title }}
           CORPS: ${{ github.event.pull_request.body }}
         run: |
-          printf '%s\n%s\n' "$TITRE" "$CORPS" > pr.txt
-          python scripts/modele/confidentialite.py --exiger-prives --texte pr.txt
+          printf '%s\n%s\n' "$TITRE" "$CORPS" > "$RUNNER_TEMP/pr.txt"
+          python scripts/modele/confidentialite.py --exiger-prives --texte "$RUNNER_TEMP/pr.txt"
           python scripts/modele/commits.py --titre "$TITRE"
+      - name: Le garde de Claude est branché
+        run: |
+          python - <<'FIN'
+          import json
+          import sys
+
+          try:
+              with open(".claude/settings.json", encoding="utf-8") as f:
+                  reglages = json.load(f)
+              branche = any(
+                  "garde_claude.py" in crochet.get("command", "")
+                  for groupe in reglages["hooks"]["PreToolUse"]
+                  for crochet in groupe.get("hooks", [])
+              )
+          except (OSError, ValueError, KeyError, TypeError, AttributeError):
+              branche = False
+          if not branche:
+              print(
+                  "garde : .claude/settings.json est illisible (conflit de copier update ?) "
+                  "ou n'a plus de hook PreToolUse qui appelle garde_claude.py",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+          FIN

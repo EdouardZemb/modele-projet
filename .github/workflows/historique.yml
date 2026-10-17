@@ -1,0 +1,27 @@
+# Le dépôt modèle applique son propre workflow géré : copie de template/.github/workflows/modele-historique.yml.
+# gitleaks sur tout l'historique : sur une PR ou un envoi, l'action n'examine que les commits de
+# l'événement ; sur workflow_dispatch et schedule, elle examine tout l'historique.
+name: historique
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 5 * * 1" # le lundi à 05:00 UTC
+
+permissions:
+  contents: read
+
+jobs:
+  historique:
+    name: historique
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: "false"

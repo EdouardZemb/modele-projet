@@ -1,9 +1,16 @@
 """La CI du socle, la règle de protection et Dependabot."""
 
 import json
+import os
 import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
 
+import pytest
 import yaml
+from conftest import git
 
 SOCLE = ".github/workflows/modele-socle.yml"
 CI = ".github/workflows/ci.yml"
@@ -67,3 +74,137 @@ def test_dependabot(rendre):
     (maj,) = [u for u in doc["updates"] if u["package-ecosystem"] == "github-actions"]
     assert maj["cooldown"]["default-days"] == 3
     assert maj["schedule"]["timezone"] == "Europe/Zurich"
+
+
+# --- revue finale du lot 1 : messages de commit (I4), $RUNNER_TEMP (L.35), garde branché (m4),
+# historique complet (I7) ---
+
+HISTORIQUE = ".github/workflows/modele-historique.yml"
+SH = shutil.which("sh") or (
+    r"C:\Program Files\Git\bin\sh.exe" if Path(r"C:\Program Files\Git\bin\sh.exe").exists() else None
+)
+
+
+def etape(rendu, nom):
+    etapes = charger(rendu, SOCLE)["jobs"]["confidentialite"]["steps"]
+    (trouvee,) = [e for e in etapes if e.get("name") == nom]
+    return trouvee
+
+
+def test_messages_de_commit_examines(rendre):
+    e = etape(rendre(), "Confidentialité des messages de commit")
+    assert e["env"] == {"MOTIFS_INTERDITS": "${{ secrets.MOTIFS_INTERDITS }}"}
+    assert 'git log --format=%B "$BASE..HEAD" > "$RUNNER_TEMP/messages.txt"' in e["run"]
+    assert 'git log --format=%B HEAD > "$RUNNER_TEMP/messages.txt"' in e["run"]
+    assert 'confidentialite.py --exiger-prives --texte "$RUNNER_TEMP/messages.txt"' in e["run"]
+
+
+def test_texte_de_pr_dans_runner_temp(rendre):
+    e = etape(rendre(), "Confidentialité et format du titre et du corps de la PR")
+    assert '> "$RUNNER_TEMP/pr.txt"' in e["run"]
+    assert '--texte "$RUNNER_TEMP/pr.txt"' in e["run"]
+    assert "pr.txt\n" not in e["run"].replace('"$RUNNER_TEMP/pr.txt"', "")
+
+
+@pytest.mark.skipif(SH is None, reason="aucun sh trouvé")
+def test_etape_des_messages_refuse_un_motif(rendre, env_isole, tmp_path):
+    rendu = rendre()
+    run = etape(rendu, "Confidentialité des messages de commit")["run"]
+    env = env_isole()
+    git(rendu, env, "init", "-q", "-b", "main")
+    git(rendu, env, "config", "core.autocrlf", "false")
+    git(rendu, env, "add", "-A")
+    git(rendu, env, "commit", "-q", "-m", "feat: base")
+    base = git(rendu, env, "rev-parse", "HEAD").strip()
+    git(rendu, env, "commit", "-q", "--allow-empty", "-m", "feat: x\n\nnoeud 192.168" + ".1.20")
+    temp = tmp_path / "runner-temp"
+    temp.mkdir()
+    env.update(
+        MOTIFS_INTERDITS="motif-essai",
+        RUNNER_TEMP=str(temp),
+        PATH=str(Path(sys.executable).parent) + os.pathsep + env["PATH"],
+    )
+
+    def lancer_etape(base):
+        return subprocess.run(
+            [SH, "-c", run],
+            check=False,
+            cwd=rendu,
+            env={**env, "BASE": base},
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+
+    for b in (base, "0" * 40):  # une plage, puis la base nulle (tout l'historique)
+        r = lancer_etape(b)
+        assert r.returncode == 1, (b, r.stderr)
+        assert "messages.txt:3 — adresse IP privée" in r.stderr
+        assert "192.168" not in r.stdout + r.stderr
+    git(rendu, env, "commit", "-q", "--allow-empty", "-m", "feat: propre")
+    apres_le_constat = git(rendu, env, "rev-parse", "HEAD~1").strip()
+    assert lancer_etape(apres_le_constat).returncode == 0
+
+
+def script_du_garde(rendu):
+    run = etape(rendu, "Le garde de Claude est branché")["run"]
+    assert run.startswith("python - <<'FIN'\n")
+    return run.split("\n", 1)[1].rsplit("FIN", 1)[0]
+
+
+@pytest.mark.parametrize(
+    ("alteration", "attendu"),
+    [
+        (None, 0),
+        ("conflit", 1),
+        ("sans-garde", 1),
+        ("absent", 1),
+    ],
+)
+def test_etape_du_garde_branche(rendre, alteration, attendu):
+    rendu = rendre()
+    reglages = rendu / ".claude/settings.json"
+    if alteration == "conflit":
+        texte = reglages.read_text(encoding="utf-8")
+        reglages.write_text("<<<<<<< avant\n" + texte + "=======\n{}\n>>>>>>> après\n", encoding="utf-8")
+    elif alteration == "sans-garde":
+        reglages.write_text('{"hooks": {"PreToolUse": []}}', encoding="utf-8")
+    elif alteration == "absent":
+        reglages.unlink()
+    r = subprocess.run(
+        [sys.executable, "-"],
+        input=script_du_garde(rendu),
+        check=False,
+        cwd=rendu,
+        capture_output=True,
+        text=True,
+    )
+    assert r.returncode == attendu, r.stderr
+
+
+def test_historique_complet(rendre):
+    rendu = rendre()
+    doc = charger(rendu, HISTORIQUE)
+    on = declencheurs(doc)
+    assert set(on) == {"workflow_dispatch", "schedule"}
+    assert on["schedule"] == [{"cron": "0 5 * * 1"}]
+    assert doc["permissions"] == {"contents": "read"}
+    assert set(doc["jobs"]) == {"historique"}
+    job = doc["jobs"]["historique"]
+    assert job["name"] == "historique"
+    checkout, gitleaks = job["steps"]
+    assert checkout["uses"].startswith("actions/checkout@")
+    assert checkout["with"] == {"fetch-depth": 0, "persist-credentials": False}
+    etapes_socle = charger(rendu, SOCLE)["jobs"]["secrets"]["steps"]
+    (gitleaks_socle,) = [e for e in etapes_socle if "gitleaks" in e["uses"]]
+    assert gitleaks["uses"] == gitleaks_socle["uses"]
+    assert gitleaks["env"] == gitleaks_socle["env"]
+    assert "${{ secrets.GITHUB_TOKEN }}" in (rendu / HISTORIQUE).read_text(encoding="utf-8")
+
+
+def test_historique_hors_contextes_requis(rendre):
+    rendu = rendre()
+    ruleset = json.loads((rendu / ".github/modele/ruleset-main.json").read_text(encoding="utf-8"))
+    regles = {r["type"]: r for r in ruleset["rules"]}
+    contextes = {c["context"] for c in regles["required_status_checks"]["parameters"]["required_status_checks"]}
+    assert contextes == {"socle / secrets", "socle / confidentialite"}

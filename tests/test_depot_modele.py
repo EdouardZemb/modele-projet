@@ -43,3 +43,36 @@ def test_settings_du_depot_modele():
     crochet = reglage["hooks"]["PreToolUse"][0]
     assert crochet["matcher"] == "Bash|PowerShell|Monitor|mcp__.*"
     assert "template/scripts/modele/garde_claude.py" in crochet["hooks"][0]["command"]
+
+
+def test_dependabot_du_depot_modele():
+    """Le second bloc tient à jour les épinglages des workflows gérés (revue finale, I6)."""
+    doc = yaml.safe_load((RACINE / ".github/dependabot.yml").read_text(encoding="utf-8"))
+    dossiers = [u["directory"] for u in doc["updates"] if u["package-ecosystem"] == "github-actions"]
+    assert dossiers == ["/", "/template/.github/workflows"]
+    assert list((RACINE / "template/.github/workflows").glob("*.yml"))
+
+
+def test_historique_du_depot_modele():
+    racine = (RACINE / ".github/workflows/historique.yml").read_text(encoding="utf-8")
+    modele = (RACINE / "template/.github/workflows/modele-historique.yml").read_text(encoding="utf-8")
+    assert racine.split("\n", 1)[1] == modele.split("\n", 1)[1]
+
+
+def test_ci_du_depot_modele_revoit_une_pr_modifiee():
+    doc = yaml.safe_load(CI.read_text(encoding="utf-8"))
+    on = doc.get("on", doc.get(True))
+    assert on["pull_request"]["types"] == ["opened", "synchronize", "reopened", "edited"]
+
+
+def test_ci_du_depot_modele_suit_le_socle():
+    """Les étapes du job confidentialite du dépôt modèle sont celles du socle, chemins préfixés."""
+    socle = yaml.safe_load(
+        (RACINE / "template/.github/workflows/modele-socle.yml").read_text(encoding="utf-8")
+    )
+    racine = yaml.safe_load(CI.read_text(encoding="utf-8"))
+    attendues = [
+        {**e, "run": e["run"].replace("scripts/modele/", "template/scripts/modele/")} if "run" in e else e
+        for e in socle["jobs"]["confidentialite"]["steps"]
+    ]
+    assert racine["jobs"]["confidentialite"]["steps"] == attendues
