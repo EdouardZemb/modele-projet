@@ -27,7 +27,9 @@ def test_nom_invalide_refuse(rendre, nom):
 
 def test_aucun_reste_de_gabarit(rendre):
     rendu = rendre()
-    for chemin in fichiers_texte(rendu):
+    fichiers = fichiers_texte(rendu)
+    assert fichiers, "aucun fichier rendu : le test passerait à vide"
+    for chemin in fichiers:
         assert not chemin.name.endswith(".jinja"), chemin
         texte = chemin.read_text(encoding="utf-8")
         assert "{%" not in texte, chemin
@@ -36,5 +38,7 @@ def test_aucun_reste_de_gabarit(rendre):
 
 def test_fins_de_ligne_lf(rendre):
     rendu = rendre()
-    for chemin in fichiers_texte(rendu):
+    fichiers = fichiers_texte(rendu)
+    assert fichiers, "aucun fichier rendu : le test passerait à vide"
+    for chemin in fichiers:
         assert b"\r" not in chemin.read_bytes(), chemin

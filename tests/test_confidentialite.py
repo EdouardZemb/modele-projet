@@ -15,6 +15,9 @@ ECHANTILLONS = {
     "adresse Tailscale": "noeud 100.101" + ".2.3",
     "cible SSH": "ssh -p 22 " + "deploy" + "@" + "hote.exemple",
     "cible scp": "scp f " + "deploy" + "@" + "hote:/tmp/f",
+    "cible scp à hôte pointé": "scp f " + "deploy" + "@" + "hote" + ".lan:/tmp/f",
+    "adresse IPv6 Tailscale": "noeud fd7a" + ":115c" + ":a1e0::1",
+    "nom MagicDNS Tailscale": "https://machine" + ".tailnet-ab12" + ".ts" + ".net/",
     "clé privée age": CLE_AGE,
     "clé privée PEM": "-----BEGIN " + "OPENSSH PRIVATE" + " KEY-----",
     "jeton GitHub": "ghp_" + "A" * 36,
@@ -45,6 +48,10 @@ def test_motifs_generiques_detectent(nom):
         "@docs/modele/methode.md",
         "age1" + "q" * 58,
         "ssh -T git@github.com",
+        "essai@example.com",
+        "les noms *.ts" + ".net de Tailscale",
+        "https://docs.ts" + ".network/x",
+        "fd7a:1",
     ],
 )
 def test_faux_positifs_ecartes(texte):
@@ -185,10 +192,13 @@ def test_diff_depuis_base(tmp_path, env_isole):
     assert "b.txt:1" in r.stderr
 
 
-def test_fichier_binaire_ignore(tmp_path, env_isole):
+def test_fichier_binaire_signale_sans_refus(tmp_path, env_isole):
     f = tmp_path / "b.bin"
     f.write_bytes(b"\0" + CLE_AGE.encode())
-    assert lancer(["--fichiers", str(f)], env_isole()).returncode == 0
+    r = lancer(["--fichiers", str(f)], env_isole())
+    assert r.returncode == 0
+    assert f"confidentialité : fichier binaire non examiné : {f}" in r.stderr
+    assert CLE_AGE not in r.stdout + r.stderr
 
 
 def test_message(tmp_path, env_isole):
@@ -242,3 +252,346 @@ def test_chemin_absent_ou_dossier(tmp_path, env_isole):
     assert r.returncode == 64
     assert "n-existe-pas" not in r.stdout + r.stderr
     assert lancer(["--fichiers", str(tmp_path)], env_isole()).returncode == 64
+
+
+# --- revue finale du lot 1 : binaires, UTF-16, textconv (I3, L.13, L.14), BOM en variable (m1) ---
+
+IP = "hote 192.168" + ".1.20"
+
+
+def utf16(texte, ordre="le"):
+    bom = b"\xff\xfe" if ordre == "le" else b"\xfe\xff"
+    return bom + texte.encode(f"utf-16-{ordre}")
+
+
+def test_source_motifs_prives_bom_en_variable(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setenv("MOTIFS_INTERDITS", "\ufeffmotif-essai\n")
+    m = c.charger_motifs_prives(c.source_motifs_prives(None))
+    assert [x.motif for x in c.examiner([("f:1", "un motif-essai ici")], m)] == ["motif privé n°1"]
+
+
+def test_bom_en_variable_detecte(tmp_path, env_isole):
+    env = env_isole()
+    env["MOTIFS_INTERDITS"] = "\ufeffmotif-essai"
+    f = tmp_path / "f.txt"
+    f.write_text("un motif-essai ici\n", encoding="utf-8")
+    assert lancer(["--fichiers", str(f)], env).returncode == 1
+
+
+@pytest.mark.parametrize("ordre", ["le", "be"])
+def test_utf16_examine_fichiers(tmp_path, env_isole, ordre):
+    f = tmp_path / "reseau.txt"
+    f.write_bytes(utf16("entete\r\n" + IP + "\r\n", ordre))
+    r = lancer(["--fichiers", str(f)], env_isole())
+    assert r.returncode == 1
+    assert f"{f}:2 — adresse IP privée" in r.stderr
+    assert "192.168" not in r.stdout + r.stderr
+
+
+def _depot_avec_base(tmp_path, env):
+    d = depot(tmp_path, env)
+    (d / "a.txt").write_text("a\n", encoding="utf-8")
+    git(d, env, "add", "a.txt")
+    git(d, env, "commit", "-qm", "init")
+    git(d, env, "switch", "-qc", "branche")
+    return d
+
+
+def test_utf16_examine_index_et_diff(tmp_path, env_isole):
+    env = env_isole()
+    d = _depot_avec_base(tmp_path, env)
+    (d / "reseau.txt").write_bytes(utf16(IP + "\n"))
+    git(d, env, "add", "reseau.txt")
+    r = lancer(["--index"], env, d)
+    assert r.returncode == 1
+    assert "reseau.txt:1 — adresse IP privée" in r.stderr
+    git(d, env, "commit", "-qm", "ajout")
+    r = lancer(["--diff", "main"], env, d)
+    assert r.returncode == 1
+    assert "reseau.txt:1 — adresse IP privée" in r.stderr
+    assert lancer(["--diff", "0" * 40], env, d).returncode == 1
+
+
+def test_binaire_signale_index_et_diff(tmp_path, env_isole):
+    env = env_isole()
+    d = _depot_avec_base(tmp_path, env)
+    (d / "b.dat").write_bytes(b"\0" + IP.encode())
+    git(d, env, "add", "b.dat")
+    r = lancer(["--index"], env, d)
+    assert r.returncode == 0
+    assert "confidentialité : fichier binaire non examiné : b.dat" in r.stderr
+    git(d, env, "commit", "-qm", "ajout")
+    r = lancer(["--diff", "main"], env, d)
+    assert r.returncode == 0
+    assert "fichier binaire non examiné : b.dat" in r.stderr
+
+
+def test_binaire_au_chemin_prive_masque(tmp_path, env_isole):
+    env = env_isole()
+    env["MOTIFS_INTERDITS"] = "nom-prive"
+    d = _depot_avec_base(tmp_path, env)
+    (d / "nom-prive.dat").write_bytes(b"\0x")
+    git(d, env, "add", "nom-prive.dat")
+    r = lancer(["--index"], env, d)
+    assert "fichier binaire non examiné : <chemin masqué>" in r.stderr
+    assert "nom-prive" not in r.stdout + r.stderr
+
+
+def test_textconv_ne_vide_rien(tmp_path, env_isole):
+    env = env_isole()
+    d = _depot_avec_base(tmp_path, env)
+    git(d, env, "config", "diff.vide.textconv", "sh -c ':'")
+    (d / ".gitattributes").write_text("*.cfg diff=vide\n", encoding="utf-8")
+    (d / "c.cfg").write_text(IP + "\n", encoding="utf-8")
+    git(d, env, "add", ".gitattributes", "c.cfg")
+    r = lancer(["--index"], env, d)
+    assert r.returncode == 1
+    assert "c.cfg:1 — adresse IP privée" in r.stderr
+    git(d, env, "commit", "-qm", "ajout")
+    assert lancer(["--diff", "main"], env, d).returncode == 1
+
+
+@pytest.mark.parametrize("attribut", ["-diff", "binary"])
+def test_texte_marque_binaire_examine(tmp_path, env_isole, attribut):
+    env = env_isole()
+    d = _depot_avec_base(tmp_path, env)
+    (d / ".gitattributes").write_text(f"*.txt {attribut}\n", encoding="utf-8")
+    (d / "note.txt").write_text("rien\n" + IP + "\n", encoding="utf-8")
+    git(d, env, "add", ".gitattributes", "note.txt")
+    r = lancer(["--index"], env, d)
+    assert r.returncode == 1
+    assert "note.txt:2 — adresse IP privée" in r.stderr
+    git(d, env, "commit", "-qm", "ajout")
+    assert lancer(["--diff", "main"], env, d).returncode == 1
+
+
+DIFF_PLUSIEURS_HUNKS = [
+    "diff --git a/x y.txt b/x y.txt",
+    "--- a/x y.txt",
+    "+++ b/x y.txt",
+    "@@ -1 +1 @@",
+    "-ancien",
+    "+nouveau",
+    "@@ -10,0 +11,2 @@",
+    "++double plus",
+    "+deux",
+    "@@ -20,3 +23 @@",
+    "-a",
+    "-b",
+    "-c",
+    "+seul",
+    "diff --git a/z b/z",
+    "--- a/z",
+    "+++ /dev/null",
+    "@@ -1 +0,0 @@",
+    "-supprimé",
+]
+
+
+def test_lignes_ajoutees():
+    diff = chr(10).join(DIFF_PLUSIEURS_HUNKS)
+    assert list(c.lignes_ajoutees(diff)) == [
+        ("x y.txt:1", "nouveau"),
+        ("x y.txt:11", "+double plus"),
+        ("x y.txt:12", "deux"),
+        ("x y.txt:23", "seul"),
+    ]
+
+
+# --- revue finale du lot 1, section I : un dépôt privé avertit sans refuser ---
+
+AVERTISSEMENT = "1 constat(s), dépôt privé : avertissement, pas de refus"
+
+
+def lancer_porte(script, args, env, cwd=None):
+    return subprocess.run(
+        [sys.executable, str(script), *args],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+        env=env,
+        cwd=cwd,
+    )
+
+
+def test_depot_prive_avertit(rendre, tmp_path, env_isole):
+    script = rendre(visibilite="prive") / "scripts/modele/confidentialite.py"
+    f = tmp_path / "f.txt"
+    f.write_text("rien\n" + IP + "\n", encoding="utf-8")
+    r = lancer_porte(script, ["--fichiers", str(f)], env_isole())
+    assert r.returncode == 0, r.stderr
+    assert f"{f}:2 — adresse IP privée" in r.stderr
+    assert f"confidentialité : {AVERTISSEMENT}" in r.stderr
+    assert "refus." not in r.stderr
+
+
+def test_depot_public_refuse(rendre, tmp_path, env_isole):
+    script = rendre(visibilite="public") / "scripts/modele/confidentialite.py"
+    f = tmp_path / "f.txt"
+    f.write_text(IP + "\n", encoding="utf-8")
+    r = lancer_porte(script, ["--fichiers", str(f)], env_isole())
+    assert r.returncode == 1
+    assert "confidentialité : 1 constat(s), refus." in r.stderr
+    assert "avertissement" not in r.stderr
+
+
+def test_depot_modele_sans_reglages_refuse(tmp_path, env_isole):
+    assert not (SCRIPTS / "reglages.py").exists()
+    f = tmp_path / "f.txt"
+    f.write_text(IP + "\n", encoding="utf-8")
+    r = lancer(["--fichiers", str(f)], env_isole())
+    assert r.returncode == 1
+    assert "refus." in r.stderr
+
+
+def test_depot_prive_ne_divulgue_rien(rendre, tmp_path, env_isole):
+    script = rendre(visibilite="prive") / "scripts/modele/confidentialite.py"
+    env = env_isole()
+    env["MOTIFS_INTERDITS"] = "valeur-privee-xyz"
+    f = tmp_path / "f.txt"
+    f.write_text(f"a valeur-privee-xyz\n{CLE_AGE}\n", encoding="utf-8")
+    r = lancer_porte(script, ["--fichiers", str(f)], env)
+    assert r.returncode == 1  # la clé est un secret : elle refuse même en privé
+    sortie = r.stdout + r.stderr
+    assert "valeur-privee-xyz" not in sortie
+    assert CLE_AGE not in sortie
+    assert "motif privé n°1" in sortie
+    assert "clé privée age" in sortie
+    assert "2 constat(s), refus : 1 secret(s), qui refusent même dans un dépôt privé." in sortie
+
+
+def test_depot_prive_erreurs_toujours_64(rendre, tmp_path, env_isole):
+    script = rendre(visibilite="prive") / "scripts/modele/confidentialite.py"
+    f = tmp_path / "f.txt"
+    f.write_text(IP + "\n", encoding="utf-8")
+    exige = lancer_porte(script, ["--exiger-prives", "--fichiers", str(f)], env_isole())
+    assert exige.returncode == 64
+    env = env_isole()
+    env["MOTIFS_INTERDITS"] = "re:(invalide"
+    assert lancer_porte(script, ["--fichiers", str(f)], env).returncode == 64
+    absent = str(tmp_path / "absent.txt")
+    assert lancer_porte(script, ["--fichiers", absent], env_isole()).returncode == 64
+
+
+# --- relecture de la vague, n1 : en CI, la visibilité réelle l'emporte ---
+
+
+@pytest.mark.parametrize(
+    ("visibilite", "depot_prive", "attendu"),
+    [
+        ("prive", "false", 1),
+        ("prive", "true", 0),
+        ("prive", "True", 0),
+        ("prive", "", 1),
+        ("public", "true", 1),
+        ("public", "false", 1),
+    ],
+)
+def test_visibilite_reelle_en_ci(rendre, tmp_path, env_isole, visibilite, depot_prive, attendu):
+    script = rendre(visibilite=visibilite) / "scripts/modele/confidentialite.py"
+    f = tmp_path / "f.txt"
+    f.write_text(IP + chr(10), encoding="utf-8")
+    env = {**env_isole(), "DEPOT_PRIVE": depot_prive}
+    r = lancer_porte(script, ["--fichiers", str(f)], env)
+    assert r.returncode == attendu, r.stderr
+    assert ("avertissement" in r.stderr) is (attendu == 0)
+
+
+# --- relecture de la vague : les secrets refusent partout, ce qui identifie avertit en privé ---
+
+SECRETS = {
+    "clé privée age",
+    "clé privée PEM",
+    "jeton GitHub",
+    "JWT",
+    "jeton de tunnel Cloudflare",
+    "adresse de ping Healthchecks",
+}
+
+
+def test_deux_familles():
+    familles = {m.nom: m.famille for m in c.MOTIFS_GENERIQUES}
+    assert set(familles.values()) == {c.SECRET, c.IDENTIFICATION}
+    assert {nom for nom, f in familles.items() if f == c.SECRET} == SECRETS
+    assert all(m.famille == c.IDENTIFICATION for m in c.charger_motifs_prives("a\nre:b+\n"))
+    constat = c.examiner([("f:1", CLE_AGE)], c.MOTIFS_GENERIQUES)[0]
+    assert constat.famille == c.SECRET
+
+
+def test_depot_prive_les_secrets_refusent(rendre, tmp_path, env_isole):
+    """Famille « secret » : chaque motif refuse, même dans un dépôt privé."""
+    script = rendre(visibilite="prive") / "scripts/modele/confidentialite.py"
+    noms = sorted(SECRETS)
+    f = tmp_path / "f.txt"
+    f.write_text("".join(ECHANTILLONS[nom] + chr(10) for nom in noms), encoding="utf-8")
+    r = lancer_porte(script, ["--fichiers", str(f)], env_isole())
+    assert r.returncode == 1, r.stderr
+    for i, nom in enumerate(noms, start=1):
+        assert f"{f}:{i} — {nom}" in r.stderr
+        assert ECHANTILLONS[nom] not in r.stdout + r.stderr
+    assert f"{len(noms)} secret(s), qui refusent même dans un dépôt privé." in r.stderr
+
+
+def test_depot_prive_ce_qui_identifie_avertit(rendre, tmp_path, env_isole):
+    """Famille « identification » : génériques et motifs privés avertissent dans un dépôt privé."""
+    script = rendre(visibilite="prive") / "scripts/modele/confidentialite.py"
+    env = {**env_isole(), "MOTIFS_INTERDITS": "valeur-privee-xyz"}
+    noms = sorted({m.nom for m in c.MOTIFS_GENERIQUES} - SECRETS)
+    lignes = [ECHANTILLONS[nom] for nom in noms] + ["a valeur-privee-xyz"]
+    f = tmp_path / "f.txt"
+    f.write_text("".join(ligne + chr(10) for ligne in lignes), encoding="utf-8")
+    r = lancer_porte(script, ["--fichiers", str(f)], env)
+    assert r.returncode == 0, r.stderr
+    for i, nom in enumerate([*noms, "motif privé n°1"], start=1):
+        assert f"{f}:{i} — {nom}" in r.stderr
+    assert f"{len(lignes)} constat(s), dépôt privé : avertissement, pas de refus" in r.stderr
+    assert "valeur-privee-xyz" not in r.stdout + r.stderr
+
+
+# --- relecture de la vague, n2 : --public, et l'historique avant un passage en public ---
+
+
+def test_option_public_refuse_dans_un_depot_prive(rendre, tmp_path, env_isole):
+    script = rendre(visibilite="prive") / "scripts/modele/confidentialite.py"
+    f = tmp_path / "f.txt"
+    f.write_text(IP + chr(10), encoding="utf-8")
+    assert lancer_porte(script, ["--fichiers", str(f)], env_isole()).returncode == 0
+    r = lancer_porte(script, ["--public", "--fichiers", str(f)], env_isole())
+    assert r.returncode == 1
+    assert "confidentialité : 1 constat(s), refus." in r.stderr
+
+
+def test_historique_avant_un_passage_en_public(rendre, tmp_path, env_isole):
+    """Un nom privé ajouté puis retiré, ou cité dans un message : l'arbre est propre, l'historique
+    ne l'est pas. La procédure de methode.md le trouve, en mode public."""
+    racine = rendre(visibilite="prive")
+    env = {**env_isole(), "MOTIFS_INTERDITS": "nom-du-serveur"}
+    git(racine, env, "init", "-q", "-b", "main")
+    git(racine, env, "config", "core.autocrlf", "false")
+    git(racine, env, "add", "-A")
+    git(racine, env, "commit", "-q", "-m", "chore: base")
+    (racine / "note.txt").write_text("hote nom-du-serveur" + chr(10), encoding="utf-8")
+    git(racine, env, "add", "note.txt")
+    git(racine, env, "commit", "-q", "-m", "docs: note")
+    git(racine, env, "rm", "-q", "note.txt")
+    git(racine, env, "commit", "-q", "-m", "docs: retire la note")
+    git(racine, env, "commit", "-q", "--allow-empty", "-m", "docs: vu sur nom-du-serveur")
+    script = racine / "scripts/modele/confidentialite.py"
+    suivis = git(racine, env, "ls-files").split()
+    arbre = lancer_porte(script, ["--exiger-prives", "--public", "--fichiers", *suivis], env, racine)
+    assert arbre.returncode == 0, arbre.stderr  # l'arbre seul ne voit rien
+
+    historique = tmp_path / "historique.txt"
+    sortie = git(
+        racine, env, "log", "-p", "--all", "--no-textconv", "--no-ext-diff", "--format=%H%n%B"
+    )
+    historique.write_text(sortie, encoding="utf-8")
+    texte = ["--exiger-prives", "--texte", str(historique)]
+    assert lancer_porte(script, texte, env, racine).returncode == 0  # en privé : averti
+    r = lancer_porte(script, ["--public", *texte], env, racine)
+    assert r.returncode == 1
+    assert r.stderr.count("— motif privé n°1") == 3  # ajout, retrait, message
+    assert "nom-du-serveur" not in r.stdout + r.stderr

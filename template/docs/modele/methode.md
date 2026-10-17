@@ -72,12 +72,41 @@ sessions à distance.
 
 | Où | Quoi |
 |---|---|
-| hook git `pre-commit` | confidentialité du contenu indexé |
+| hook git `pre-commit` | confidentialité du contenu indexé, fichiers UTF-16 compris ; un autre binaire est signalé « non examiné ». La porte refuse dans un dépôt public ; dans un dépôt privé, elle avertit sur ce qui identifie et refuse toujours les secrets (voir plus bas), au hook comme en CI |
 | hook git `commit-msg` | format Conventional Commits, confidentialité du message |
 | hook git `pre-push` | refus d'envoyer sur la branche principale |
-| hook Claude `PreToolUse` (outils `Bash` et `PowerShell`) | bloque `git push` vers la branche principale, tout force-push vers elle, `--no-verify`, toute modification de `core.hooksPath`, `gh pr merge` tant que les contrôles ne sont pas tous verts, et `gh pr merge --admin` |
-| CI de base | gitleaks sur tout l'historique ; confidentialité du diff et du texte de la PR ; format des commits ; actions épinglées par SHA |
-| règle de protection GitHub | PR obligatoire, contrôles requis, ni force-push ni suppression de la branche principale. Posée sur les dépôts publics |
+| hook Claude `PreToolUse` (outils `Bash`, `PowerShell`, `Monitor`, et tout outil MCP qui porte une commande) | bloque `git push` vers la branche principale, tout force-push vers elle, `--no-verify`, toute modification de `core.hooksPath` sauf la réparation `git config core.hooksPath .githooks` (variables `GIT_CONFIG_*` comprises), `gh pr merge` tant que les contrôles ne sont pas tous verts, `gh pr merge --admin`, les alias et extensions de `gh`, ce qui affiche le jeton de `gh` ou les identifiants de git (`gh auth token`, `gh auth status --show-token`, `gh auth git-credential`, `git credential fill`, `git credential-manager get`), et l'effacement, le déplacement ou le renommage de `.githooks` et de `scripts/modele` (`rm`, `mv`, `Remove-Item`, `git rm`…). Il lit aussi les substitutions `$(…)`, même entre guillemets, le texte d'une here-string (`bash <<< '…'`) passée à un interprète, et les enveloppes (`timeout`, `Start-Process`, `Invoke-Expression`…) |
+| CI de base | gitleaks examine les commits de chaque PR et de chaque envoi, et tout l'historique chaque semaine et à la demande (`modele-historique.yml`) ; confidentialité du diff, des messages de commit et du texte de la PR ; format des commits ; le garde de Claude toujours branché dans `.claude/settings.json` ; actions épinglées par SHA |
+| Dependabot | chaque lundi, les versions des actions épinglées (`.github/dependabot.yml`), après trois jours de recul |
+| règle de protection GitHub | tout commit qui arrive sur la branche principale est la tête d'une PR dont les contrôles requis sont verts ; un envoi direct de cette tête est accepté et marque la PR fusionnée, sans squash. Côté agent, c'est le refus de pousser vers la branche principale par le garde qui ferme ce chemin. Ni force-push ni suppression de la branche principale. Posée sur les dépôts publics |
+
+**Dépôt public, dépôt privé.** La visibilité est une réponse du modèle (`visibilite` dans
+`.copier-answers.yml`, `VISIBILITE` dans `scripts/modele/reglages.py`). Dans un dépôt **public**, un
+constat de la porte de confidentialité refuse, à chaque hook comme en CI. Dans un dépôt **privé**,
+qui peut nommer son propre serveur, **la porte avertit sur ce qui identifie et refuse toujours les
+secrets**. Ce qui identifie (adresses privées et Tailscale, cibles SSH et scp, noms MagicDNS,
+motifs de la liste privée) s'affiche, avec son emplacement et le nom du motif, jamais la valeur, et
+ne refuse pas. Un secret (clé privée age ou PEM, jeton GitHub, JWT, jeton de tunnel, adresse de
+ping) refuse partout, au `pre-commit` comme en CI ; gitleaks les cherche aussi, en CI. **En CI,
+c'est la visibilité réelle du dépôt qui s'applique** (`github.event.repository.private`, passée à
+la porte par `DEPOT_PRIVE`) : un dépôt public refuse, quoi que dise `reglages.py`. Les erreurs
+d'usage et l'absence de la liste privée exigée refusent toujours. Un dépôt privé n'a pas de règle
+de protection : le garde de Claude y est la seule serrure côté agent, et la CI du socle le seul
+filet.
+
+**Avant de passer un dépôt privé en public**, quatre étapes obligatoires, dans cet ordre. `--public`
+fait refuser la porte comme dans un dépôt public, puisque le dépôt est encore privé :
+
+1. l'arbre : `python scripts/modele/confidentialite.py --exiger-prives --public --fichiers <la liste
+   de git ls-files>` est propre ;
+2. tout l'historique : `git log -p --all --no-textconv --no-ext-diff --format='%H%n%B' > <fichier
+   temporaire>`, puis `python scripts/modele/confidentialite.py --exiger-prives --public --texte
+   <fichier temporaire>` est propre (aucun constat, aucune ligne « non examiné »). Les lignes
+   ajoutées et retirées et les messages sont examinés ; les binaires de l'historique ne le sont
+   pas. Si un constat apparaît : réécrire l'historique, ou publier un nouveau dépôt depuis un
+   commit unique propre ;
+3. un passage complet de `modele-historique.yml` est vert ;
+4. `copier update` avec `visibilite=public`, puis la règle de protection.
 
 Le secret `MOTIFS_INTERDITS` (la liste privée) est posé **deux fois** par dépôt : comme secret
 Actions et comme secret Dependabot (`gh secret set MOTIFS_INTERDITS --app dependabot`). Les
@@ -92,6 +121,12 @@ clone et chaque worktree.
 **Un refus se corrige, il ne se contourne jamais** : pas de `--no-verify`, pas de `core.hooksPath`
 modifié.
 
+**Un texte qui cite une commande refusée se passe par fichier.** Le garde lit un message de commit
+ou un corps de PR donné en ligne de commande comme il lit une commande, substitutions et
+apostrophes inversées comprises : un message qui cite `git push origin main` est refusé comme le
+serait la commande. Écrire le texte dans un fichier, puis `git commit -F <fichier>` ou
+`gh pr create --body-file <fichier>`.
+
 ## Les fichiers gérés par le modèle
 
 - Les fichiers **gérés** sont réécrits par chaque `copier update`. On ne les modifie jamais dans le
@@ -100,6 +135,10 @@ modifié.
   touche plus.
 - Un cas mixte, `.claude/settings.json` : le modèle y pose ses hooks, le projet y ajoute ses
   réglages. Un conflit s'y résout à la main, dans la PR de mise à jour.
+- **Les chemins gérés sont exclus des formateurs et des linters du projet** (Prettier, biome,
+  ruff…) : `.githooks/`, `scripts/modele/`, `docs/modele/`, `.github/modele/`,
+  `.github/workflows/modele-*.yml`, `.claude/skills/consigner/`. Un formateur qui les réécrirait
+  ferait d'une modification locale un conflit à chaque `copier update`.
 - Changer de cible, c'est changer une réponse puis lancer `copier update`. Les fichiers gérés de
   l'ancienne cible disparaissent, ceux de la nouvelle arrivent. Les fichiers semés de l'ancienne
   cible restent : le projet les retire à la main dans la même PR.

@@ -6,12 +6,23 @@ Règle d'or : la sortie ne contient JAMAIS la valeur trouvée ni le texte d'un m
 seulement « emplacement — nom du motif ». Les journaux d'Actions d'un dépôt public sont publics.
 Pour la même raison, un chemin de fichier qui correspond lui-même à un motif est masqué.
 
+Un fichier UTF-16 (avec BOM) est examiné comme du texte ; un autre binaire est signalé par une
+ligne « fichier binaire non examiné », sans refus.
+
+Dans un dépôt privé (`VISIBILITE = "prive"` dans reglages.py), un constat de la famille
+« identification » (adresse, cible, nom de machine, motif privé) s'affiche de la même façon, sans
+refuser ; un constat de la famille « secret » (clé, jeton) refuse toujours. En CI, DEPOT_PRIVE
+(la visibilité réelle) l'emporte sur reglages.py ; --public force le mode public. Sans
+reglages.py (le dépôt modèle lui-même) ou en `public`, tout constat refuse. Les erreurs d'usage et
+l'absence d'une liste privée exigée refusent toujours (64).
+
 Usage (un seul mode) :
     confidentialite.py --index | --message FICHIER | --diff BASE | --texte FICHIER
                        | --fichiers CHEMIN...
-    options : --motifs FICHIER, --exiger-prives
+    options : --motifs FICHIER, --exiger-prives, --public
 
-Retour : 0 rien trouvé, 1 au moins un constat, 64 erreur d'usage ou liste privée exigée absente.
+Retour : 0 rien trouvé (ou dépôt privé sans secret), 1 au moins un constat qui refuse, 64 erreur
+d'usage ou liste privée exigée absente.
 """
 
 from __future__ import annotations
@@ -30,20 +41,28 @@ LISTE_PAR_DEFAUT = ".config/modele-projet/motifs-interdits.txt"
 EXIT_USAGE = 64
 
 
+# Deux familles. Un secret (clé, jeton) refuse toujours, même dans un dépôt privé. Ce qui identifie
+# (adresse, cible, nom de machine, motif privé) avertit seulement dans un dépôt privé.
+SECRET = "secret"
+IDENTIFICATION = "identification"
+
+
 @dataclass(frozen=True)
 class Motif:
     nom: str
     expression: re.Pattern[str]
+    famille: str = IDENTIFICATION
 
 
 @dataclass(frozen=True)
 class Constat:
     emplacement: str
     motif: str
+    famille: str = IDENTIFICATION
 
 
-def _g(nom: str, expression: str) -> Motif:
-    return Motif(nom, re.compile(expression))
+def _g(nom: str, expression: str, famille: str = IDENTIFICATION) -> Motif:
+    return Motif(nom, re.compile(expression), famille)
 
 
 MOTIFS_GENERIQUES: tuple[Motif, ...] = (
@@ -57,12 +76,20 @@ MOTIFS_GENERIQUES: tuple[Motif, ...] = (
         r"\bssh(?:\.exe)?\s+(?:-\S+\s+(?:[^\s@-][^\s@]*\s+)?)*(?!git@)[A-Za-z_][\w.-]*@[\w.-]+",
     ),
     _g("cible scp", r"\b[a-z_][\w.-]*@[a-z0-9][\w-]*:[~/]"),
-    _g("clé privée age", r"AGE-SECRET-KEY-1[0-9A-Z]{58}"),
-    _g("clé privée PEM", r"-----BEGIN (?:[A-Z]+ )*PRIVATE KEY-----"),
-    _g("jeton GitHub", r"\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{60,})\b"),
-    _g("JWT", r"\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"),
-    _g("jeton de tunnel Cloudflare", r"\beyJ[A-Za-z0-9+/=]{100,}"),
-    _g("adresse de ping Healthchecks", r"hc-ping\.com/[A-Za-z0-9_-]{20,}"),
+    _g("cible scp à hôte pointé", r"\b[a-z_][\w.-]*@[a-z0-9][\w-]*(?:\.[\w-]+)+:[~/]"),
+    _g("adresse IPv6 Tailscale", r"(?i)\bfd7a:115c:a1e0:"),
+    _g("nom MagicDNS Tailscale", r"(?i)\b[a-z0-9-]+\.[a-z0-9-]+\.ts\.net\b"),
+    _g("clé privée age", r"AGE-SECRET-KEY-1[0-9A-Z]{58}", SECRET),
+    _g("clé privée PEM", r"-----BEGIN (?:[A-Z]+ )*PRIVATE KEY-----", SECRET),
+    _g(
+        "jeton GitHub",
+        r"\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{60,})\b",
+        SECRET,
+    ),
+    _g("JWT", r"\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}", SECRET),
+    _g("jeton de tunnel Cloudflare", r"\beyJ[A-Za-z0-9+/=]{100,}", SECRET),
+    # l'adresse de ping porte la clé du contrôle : qui la connaît peut le faire mentir
+    _g("adresse de ping Healthchecks", r"hc-ping\.com/[A-Za-z0-9_-]{20,}", SECRET),
 )
 
 
@@ -92,8 +119,9 @@ def source_motifs_prives(chemin: str | None) -> str | None:
     """Fichier --motifs, sinon variable MOTIFS_INTERDITS, sinon liste du poste, sinon None."""
     if chemin:
         return _lire_liste(Path(chemin))
-    env = os.environ.get("MOTIFS_INTERDITS")
-    if env and env.strip():
+    # Un secret posé depuis un fichier enregistré avec un BOM le garde en tête de la variable.
+    env = (os.environ.get("MOTIFS_INTERDITS") or "").removeprefix("\ufeff")
+    if env.strip():
         return env.replace("\r", "")
     defaut = Path.home() / LISTE_PAR_DEFAUT
     if defaut.is_file():
@@ -107,7 +135,7 @@ def examiner(lignes: Iterable[tuple[str, str]], motifs: Sequence[Motif]) -> list
     for emplacement, texte in lignes:
         for motif in motifs:
             if motif.expression.search(texte):
-                constats.append(Constat(emplacement, motif.nom))
+                constats.append(Constat(emplacement, motif.nom, motif.famille))
     return constats
 
 
@@ -118,7 +146,7 @@ class ErreurUsage(Exception):
     pass
 
 
-def _git(*args: str) -> str:
+def _git_octets(*args: str) -> bytes:
     try:
         r = subprocess.run(
             ["git", "-c", "core.quotepath=false", *args],
@@ -129,9 +157,13 @@ def _git(*args: str) -> str:
         raise ErreurUsage("git est introuvable") from None
     if r.returncode != 0:
         raise ErreurUsage("échec de git (dépôt, base ou référence invalide)")
+    return r.stdout
+
+
+def _git(*args: str) -> str:
     # Octets bruts, décodés ici : le mode texte de subprocess transformerait un retour chariot
     # isolé en saut de ligne et ferait disparaître du contenu ajouté.
-    return r.stdout.decode("utf-8", errors="replace")
+    return _git_octets(*args).decode("utf-8", errors="replace")
 
 
 _ENTETE = re.compile(r"^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
@@ -173,12 +205,56 @@ def _chemins(sortie: str) -> list[str]:
     return [c for c in sortie.split("\0") if c]
 
 
-def _lignes_de_texte(emplacement: str, octets: bytes) -> Iterator[tuple[str, str]]:
+# Options de chaque `git diff` : ni pager, ni outil externe, ni textconv (un textconv peut vider
+# le contenu que la porte doit lire), ni détection de renommage.
+DIFF = ("--no-color", "--no-ext-diff", "--no-textconv", "--no-renames")
+BOM_UTF16 = (b"\xff\xfe", b"\xfe\xff")
+
+
+def _texte(octets: bytes) -> str | None:
+    """Le texte d'un contenu, ou None s'il est binaire (un octet nul dans les 8 premiers Kio).
+
+    Un contenu qui commence par un BOM UTF-16 est décodé comme tel : c'est ce qu'écrivent par
+    défaut `>` et `Out-File` dans Windows PowerShell 5.1."""
+    if octets[:2] in BOM_UTF16:
+        return octets.decode("utf-16", errors="replace")
     if b"\0" in octets[:8192]:
+        return None
+    return octets.decode("utf-8", errors="replace")
+
+
+def _lignes_de_texte(
+    emplacement: str, octets: bytes, non_examines: list[str]
+) -> Iterator[tuple[str, str]]:
+    """Chaque ligne d'un contenu ; un binaire n'en donne aucune et rejoint `non_examines`."""
+    texte = _texte(octets)
+    if texte is None:
+        non_examines.append(emplacement)
         return
-    texte = octets.decode("utf-8", errors="replace")
     for i, ligne in enumerate(texte.split("\n"), start=1):
         yield f"{emplacement}:{i}", ligne.rstrip("\r")
+
+
+def _binaires(*plage: str) -> list[str]:
+    """Les chemins ajoutés ou modifiés que git juge binaires (`-` `-` dans --numstat)."""
+    sortie = _git("diff", *plage, "--numstat", "-z", "--diff-filter=ACMR", *DIFF)
+    chemins = []
+    for entree in sortie.split("\0"):
+        champs = entree.split("\t", 2)
+        if len(champs) == 3 and champs[0] == "-" and champs[1] == "-":
+            chemins.append(champs[2])
+    return chemins
+
+
+def _lignes_des_binaires(
+    plage: Sequence[str], revision: str, non_examines: list[str]
+) -> Iterator[tuple[str, str]]:
+    """Un fichier que git juge binaire n'a aucune ligne dans le diff : on lit l'objet lui-même
+    (`:<chemin>` pour l'index, `HEAD:<chemin>` sinon). UTF-16 et texte marqué binaire par un
+    attribut sont examinés en entier ; un vrai binaire est signalé, sans refus."""
+    for chemin in _binaires(*plage):
+        octets = _git_octets("show", "--no-textconv", f"{revision}:{chemin}")
+        yield from _lignes_de_texte(chemin, octets, non_examines)
 
 
 def _lire_octets(chemin: str) -> bytes:
@@ -188,13 +264,16 @@ def _lire_octets(chemin: str) -> bytes:
         raise ErreurUsage("fichier illisible") from None
 
 
-def _lignes_du_mode(args: argparse.Namespace) -> list[tuple[str, str]]:
+def _lignes_du_mode(args: argparse.Namespace) -> tuple[list[tuple[str, str]], list[str]]:
+    """Les lignes à examiner, et les fichiers binaires qui ne l'ont pas été."""
     sortie: list[tuple[str, str]] = []
+    non_examines: list[str] = []
     if args.index:
-        diff = _git("diff", "--cached", "-U0", "--no-color", "--no-ext-diff", "--no-renames")
+        diff = _git("diff", "--cached", "-U0", *DIFF)
         sortie.extend(lignes_ajoutees(diff))
-        noms = _git("diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR", "--no-renames")
+        noms = _git("diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR", *DIFF)
         sortie.extend((f"{c}:0", c) for c in _chemins(noms))
+        sortie.extend(_lignes_des_binaires(["--cached"], "", non_examines))
     elif args.diff is not None:
         if not args.diff.strip() or args.diff.startswith("-"):
             raise ErreurUsage("base de comparaison vide ou invalide")
@@ -207,26 +286,25 @@ def _lignes_du_mode(args: argparse.Namespace) -> list[tuple[str, str]]:
                 args.diff + "^" + "{" + "commit" + "}",
             )
         if set(args.diff) == {"0"}:
-            base = ["diff", ARBRE_VIDE, "HEAD"]
-            noms_base = [ARBRE_VIDE, "HEAD"]
+            plage = [ARBRE_VIDE, "HEAD"]
         else:
-            base = ["diff", f"{args.diff}...HEAD"]
-            noms_base = [f"{args.diff}...HEAD"]
-        diff = _git(*base, "-U0", "--no-color", "--no-ext-diff", "--no-renames")
+            plage = [f"{args.diff}...HEAD"]
+        diff = _git("diff", *plage, "-U0", *DIFF)
         sortie.extend(lignes_ajoutees(diff))
-        noms = _git("diff", *noms_base, "--name-only", "-z", "--diff-filter=ACMR", "--no-renames")
+        noms = _git("diff", *plage, "--name-only", "-z", "--diff-filter=ACMR", *DIFF)
         sortie.extend((f"{c}:0", c) for c in _chemins(noms))
+        sortie.extend(_lignes_des_binaires(plage, "HEAD", non_examines))
     elif args.message is not None:
-        sortie.extend(_lignes_de_texte(args.message, _lire_octets(args.message)))
+        sortie.extend(_lignes_de_texte(args.message, _lire_octets(args.message), non_examines))
     elif args.texte is not None:
-        sortie.extend(_lignes_de_texte(args.texte, _lire_octets(args.texte)))
+        sortie.extend(_lignes_de_texte(args.texte, _lire_octets(args.texte), non_examines))
     else:
         for rang, chemin in enumerate(args.fichiers, start=1):
             if not Path(chemin).is_file():
                 raise ErreurUsage(f"chemin introuvable ou dossier (argument n°{rang})")
             sortie.append((f"{chemin}:0", chemin))
-            sortie.extend(_lignes_de_texte(chemin, _lire_octets(chemin)))
-    return sortie
+            sortie.extend(_lignes_de_texte(chemin, _lire_octets(chemin), non_examines))
+    return sortie, non_examines
 
 
 # --- ligne de commande -----------------------------------------------------------------------
@@ -247,17 +325,46 @@ def _analyseur() -> argparse.ArgumentParser:
     mode.add_argument("--fichiers", metavar="CHEMIN", nargs="+", help="fichiers à examiner")
     p.add_argument("--motifs", metavar="FICHIER", help="liste de motifs privés")
     p.add_argument("--exiger-prives", action="store_true", help="échoue sans liste privée")
+    p.add_argument(
+        "--public",
+        action="store_true",
+        help="mode public quelle que soit la visibilité : tout constat refuse (avant un passage "
+        "en public)",
+    )
     return p
 
 
+def _masquer_chemin(chemin: str, motifs: Sequence[Motif]) -> str:
+    """Un texte neutre à la place du chemin, s'il correspond lui-même à un motif."""
+    return "<chemin masqué>" if any(m.expression.search(chemin) for m in motifs) else chemin
+
+
 def _masquer(emplacement: str, motifs: Sequence[Motif]) -> str:
-    """Remplace le chemin par un texte neutre s'il correspond lui-même à un motif."""
+    """Comme _masquer_chemin, pour un emplacement « chemin:ligne »."""
     chemin, _, reste = emplacement.rpartition(":")
     if not chemin:
         chemin, reste = emplacement, ""
-    if any(m.expression.search(chemin) for m in motifs):
-        chemin = "<chemin masqué>"
+    chemin = _masquer_chemin(chemin, motifs)
     return f"{chemin}:{reste}" if reste else chemin
+
+
+def visibilite() -> str:
+    """La visibilité qui s'applique : `prive` ou `public`.
+
+    En CI, la variable DEPOT_PRIVE porte la visibilité réelle du dépôt
+    (`github.event.repository.private`) et l'emporte : toute autre valeur que `true` donne
+    `public`, quoi que dise reglages.py. Un dépôt passé public sans `copier update`, ou une PR qui
+    réécrit VISIBILITE, ne s'ouvre donc pas. Sans la variable (le poste, les hooks), c'est la
+    visibilité posée au rendu (`reglages.VISIBILITE`) qui décide. Sans réglages (le dépôt modèle
+    lui-même), ou pour toute autre valeur que `prive` : `public`, où un constat refuse."""
+    depot_prive = os.environ.get("DEPOT_PRIVE")
+    if depot_prive is not None and depot_prive.strip().lower() != "true":
+        return "public"
+    try:
+        from reglages import VISIBILITE
+    except ImportError:
+        return "public"
+    return "prive" if VISIBILITE == "prive" else "public"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -286,20 +393,40 @@ def main(argv: list[str] | None = None) -> int:
         print("confidentialité : aucune liste privée, motifs génériques seuls", file=sys.stderr)
     motifs = (*MOTIFS_GENERIQUES, *prives)
     try:
-        lignes = _lignes_du_mode(args)
+        lignes, non_examines = _lignes_du_mode(args)
     except ErreurUsage as e:
         print(f"confidentialité : {e}", file=sys.stderr)
         return EXIT_USAGE
+    for chemin in non_examines:  # la fin du silence, pas un refus
+        print(
+            f"confidentialité : fichier binaire non examiné : {_masquer_chemin(chemin, motifs)}",
+            file=sys.stderr,
+        )
     constats = examiner(lignes, motifs)
     for constat in constats:
         print(
             f"confidentialité : {_masquer(constat.emplacement, motifs)} — {constat.motif}",
             file=sys.stderr,
         )
-    if constats:
-        print(f"confidentialité : {len(constats)} constat(s), refus.", file=sys.stderr)
+    if not constats:
+        return 0
+    if not args.public and visibilite() == "prive":
+        secrets = sum(1 for c in constats if c.famille == SECRET)
+        if not secrets:  # un dépôt privé peut nommer son serveur : il est averti
+            print(
+                f"confidentialité : {len(constats)} constat(s), "
+                "dépôt privé : avertissement, pas de refus",
+                file=sys.stderr,
+            )
+            return 0
+        print(
+            f"confidentialité : {len(constats)} constat(s), refus : "
+            f"{secrets} secret(s), qui refusent même dans un dépôt privé.",
+            file=sys.stderr,
+        )
         return 1
-    return 0
+    print(f"confidentialité : {len(constats)} constat(s), refus.", file=sys.stderr)
+    return 1
 
 
 if __name__ == "__main__":

@@ -36,3 +36,74 @@ def test_hooks_du_depot_modele():
     for hook in hooks:
         assert "template/scripts/modele/" in hook.read_text(encoding="utf-8"), hook.name
     assert "--branche main" in (RACINE / ".githooks/pre-push").read_text(encoding="utf-8")
+
+
+def test_settings_du_depot_modele():
+    reglage = json.loads((RACINE / ".claude/settings.json").read_text(encoding="utf-8"))
+    crochet = reglage["hooks"]["PreToolUse"][0]
+    assert crochet["matcher"] == "Bash|PowerShell|Monitor|mcp__.*"
+    assert "template/scripts/modele/garde_claude.py" in crochet["hooks"][0]["command"]
+
+
+def test_dependabot_du_depot_modele():
+    """Le second bloc tient à jour les épinglages des workflows gérés (revue finale, I6)."""
+    doc = yaml.safe_load((RACINE / ".github/dependabot.yml").read_text(encoding="utf-8"))
+    dossiers = [u["directory"] for u in doc["updates"] if u["package-ecosystem"] == "github-actions"]
+    assert dossiers == ["/", "/template/.github/workflows"]
+    assert list((RACINE / "template/.github/workflows").glob("*.yml"))
+
+
+def test_historique_du_depot_modele():
+    racine = (RACINE / ".github/workflows/historique.yml").read_text(encoding="utf-8")
+    modele = (RACINE / "template/.github/workflows/modele-historique.yml").read_text(encoding="utf-8")
+    assert racine.split("\n", 1)[1] == modele.split("\n", 1)[1]
+
+
+def test_ci_du_depot_modele_revoit_une_pr_modifiee():
+    doc = yaml.safe_load(CI.read_text(encoding="utf-8"))
+    on = doc.get("on", doc.get(True))
+    assert on["pull_request"]["types"] == ["opened", "synchronize", "reopened", "edited"]
+
+
+def test_ci_du_depot_modele_suit_le_socle():
+    """Les étapes du job confidentialite du dépôt modèle sont celles du socle, chemins préfixés."""
+    socle = yaml.safe_load(
+        (RACINE / "template/.github/workflows/modele-socle.yml").read_text(encoding="utf-8")
+    )
+    racine = yaml.safe_load(CI.read_text(encoding="utf-8"))
+    attendues = [
+        {**e, "run": e["run"].replace("scripts/modele/", "template/scripts/modele/")} if "run" in e else e
+        for e in socle["jobs"]["confidentialite"]["steps"]
+    ]
+    assert racine["jobs"]["confidentialite"]["steps"] == attendues
+
+
+def test_liste_d_alignement():
+    texte = (RACINE / "docs/aligner.md").read_text(encoding="utf-8")
+    assert texte.splitlines()[0] == "# Aligner un projet existant sur le modèle"
+    for fragment in (
+        "copier copy --defaults --vcs-ref",
+        "git diff --name-only",
+        "@docs/modele/methode.md",
+        "needs:",
+        "edited",
+        "`.claude/settings.local.json` et `__pycache__/`",
+        "`.githooks` et `scripts/modele`",
+        "excluent les chemins",
+        "extensions.worktreeConfig",
+        "--app dependabot",
+        "squash_merge_commit_title=PR_TITLE -f squash_merge_commit_message=PR_BODY",
+        "ruleset-main.json",
+        "gh workflow run modele-historique.yml",
+        "en avance rapide",
+        "--dry-run",
+        "aucune PR",
+        "## Avant de passer un dépôt privé en public",
+        "visibilite=public",
+        "git log -p --all --no-textconv --no-ext-diff --format='%H%n%B'",
+        "--exiger-prives --public --texte",
+        "commit unique propre",
+    ):
+        assert fragment in texte, fragment
+    for lien in ("CLAUDE.md", "README.md"):
+        assert "docs/aligner.md" in (RACINE / lien).read_text(encoding="utf-8"), lien

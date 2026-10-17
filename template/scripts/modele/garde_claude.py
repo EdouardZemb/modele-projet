@@ -10,6 +10,13 @@ Bibliothèque standard seule, Python 3.10 ou plus.
 Usage : garde_claude.py [--branche NOM]  (lit sur l'entrée standard le JSON du hook :
     {"tool_name": ..., "tool_input": {"command": ...}, "cwd": ...})
 
+Outils surveillés : `Bash` et `Monitor` (lecture Bash), `PowerShell` (lecture PowerShell), et
+tout autre outil qui porte une commande, un outil MCP par exemple (toutes les lectures). La
+commande est le premier champ utilisable de `tool_input` parmi `command`, `cmd`, `input`,
+`script` : un texte, ou une liste de textes (argv) jointe par des espaces. Pour `Bash`,
+`PowerShell` et `Monitor`, un champ d'un autre type est refusé ; pour tout autre outil, il est
+ignoré. Un outil sans champ utilisable passe sans que rien soit lancé.
+
 Retour : 0 rien refusé, 2 commande refusée (Claude Code affiche l'erreur à l'agent),
 1 entrée illisible (erreur non bloquante), 64 erreur d'usage (branche inconnue).
 
@@ -32,7 +39,9 @@ from collections.abc import Callable
 from typing import Any
 
 EXIT_USAGE = 64
-OUTILS = ("Bash", "PowerShell")
+# La lecture de chaque outil connu ; tout autre outil est lu de toutes les façons (None).
+LECTURES = {"Bash": "Bash", "PowerShell": "PowerShell", "Monitor": "Bash"}
+CHAMPS_COMMANDE = ("command", "cmd", "input", "script")
 PROFONDEUR_MAX = 4
 BUDGET = 20.0  # secondes, pour tous les sous-processus d'une invocation (délai du hook : 30)
 _echeance: float | None = None
@@ -40,17 +49,62 @@ _echeance: float | None = None
 ASSIGNATION = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 REDIRECTIONS = set("<>")
 PONCTUATION = ";|&()<>\n"
+# Marque le texte d'une here-string (`<<<`) parmi les jetons : un octet nul ne vient jamais d'une
+# commande. Pour un interprète, ce texte est une commande ; pour tout autre, c'est une donnée.
+ICI = chr(0) + "<<<"
+# Configuration git passée par l'environnement : elle prime sur le core.hooksPath du dépôt.
+CONFIG_PAR_ENVIRONNEMENT = re.compile(r"git_config_(?:count|key_|parameters)", re.IGNORECASE)
+REFUS_CONFIG_ENVIRONNEMENT = (
+    "configuration git par l'environnement (GIT_CONFIG_…), qui peut détourner les hooks"
+)
+REFUS_HOOKS = "hooks git détournés (core.hooksPath)"
 
 # Mots qui précèdent la vraie commande sans la changer.
 PREFIXES = {
-    "env", "command", "exec", "sudo", "time", "nohup", "builtin", "nice", "!", "{", "}",
+    "env", "command", "exec", "sudo", "time", "nohup", "builtin", "nice", "timeout", "!", "{", "}",
     "if", "then", "do", "else", "elif", "while", "until",
 }  # fmt: skip
+# Options de ces enveloppes qui prennent une valeur (`env -u NOM`, `timeout -s KILL`).
+ENVELOPPES_AVEC_VALEUR = {
+    "env": {"-u", "--unset"},
+    "timeout": {"-s", "--signal", "-k", "--kill-after"},
+}
+# Enveloppes dont le premier argument est une durée, pas la commande (`timeout 60 git …`).
+ENVELOPPES_A_DUREE = {"timeout"}
 # Interpréteurs dont un argument est lui-même une commande.
 INTERPRETES = {
     "bash", "sh", "zsh", "dash", "ksh", "pwsh", "powershell", "cmd", "eval", "xargs", "wsl", "start",
+    "start-process", "saps", "invoke-expression", "iex",
 }  # fmt: skip
 CHANGE_DOSSIER = {"cd", "pushd", "chdir", "set-location", "sl", "push-location"}
+# Commandes qui effacent, déplacent ou renomment : Bash, cmd, PowerShell et ses alias.
+EFFACE_OU_DEPLACE = {
+    "rm", "rmdir", "del", "erase", "rd", "remove-item", "ri",
+    "mv", "move", "move-item", "mi", "ren", "rename", "rename-item", "rni",
+}  # fmt: skip
+REFUS_GARDE_FOUS = "effacement ou déplacement des garde-fous (.githooks, scripts/modele)"
+REFUS_IDENTIFIANTS = (
+    "identifiants affichés (git credential, gh auth git-credential), "
+    "qui permettraient de contourner le garde"
+)
+
+
+def _affiche_identifiants(commande: str, args: list[str]) -> bool:
+    """`git credential fill`, ou `get` d'un assistant (`git credential-manager get`,
+    `git-credential-store get`) : ils impriment l'identifiant enregistré."""
+    if commande == "credential":
+        return "fill" in args
+    return commande.startswith(("credential-", "git-credential-")) and "get" in args
+
+
+# Les commandes de `gh help` (gh 2.93) : de base, d'actions, d'alias et additionnelles. Tout autre
+# premier mot est un alias ou une extension, qui pourrait masquer `gh pr merge`.
+COMMANDES_GH = {
+    "auth", "browse", "codespace", "gist", "issue", "org", "pr", "project", "release", "repo",
+    "skill", "cache", "run", "workflow", "co", "agent-task", "alias", "api", "attestation",
+    "completion", "config", "copilot", "extension", "gpg-key", "label", "licenses", "preview",
+    "ruleset", "search", "secret", "ssh-key", "status", "variable", "help", "--version", "--help",
+}  # fmt: skip
 
 SOUS_COMMANDES_HOOKS = {"commit", "merge", "push", "am", "rebase", "cherry-pick", "revert"}
 LONGUES_AVEC_VALEUR = {
@@ -120,64 +174,73 @@ def _est_operateur(jeton: str) -> bool:
     return bool(jeton) and all(c in PONCTUATION for c in jeton)
 
 
-def _segments_shlex(commande: str, echappement: bool) -> list[list[str]]:
+def _segments_shlex(commande: str, echappement: bool, virgules: bool) -> list[list[str]]:
     lex = shlex.shlex(commande, posix=True, punctuation_chars=PONCTUATION)
-    lex.whitespace = " \t\r"
+    # PowerShell : `a,b` hors guillemets est une liste, chaque élément devient un argument.
+    lex.whitespace = " \t\r" + ("," if virgules else "")
     lex.whitespace_split = True
     lex.commenters = ""
     if not echappement:
         lex.escape = ""
     segments: list[list[str]] = [[]]
     sauter = False
+    chaine = False
     for jeton in lex:
         if _est_operateur(jeton):
             if any(c in jeton for c in ";|()\n") or not (set(jeton) & REDIRECTIONS):
                 segments.append([])
             else:  # redirection : l'opérateur et sa cible ne sont pas des arguments
                 sauter = True
+                chaine = jeton == "<<<"
                 if segments[-1] and segments[-1][-1].isdigit():
                     segments[-1].pop()
             continue
         if sauter:
             sauter = False
+            if chaine:  # here-string : son texte est gardé, marqué, pour _motif_segment
+                segments[-1].append(ICI + jeton)
             continue
         segments[-1].append(jeton)
     return [s for s in segments if s]
 
 
-def _segments_grossiers(commande: str) -> list[list[str]]:
+def _segments_grossiers(commande: str, virgules: bool) -> list[list[str]]:
     """Repli quand `shlex` échoue (guillemets mal fermés, syntaxe PowerShell) : espaces seuls."""
     morceaux = re.split(r"[;|&\n()<>]+", commande)
     segments = []
     for morceau in morceaux:
-        jetons = morceau.replace("'", "").replace('"', "").split()
-        if jetons:
-            segments.append(jetons)
+        jetons = morceau.replace("'", "").replace('"', "")
+        if virgules:
+            jetons = jetons.replace(",", " ")
+        if jetons.split():
+            segments.append(jetons.split())
     return segments
 
 
-def _segments(commande: str, echappement: bool) -> list[list[str]]:
+def _segments(commande: str, echappement: bool, virgules: bool = False) -> list[list[str]]:
     try:
-        return _segments_shlex(commande, echappement)
+        return _segments_shlex(commande, echappement, virgules)
     except ValueError:
-        return _segments_grossiers(commande)
+        return _segments_grossiers(commande, virgules)
 
 
-def _variantes(commande: str, outil: str | None = None) -> list[tuple[str, bool]]:
-    """Les lectures d'une commande selon l'outil.
+def _variantes(commande: str, outil: str | None = None) -> list[tuple[str, bool, bool]]:
+    """Les lectures d'une commande selon l'outil : (texte, échappement, virgules).
 
-    Bash : l'antislash échappe, l'apostrophe inversée est une substitution (donc un séparateur).
-    PowerShell : l'antislash est un caractère ordinaire (chemins Windows), l'apostrophe inversée
-    est l'échappement, supprimé avant l'analyse. Outil inconnu : toutes les lectures, et on
-    refuse si une seule refuse."""
-    powershell = [(re.sub(r"`\r?\n", " ", commande).replace("`", ""), False)]
+    Bash : l'antislash échappe, l'apostrophe inversée est une substitution (donc un séparateur) ;
+    une troisième lecture la garde, pour que le contenu d'un jeton entre guillemets qui en porte
+    une soit réanalysé. PowerShell : l'antislash est un caractère ordinaire (chemins Windows),
+    l'apostrophe inversée est l'échappement, supprimé avant l'analyse, et la virgule sépare les
+    éléments d'une liste d'arguments. Outil inconnu : toutes les lectures, et on refuse si une
+    seule refuse."""
+    powershell = [(re.sub(r"`\r?\n", " ", commande).replace("`", ""), False, True)]
     if outil == "PowerShell":
         return powershell
     continue_sh = re.sub(r"\\\r?\n", "", commande)  # continuation : antislash puis saut
-    textes = (continue_sh.replace("`", " "), continue_sh.replace("`", ";"))
+    textes = (continue_sh.replace("`", " "), continue_sh.replace("`", ";"), continue_sh)
     if outil == "Bash":
-        return [(t, True) for t in textes]
-    return [(t, e) for t in textes for e in (True, False)] + powershell
+        return [(t, True, False) for t in textes]
+    return [(t, e, False) for t in textes for e in (True, False)] + powershell
 
 
 def _valeur_suivante(args: list[str], i: int) -> str:
@@ -186,6 +249,23 @@ def _valeur_suivante(args: list[str], i: int) -> str:
 
 def _motif_hooks_git(jeton: str) -> bool:
     return "hookspath" in jeton.lower()
+
+
+def _vise_garde_fous(arg: str) -> bool:
+    """Vrai si `arg` désigne `.githooks` ou `scripts/modele`, ou un chemin en dessous : séparateur
+    `/` ou `\\`, préfixe quelconque (`./`, `C:\\x\\`), sans égard à la casse. `scripts` lui-même,
+    qui contient `scripts/modele`, n'est visé qu'à la racine (`scripts`, `./scripts`), pas
+    `apps/web/scripts`. Une option porteuse d'un chemin (`-Path:x`, `--x=y`) est lue par sa
+    valeur."""
+    valeur = re.sub(r"^-+[\w-]+[:=]", "", arg) if arg.startswith("-") else arg
+    parties = [p for p in re.split(r"[\\/]", valeur.lower()) if p not in ("", ".")]
+    for i, partie in enumerate(parties):
+        if partie == ".githooks":
+            return True
+        if partie == "scripts" and parties[i + 1 : i + 2] == ["modele"]:
+            return True
+    absolu = bool(re.match(r"[\\/~]|[A-Za-z]:", valeur))
+    return parties == ["scripts"] and not absolu
 
 
 def _options_git(args: list[str]) -> tuple[str | None, int, str | None]:
@@ -324,6 +404,12 @@ def _git(args: list[str], ctx: Contexte) -> str | None:
             return "hooks git détournés (core.hooksPath)"
         if any(a.lower().startswith("alias.") for a in reste) and not lecture:
             return "alias git pouvant masquer un push vers la branche principale"
+    elif _motif_hooks_git(sous) or any(_motif_hooks_git(a) for a in reste):
+        return REFUS_HOOKS
+    if sous in ("rm", "mv") and any(_vise_garde_fous(a) for a in reste):
+        return REFUS_GARDE_FOUS
+    if _affiche_identifiants(sous.lower(), reste):
+        return REFUS_IDENTIFIANTS
     if sous == "push":
         return _push(reste, chemin, ctx)
     return None
@@ -379,13 +465,21 @@ def _gh_api(args: list[str]) -> str | None:
         elif not a.startswith("-") and point is None:
             point = a
         i += 1
-    texte = " ".join(args).lower()  # les deux contrôles valent pour tout appel, quel que soit le point
+    # Les deux contrôles valent pour tout appel, quel que soit le point d'accès.
+    texte = " ".join(args).lower()
     if "mutation" in texte and GRAPHQL_ECRITURE.search(texte):
         return refus
     effective = (methode or ("POST" if champs else "GET")).upper()
     if effective != "GET" and point is not None and API_ECRITURE.search(point.lower()):
         return refus
     return None
+
+
+def _montre_le_jeton(arg: str) -> bool:
+    """`--show-token`, `-t`, ou `-t` dans un groupe d'options courtes (`-at`)."""
+    if arg.split("=")[0] == "--show-token":
+        return True
+    return bool(re.fullmatch(r"-[a-z]*t[a-z]*", arg))
 
 
 def _gh(args: list[str], ctx: Contexte) -> str | None:
@@ -402,6 +496,18 @@ def _gh(args: list[str], ctx: Contexte) -> str | None:
             positions.append(i)
         i += 1
     mots = [args[k] for k in positions]
+    if mots and mots[0] not in COMMANDES_GH:
+        return "commande gh inconnue (alias ou extension), qui pourrait masquer une fusion"
+    if mots[:1] == ["alias"] and mots[1:2] in (["set"], ["import"]):
+        return "alias gh pouvant masquer une fusion"
+    if mots == ["auth", "token"]:
+        return "jeton gh exposé (gh auth token), qui permettrait de contourner le garde"
+    if mots == ["auth", "git-credential"]:
+        return REFUS_IDENTIFIANTS
+    if mots == ["auth", "status"] and any(_montre_le_jeton(a) for a in args):
+        return (
+            "jeton gh exposé (gh auth status --show-token), qui permettrait de contourner le garde"
+        )
     if mots == ["pr", "merge"]:
         reste = args[positions[1] + 1 :]
         return _gh_merge(reste, ctx, depot)
@@ -411,21 +517,48 @@ def _gh(args: list[str], ctx: Contexte) -> str | None:
 
 
 def _motif_segment(segment: list[str], ctx: Contexte, profondeur: int) -> str | None:
+    ici = [jeton[len(ICI) :] for jeton in segment if jeton.startswith(ICI)]
+    segment = [jeton for jeton in segment if not jeton.startswith(ICI)]
+    # Une substitution `$(…)` ou `…` s'exécute même entre guillemets doubles (Bash), et "$(…)"
+    # aussi en PowerShell : le contenu d'un tel jeton est réanalysé comme une commande.
+    if profondeur < PROFONDEUR_MAX:
+        for jeton in [*segment, *ici]:
+            if "$(" in jeton or "`" in jeton:
+                motif = _motif_commande(jeton.replace("`", ";"), ctx, profondeur + 1)
+                if motif:
+                    return motif
+    if any(CONFIG_PAR_ENVIRONNEMENT.search(jeton) for jeton in segment):
+        return REFUS_CONFIG_ENVIRONNEMENT
     i = 0
-    enveloppe = False
+    enveloppe: str | None = None
+    duree = False
     while i < len(segment):
         jeton = segment[i]
         if ASSIGNATION.match(jeton):
-            if _motif_hooks_git(jeton):
-                return "hooks git détournés (core.hooksPath)"
+            pass
         elif _nom(jeton) in PREFIXES:
-            enveloppe = True
-        elif not (enveloppe and jeton.startswith("-")):
+            enveloppe = _nom(jeton)
+            duree = enveloppe in ENVELOPPES_A_DUREE
+        elif enveloppe is not None and jeton.startswith("-"):
+            if jeton in ENVELOPPES_AVEC_VALEUR.get(enveloppe, ()):
+                i += 1
+        elif duree:
+            duree = False
+        else:
             break
         i += 1
+    if any(_motif_hooks_git(jeton) for jeton in segment[:i]):
+        return REFUS_HOOKS
     if i >= len(segment):
         return None
     commande, reste = _nom(segment[i]), segment[i + 1 :]
+    # core.hooksPath dans n'importe quel jeton : seul git (lectures, réparation exacte) en décide.
+    if commande != "git" and any(_motif_hooks_git(jeton) for jeton in segment[i:]):
+        return REFUS_HOOKS
+    if commande in EFFACE_OU_DEPLACE and any(_vise_garde_fous(a) for a in reste):
+        return REFUS_GARDE_FOUS
+    if commande.startswith("git-credential-") and _affiche_identifiants(commande, reste):
+        return REFUS_IDENTIFIANTS
     if commande in CHANGE_DOSSIER:
         cible = next((a for a in reste if not a.startswith("-") or a == "-"), None)
         if cible is not None and cible != "-":
@@ -439,7 +572,10 @@ def _motif_segment(segment: list[str], ctx: Contexte, profondeur: int) -> str | 
         utiles = list(reste)
         while utiles and (utiles[0].startswith("-") or utiles[0].startswith("/")):
             utiles.pop(0)
-        for candidat in [*reste, " ".join(utiles)]:
+        candidats = [*reste, " ".join(utiles)]
+        if ici:  # `bash <<< 'cmd'` exécute le texte ; `xargs git commit <<< x` l'ajoute à la fin
+            candidats += [*ici, " ".join([*utiles, *ici])]
+        for candidat in candidats:
             if candidat.strip():
                 motif = _motif_commande(candidat, ctx, profondeur + 1)
                 if motif:
@@ -448,8 +584,13 @@ def _motif_segment(segment: list[str], ctx: Contexte, profondeur: int) -> str | 
 
 
 def _motif_commande(commande: str, ctx: Contexte, profondeur: int = 0) -> str | None:
-    for texte, echappement in _variantes(commande, ctx.outil if profondeur == 0 else None):
-        for segment in _segments(texte, echappement):
+    if CONFIG_PAR_ENVIRONNEMENT.search(commande):
+        return REFUS_CONFIG_ENVIRONNEMENT
+    lecture = ctx.outil if profondeur == 0 else None
+    for texte, echappement, virgules in _variantes(commande, lecture):
+        if CONFIG_PAR_ENVIRONNEMENT.search(texte):
+            return REFUS_CONFIG_ENVIRONNEMENT
+        for segment in _segments(texte, echappement, virgules):
             motif = _motif_segment(segment, ctx, profondeur)
             if motif:
                 return motif
@@ -471,11 +612,15 @@ def motif_de_refus(
     Aucune exception ne sort d'ici : une commande qu'on ne sait pas analyser est refusée.
     """
     try:
+        if CONFIG_PAR_ENVIRONNEMENT.search(commande):
+            return REFUS_CONFIG_ENVIRONNEMENT
         # Le dossier suivi (`cd`) ne doit pas passer d'une lecture à l'autre.
         ctx = Contexte(branche, branche_courante, checks_verts, outil)
-        for texte, echappement in _variantes(commande, outil):
+        for texte, echappement, virgules in _variantes(commande, outil):
+            if CONFIG_PAR_ENVIRONNEMENT.search(texte):
+                return REFUS_CONFIG_ENVIRONNEMENT
             ctx.dossier = None
-            for segment in _segments(texte, echappement):
+            for segment in _segments(texte, echappement, virgules):
                 motif = _motif_segment(segment, ctx, 0)
                 if motif:
                     return motif
@@ -564,6 +709,31 @@ def _refuser(motif: str) -> None:
     )
 
 
+class CommandeIllisible(Exception):
+    """Un champ de commande d'un type que le garde ne sait pas lire."""
+
+
+def commande_de(entree: dict, stricte: bool = True) -> str | None:
+    """La commande du premier champ utilisable de `tool_input` parmi CHAMPS_COMMANDE, ou None.
+
+    Un texte est pris tel quel ; une liste de textes (un argv) est jointe par des espaces. Un
+    champ d'un autre type lève CommandeIllisible en lecture stricte (Bash, PowerShell, Monitor,
+    dont la commande doit être un texte) ; pour tout autre outil, il est ignoré, et le champ
+    suivant est essayé : un outil MCP peut avoir un `input` structuré qui n'est pas une
+    commande."""
+    for champ in CHAMPS_COMMANDE:
+        if champ not in entree:
+            continue
+        valeur = entree[champ]
+        if isinstance(valeur, str):
+            return valeur
+        if isinstance(valeur, list) and all(isinstance(v, str) for v in valeur):
+            return " ".join(valeur)
+        if stricte:
+            raise CommandeIllisible(champ)
+    return None
+
+
 def _executer_garde(args) -> int:
     global _echeance
     _echeance = time.monotonic() + BUDGET
@@ -571,14 +741,18 @@ def _executer_garde(args) -> int:
         donnees = json.loads(sys.stdin.buffer.read().decode("utf-8", errors="replace"))
         outil = donnees["tool_name"]
         entree = donnees.get("tool_input") or {}
-        commande = entree.get("command", "") if outil in OUTILS else ""
         cwd = donnees.get("cwd") or "."
-        if not isinstance(outil, str) or not isinstance(commande, str) or not isinstance(cwd, str):
+        if not isinstance(outil, str) or not isinstance(entree, dict) or not isinstance(cwd, str):
             raise TypeError
     except (ValueError, KeyError, TypeError, AttributeError):
         print("garde-claude : entrée du hook illisible, rien vérifié.", file=sys.stderr)
         return 1
-    if outil not in OUTILS:
+    try:
+        commande = commande_de(entree, stricte=outil in LECTURES)
+    except CommandeIllisible:
+        _refuser("champ de commande d'un type inattendu, impossible à analyser")
+        return 2
+    if commande is None:  # un outil sans commande (lecture, recherche, MCP) : rien à lancer
         return 0
     branche = args.branche
     if branche is None:
@@ -592,7 +766,7 @@ def _executer_garde(args) -> int:
         branche,
         lambda chemin: branche_courante_git(chemin, cwd),
         lambda pr: checks_verts_gh(pr, cwd),
-        outil,
+        LECTURES.get(outil),
     )
     if motif is None:
         return 0

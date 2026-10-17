@@ -22,6 +22,8 @@ Lot 1 en cours : le socle (cible `aucune`). Le cadrage est dans `docs/cadrage.md
 - `docs/cadrage.md` : les décisions, le contrat, les cibles, les lots.
 - Les ADR hérités, dans `template/docs/modele/decisions/`.
 - `template/docs/modele/methode.md` : la méthode distribuée aux projets.
+- `docs/aligner.md` : la liste de contrôle « Aligner un projet existant », à suivre case par case
+  dans chaque lot d'alignement.
 
 ## Invariants
 

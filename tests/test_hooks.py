@@ -1,5 +1,6 @@
 """Les hooks git d'un projet rendu : confidentialité, format des commits, branche principale."""
 
+import json
 import os
 import shutil
 import subprocess
@@ -8,7 +9,8 @@ from pathlib import Path
 
 import pre_push
 import pytest
-from conftest import git
+import yaml
+from conftest import RACINE, git
 
 SH = shutil.which("sh") or (
     r"C:\Program Files\Git\bin\sh.exe" if Path(r"C:\Program Files\Git\bin\sh.exe").exists() else None
@@ -147,3 +149,72 @@ def test_entree_mal_formee_refusee(monkeypatch, capsys):
     assert pre_push.main(["--branche", "main"]) == 1
     assert "ligne d'entrée mal formée, envoi refusé" in capsys.readouterr().err
     assert pre_push.refs_refusees("\r\n\nrefs/heads/x 1 refs/heads/y 2\r\n", "main") == []
+
+
+def test_visibilite_rendue(rendre):
+    for visibilite in ("prive", "public"):
+        reglages = rendre(visibilite=visibilite) / "scripts/modele/reglages.py"
+        assert f'VISIBILITE = "{visibilite}"' in reglages.read_text(encoding="utf-8")
+
+
+@pytest.mark.skipif(SH is None, reason="aucun sh trouvé")
+def test_commit_prive_avertit_sans_refuser(rendre, env_isole):
+    racine = rendre(visibilite="prive")
+    env = {**env_isole(), "MOTIFS_INTERDITS": MOTIF}
+    git(racine, env, "init", "-q", "-b", "main")
+    git(racine, env, "config", "core.autocrlf", "false")
+    git(racine, env, "config", "core.hooksPath", ".githooks")
+    (racine / "note.txt").write_text(f"voici {MOTIF} ici\n", encoding="utf-8")
+    git(racine, env, "add", "-A")
+    r = lancer_git(racine, env, "commit", "-m", f"feat: essai {MOTIF}")
+    assert r.returncode == 0, r.stderr
+    assert "note.txt:1 — motif privé n°1" in r.stderr
+    assert "dépôt privé : avertissement, pas de refus" in r.stderr
+    assert MOTIF not in r.stderr.replace(f"feat: essai {MOTIF}", "")
+
+
+@pytest.mark.skipif(SH is None, reason="aucun sh trouvé")
+def test_aucun_cache_python(rendre, env_isole, tmp_path):
+    """Hooks et garde importent reglages : rien ne doit rester dans scripts/modele/ (ancrage, 17/10)."""
+    racine = rendre()
+    env = {**env_isole(), "MOTIFS_INTERDITS": MOTIF}
+    env.pop("PYTHONDONTWRITEBYTECODE", None)  # c'est lancer.sh qui doit le poser
+    git(racine, env, "init", "-q", "-b", "main")
+    git(racine, env, "config", "core.autocrlf", "false")
+    git(racine, env, "config", "core.hooksPath", ".githooks")
+    git(racine, env, "add", "-A")
+    r = lancer_git(racine, env, "commit", "-q", "-m", "feat: base")
+    assert r.returncode == 0, r.stderr
+    origin = tmp_path / "origin.git"
+    origin.mkdir()
+    git(origin, env, "init", "-q", "--bare", "-b", "main")
+    git(racine, env, "remote", "add", "origin", str(origin))
+    r = lancer_git(racine, env, "push", "-q", "origin", "HEAD:refs/heads/lot-1/essai")
+    assert r.returncode == 0, r.stderr
+
+    reglage = json.loads((racine / ".claude/settings.json").read_text(encoding="utf-8"))
+    commande = reglage["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+    env_garde = {**env, "CLAUDE_PROJECT_DIR": racine.as_posix()}
+    for essai, attendu in (("git status", 0), ("git push origin main", 2)):
+        entree = {"tool_name": "Bash", "tool_input": {"command": essai}, "cwd": str(racine)}
+        r = subprocess.run(
+            [SH, "-c", commande],
+            input=json.dumps(entree),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=env_garde,
+            cwd=racine,
+            check=False,
+        )
+        assert r.returncode == attendu, (essai, r.stderr)
+
+    assert list(racine.rglob("__pycache__")) == []
+    assert lancer_git(racine, env, "status", "--porcelain", "--ignored").stdout == ""
+
+
+def test_gitignore_des_scripts_gere(rendre):
+    """Géré (pas semé) : il atteint les projets alignés à leur prochain copier update."""
+    copier_yml = yaml.safe_load((RACINE / "copier.yml").read_text(encoding="utf-8"))
+    assert "scripts/modele/.gitignore" not in copier_yml["_skip_if_exists"]
+    assert (rendre() / "scripts/modele/.gitignore").read_bytes() == b"__pycache__/\n"
