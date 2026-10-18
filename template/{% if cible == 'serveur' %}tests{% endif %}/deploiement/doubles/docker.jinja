@@ -54,7 +54,8 @@
 # Sauvegarde : `compose exec -T app <sauvegarder…> /sauvegardes/<chemin>` crée, dans le dossier des
 # sauvegardes de compose.env, le dossier de l'instantané, qui a la forme de /donnees (donnees.txt,
 # un fichier caché .cachee et un sous-dossier sous/profond.txt), comme la commande de l'image. Une
-# destination qui existe déjà est refusée (code 1). Les mots de la commande (ce qui suit « app »,
+# destination qui existe déjà est refusée (code 1), et un dossier parent absent aussi : la commande
+# crée son dossier, pas ses parents, que le script doit avoir créés (R22). Les mots de la commande (ce qui suit « app »,
 # destination comprise) sont écrits un par ligne dans exec-mots, à côté de $APPELS.
 #
 # Conteneurs jetables : `run -d --name <nom>` crée conteneur-<nom>.env à côté de $APPELS (port,
@@ -166,9 +167,13 @@ case "${1:-}" in
             echo "destination existante : $destination"
             exit 1
           fi
+          if [ ! -d "$(dirname "$hote")" ]; then
+            echo "dossier parent absent : $(dirname "$destination")"
+            exit 1
+          fi
           case "$forme" in
             dossier | lien | physique | apparue)
-              mkdir -p "$hote/sous"
+              mkdir "$hote" "$hote/sous"
               echo "instantané de test $(basename "${destination%.partiel}")" >"$hote/donnees.txt"
               echo "fichier caché" >"$hote/.cachee"
               echo "fichier profond" >"$hote/sous/profond.txt"
@@ -177,13 +182,12 @@ case "${1:-}" in
               [ "$forme" != apparue ] || mkdir -p "${hote%.partiel}"
               ;;
             partielle)
-              mkdir -p "$hote"
+              mkdir "$hote"
               echo "instantané de test $(basename "${destination%.partiel}")" >"$hote/donnees.txt"
               code=1
               ;;
-            vide) mkdir -p "$hote" ;;
+            vide) mkdir "$hote" ;;
             fichier)
-              mkdir -p "$(dirname "$hote")"
               echo "un fichier" >"$hote"
               ;;
             *) refuser "exec : forme inconnue $forme" ;;

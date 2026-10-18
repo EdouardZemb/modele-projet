@@ -138,6 +138,27 @@ def test_compose_app(rendre, sauvegardes):
     assert "${ESSAI_DONNEES:?}:/donnees" in app["volumes"]
 
 
+def test_sonde_suit_la_branche_principale(rendre):
+    """R22 : le canal `main` du staging suit la branche principale ; l'image reste `:main`."""
+    rendu = rendre(**{**REPONSES_SERVEUR, "branche_principale": "principal"})
+    sonde = lire(rendu, "deploiement/sonder.sh")
+    assert 'git -C "$clone" fetch origin principal 9>&-' in sonde
+    assert 'git -C "$clone" merge --ff-only origin/principal' in sonde
+    assert 'anomalie "git fetch origin principal impossible"' in sonde
+    assert 'anomalie "git merge --ff-only origin/principal impossible"' in sonde
+    assert "`git fetch origin principal`, `git merge --ff-only origin/principal`" in sonde
+    assert "origin/main" not in sonde
+    assert "origin main" not in sonde
+    # le canal et l'étiquette d'image ne changent pas : la CI publie toujours :main
+    assert lire(rendu, "deploiement/env/staging.env").splitlines()[-1] == "ESSAI_CANAL=main"
+    assert "    main)\n" in sonde
+    assert "image :main" in sonde
+    # le banc bats du rendu attend les appels sur cette branche
+    bats = lire(rendu, "tests/deploiement/sonder.bats")
+    assert '"git -C $CLONE fetch origin principal"' in bats
+    assert '"git -C $CLONE merge --ff-only origin/principal"' in bats
+
+
 def test_pas_de_cloudflared(rendre):
     rendu = rendre(**REPONSES_SERVEUR)
     for chemin in fichiers_texte(rendu):

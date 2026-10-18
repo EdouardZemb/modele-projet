@@ -15,8 +15,8 @@
 {%- endif %}
 #   2. clone propre (`git status --porcelain` vide), sinon alerte « clone modifié » ;
 #   3. cible, selon le canal de l'environnement ({{ prefixe }}CANAL, dans env/<env>.env) :
-#      - main (staging) : `git fetch origin main`, `git merge --ff-only origin/main` ; image :main,
-#        version main ;
+#      - main (staging) : `git fetch origin {{ branche_principale }}`, `git merge --ff-only origin/{{ branche_principale }}` (la
+#        branche principale) ; image :main, version main ;
 #      - etiquette (prod) : `git fetch --prune --prune-tags --tags origin` (une étiquette retirée
 #        de l'origine disparaît aussi du clone : `--tags` seul ne supprime jamais une étiquette
 #        locale, et la sonde viserait encore une version retirée) ; plus haute étiquette vX.Y.Z (tri
@@ -163,12 +163,12 @@ main() {
   # garde pas le verrou après la sonde.
   case "${{ prefixe }}CANAL" in
     main)
-      if ! git -C "$clone" fetch origin main 9>&-; then
-        anomalie "git fetch origin main impossible"
+      if ! git -C "$clone" fetch origin {{ branche_principale }} 9>&-; then
+        anomalie "git fetch origin {{ branche_principale }} impossible"
         return 1
       fi
-      if ! git -C "$clone" merge --ff-only origin/main; then
-        anomalie "git merge --ff-only origin/main impossible"
+      if ! git -C "$clone" merge --ff-only origin/{{ branche_principale }}; then
+        anomalie "git merge --ff-only origin/{{ branche_principale }} impossible"
         return 1
       fi
       version=main

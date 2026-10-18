@@ -179,6 +179,26 @@ nombre_de_lancements() {
   [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
 }
 
+# R22 : la commande SAUVEGARDER crée son dossier, pas ses parents. pre-deploiement/ n'existe pas
+# avant le premier instantané d'avant déploiement (la sauvegarde de la nuit ne crée que
+# quotidiennes/, et le staging n'en a pas) : le script le crée sur l'hôte, comme sauvegarder.sh
+# crée quotidiennes/. Le double de docker refuse un parent absent, comme le ferait la commande.
+@test "deployer_cree_pre_deploiement_avant_l_instantane" {
+  deja_en_service "$ANCIENNE" 0.1.0
+  local pre="${{ prefixe }}RACINE_SAUVEGARDES/pre-deploiement" instantane
+  rm -rf "$pre"
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 0 ]
+  [ -d "$pre" ]
+  # un seul instantané, un dossier sous son nom définitif
+  [ "$(find "$pre" -mindepth 1 -maxdepth 1 | wc -l)" -eq 1 ]
+  instantane="$(find "$pre" -mindepth 1 -maxdepth 1)"
+  [[ "$(basename "$instantane")" =~ ^[0-9]{8}T[0-9]{6}Z$ ]]
+  [ -d "$instantane" ]
+  [ -f "$instantane/donnees.txt" ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+}
+
 # Un instantané en échec annule le déploiement avant tout changement : rien n'est arrêté ni lancé,
 # l'application en service y reste, et rien n'est marqué en échec. La sonde réessaiera au prochain
 # passage. Les cas :
@@ -188,13 +208,14 @@ nombre_de_lancements() {
 #   - une destination déjà présente : rien n'est lancé ni écrasé ;
 #   - un dossier vide apparu au nom définitif pendant l'écriture : `mv -T` le remplacerait sans
 #     bruit, il ne doit pas ;
+#   - pre-deploiement/ impossible à créer (un fichier à sa place) : la commande n'est pas lancée ;
 #   - aucune commande SAUVEGARDER dans projet.env.
 @test "deployer_instantane_en_echec_n_arrete_rien" {
   deja_en_service "$ANCIENNE" 0.1.0
   cp "$ETAT/compose.env" "$BATS_TEST_TMPDIR/compose.env.avant"
   local cas vrai pre="${{ prefixe }}RACINE_SAUVEGARDES/pre-deploiement"
   vrai="$(command -v date)"
-  for cas in code-1 code-2 partiel sans-fichier deja-present apparu sans-commande; do
+  for cas in code-1 code-2 partiel sans-fichier deja-present apparu pre-impossible sans-commande; do
     : >"$APPELS"
     # chaque cas part de pre-deploiement/ vide : deux cas dans la même seconde viseraient le même nom
     rm -rf "$pre" "$DOUBLES/date"
@@ -214,6 +235,7 @@ nombre_de_lancements() {
         echo "déjà là" >"$pre/20261018T024500Z/donnees.txt"
         ;;
       apparu) export DOUBLE_DOCKER_SAUVEGARDE_FORME=apparue ;;
+      pre-impossible) echo "pas un dossier" >"$pre" ;;
       sans-commande) printf '%s\n' 'VERIFIER=outil verifier' >"$CLONE/deploiement/projet.env" ;;
     esac
     deployer prod "$NOUVELLE" 0.2.0
@@ -253,6 +275,11 @@ nombre_de_lancements() {
         # le dossier apparu n'est pas remplacé ; l'instantané garde son nom provisoire
         [ -n "$(find "$pre" -mindepth 1 -maxdepth 1 -type d -name '*Z' -empty)" ]
         [ -n "$(find "$pre" -mindepth 2 -maxdepth 2 -path '*.partiel/donnees.txt')" ]
+        ;;
+      pre-impossible)
+        [[ "$output" == *"instantané impossible : le dossier $pre ne peut pas être créé"* ]]
+        [ "$(appels_de docker | grep -c ' exec ')" -eq 0 ]
+        [ "$(cat "$pre")" = "pas un dossier" ]
         ;;
       *) [[ "$output" == *"instantané impossible (code ${cas#code-}) : données illisibles"* ]] ;;
     esac

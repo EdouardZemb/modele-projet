@@ -71,9 +71,10 @@ signal() {
   echo "$EMPREINTE main" >"$ETAT/deploye"
   sonder staging
   [ "$status" -eq 0 ]
-  # la sonde a suivi main et tiré :main…
+  # la sonde a suivi la branche principale (R22) et tiré :main…
   [ "$(appels_de git)" = "$(printf '%s\n' "git -C $CLONE status --porcelain" \
-    "git -C $CLONE fetch origin main" "git -C $CLONE merge --ff-only origin/main")" ]
+    "git -C $CLONE fetch origin {{ branche_principale }}" \
+    "git -C $CLONE merge --ff-only origin/{{ branche_principale }}")" ]
   appels_de docker | grep -Fx 'docker pull -q ghcr.io/edouardzemb/{{ nom }}:main'
   # …puis, rien à déployer : l'adresse publique répond (corps lu, code HTTP vérifié), signal ok
   [ "$(nombre_d_appels deployer.sh)" -eq 0 ]

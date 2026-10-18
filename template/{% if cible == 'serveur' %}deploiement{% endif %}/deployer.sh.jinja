@@ -15,7 +15,8 @@
 #      plus), sauf si {{ prefixe }}VERROU_TENU=1 ;
 #   2. si l'application tourne, instantané de ses données dans le dossier
 #      /sauvegardes/pre-deploiement/<AAAAMMJJTHHMMSSZ>, qui a la forme de /donnees, par la commande
-#      SAUVEGARDER de deploiement/projet.env ; elle l'écrit sous un nom provisoire,
+#      SAUVEGARDER de deploiement/projet.env (pre-deploiement/ est d'abord créé sur l'hôte s'il
+#      manque : la commande crée son dossier, pas ses parents) ; elle l'écrit sous un nom provisoire,
 #      <AAAAMMJJTHHMMSSZ>.partiel, que le dossier ne quitte qu'après le code 0 ; si elle ne rend pas
 #      0, on s'arrête là, et le dossier garde ce nom, pour le diagnostic ;
 {%- else %}
@@ -144,12 +145,18 @@ sante_conforme() {
 # service. Seul son code de sortie fait foi : sa sortie n'est que journalisée. La commande écrit sous
 # un nom provisoire, <horodatage>.partiel, renommé après le code 0 : un instantané en échec garde ce
 # nom, et rien ne le prend pour un instantané complet. Une destination déjà présente est un échec.
+# La commande crée son dossier, pas ses parents : pre-deploiement/ est créé ici, sur l'hôte, comme
+# sauvegarder.sh crée quotidiennes/ (R22). S'il ne peut pas l'être, rien n'est lancé.
 instantane() {
-  local horodatage destination hote sortie code=0
+  local horodatage destination hote sortie code=0 pre="${{ prefixe }}SAUVEGARDES/pre-deploiement"
   lire_projet_env SAUVEGARDER || return 1
+  if ! mkdir -p -- "$pre"; then
+    journal "instantané impossible : le dossier $pre ne peut pas être créé"
+    return 1
+  fi
   horodatage="$(date -u +%Y%m%dT%H%M%SZ)"
   destination="/sauvegardes/pre-deploiement/$horodatage"
-  hote="${{ prefixe }}SAUVEGARDES/pre-deploiement/$horodatage"
+  hote="$pre/$horodatage"
   if [ -e "$hote" ] || [ -L "$hote" ] || [ -e "$hote.partiel" ] || [ -L "$hote.partiel" ]; then
     journal "instantané impossible : $hote existe déjà (ou $hote.partiel), rien n'est écrasé"
     return 1
