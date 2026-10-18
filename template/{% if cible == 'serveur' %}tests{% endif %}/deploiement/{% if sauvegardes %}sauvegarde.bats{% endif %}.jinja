@@ -81,6 +81,11 @@ instantane() {
     "$chemin/sous" "$chemin"
 }
 
+# il_y_a <jours> : l'horodatage UTC d'il y a tant de jours, sous la forme des noms d'instantanés.
+il_y_a() {
+  date -u -d "$1 days ago" +%Y%m%dT%H%M%SZ
+}
+
 # donnees_courantes : les données de la prod en service : un fichier, un fichier caché, un dossier.
 donnees_courantes() {
   mkdir -p "$DONNEES/journal"
@@ -241,7 +246,7 @@ exec '"$vrai"' "$@"'
   [ ! -s "$BATS_TEST_TMPDIR/interdit.tar" ]
 
   # l'instantané se fait dans le conteneur, par le projet et le compose.env de la prod
-  appels_de docker | grep -Fx "$(dc_prod) exec -T app outil sauvegarder --forme dossier /sauvegardes/quotidiennes/$nom"
+  appels_de docker | grep -Fx "$(dc_prod) exec -T app outil sauvegarder --forme dossier /sauvegardes/quotidiennes/$nom.partiel"
   # l'archive chiffrée part, puis sa présence est contrôlée
   appels_de rclone | grep -E "^rclone copy $TMPDIR/{{ nom }}-sauvegarde\.[A-Za-z0-9]+/$nom\.tar\.age sauvegardes:{{ nom }}-sauvegardes$"
   [ "$(ligne_de 'rclone copy')" -lt "$(ligne_de 'rclone lsf')" ]
@@ -261,8 +266,10 @@ exec '"$vrai"' "$@"'
   [ "$(stat -c %a "$SAUVEGARDES/quotidiennes")" = 700 ]
 }
 
-# Le contrat de l'instantané : `<SAUVEGARDER…> /sauvegardes/quotidiennes/<nom>-<horodatage>` crée ce
-# dossier, qui a la forme de /donnees. La commande est celle de projet.env, passée mot à mot.
+# Le contrat de l'instantané : `<SAUVEGARDER…> <dossier>` crée ce dossier, qui a la forme de
+# /donnees. La commande est celle de projet.env, passée mot à mot. Le dossier qu'elle reçoit est
+# provisoire, /sauvegardes/quotidiennes/<nom>-<horodatage>.partiel (R13) : le script ne lui donne son
+# nom qu'une fois l'instantané contrôlé.
 @test "sauvegarde_dossier_instantane" {
   sauvegarder prod
   [ "$status" -eq 0 ]
@@ -275,9 +282,68 @@ exec '"$vrai"' "$@"'
   [ "$(cat "${instantanes[0]}/donnees.txt")" = "instantané de test $nom" ]
   [ -f "${instantanes[0]}/.cachee" ]
   [ -f "${instantanes[0]}/sous/profond.txt" ]
-  # la commande de projet.env, mot à mot, puis la destination
-  [ "$(cat "$BATS_TEST_TMPDIR/exec-mots")" = "$(printf '%s\n' outil sauvegarder --forme dossier "/sauvegardes/quotidiennes/$nom")" ]
+  # la commande de projet.env, mot à mot, puis la destination provisoire, renommée ensuite
+  [ "$(cat "$BATS_TEST_TMPDIR/exec-mots")" = "$(printf '%s\n' outil sauvegarder --forme dossier "/sauvegardes/quotidiennes/$nom.partiel")" ]
+  [ ! -e "$SAUVEGARDES/quotidiennes/$nom.partiel" ]
   [[ "$output" == *"instantané : $SAUVEGARDES/quotidiennes/$nom (3 fichiers)"* ]]
+}
+
+# R13 : une sauvegarde en échec garde son nom provisoire, <nom>-<horodatage>.partiel, pour le
+# diagnostic : rien ne la prend jamais pour un instantané complet, et aucun nom définitif n'apparaît.
+@test "sauvegarde_en_echec_laisse_un_partiel" {
+  local forme entrees
+  # la commande écrit une partie, puis échoue ; ou rend 0 sur un dossier vide
+  for forme in partielle vide; do
+    DOUBLE_DOCKER_SAUVEGARDE_FORME="$forme" sauvegarder prod
+    [ "$status" -eq 1 ]
+    entrees=("$SAUVEGARDES"/quotidiennes/*)
+    [ "{% raw %}${#entrees[@]}{% endraw %}" -eq 1 ]
+    [[ "${entrees[0]##*/}" =~ ^{{ nom }}-[0-9]{8}T[0-9]{6}Z\.partiel$ ]]
+    [ -d "${entrees[0]}" ]
+    [ "$forme" != partielle ] || [ -f "${entrees[0]}/donnees.txt" ]
+    rm -rf "$SAUVEGARDES/quotidiennes"
+  done
+  [ "$(envois_echec "$HC_SAUVEGARDE" | wc -l)" -eq 2 ]
+  [ -z "$(envois_ok "$HC_SAUVEGARDE")" ]
+  [ -z "$(appels_de rclone)" ]
+}
+
+# Une destination déjà présente, sous son nom définitif ou provisoire, est une erreur : rien n'est
+# écrasé, et la commande n'est pas lancée.
+@test "sauvegarde_ne_reutilise_jamais_une_destination" {
+  local vrai existant
+  vrai="$(command -v date)"
+  # shellcheck disable=SC2016  # le corps du double se développe quand il s'exécute, pas ici
+  creer_double date 'if [ "$*" = "-u +%Y%m%dT%H%M%SZ" ]; then echo 20261018T024500Z; else exec '"$vrai"' "$@"; fi'
+  for existant in {{ nom }}-20261018T024500Z {{ nom }}-20261018T024500Z.partiel; do
+    mkdir -p "$SAUVEGARDES/quotidiennes/$existant"
+    echo "déjà là" >"$SAUVEGARDES/quotidiennes/$existant/donnees.txt"
+    sauvegarder prod
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"existe déjà"* ]]
+    [ "$(cat "$SAUVEGARDES/quotidiennes/$existant/donnees.txt")" = "déjà là" ]
+    rm -rf "$SAUVEGARDES/quotidiennes"
+  done
+  [ -z "$(appels_de docker | grep ' exec ' || true)" ]
+  [ "$(envois_echec "$HC_SAUVEGARDE" | wc -l)" -eq 2 ]
+}
+
+# I1 : un instantané où deux noms sont un même fichier (un lien physique). tar le stockerait comme un
+# lien (type h), que restaurer.sh refuse : l'archive se fait avec --hard-dereference, et la
+# restauration rend les deux noms, au même contenu.
+@test "sauvegarde_liens_physiques_archive_restaurable" {
+  DOUBLE_DOCKER_SAUVEGARDE_FORME=physique sauvegarder prod
+  [ "$status" -eq 0 ]
+  local envoyes=("$DISTANT"/*) nom
+  nom="$(basename "${envoyes[0]}" .tar.age)"
+  age -d -i "$AGE_IDENTITE_HORS_LIGNE" -o "$BATS_TEST_TMPDIR/clair.tar" "${envoyes[0]}"
+  # que des fichiers et des dossiers dans l'archive
+  [ -z "$(tar -tvf "$BATS_TEST_TMPDIR/clair.tar" | cut -c1 | grep -v '^[-d]$' || true)" ]
+  donnees_courantes
+  restaurer prod "${envoyes[0]}" --oui --cle "$AGE_IDENTITE_HORS_LIGNE"
+  [ "$status" -eq 0 ]
+  diff -r "$SAUVEGARDES/quotidiennes/$nom" "$DONNEES"
+  [ "$(cat "$DONNEES/sous/physique.txt")" = "instantané de test $nom" ]
 }
 
 # L'archive : `tar -C quotidiennes -cf - <nom> | age -R cles/hors-ligne.pub`. Tous ses membres sont
@@ -493,42 +559,79 @@ exec '"$vrai"' "$@"'
   [ -z "$(appels_de rclone)" ]
 }
 
-# La rétention locale vise des dossiers (migration 4) : quotidiennes/{{ nom }}-<horodatage>/ et
-# pre-deploiement/<horodatage>/, le nom que deployer.sh leur donne, plus les avant-restauration-*/
-# de restaurer.sh, copies en clair des données elles aussi. Ce qui ne vient pas de nous reste, même
-# vieux.
+# R14 : la rétention locale lit l'âge dans le nom des dossiers, l'horodatage UTC qu'il porte, et
+# jamais dans leur date. Elle vise quotidiennes/{{ nom }}-<horodatage>/, pre-deploiement/<horodatage>/
+# (le nom que deployer.sh leur donne), leurs .partiel, et les avant-restauration-<horodatage>/ de
+# restaurer.sh, copies en clair des données elles aussi. Un nom d'une autre forme n'est jamais
+# retiré, même vieux. Les noms se calculent à partir d'aujourd'hui : le test vaut à toute date.
 @test "retention_supprime_au_dela_de_30_jours" {
-  instantane {{ nom }}-20260801T024500Z 40
-  instantane {{ nom }}-20260915T024500Z 29
-  instantane 20260801T120000Z 40 pre-deploiement
-  instantane 20260915T120000Z 29 pre-deploiement
-  mkdir -p "$SAUVEGARDES/avant-restauration-20260801T100000Z" "$SAUVEGARDES/avant-restauration-20260915T100000Z"
-  echo vieille >"$SAUVEGARDES/avant-restauration-20260801T100000Z/courant.txt"
-  echo recente >"$SAUVEGARDES/avant-restauration-20260915T100000Z/courant.txt"
-  touch -d '40 days ago' "$SAUVEGARDES/avant-restauration-20260801T100000Z"
-  touch -d '29 days ago' "$SAUVEGARDES/avant-restauration-20260915T100000Z"
-  # ce qui ne vient pas de nous : un fichier, le dossier d'un autre projet, un dossier sans horodatage
-  echo autre >"$SAUVEGARDES/quotidiennes/notes.txt"
-  mkdir -p "$SAUVEGARDES/quotidiennes/autre-projet-20260801T024500Z" "$SAUVEGARDES/pre-deploiement/notes"
-  touch -d '40 days ago' "$SAUVEGARDES/quotidiennes/notes.txt" \
-    "$SAUVEGARDES/quotidiennes/autre-projet-20260801T024500Z" "$SAUVEGARDES/pre-deploiement/notes"
+  local vieux recent ancien q="$SAUVEGARDES/quotidiennes" p="$SAUVEGARDES/pre-deploiement"
+  vieux="$(il_y_a 31)"
+  recent="$(il_y_a 29)"
+  ancien="$(il_y_a 40)"
+  # vieux par leur nom, mais datés d'aujourd'hui : ils partent
+  instantane "{{ nom }}-$vieux"
+  instantane "{{ nom }}-$vieux.partiel"
+  instantane "$vieux" 0 pre-deploiement
+  instantane "$vieux.partiel" 0 pre-deploiement
+  mkdir -p "$SAUVEGARDES/avant-restauration-$vieux"
+  echo vieille >"$SAUVEGARDES/avant-restauration-$vieux/courant.txt"
+  # récents par leur nom, mais datés de 60 jours : ils restent
+  instantane "{{ nom }}-$recent" 60
+  instantane "$recent" 60 pre-deploiement
+  mkdir -p "$SAUVEGARDES/avant-restauration-$recent"
+  echo recente >"$SAUVEGARDES/avant-restauration-$recent/courant.txt"
+  touch -d '60 days ago' "$SAUVEGARDES/avant-restauration-$recent"
+  # d'autres noms, vieux par leur nom comme par leur date : ils restent
+  echo autre >"$q/notes.txt"
+  echo autre >"$q/{{ nom }}-$ancien.tar"
+  echo autre >"$p/$ancien"
+  mkdir -p "$q/autre-projet-$ancien" "$q/{{ nom }}-$ancien-copie" "$p/notes" "$p/$ancien-copie" \
+    "$SAUVEGARDES/avant-restauration-$ancien-copie"
+  touch -d '60 days ago' "$q/notes.txt" "$q/{{ nom }}-$ancien.tar" "$p/$ancien" "$q/autre-projet-$ancien" \
+    "$q/{{ nom }}-$ancien-copie" "$p/notes" "$p/$ancien-copie" "$SAUVEGARDES/avant-restauration-$ancien-copie"
 
   sauvegarder prod
   [ "$status" -eq 0 ]
 
-  # les dossiers de plus de 30 jours partent en entier, ceux de moins de 30 jours restent en entier
-  [ ! -e "$SAUVEGARDES/quotidiennes/{{ nom }}-20260801T024500Z" ]
-  [ -f "$SAUVEGARDES/quotidiennes/{{ nom }}-20260915T024500Z/sous/profond.txt" ]
-  [ ! -e "$SAUVEGARDES/pre-deploiement/20260801T120000Z" ]
-  [ -f "$SAUVEGARDES/pre-deploiement/20260915T120000Z/sous/profond.txt" ]
-  [ ! -e "$SAUVEGARDES/avant-restauration-20260801T100000Z" ]
-  [ -e "$SAUVEGARDES/avant-restauration-20260915T100000Z/courant.txt" ]
-  [ -e "$SAUVEGARDES/quotidiennes/notes.txt" ]
-  [ -d "$SAUVEGARDES/quotidiennes/autre-projet-20260801T024500Z" ]
-  [ -d "$SAUVEGARDES/pre-deploiement/notes" ]
-  # l'instantané du jour est là
-  local instantanes=("$SAUVEGARDES"/quotidiennes/{{ nom }}-*/)
-  [ "{% raw %}${#instantanes[@]}{% endraw %}" -eq 2 ]
+  # les dossiers de plus de 30 jours, par leur nom, partent en entier ; les autres restent en entier
+  [ ! -e "$q/{{ nom }}-$vieux" ]
+  [ ! -e "$q/{{ nom }}-$vieux.partiel" ]
+  [ ! -e "$p/$vieux" ]
+  [ ! -e "$p/$vieux.partiel" ]
+  [ ! -e "$SAUVEGARDES/avant-restauration-$vieux" ]
+  [ -f "$q/{{ nom }}-$recent/sous/profond.txt" ]
+  [ -f "$p/$recent/sous/profond.txt" ]
+  [ -e "$SAUVEGARDES/avant-restauration-$recent/courant.txt" ]
+  # un nom d'une autre forme, ou ce qui n'est pas un dossier, reste
+  [ -e "$q/notes.txt" ]
+  [ -e "$q/{{ nom }}-$ancien.tar" ]
+  [ -f "$p/$ancien" ]
+  [ -d "$q/autre-projet-$ancien" ]
+  [ -d "$q/{{ nom }}-$ancien-copie" ]
+  [ -d "$p/notes" ]
+  [ -d "$p/$ancien-copie" ]
+  [ -d "$SAUVEGARDES/avant-restauration-$ancien-copie" ]
+  # l'instantané du jour est là, avec le récent
+  [ "$(find "$q" -mindepth 1 -maxdepth 1 -type d -regextype posix-extended -regex '.*/{{ nom }}-[0-9]{8}T[0-9]{6}Z' | wc -l)" -eq 2 ]
+}
+
+# I2 : une commande SAUVEGARDER qui copie /donnees avec ses dates (cp -a, rsync -a) date l'instantané
+# du jour comme ses données, 60 jours ici. Il reste, et le test de restauration le trouve. De même
+# pour un instantané d'avant déploiement nommé d'aujourd'hui.
+@test "retention_ne_regarde_pas_la_date_des_dossiers" {
+  local aujourdhui
+  aujourdhui="$(il_y_a 0)"
+  instantane "$aujourdhui" 60 pre-deploiement
+  DOUBLE_DOCKER_SAUVEGARDE_VIEILLI=60 sauvegarder prod
+  [ "$status" -eq 0 ]
+  local instantanes=("$SAUVEGARDES"/quotidiennes/{{ nom }}-*)
+  [ "{% raw %}${#instantanes[@]}{% endraw %}" -eq 1 ]
+  [ -d "${instantanes[0]}" ]
+  [ -f "$SAUVEGARDES/pre-deploiement/$aujourdhui/sous/profond.txt" ]
+  tester prod
+  [ "$status" -eq 0 ]
+  [[ "$(envois_ok "$HC_TEST")" == *"${instantanes[0]##*/} restaurée"* ]]
 }
 
 @test "retention_supprime_au_dela_de_90_jours_au_distant" {
@@ -561,8 +664,10 @@ exec '"$vrai"' "$@"'
 }
 
 @test "retention_locale_ne_vise_jamais_le_dossier_des_sauvegardes_lui_meme" {
-  # un dossier des sauvegardes qui porterait un nom de dossier à purger, et vieux
-  export {{ prefixe }}RACINE_SAUVEGARDES="$BATS_TEST_TMPDIR/avant-restauration-racine"
+  # un dossier des sauvegardes qui porterait un nom de dossier à purger, vieux par son nom et sa date
+  local racine
+  racine="$BATS_TEST_TMPDIR/avant-restauration-$(il_y_a 40)"
+  export {{ prefixe }}RACINE_SAUVEGARDES="$racine"
   SAUVEGARDES="${{ prefixe }}RACINE_SAUVEGARDES"
   en_service prod "$IMAGE" 0.1.0
   mkdir -p "$SAUVEGARDES/quotidiennes"
@@ -574,11 +679,13 @@ exec '"$vrai"' "$@"'
 }
 
 @test "retention_n_efface_rien_de_local_si_l_envoi_echoue" {
-  instantane {{ nom }}-20260801T024500Z 40
+  local vieux
+  vieux="$(il_y_a 40)"
+  instantane "{{ nom }}-$vieux" 40
   export DOUBLE_RCLONE_COPY_CODE=1
   sauvegarder prod
   [ "$status" -eq 1 ]
-  [ -f "$SAUVEGARDES/quotidiennes/{{ nom }}-20260801T024500Z/donnees.txt" ]
+  [ -f "$SAUVEGARDES/quotidiennes/{{ nom }}-$vieux/donnees.txt" ]
 }
 
 @test "retention_en_echec_est_signalee_apres_l_envoi" {
@@ -881,6 +988,19 @@ exec '"$vrai"' "$@"'
   echo "un fichier" >"$q/{{ nom }}-20261015T024500Z.tar"
   mkdir -p "$q/{{ nom }}-zzz" "$q/{{ nom }}-20261016T024500Z-copie"
   ln -s "$q/{{ nom }}-20261013T024500Z" "$q/{{ nom }}-20261017T024500Z"
+  tester prod
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"test de restauration de $SNAPSHOT"* ]]
+  [[ "$(envois_ok "$HC_TEST")" == *"$SNAPSHOT restaurée"* ]]
+  [ "$(cat "$BATS_TEST_TMPDIR/verifie/donnees.txt")" = "instantané de test $SNAPSHOT" ]
+}
+
+# R13 : une sauvegarde en échec laisse son dossier .partiel, plus récent que le dernier instantané
+# complet. Le test de restauration ne le prend jamais.
+@test "test_restauration_ignore_un_instantane_partiel" {
+  instantane "$SNAPSHOT" 2
+  DOUBLE_DOCKER_SAUVEGARDE_FORME=partielle sauvegarder prod
+  [ "$status" -eq 1 ]
   tester prod
   [ "$status" -eq 0 ]
   [[ "$output" == *"test de restauration de $SNAPSHOT"* ]]
@@ -1196,6 +1316,11 @@ exec $(command -v rm) \"\$@\""
   [ "$status" -eq 64 ]
   restaurer prod "$BATS_TEST_TMPDIR/a" --pas-une-option
   [ "$status" -eq 64 ]
+  # un instantané partiel (R13) ne se restaure pas
+  instantane {{ nom }}-20261015T024500Z.partiel 0
+  restaurer prod "$SAUVEGARDES/quotidiennes/{{ nom }}-20261015T024500Z.partiel" --oui
+  [ "$status" -eq 64 ]
+  [[ "$output" == *".partiel"*"ne se restaure pas"* ]]
   [ -z "$(appels_de docker)" ]
   contenu_courant_intact
 }
@@ -1268,6 +1393,25 @@ archive_chiffree() {
   [ "$status" -eq 64 ]
   [ -z "$(appels_de docker)" ]
   contenu_courant_intact
+}
+
+# R15 : une clé collée à la place du chemin de l'identité est refusée, et jamais répétée, ni dans
+# le message, ni dans le plan.
+@test "restaurer_refuse_une_cle_collee_sans_l_afficher" {
+  archive_chiffree
+  donnees_courantes
+  local cle oui
+  cle="$(grep '^AGE-SECRET-KEY-' "$AGE_IDENTITE_HORS_LIGNE")"
+  for oui in --oui ""; do
+    # shellcheck disable=SC2086  # sans --oui, l'option disparaît : c'est le plan qui est demandé
+    restaurer prod "$BATS_TEST_TMPDIR/$SNAPSHOT.tar.age" $oui --cle "$cle"
+    [ "$status" -eq 64 ]
+    [[ "$output" == *"--cle attend un chemin vers un fichier d'identité, pas la clé elle-même"* ]]
+    aucune_ligne "AGE-SECRET-KEY|${cle#AGE-SECRET-KEY-}" <(printf '%s\n' "$output")
+  done
+  [ -z "$(appels_de docker)" ]
+  contenu_courant_intact
+  aucun_temporaire
 }
 
 @test "restaurer_depuis_une_archive_avec_la_mauvaise_cle_ne_touche_a_rien" {
@@ -1490,13 +1634,62 @@ archive_chiffree() {
   [ -n "$(appels_de docker | grep ' stop app' || true)" ]
   [ -z "$(appels_de docker | grep ' start app' || true)" ]
   [ ! -f "$EN_SERVICE" ]
-  [[ "$output" == *"intervention nécessaire : le contenu d'avant est dans ${avant[0]}"* ]]
+  [[ "$output" == *"intervention nécessaire : l'ancien contenu n'est pas entièrement revenu"*"${avant[0]}"* ]]
   [[ "$output" != *"ancien contenu remis en place"* ]]
+  aucune_ligne '[Vv]ider' <(printf '%s\n' "$output")
   # les vraies données ne sont perdues nulle part : elles sont dans le dossier de restauration
   [ "$(cat "${avant[0]}/courant.txt")" = "contenu courant" ]
   [ "$(cat "${avant[0]}/.courant")" = "caché courant" ]
   [ "$(cat "${avant[0]}/journal/entree.txt")" = "journal courant" ]
   [ "$(nombre_d_entrees "$DONNEES")" -eq 0 ]
+  aucun_temporaire
+}
+
+# I3 : l'instantané ne ressort pas des données. L'ancien contenu est alors entier dans
+# avant-restauration-*/, et ce qui reste dans les données n'est fait que de copies de l'instantané. La
+# consigne le dit, et ne prescrit jamais de vider quoi que ce soit.
+@test "restaurer_intervention_si_l_instantane_ne_ressort_pas" {
+  instantane "$SNAPSHOT" 1
+  donnees_courantes
+  # .cachee et donnees.txt entrent, sous/ échoue, puis .cachee ne ressort pas des données
+  double_mv_en_echec '*/donnees.nouvelle/sous' '*/prod/donnees/.cachee'
+  restaurer prod "$SAUVEGARDES/quotidiennes/$SNAPSHOT" --oui
+  [ "$status" -eq 1 ]
+  local avant=("$SAUVEGARDES"/avant-restauration-*)
+  [[ "$output" == *"intervention nécessaire : l'ancien contenu est entier dans ${avant[0]}"*"des copies"* ]]
+  aucune_ligne '[Vv]ider' <(printf '%s\n' "$output")
+  # l'application reste arrêtée
+  [ -z "$(appels_de docker | grep ' start app' || true)" ]
+  [ ! -f "$EN_SERVICE" ]
+  # l'ancien contenu, entier, est dans le dossier de restauration ; les données n'ont que des copies
+  [ "$(cat "${avant[0]}/courant.txt")" = "contenu courant" ]
+  [ "$(cat "${avant[0]}/.courant")" = "caché courant" ]
+  [ "$(cat "${avant[0]}/journal/entree.txt")" = "journal courant" ]
+  [ "$(nombre_d_entrees "${avant[0]}")" -eq 3 ]
+  [ "$(find "$DONNEES" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort | tr '\n' ' ')" = ".cachee donnees.txt " ]
+  aucun_temporaire
+}
+
+# I3 : l'ancien contenu ne revient qu'en partie. Il est réparti entre les données et
+# avant-restauration-*/, et rien de l'instantané ne reste dans les données : la consigne dit de ne
+# rien supprimer et de remettre ce qui manque.
+@test "restaurer_intervention_si_l_ancien_contenu_revient_en_partie" {
+  instantane "$SNAPSHOT" 1
+  donnees_courantes
+  # sous/ n'entre pas, puis journal/ ne revient pas
+  double_mv_en_echec '*/donnees.nouvelle/sous' '*/avant-restauration-*/journal'
+  restaurer prod "$SAUVEGARDES/quotidiennes/$SNAPSHOT" --oui
+  [ "$status" -eq 1 ]
+  local avant=("$SAUVEGARDES"/avant-restauration-*)
+  [[ "$output" == *"intervention nécessaire : l'ancien contenu n'est pas entièrement revenu"*"${avant[0]}"*"Ne rien supprimer"* ]]
+  aucune_ligne '[Vv]ider' <(printf '%s\n' "$output")
+  [ -z "$(appels_de docker | grep ' start app' || true)" ]
+  [ ! -f "$EN_SERVICE" ]
+  # réparti : une part dans les données, le reste de côté, rien de l'instantané
+  [ "$(find "$DONNEES" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort | tr '\n' ' ')" = ".courant courant.txt " ]
+  [ "$(cat "$DONNEES/courant.txt")" = "contenu courant" ]
+  [ "$(ls -A "${avant[0]}")" = journal ]
+  [ "$(cat "${avant[0]}/journal/entree.txt")" = "journal courant" ]
   aucun_temporaire
 }
 

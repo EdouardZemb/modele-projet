@@ -21,9 +21,11 @@
 #   2. l'image est la première colonne de ${{ prefixe }}ETAT/deploye : sans version déployée, on
 #      déploie d'abord (deployer.sh), puis on restaure ;
 #   3. l'instantané, dans un dossier temporaire 0700, détruit (shred) à la sortie :
-#      - un dossier y est copié ;
+#      - un dossier y est copié ; un dossier .partiel (une sauvegarde en cours ou en échec) est
+#        refusé (code 64) ;
 #      - une archive .tar.age exige --cle (l'identité hors ligne, apportée pour l'occasion et jamais
-#        gardée sur le serveur : voir /dev/stdin ci-dessus, lue une seule fois). L'archive vient
+#        gardée sur le serveur : voir /dev/stdin ci-dessus, lue une seule fois). La clé elle-même,
+#        collée à la place d'un chemin, est refusée sans être répétée (code 64). L'archive vient
 #        d'un distant et la clé publique n'est pas secrète : n'importe qui peut fabriquer une
 #        archive qui se déchiffre. Ses membres sont donc contrôlés avant toute extraction : un seul
 #        dossier, {{ nom }}-<horodatage>/, et rien à côté ; ni chemin absolu, ni « .. », ni lien, rien
@@ -48,12 +50,17 @@
 #
 # Si quelque chose échoue entre l'arrêt et la fin de la mise en place, un trap retire ce qui était
 # entré de l'instantané, remet l'ancien contenu en place (s'il avait été déplacé) et relance
-# l'application : la restauration n'a pas eu lieu. Si l'ancien contenu ne peut pas être remis en
-# place, l'application reste arrêtée (relancée, elle démarrerait sur des données vides ou
-# incomplètes, sous une santé que la sonde jugerait verte) et le message dit où il est :
-# intervention nécessaire, code 1. Si c'est le redémarrage ou la santé qui échoue après la mise en
-# place, l'instantané reste en place (rien n'est défait en douce) ; l'ancien contenu est dans
-# avant-restauration-*/ (s'il y en avait un), et le message dit où.
+# l'application : la restauration n'a pas eu lieu. Si le trap n'y arrive pas, l'application reste
+# arrêtée (relancée, elle démarrerait sur des données vides ou incomplètes, sous une santé que la
+# sonde jugerait verte), code 1, et le message dit où est chaque chose, sans jamais faire supprimer
+# l'ancien contenu :
+#   - si l'instantané n'a pas pu ressortir des données, l'ancien contenu est entier dans
+#     avant-restauration-*/, et ce qui reste dans les données n'est que des copies de l'instantané ;
+#   - si l'ancien contenu n'a pu revenir qu'en partie, il est réparti entre les données et
+#     avant-restauration-*/, et rien n'est à supprimer.
+# Si c'est le redémarrage ou la santé qui échoue après la mise en place, l'instantané reste en place
+# (rien n'est défait en douce) ; l'ancien contenu est dans avant-restauration-*/ (s'il y en avait
+# un), et le message dit où.
 #
 # Les dossiers avant-restauration-* sont des copies en clair des données : sauvegarder.sh les efface
 # après 30 jours, comme les autres copies locales.
@@ -78,6 +85,7 @@ ANCIEN=0 # 1 si les données courantes avaient un contenu, déplacé dans $AVANT
 PHASE=rien # rien, arretee, deplacee (l'ancien contenu sort, puis l'instantané entre), installee, demarree
 INSTALLATION=0 # 1 dès que le contenu de l'instantané a commencé d'entrer dans les données
 NOUVELLE=""
+ECHEC_RETABLIR="" # ce que retablir n'a pas pu faire : instantane (le ressortir) ou ancien (le remettre)
 
 USAGE="usage : restaurer.sh prod <dossier|archive .tar.age> [--oui] [--cle <identité age>]
 exemple, la clé hors ligne sur l'entrée standard (jamais écrite sur le disque du serveur) :
@@ -129,15 +137,18 @@ deplacer_contenu() {
 # retablir : la restauration a échoué après l'arrêt de l'application, l'ancien contenu sorti des
 # données ou en train de l'être. Ce qui était entré de l'instantané repart dans la copie de travail
 # (les données ne contenaient alors rien d'autre), puis l'ancien contenu revient. Succès si tout est
-# revenu, ou s'il n'y avait rien à remettre ; échec dès qu'une entrée n'est pas revenue.
+# revenu, ou s'il n'y avait rien à remettre ; échec dès qu'une entrée n'est pas revenue, ECHEC_RETABLIR
+# disant laquelle des deux étapes n'a pas abouti.
 # shellcheck disable=SC2317,SC2329  # appelée par sortie, elle-même sous trap
 retablir() {
   if [ "$INSTALLATION" -eq 1 ] && ! deplacer_contenu "${{ prefixe }}DONNEES" "$NOUVELLE"; then
     journal "instantané : son contenu n'a pas pu être retiré de ${{ prefixe }}DONNEES"
+    ECHEC_RETABLIR=instantane
     return 1
   fi
   if ! deplacer_contenu "$AVANT" "${{ prefixe }}DONNEES"; then
     journal "ancien contenu : non remis en place depuis $AVANT"
+    ECHEC_RETABLIR=ancien
     return 1
   fi
   if [ "$ANCIEN" -eq 1 ]; then
@@ -175,7 +186,15 @@ sortie() {
   if [ "$code" -ne 0 ]; then
     if [ "$PHASE" = deplacee ] && ! retablir; then
       relancer=0
-      journal "intervention nécessaire : le contenu d'avant est dans $AVANT. L'application reste arrêtée (relancée, elle démarrerait sur des données vides ou incomplètes). Vider ${{ prefixe }}DONNEES, y remettre le contenu de $AVANT, puis lancer docker compose start app"
+      # Jamais « vider » : l'ancien contenu peut être en partie revenu dans les données.
+      case "$ECHEC_RETABLIR" in
+        instantane)
+          journal "intervention nécessaire : l'ancien contenu est entier dans $AVANT, mais des entrées de l'instantané sont restées dans ${{ prefixe }}DONNEES : ce sont des copies, la source ($SOURCE) est intacte. L'application reste arrêtée (relancée, elle démarrerait sur un instantané incomplet). Déplacer ces entrées de l'instantané hors de ${{ prefixe }}DONNEES, y remettre tout le contenu de $AVANT, puis lancer docker compose start app"
+          ;;
+        *)
+          journal "intervention nécessaire : l'ancien contenu n'est pas entièrement revenu : il est dans $AVANT et, pour ce qui est déjà revenu, dans ${{ prefixe }}DONNEES, qui ne contient rien de l'instantané. Ne rien supprimer. L'application reste arrêtée (relancée, elle démarrerait sur des données incomplètes). Déplacer dans ${{ prefixe }}DONNEES ce qui reste dans $AVANT, puis lancer docker compose start app"
+          ;;
+      esac
     fi
     if [ "$relancer" -eq 1 ]; then
       case "$PHASE" in
@@ -299,6 +318,10 @@ main() {
         ;;
       --cle)
         [ "$#" -ge 2 ] || arreter 64 "--cle demande un fichier (l'identité age). $USAGE"
+        # Une clé collée à la place d'un chemin n'est jamais répétée, ni ici, ni dans le plan.
+        case "$2" in
+          AGE-SECRET-KEY-*) arreter 64 "--cle attend un chemin vers un fichier d'identité, pas la clé elle-même : rien n'a changé (par exemple --cle /dev/stdin, la clé sur l'entrée standard)" ;;
+        esac
         CLE="$2"
         shift 2
         ;;
@@ -313,6 +336,9 @@ main() {
   [ -n "$SOURCE" ] || arreter 64 "$USAGE"
   if [ -d "$SOURCE" ]; then
     FORME=dossier
+    case "${SOURCE%/}" in
+      *.partiel) arreter 64 "$SOURCE est un instantané partiel (.partiel : une sauvegarde en cours ou en échec), qui ne se restaure pas" ;;
+    esac
   elif [[ "$SOURCE" == *.tar.age ]]; then
     FORME=archive
     [ -f "$SOURCE" ] || arreter 64 "archive introuvable : $SOURCE"

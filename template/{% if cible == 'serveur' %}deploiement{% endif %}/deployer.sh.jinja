@@ -15,7 +15,9 @@
 #      plus), sauf si {{ prefixe }}VERROU_TENU=1 ;
 #   2. si l'application tourne, instantané de ses données dans le dossier
 #      /sauvegardes/pre-deploiement/<AAAAMMJJTHHMMSSZ>, qui a la forme de /donnees, par la commande
-#      SAUVEGARDER de deploiement/projet.env ; si elle ne rend pas 0, on s'arrête là ;
+#      SAUVEGARDER de deploiement/projet.env ; elle l'écrit sous un nom provisoire,
+#      <AAAAMMJJTHHMMSSZ>.partiel, que le dossier ne quitte qu'après le code 0 ; si elle ne rend pas
+#      0, on s'arrête là, et le dossier garde ce nom, pour le diagnostic ;
 {%- else %}
 #   1. verrou ${{ prefixe }}ETAT/verrou, partagé avec la sonde (600 s d'attente au plus), sauf si
 #      {{ prefixe }}VERROU_TENU=1 ;
@@ -139,14 +141,26 @@ sante_conforme() {
 
 # instantane : copie des données en service, dans un dossier qui a la forme de /donnees, par la
 # commande SAUVEGARDER de deploiement/projet.env (lu, jamais sourcé), lancée dans le conteneur en
-# service. Seul son code de sortie fait foi : sa sortie n'est que journalisée.
+# service. Seul son code de sortie fait foi : sa sortie n'est que journalisée. La commande écrit sous
+# un nom provisoire, <horodatage>.partiel, renommé après le code 0 : un instantané en échec garde ce
+# nom, et rien ne le prend pour un instantané complet. Une destination déjà présente est un échec.
 instantane() {
-  local destination sortie code=0
+  local horodatage destination hote sortie code=0
   lire_projet_env SAUVEGARDER || return 1
-  destination="/sauvegardes/pre-deploiement/$(date -u +%Y%m%dT%H%M%SZ)"
-  sortie="$(dc exec -T app "${PROJET_MOTS[@]}" "$destination")" || code=$?
+  horodatage="$(date -u +%Y%m%dT%H%M%SZ)"
+  destination="/sauvegardes/pre-deploiement/$horodatage"
+  hote="${{ prefixe }}SAUVEGARDES/pre-deploiement/$horodatage"
+  if [ -e "$hote" ] || [ -L "$hote" ] || [ -e "$hote.partiel" ] || [ -L "$hote.partiel" ]; then
+    journal "instantané impossible : $hote existe déjà (ou $hote.partiel), rien n'est écrasé"
+    return 1
+  fi
+  sortie="$(dc exec -T app "${PROJET_MOTS[@]}" "$destination.partiel")" || code=$?
   if [ "$code" -ne 0 ]; then
     journal "instantané impossible (code $code) : ${sortie//$'\n'/ }"
+    return 1
+  fi
+  if ! { [ -d "$hote.partiel" ] && [ ! -L "$hote.partiel" ] && mv -T -- "$hote.partiel" "$hote"; }; then
+    journal "instantané impossible : la commande a rendu 0, mais $hote.partiel ne peut pas prendre le nom $hote"
     return 1
   fi
   journal "instantané : $destination"

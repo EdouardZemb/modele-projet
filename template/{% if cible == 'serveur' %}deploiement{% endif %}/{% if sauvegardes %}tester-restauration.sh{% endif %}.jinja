@@ -18,8 +18,8 @@
 #      elle, échec (rien à tester) ;
 #   3. source : le dernier dossier quotidiennes/{{ nom }}-<AAAAMMJJTHHMMSSZ> (l'ordre des noms est celui
 #      du temps ; ni un fichier, ni un lien, ni un autre nom), copié dans un dossier temporaire
-#      0700. Une sauvegarde qui s'écrirait au même moment serait copiée telle quelle : les heures
-#      des deux minuteries les séparent, et sa vérification, à l'étape suivante, le dirait ;
+#      0700. Une sauvegarde en cours d'écriture, ou en échec, porte encore le suffixe .partiel
+#      (sauvegarder.sh ne la renomme qu'une fois contrôlée) : elle n'est jamais prise ;
 #   4. contrôle : `docker run --rm … -v <copie>:/donnees <image> <VERIFIER…> /donnees`, la commande
 #      VERIFIER de deploiement/projet.env, doit rendre 0 (conforme ; 2 = non conforme) ;
 #   5. `docker run -d --name {{ nom }}-test-restauration -p 127.0.0.1:{{ bloc_ports + 9 }}:{{ port_app }} -v <copie>:/donnees` :
@@ -83,7 +83,7 @@ sortie() {
 
 # dernier_instantane : le chemin du dernier dossier quotidiennes/{{ nom }}-<horodatage> (les noms
 # portent l'horodatage UTC : l'ordre alphabétique est l'ordre du temps). Ni un fichier, ni un lien,
-# ni un nom d'une autre forme.
+# ni un nom d'une autre forme, dont un instantané .partiel, en cours d'écriture ou en échec.
 dernier_instantane() {
   local dossier="${{ prefixe }}SAUVEGARDES/quotidiennes" chemin retenu=""
   local motif='^{{ nom }}-[0-9]{8}T[0-9]{6}Z$'

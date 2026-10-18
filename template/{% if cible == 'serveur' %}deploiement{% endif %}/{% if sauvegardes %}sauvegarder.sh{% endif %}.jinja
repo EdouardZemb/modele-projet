@@ -16,26 +16,33 @@
 #      de suite ;
 #   1. verrou ${{ prefixe }}ETAT/verrou, partagé avec la sonde, le déploiement et la restauration (600 s
 #      d'attente au plus) : pendant un déploiement ou une restauration, les données bougent ;
-#   2. nom {{ nom }}-<AAAAMMJJTHHMMSSZ> (UTC) ;
-#   3. instantané dans le conteneur : `<SAUVEGARDER…> /sauvegardes/quotidiennes/<nom>`, qui crée ce
-#      dossier, à la forme de /donnees (le contrat de l'image, M-0003). Le code de sortie d'abord
-#      (0, sinon échec), puis le dossier lui-même : un dossier, non vide, fait de fichiers et de
-#      dossiers seulement (restaurer.sh refuse tout le reste) ; jamais le seul code 0. La sortie de
-#      la commande n'est pas interprétée : elle va au journal. Le verrou est relâché dès que
-#      l'instantané est contrôlé : la suite (chiffrement, envoi, rétention) ne lit plus les
-#      données, et un déploiement ou la sonde n'ont pas à attendre les quotas et les reprises du
-#      distant ;
-#   4. archive tar du dossier (`tar -C quotidiennes -cf - <nom>` : tous ses membres sont sous
-#      <nom>/), chiffrée par `age -R deploiement/cles/hors-ligne.pub`, dans un dossier temporaire
+#   2. nom {{ nom }}-<AAAAMMJJTHHMMSSZ> (UTC) ; un dossier déjà présent à ce nom, ou à ce nom suivi
+#      de .partiel, est une erreur : rien n'est écrasé ;
+#   3. instantané dans le conteneur : `<SAUVEGARDER…> /sauvegardes/quotidiennes/<nom>.partiel`, qui
+#      crée ce dossier, à la forme de /donnees (le contrat de l'image, M-0003). Le code de sortie
+#      d'abord (0, sinon échec), puis le dossier lui-même : un dossier, non vide, fait de fichiers et
+#      de dossiers seulement (restaurer.sh refuse tout le reste) ; jamais le seul code 0. La sortie
+#      de la commande n'est pas interprétée : elle va au journal. Contrôlé, le dossier prend son nom,
+#      <nom> (`mv -T`). Une sauvegarde en échec garde le suffixe .partiel, pour le diagnostic : le
+#      test de restauration et la restauration ne le prennent jamais, et la rétention l'efface comme
+#      les autres. Le verrou est relâché dès que l'instantané est en place : la suite (chiffrement,
+#      envoi, rétention) ne lit plus les données, et un déploiement ou la sonde n'ont pas à attendre
+#      les quotas et les reprises du distant ;
+#   4. archive tar du dossier (`tar --hard-dereference -C quotidiennes -cf - <nom>` : tous ses
+#      membres sont sous <nom>/, et un lien physique y est un fichier ordinaire, que restaurer.sh
+#      accepte), chiffrée par `age -R deploiement/cles/hors-ligne.pub`, dans un dossier temporaire
 #      0700 ; l'en-tête age est contrôlé. La clé privée n'est pas sur le serveur : personne ici ne
 #      peut relire cette archive ;
 #   5. `rclone copy` vers ${ {{- prefixe }}DISTANT:-sauvegardes:{{ nom }}-sauvegardes}, puis `rclone lsf` :
 #      l'archive doit y figurer. sauvegardes: est l'alias que le serveur fait pointer vers son
 #      remote ;
 #   6. rétention, seulement après un envoi contrôlé :
-#      - en local, les dossiers de plus de 30 jours dans quotidiennes/ ({{ nom }}-*) et
-#        pre-deploiement/ (<horodatage> : le nom que deployer.sh leur donne), et les dossiers
-#        avant-restauration-* de restaurer.sh, copies en clair des données elles aussi ;
+#      - en local, les dossiers de plus de 30 jours dans quotidiennes/ ({{ nom }}-<horodatage>) et
+#        pre-deploiement/ (<horodatage> : le nom que deployer.sh leur donne), .partiel compris, et
+#        les dossiers avant-restauration-<horodatage> de restaurer.sh, copies en clair des données
+#        elles aussi. L'âge se lit dans le nom, jamais dans la date du dossier : une commande
+#        SAUVEGARDER qui copie /donnees avec ses dates (cp -a, rsync -a) daterait l'instantané du
+#        jour comme ses données. Un nom d'une autre forme n'est jamais retiré ;
 #      - à distance, `rclone delete --min-age 90d --max-depth 1 --drive-use-trash=false --include
 #        '{{ nom }}-*.tar.age'` : seules nos archives de plus de 90 jours, directement dans le dossier
 #        de la destination (rclone delete est récursif : sans --max-depth 1, un sous-dossier serait
@@ -105,20 +112,31 @@ valider_distant() {
     || echouer "destination distante refusée : '$1' (attendu : <remote>:<dossier>[/<sous-dossier>…], jamais la racine du remote)"
 }
 
-# retention_locale : plus de 30 jours, rien que des dossiers que ce script, deployer.sh ou
-# restaurer.sh écrivent, emportés en entier.
+# purger_par_nom <dossier> <regex> <limite> : retire, emportés en entier, les dossiers de <dossier>
+# dont le nom suit <regex> et dont l'horodatage, le premier groupe de la regex (AAAAMMJJTHHMMSSZ),
+# est antérieur à <limite>, de la même forme : l'ordre lexical est celui du temps. Ni un fichier,
+# ni un lien, ni un nom d'une autre forme. La date du dossier n'est jamais lue.
+purger_par_nom() {
+  local dossier="$1" motif="$2" limite="$3" chemin
+  [ -d "$dossier" ] || return 0
+  for chemin in "$dossier"/*; do
+    { [ -d "$chemin" ] && [ ! -L "$chemin" ]; } || continue
+    [[ "${chemin##*/}" =~ $motif ]] || continue
+    [[ "${BASH_REMATCH[1]}" < "$limite" ]] || continue
+    rm -rf -- "$chemin" || return 1
+  done
+}
+
+# retention_locale : plus de 30 jours d'après leur nom, rien que des dossiers que ce script,
+# deployer.sh ou restaurer.sh écrivent, emportés en entier.
 retention_locale() {
-  local quotidiennes="${{ prefixe }}SAUVEGARDES/quotidiennes" pre="${{ prefixe }}SAUVEGARDES/pre-deploiement"
-  if [ -d "$quotidiennes" ]; then
-    find "$quotidiennes" -mindepth 1 -maxdepth 1 -type d -name '{{ nom }}-*' -mtime +30 \
-      -exec rm -rf -- {} + || return 1
-  fi
-  if [ -d "$pre" ]; then
-    find "$pre" -mindepth 1 -maxdepth 1 -type d -name '[0-9]*T[0-9]*Z' -mtime +30 \
-      -exec rm -rf -- {} + || return 1
-  fi
-  find "${{ prefixe }}SAUVEGARDES" -mindepth 1 -maxdepth 1 -type d -name 'avant-restauration-*' -mtime +30 \
-    -exec rm -rf -- {} + || return 1
+  local limite
+  limite="$(date -u -d '30 days ago' +%Y%m%dT%H%M%SZ)" || return 1
+  purger_par_nom "${{ prefixe }}SAUVEGARDES/quotidiennes" '^{{ nom }}-([0-9]{8}T[0-9]{6}Z)(\.partiel)?$' "$limite" \
+    || return 1
+  purger_par_nom "${{ prefixe }}SAUVEGARDES/pre-deploiement" '^([0-9]{8}T[0-9]{6}Z)(\.partiel)?$' "$limite" \
+    || return 1
+  purger_par_nom "${{ prefixe }}SAUVEGARDES" '^avant-restauration-([0-9]{8}T[0-9]{6}Z)$' "$limite"
 }
 
 main() {
@@ -139,7 +157,7 @@ main() {
   local etat="${{ prefixe }}ETAT" quotidiennes="${{ prefixe }}SAUVEGARDES/quotidiennes"
   local distant="${ {{- prefixe }}DISTANT:-sauvegardes:{{ nom }}-sauvegardes}"
   local cle="${{ prefixe }}CLONE/deploiement/cles/hors-ligne.pub"
-  local nom destination instantane sortie code=0 nombre fichiers archive presents
+  local nom destination instantane partiel sortie code=0 nombre fichiers archive presents
 
   # 0. Contrôles qui précèdent tout effet.
   valider_distant "$distant"
@@ -158,27 +176,35 @@ main() {
     || echouer "verrou $etat/verrou toujours pris après ${ {{- prefixe }}VERROU_ATTENTE:-600} s : sauvegarde abandonnée, rien n'a changé"
 
   # 2. Nom. Les copies en clair ne sont lisibles que de leur propriétaire (M-0005) ; le conteneur
-  # crée l'instantané dans quotidiennes/, sous le même uid.
+  # crée l'instantané dans quotidiennes/, sous le même uid. La commande écrit sous un nom
+  # provisoire, que l'instantané ne quitte qu'une fois contrôlé.
   nom="{{ nom }}-$(date -u +%Y%m%dT%H%M%SZ)"
-  destination="/sauvegardes/quotidiennes/$nom"
   instantane="$quotidiennes/$nom"
+  partiel="$instantane.partiel"
+  destination="/sauvegardes/quotidiennes/$nom.partiel"
   mkdir -p "$quotidiennes"
   chmod 700 "${{ prefixe }}SAUVEGARDES" "$quotidiennes" \
     || echouer "droits de ${{ prefixe }}SAUVEGARDES impossibles à restreindre"
+  if [ -e "$instantane" ] || [ -L "$instantane" ] || [ -e "$partiel" ] || [ -L "$partiel" ]; then
+    echouer "$instantane existe déjà (ou $partiel) : rien n'est écrasé, rien n'est sauvegardé"
+  fi
   journal "sauvegarde $nom"
 
   # 3. Instantané. Le code de sortie d'abord (une commande écrit aussi ses erreurs sur stdout), puis
-  # le dossier. La sortie ne va qu'au journal : elle peut décrire les données.
+  # le dossier. La sortie ne va qu'au journal : elle peut décrire les données. Un échec garde le nom
+  # provisoire.
   sortie="$(dc exec -T app "${PROJET_MOTS[@]}" "$destination")" || code=$?
   sortie="${sortie//$'\n'/ }"
   [ "$code" -eq 0 ] \
     || echouer_avec_detail "instantané impossible (code $code)" "$sortie"
-  { [ -d "$instantane" ] && [ ! -L "$instantane" ]; } \
-    || echouer_avec_detail "instantané absent du disque : $instantane (la commande a rendu 0 sans écrire le dossier)" "$sortie"
-  [ -n "$(find "$instantane" -mindepth 1 -print -quit)" ] \
-    || echouer_avec_detail "instantané vide : $instantane (un dossier vide ne prouve rien)" "$sortie"
-  [ -z "$(find "$instantane" -mindepth 1 ! -type f ! -type d -print -quit)" ] \
-    || echouer_avec_detail "instantané refusé : $instantane contient des entrées qui ne sont ni des fichiers ni des dossiers (liens…), que restaurer.sh refuserait" "$sortie"
+  { [ -d "$partiel" ] && [ ! -L "$partiel" ]; } \
+    || echouer_avec_detail "instantané absent du disque : $partiel (la commande a rendu 0 sans écrire le dossier)" "$sortie"
+  [ -n "$(find "$partiel" -mindepth 1 -print -quit)" ] \
+    || echouer_avec_detail "instantané vide : $partiel (un dossier vide ne prouve rien)" "$sortie"
+  [ -z "$(find "$partiel" -mindepth 1 ! -type f ! -type d -print -quit)" ] \
+    || echouer_avec_detail "instantané refusé : $partiel contient des entrées qui ne sont ni des fichiers ni des dossiers (liens…), que restaurer.sh refuserait" "$sortie"
+  { [ ! -e "$instantane" ] && [ ! -L "$instantane" ] && mv -T -- "$partiel" "$instantane"; } \
+    || echouer "instantané contrôlé, mais $partiel ne peut pas prendre le nom $instantane"
   nombre="$(find "$instantane" -type f | wc -l)"
   fichiers="$nombre fichier"
   [ "$nombre" -le 1 ] || fichiers="${fichiers}s"
@@ -188,11 +214,12 @@ main() {
   # pour que ni un déploiement manuel ni la sonde n'attendent le distant.
   exec 9>&-
 
-  # 4. Archive chiffrée pour la clé hors ligne, dans un dossier que le trap détruit.
+  # 4. Archive chiffrée pour la clé hors ligne, dans un dossier que le trap détruit. Un lien
+  # physique y est un fichier ordinaire (--hard-dereference) : restaurer.sh refuse les liens.
   TMP="$(umask 077 && mktemp -d "${TMPDIR:-/tmp}/{{ nom }}-sauvegarde.XXXXXX")" \
     || echouer "dossier temporaire impossible dans ${TMPDIR:-/tmp}"
   archive="$TMP/$nom.tar.age"
-  tar -C "$quotidiennes" -cf - "$nom" | age -R "$cle" >"$archive" \
+  tar --hard-dereference -C "$quotidiennes" -cf - "$nom" | age -R "$cle" >"$archive" \
     || echouer "chiffrement impossible (tar | age -R $cle)"
   [ "$(head -c 21 "$archive")" = age-encryption.org/v1 ] \
     || echouer "l'archive $archive n'est pas un fichier age : rien n'est envoyé"
