@@ -1,0 +1,288 @@
+#!/usr/bin/env bash
+# Sonde d'un environnement d'{{ nom }}, lancée toutes les 5 minutes par {{ nom }}-sonde-<env>.timer.
+# Elle suit la cible de l'environnement, déploie toute nouvelle image par deployer.sh, et sinon
+# contrôle la version en service.
+#
+#   sonder.sh <prod|staging>
+#
+# Déroulé :
+{%- if sauvegardes %}
+#   1. verrou ${{ prefixe }}ETAT/verrou, sans attente. S'il est pris (déploiement manuel, sauvegarde,
+#      autre sonde) : « occupé », code 0 ;
+{%- else %}
+#   1. verrou ${{ prefixe }}ETAT/verrou, sans attente. S'il est pris (déploiement manuel, autre sonde) :
+#      « occupé », code 0 ;
+{%- endif %}
+#   2. clone propre (`git status --porcelain` vide), sinon alerte « clone modifié » ;
+#   3. cible, selon le canal de l'environnement ({{ prefixe }}CANAL, dans env/<env>.env) :
+#      - main (staging) : `git fetch origin main`, `git merge --ff-only origin/main` ; image :main,
+#        version main ;
+#      - etiquette (prod) : `git fetch --prune --prune-tags --tags origin` (une étiquette retirée
+#        de l'origine disparaît aussi du clone : `--tags` seul ne supprime jamais une étiquette
+#        locale, et la sonde viserait encore une version retirée) ; plus haute étiquette vX.Y.Z (tri
+#        -v:refname, les autres formes comme v1.0.0-rc1 sont ignorées) ; image :X.Y.Z, version
+#        X.Y.Z. Sans étiquette : « aucune version », signal ok ;
+#   4. `docker pull -q` de la cible. Sur le canal etiquette, une étiquette que le registre ne
+#      connaît pas (« manifest unknown », « manifest for <cible> not found », « <cible>: not
+#      found ») n'est pas encore publiée : on attend, sans signal. Tout autre échec alerte ;
+#   5. sa référence image@sha256:…, comparée à l'état :
+#      - en échec (`echec`, contrôlé en premier) : on attend une nouvelle image, sans signal, si
+#        l'état laissé par le retour arrière est cohérent (voir etat_apres_echec) ; sinon, alerte
+#        « retour arrière incomplet » à chaque passage, sans relance automatique : `deployer.sh` à
+#        la main. C'est l'état d'un retour arrière manuel (`deployer.sh <env> --retour`), qui
+#        écrit la version quittée dans `echec` et la garde : la sonde ne la redéploie pas. Si ce
+#        retour a échoué, la version quittée est à la fois déployée et en échec : même attente
+#        silencieuse (pas de signal ok), ou même alerte si elle ne répond pas non plus ;
+#      - déjà déployée (premier champ de `deploye`) : en prod, contrôle de dérive des unités ;
+#        puis l'adresse publique doit répondre HTTP 200 (une redirection est un échec), avec un
+#        corps statut ok pour cet environnement ; signal ok ;
+#      - sinon : le clone passe sur l'étiquette (canal etiquette) et, en prod, les unités sont
+#        réinstallées ; puis deployer.sh (qui envoie ses propres signaux), dont le code est renvoyé.
+#
+# Les unités systemd ne concernent que la prod : elles sont toutes rendues depuis son clone (voir
+# installer-unites.sh). Le staging ne les installe ni ne les contrôle.
+#
+# Pas de signal quand le verrou est pris, quand l'image de prod n'est pas encore publiée ou quand
+# la version est en échec et que son retour arrière a abouti : si cela dure, c'est l'absence de
+# signal ok qui alerte.
+#
+# Codes de sortie : 0 ; 1 anomalie (signalée) ; 3 secrets absents ; 64 usage ; sinon, celui de
+# deployer.sh. Tout code non nul déclenche aussi l'alerte de l'unité (OnFailure=).
+set -euo pipefail
+# shellcheck source=deploiement/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+
+DEPOT_IMAGE=ghcr.io/edouardzemb/{{ nom }}
+
+# signaler_sonde ok|echec <message> : le signal n'est qu'un plus (signaler journalise son échec) ;
+# le code de la sonde n'en dépend pas.
+signaler_sonde() {
+  signaler HC_SONDE "$@" || true
+}
+
+# anomalie <message> : journal et signal d'échec. L'appelant renvoie ensuite le code 1.
+anomalie() {
+  journal "anomalie : $1"
+  signaler_sonde echec "$1"
+}
+
+# etat_apres_echec <référence déployée> <version déployée> : vérifie que le dernier déploiement en
+# échec a bien laissé la place. deployer.sh écrit `echec` avant le retour arrière ; s'il est coupé
+# pendant ce retour, la version en échec peut tourner encore, sans que rien l'ait signalé.
+#   - Une version déployée : compose.env la décrit, et la santé locale annonce sa version et la
+#     révision de son image.
+#   - Aucune (premier déploiement en échec) : rien du projet ne doit tourner. Sans compose.env,
+#     aucun `up` n'a eu lieu ; avec, `dc ps -q app` doit être vide (un conteneur qui redémarre en
+#     boucle y figure). La santé locale ne suffirait pas : une version en échec répond souvent mal.
+# Succès si l'état est cohérent ; sinon, la raison sur stdout.
+etat_apres_echec() {
+  local deployee="$1" version_deployee="$2" etat="${{ prefixe }}ETAT" conteneurs revision reponse
+  if [ -z "$deployee" ]; then
+    [ -f "$etat/compose.env" ] || return 0
+    if ! conteneurs="$(dc ps -q app)"; then
+      echo "état de l'application illisible"
+      return 1
+    fi
+    if [ -n "$conteneurs" ]; then
+      echo "la version en échec tourne encore (aucune version déployée avant elle)"
+      return 1
+    fi
+    return 0
+  fi
+  if [ "$(valeur_de {{ prefixe }}IMAGE "$etat/compose.env")" != "$deployee" ]; then
+    echo "compose.env ne décrit pas la version déployée ($version_deployee)"
+    return 1
+  fi
+  if ! revision="$(revision_de "$deployee")"; then
+    echo "révision de la version déployée illisible"
+    return 1
+  fi
+  if ! reponse="$(sante_locale "$version_deployee" "$revision")"; then
+    journal "santé locale : ${reponse//$'\n'/ } (attendu : version $version_deployee, révision $revision)"
+    echo "la santé locale n'annonce pas la version déployée ($version_deployee)"
+    return 1
+  fi
+}
+
+# controler_adresse_publique <env> : l'adresse publique ({{ prefixe }}URL_PUBLIQUE, par le tunnel) doit
+# répondre HTTP 200, et son corps doit dire statut ok pour CET environnement. Le corps compte : des
+# routes du tunnel inversées (staging et prod) donneraient deux adresses « ok », et celle du staging
+# servirait les données réelles de la prod. Une redirection (Cloudflare Access…) n'est pas une santé,
+# et `curl -f` la laisse passer : le code HTTP est lu avec -w, sans suivre les redirections. En cas
+# d'échec : journal, signal d'échec, code 1.
+controler_adresse_publique() {
+  local nom_env="$1" sortie corps http code=0
+  sortie="$(curl -sS -m 10 -w '\n%{http_code}' "${{ prefixe }}URL_PUBLIQUE{{ chemin_sante }}")" || code=$?
+  if [ "$code" -ne 0 ]; then
+    anomalie "adresse publique injoignable"
+    return 1
+  fi
+  http="${sortie##*$'\n'}"
+  corps="${sortie%$'\n'*}"
+  if [ "$http" != 200 ]; then
+    journal "adresse publique : réponse HTTP $http au lieu de 200 (une redirection n'est pas une santé) : ${corps:0:300}"
+    anomalie "adresse publique : réponse HTTP $http au lieu de 200"
+    return 1
+  fi
+  # shellcheck disable=SC2016  # $env est une variable de jq (--arg)
+  if ! jq_vaut true "$corps" '.statut == "ok" and .environnement == $env' --arg env "$nom_env"; then
+    journal "adresse publique : corps inattendu (attendu : statut ok, environnement $nom_env) : ${corps:0:300}"
+    anomalie "adresse publique : réponse inattendue (attendu : statut ok, environnement $nom_env)"
+    return 1
+  fi
+}
+
+main() {
+  [ "$#" -eq 1 ] || arreter 64 "usage : sonder.sh <prod|staging>"
+  local nom_env="$1"
+  charger_env "$nom_env"
+  charger_secrets "$nom_env"
+  local etat="${{ prefixe }}ETAT" clone="${{ prefixe }}CLONE"
+  local modifications etiquettes etiquette="" ligne version cible sortie code=0 reference
+  local deployee="" version_deployee="" en_echec="" raison
+
+  # 1. Verrou, gardé jusqu'à la fin de la sonde (deployer.sh compris).
+  exec 9>"$etat/verrou"
+  if ! flock -n 9; then
+    journal "occupé : le verrou $etat/verrou est tenu (déploiement{% if sauvegardes %}, sauvegarde{% endif %} ou autre sonde)"
+    return 0
+  fi
+
+  # 2. Clone propre.
+  if ! modifications="$(git -C "$clone" status --porcelain)"; then
+    anomalie "git status impossible"
+    return 1
+  fi
+  if [ -n "$modifications" ]; then
+    journal "clone modifié ($clone) : ${modifications//$'\n'/ ; }"
+    anomalie "clone modifié"
+    return 1
+  fi
+
+  # 3. Cible. `9>&-` : un processus que git laisserait derrière lui (maître ssh persistant…) ne
+  # garde pas le verrou après la sonde.
+  case "${{ prefixe }}CANAL" in
+    main)
+      if ! git -C "$clone" fetch origin main 9>&-; then
+        anomalie "git fetch origin main impossible"
+        return 1
+      fi
+      if ! git -C "$clone" merge --ff-only origin/main; then
+        anomalie "git merge --ff-only origin/main impossible"
+        return 1
+      fi
+      version=main
+      ;;
+    etiquette)
+      if ! git -C "$clone" fetch --prune --prune-tags --tags origin 9>&-; then
+        anomalie "git fetch --prune --prune-tags --tags origin impossible"
+        return 1
+      fi
+      if ! etiquettes="$(git -C "$clone" tag --list --sort=-v:refname)"; then
+        anomalie "liste des étiquettes illisible"
+        return 1
+      fi
+      while IFS= read -r ligne; do
+        if [[ "$ligne" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          etiquette="$ligne"
+          break
+        fi
+      done <<<"$etiquettes"
+      if [ -z "$etiquette" ]; then
+        journal "aucune version : pas d'étiquette vX.Y.Z"
+        signaler_sonde ok "aucune version"
+        return 0
+      fi
+      version="${etiquette#v}"
+      ;;
+    *)
+      anomalie "canal inconnu : '${{ prefixe }}CANAL' (attendu : main ou etiquette)"
+      return 1
+      ;;
+  esac
+  cible="$DEPOT_IMAGE:$version"
+
+  # 4. Image. Seules les réponses du registre « cette étiquette n'existe pas » valent attente ; un
+  # « not found » quelconque (docker absent, assistant d'identifiants introuvable, dépôt inconnu)
+  # est une panne.
+  sortie="$(docker pull -q "$cible" 2>&1)" || code=$?
+  if [ "$code" -ne 0 ]; then
+    if [ "${{ prefixe }}CANAL" = etiquette ] && {
+      [[ "$sortie" == *"manifest unknown"* ]] \
+        || [[ "$sortie" == *"manifest for $cible not found"* ]] \
+        || [[ "$sortie" == *"$cible: not found"* ]]
+    }; then
+      journal "image pas encore publiée : $cible (${sortie//$'\n'/ })"
+      return 0
+    fi
+    journal "docker pull $cible : code $code : ${sortie//$'\n'/ }"
+    anomalie "docker pull $cible impossible"
+    return 1
+  fi
+
+  # 5. Référence et état.
+  if ! reference="$(docker image inspect -f '{% raw %}{{index .RepoDigests 0}}{% endraw %}' "$cible")" \
+    || [[ "$reference" != "$DEPOT_IMAGE@sha256:"* ]] \
+    || ! [[ "${reference#"$DEPOT_IMAGE@sha256:"}" =~ ^[0-9a-f]{64}$ ]]; then
+    journal "référence de $cible inattendue : '${reference:-}'"
+    anomalie "référence de $cible illisible"
+    return 1
+  fi
+  if [ -f "$etat/deploye" ]; then
+    { read -r deployee version_deployee _ || true; } <"$etat/deploye"
+  fi
+  if [ -f "$etat/echec" ]; then
+    { read -r en_echec _ || true; } <"$etat/echec"
+  fi
+
+  # La version en échec d'abord : `deployer.sh <env> --retour` qui n'a pas pu quitter la version en
+  # service la laisse à la fois déployée et en échec. Elle n'est pas « en service » : pas de signal
+  # ok, le silence tient l'incident ouvert.
+  if [ "$reference" = "$en_echec" ]; then
+{%- if sauvegardes %}
+    # Pas de relance automatique : elle reprendrait un instantané à chaque passage.
+{%- else %}
+    # Pas de relance automatique : elle referait un déploiement et son retour arrière à chaque passage.
+{%- endif %}
+    if ! raison="$(etat_apres_echec "$deployee" "$version_deployee")"; then
+      journal "version en échec ($version, $reference), mais le retour arrière n'a pas abouti : $raison. Relancer deployer.sh à la main"
+      anomalie "retour arrière incomplet : $raison"
+      return 1
+    fi
+    journal "version en échec, attente d'une nouvelle : $version ($reference)"
+    return 0
+  fi
+
+  if [ "$reference" = "$deployee" ]; then
+    if [ "$nom_env" = prod ] && ! bash "$clone/deploiement/installer-unites.sh" --verifier; then
+      anomalie "unités divergentes"
+      return 1
+    fi
+    if ! controler_adresse_publique "$nom_env"; then
+      return 1
+    fi
+    journal "$version en service : $reference"
+    signaler_sonde ok "$version en service"
+    return 0
+  fi
+
+  journal "nouvelle image pour $version : $reference (en service : ${deployee:-aucune})"
+  if [ -n "$etiquette" ] && ! git -C "$clone" checkout --quiet "$etiquette"; then
+    anomalie "git checkout $etiquette impossible"
+    return 1
+  fi
+  if [ "$nom_env" = prod ]; then
+    if ! bash "$clone/deploiement/installer-unites.sh"; then
+      anomalie "installation des unités impossible avant $version"
+      return 1
+    fi
+  fi
+  code=0
+  {{ prefixe }}VERROU_TENU=1 bash "$clone/deploiement/deployer.sh" "$nom_env" "$reference" "$version" \
+    || code=$?
+  return "$code"
+}
+
+# Tout le corps est dans main, appelée sur la dernière ligne : bash a lu tout le fichier avant
+# que `git merge` ou `git checkout` ne le remplace.
+main "$@"; exit $?

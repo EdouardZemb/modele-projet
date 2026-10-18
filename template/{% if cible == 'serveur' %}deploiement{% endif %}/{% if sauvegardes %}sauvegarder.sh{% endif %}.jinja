@@ -1,0 +1,252 @@
+{#- Gabarit Copier. `${ {{- prefixe }}X}` : l'espace et le tiret évitent `${{{`, que Jinja lit mal. -#}
+#!/usr/bin/env bash
+# Sauvegarde nocturne des données de prod : un instantané en clair gardé 30 jours sur le serveur, et
+# sa copie chiffrée pour la clé hors ligne, envoyée au distant et gardée 90 jours (M-0005).
+#
+#   sauvegarder.sh prod
+#
+# Lancé chaque nuit par {{ nom }}-sauvegarde.timer. Réservé à la prod : le staging n'a que des données
+# factices (code 64).
+#
+# Déroulé :
+#   0. contrôles qui précèdent tout effet : la destination distante est un dossier précis d'un
+#      remote (jamais sa racine), la clé publique hors ligne est là (et n'est pas une clé privée),
+#      l'application est déployée, la commande SAUVEGARDER est dans deploiement/projet.env. Sans
+#      clé, aucun instantané n'est fait : rien ne part jamais en clair, et l'absence se voit tout
+#      de suite ;
+#   1. verrou ${{ prefixe }}ETAT/verrou, partagé avec la sonde, le déploiement et la restauration (600 s
+#      d'attente au plus) : pendant un déploiement ou une restauration, les données bougent ;
+#   2. nom {{ nom }}-<AAAAMMJJTHHMMSSZ> (UTC) ; un dossier déjà présent à ce nom, ou à ce nom suivi
+#      de .partiel, est une erreur : rien n'est écrasé ;
+#   3. instantané dans le conteneur : `<SAUVEGARDER…> /sauvegardes/quotidiennes/<nom>.partiel`, qui
+#      crée ce dossier, à la forme de /donnees (le contrat de l'image, M-0003). Le code de sortie
+#      d'abord (0, sinon échec), puis le dossier lui-même : un dossier, non vide, fait de fichiers et
+#      de dossiers seulement (restaurer.sh refuse tout le reste) ; jamais le seul code 0. La sortie
+#      de la commande n'est pas interprétée : elle va au journal. Contrôlé, le dossier prend son nom,
+#      <nom> (`mv -T`). Une sauvegarde en échec garde le suffixe .partiel, pour le diagnostic : le
+#      test de restauration et la restauration ne le prennent jamais, et la rétention l'efface comme
+#      les autres. Le verrou est relâché dès que l'instantané est en place : la suite (chiffrement,
+#      envoi, rétention) ne lit plus les données, et un déploiement ou la sonde n'ont pas à attendre
+#      les quotas et les reprises du distant ;
+#   4. archive tar du dossier (`tar --hard-dereference -C quotidiennes -cf - <nom>` : tous ses
+#      membres sont sous <nom>/, et un lien physique y est un fichier ordinaire, que restaurer.sh
+#      accepte), chiffrée par `age -R deploiement/cles/hors-ligne.pub`, dans un dossier temporaire
+#      0700 ; l'en-tête age est contrôlé. La clé privée n'est pas sur le serveur : personne ici ne
+#      peut relire cette archive ;
+#   5. `rclone copy` vers ${ {{- prefixe }}DISTANT:-sauvegardes:{{ nom }}-sauvegardes}, puis `rclone lsf` :
+#      l'archive doit y figurer. sauvegardes: est l'alias que le serveur fait pointer vers son
+#      remote ;
+#   6. rétention, seulement après un envoi contrôlé :
+#      - en local, les dossiers de plus de 30 jours dans quotidiennes/ ({{ nom }}-<horodatage>) et
+#        pre-deploiement/ (<horodatage> : le nom que deployer.sh leur donne), .partiel compris, et
+#        les dossiers avant-restauration-<horodatage> de restaurer.sh, copies en clair des données
+#        elles aussi. L'âge se lit dans le nom, jamais dans la date du dossier : une commande
+#        SAUVEGARDER qui copie /donnees avec ses dates (cp -a, rsync -a) daterait l'instantané du
+#        jour comme ses données. Un nom d'une autre forme n'est jamais retiré ;
+#      - à distance, `rclone delete --min-age 90d --max-depth 1 --drive-use-trash=false --include
+#        '{{ nom }}-*.tar.age'` : seules nos archives de plus de 90 jours, directement dans le dossier
+#        de la destination (rclone delete est récursif : sans --max-depth 1, un sous-dossier serait
+#        vidé aussi). La suppression est définitive : la corbeille d'un Drive garderait ces archives
+#        30 jours de plus, au-delà des 90 jours promis (M-0005). Le distant peut servir à d'autres
+#        projets : une destination qui serait la racine du remote est refusée à l'étape 0 ;
+#   7. signal HC_SAUVEGARDE ok « <nom> : <N> fichiers ».
+#
+# Toute erreur, à partir du chargement des secrets, est signalée (HC_SAUVEGARDE /fail) par un trap
+# de sortie, qui détruit aussi le dossier temporaire, y compris sur INT, TERM et HUP. Healthchecks
+# est un tiers : la raison envoyée est un résumé (le code de la commande, la forme de l'instantané),
+# jamais la sortie de la commande, qui peut décrire les données ; la sortie va au journal. Le signal
+# d'une erreur n'efface rien : l'instantané local et l'archive envoyée restent. Si la rétention
+# échoue, la sauvegarde est faite mais le signal est un échec : il faut libérer de la place avant
+# qu'elle manque.
+#
+# Codes de sortie : 0 ; 1 échec (signalé) ; 3 secrets absents ; 64 usage ou environnement refusé ;
+# 129, 130, 143 interruption.
+#
+# Variables de test : {{ prefixe }}DISTANT (la destination), {{ prefixe }}VERROU_ATTENTE (secondes).
+set -euo pipefail
+# shellcheck source=deploiement/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+
+# Posées par main.
+ARME=0 # 1 dès que les secrets sont chargés : une sortie en erreur est alors signalée
+RAISON=""
+TMP=""
+
+# echouer <raison…> : journalise et quitte avec le code 1 ; le trap de sortie signale l'échec.
+echouer() {
+  RAISON="$*"
+  journal "échec : $RAISON"
+  exit 1
+}
+
+# echouer_avec_detail <résumé> <détail> : comme echouer, mais seul le résumé part chez Healthchecks
+# (un tiers) ; le détail (la sortie de la commande) reste dans le journal.
+echouer_avec_detail() {
+  RAISON="$1"
+  journal "échec : $1${2:+ : $2}"
+  exit 1
+}
+
+# sortie : trap EXIT. Détruit le dossier temporaire, et signale l'échec d'une sortie en erreur.
+# shellcheck disable=SC2317,SC2329  # appelée par trap EXIT
+sortie() {
+  local code=$?
+  trap - EXIT INT TERM HUP
+  [ -z "$TMP" ] || rm -rf -- "$TMP"
+  if [ "$code" -ne 0 ] && [ "$ARME" -eq 1 ]; then
+    [ -n "$RAISON" ] || RAISON="échec inattendu (code $code), voir le journal de l'unité"
+    journal "sauvegarde en échec (code $code) : $RAISON"
+    signaler HC_SAUVEGARDE echec "$RAISON" || true
+    # Une interruption garde son code (128 + signal) ; toute autre erreur vaut 1.
+    [ "$code" -ge 128 ] || code=1
+  fi
+  exit "$code"
+}
+
+# valider_distant <remote:dossier> : un dossier précis d'un remote, dans un alphabet sans `..` ni
+# espace. `rclone delete` vide ce qu'on lui donne : « sauvegardes: » viserait toute la racine du
+# remote, où d'autres projets ont leurs propres sauvegardes.
+valider_distant() {
+  local motif='^[A-Za-z0-9_][A-Za-z0-9_.-]*:[A-Za-z0-9_][A-Za-z0-9_.-]*(/[A-Za-z0-9_][A-Za-z0-9_.-]*)*$'
+  [[ "$1" =~ $motif ]] \
+    || echouer "destination distante refusée : '$1' (attendu : <remote>:<dossier>[/<sous-dossier>…], jamais la racine du remote)"
+}
+
+# purger_par_nom <dossier> <regex> <limite> : retire, emportés en entier, les dossiers de <dossier>
+# dont le nom suit <regex> et dont l'horodatage, le premier groupe de la regex (AAAAMMJJTHHMMSSZ),
+# est antérieur à <limite>, de la même forme : l'ordre lexical est celui du temps. Ni un fichier,
+# ni un lien, ni un nom d'une autre forme. La date du dossier n'est jamais lue.
+purger_par_nom() {
+  local dossier="$1" motif="$2" limite="$3" chemin
+  [ -d "$dossier" ] || return 0
+  for chemin in "$dossier"/*; do
+    { [ -d "$chemin" ] && [ ! -L "$chemin" ]; } || continue
+    [[ "${chemin##*/}" =~ $motif ]] || continue
+    [[ "${BASH_REMATCH[1]}" < "$limite" ]] || continue
+    rm -rf -- "$chemin" || return 1
+  done
+}
+
+# retention_locale : plus de 30 jours d'après leur nom, rien que des dossiers que ce script,
+# deployer.sh ou restaurer.sh écrivent, emportés en entier.
+retention_locale() {
+  local limite
+  limite="$(date -u -d '30 days ago' +%Y%m%dT%H%M%SZ)" || return 1
+  purger_par_nom "${{ prefixe }}SAUVEGARDES/quotidiennes" '^{{ nom }}-([0-9]{8}T[0-9]{6}Z)(\.partiel)?$' "$limite" \
+    || return 1
+  purger_par_nom "${{ prefixe }}SAUVEGARDES/pre-deploiement" '^([0-9]{8}T[0-9]{6}Z)(\.partiel)?$' "$limite" \
+    || return 1
+  purger_par_nom "${{ prefixe }}SAUVEGARDES" '^avant-restauration-([0-9]{8}T[0-9]{6}Z)$' "$limite"
+}
+
+main() {
+  [ "$#" -eq 1 ] || arreter 64 "usage : sauvegarder.sh prod"
+  reserver_a_prod "$1" sauvegarder.sh
+  # Les secrets de ce déploiement font seuls foi : rien d'hérité du shell.
+  unset HC_SAUVEGARDE
+  charger_env prod
+  charger_secrets prod
+
+  trap sortie EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  trap 'exit 129' HUP
+  ARME=1
+  refuser_image_heritee
+
+  local etat="${{ prefixe }}ETAT" quotidiennes="${{ prefixe }}SAUVEGARDES/quotidiennes"
+  local distant="${ {{- prefixe }}DISTANT:-sauvegardes:{{ nom }}-sauvegardes}"
+  local cle="${{ prefixe }}CLONE/deploiement/cles/hors-ligne.pub"
+  local nom destination instantane partiel sortie code=0 nombre fichiers archive presents
+
+  # 0. Contrôles qui précèdent tout effet.
+  valider_distant "$distant"
+  [ -s "$cle" ] \
+    || echouer "clé publique hors ligne absente ou vide : $cle. Rien n'est sauvegardé : une copie ne part jamais en clair"
+  if grep -q 'AGE-SECRET-KEY' "$cle"; then
+    echouer "$cle contient une clé privée : la clé privée hors ligne ne doit jamais être sur le serveur"
+  fi
+  [ -f "$etat/compose.env" ] \
+    || echouer "compose.env absent ($etat) : aucune version déployée, rien à sauvegarder"
+  lire_projet_env SAUVEGARDER \
+    || echouer "commande SAUVEGARDER introuvable dans deploiement/projet.env : rien n'est sauvegardé"
+
+  # 1. Verrou, gardé pendant l'instantané (relâché après l'étape 3).
+  prendre_verrou \
+    || echouer "verrou $etat/verrou toujours pris après ${ {{- prefixe }}VERROU_ATTENTE:-600} s : sauvegarde abandonnée, rien n'a changé"
+
+  # 2. Nom. Les copies en clair ne sont lisibles que de leur propriétaire (M-0005) ; le conteneur
+  # crée l'instantané dans quotidiennes/, sous le même uid. La commande écrit sous un nom
+  # provisoire, que l'instantané ne quitte qu'une fois contrôlé.
+  nom="{{ nom }}-$(date -u +%Y%m%dT%H%M%SZ)"
+  instantane="$quotidiennes/$nom"
+  partiel="$instantane.partiel"
+  destination="/sauvegardes/quotidiennes/$nom.partiel"
+  mkdir -p "$quotidiennes"
+  chmod 700 "${{ prefixe }}SAUVEGARDES" "$quotidiennes" \
+    || echouer "droits de ${{ prefixe }}SAUVEGARDES impossibles à restreindre"
+  if [ -e "$instantane" ] || [ -L "$instantane" ] || [ -e "$partiel" ] || [ -L "$partiel" ]; then
+    echouer "$instantane existe déjà (ou $partiel) : rien n'est écrasé, rien n'est sauvegardé"
+  fi
+  journal "sauvegarde $nom"
+
+  # 3. Instantané. Le code de sortie d'abord (une commande écrit aussi ses erreurs sur stdout), puis
+  # le dossier. La sortie ne va qu'au journal : elle peut décrire les données. Un échec garde le nom
+  # provisoire.
+  sortie="$(dc exec -T app "${PROJET_MOTS[@]}" "$destination")" || code=$?
+  sortie="${sortie//$'\n'/ }"
+  [ "$code" -eq 0 ] \
+    || echouer_avec_detail "instantané impossible (code $code)" "$sortie"
+  { [ -d "$partiel" ] && [ ! -L "$partiel" ]; } \
+    || echouer_avec_detail "instantané absent du disque : $partiel (la commande a rendu 0 sans écrire le dossier)" "$sortie"
+  [ -n "$(find "$partiel" -mindepth 1 -print -quit)" ] \
+    || echouer_avec_detail "instantané vide : $partiel (un dossier vide ne prouve rien)" "$sortie"
+  [ -z "$(find "$partiel" -mindepth 1 ! -type f ! -type d -print -quit)" ] \
+    || echouer_avec_detail "instantané refusé : $partiel contient des entrées qui ne sont ni des fichiers ni des dossiers (liens…), que restaurer.sh refuserait" "$sortie"
+  { [ ! -e "$instantane" ] && [ ! -L "$instantane" ] && mv -T -- "$partiel" "$instantane"; } \
+    || echouer "instantané contrôlé, mais $partiel ne peut pas prendre le nom $instantane"
+  nombre="$(find "$instantane" -type f | wc -l)"
+  fichiers="$nombre fichier"
+  [ "$nombre" -le 1 ] || fichiers="${fichiers}s"
+  journal "instantané : $instantane ($fichiers)${sortie:+ ; sortie : $sortie}"
+
+  # L'instantané est un dossier fermé : la suite ne lit plus les données. Le verrou est relâché ici,
+  # pour que ni un déploiement manuel ni la sonde n'attendent le distant.
+  exec 9>&-
+
+  # 4. Archive chiffrée pour la clé hors ligne, dans un dossier que le trap détruit. Un lien
+  # physique y est un fichier ordinaire (--hard-dereference) : restaurer.sh refuse les liens.
+  TMP="$(umask 077 && mktemp -d "${TMPDIR:-/tmp}/{{ nom }}-sauvegarde.XXXXXX")" \
+    || echouer "dossier temporaire impossible dans ${TMPDIR:-/tmp}"
+  archive="$TMP/$nom.tar.age"
+  tar --hard-dereference -C "$quotidiennes" -cf - "$nom" | age -R "$cle" >"$archive" \
+    || echouer "chiffrement impossible (tar | age -R $cle)"
+  [ "$(head -c 21 "$archive")" = age-encryption.org/v1 ] \
+    || echouer "l'archive $archive n'est pas un fichier age : rien n'est envoyé"
+
+  # 5. Envoi, puis contrôle de présence.
+  rclone copy "$archive" "$distant" \
+    || echouer "envoi vers $distant impossible (rclone copy : code $?)"
+  presents="$(rclone lsf --files-only "$distant")" \
+    || echouer "contrôle de l'envoi vers $distant impossible (rclone lsf : code $?)"
+  case $'\n'"$presents"$'\n' in
+    *$'\n'"$nom.tar.age"$'\n'*) ;;
+    *) echouer "archive $nom.tar.age absente de $distant après l'envoi" ;;
+  esac
+  journal "envoyé : $nom.tar.age vers $distant"
+
+  # 6. Rétention, après un envoi contrôlé.
+  retention_locale \
+    || echouer "sauvegarde $nom faite et envoyée, mais rétention locale en échec : de la place peut manquer"
+  rclone delete --min-age 90d --max-depth 1 --drive-use-trash=false --include '{{ nom }}-*.tar.age' "$distant" \
+    || echouer "sauvegarde $nom faite et envoyée, mais rétention distante en échec (rclone delete : code $?)"
+
+  # 7. Signal.
+  journal "sauvegarde terminée : $nom ($fichiers)"
+  signaler HC_SAUVEGARDE ok "$nom : $fichiers" || true
+  return 0
+}
+
+# Tout le corps est dans main, appelée sur la dernière ligne : bash a lu tout le fichier avant
+# qu'un `git checkout` ne le remplace.
+main "$@"; exit $?

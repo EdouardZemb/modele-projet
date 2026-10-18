@@ -1,0 +1,923 @@
+#!/usr/bin/env bats
+{%- if sauvegardes %}
+# deployer.sh : verrou, instantané, compose.env, lancement, santé, état, retour arrière.
+{%- else %}
+# deployer.sh : verrou, compose.env, lancement, santé, état, retour arrière.
+{%- endif %}
+#
+# docker et curl sont des doubles (tests/deploiement/doubles/) : l'« application en service » est
+# le fichier en-service.env, que `compose up` remplit à partir du compose.env reçu et que le double
+# de curl lit pour répondre à {{ chemin_sante }}. Les tests tournent surtout en prod, où les versions
+# (0.1.0, 0.2.0) se distinguent dans les messages.
+
+# Chaque test tourne dans son propre processus : les `export DOUBLE_*` d'un test ne fuient pas
+# dans les autres, comme le veut le pilotage des doubles.
+# shellcheck disable=SC2030,SC2031
+
+bats_require_minimum_version 1.5.0
+
+load aide
+
+setup() {
+  preparer_environnement
+  installer_doubles docker curl
+  export {{ prefixe }}SANTE_DELAI=0
+  ETAT="${{ prefixe }}RACINE_ETAT/prod"
+  EN_SERVICE="$BATS_TEST_TMPDIR/en-service.env"
+  ANCIENNE="ghcr.io/edouardzemb/{{ nom }}@sha256:$(printf '1%.0s' {1..64})"
+  NOUVELLE="ghcr.io/edouardzemb/{{ nom }}@sha256:$(printf '2%.0s' {1..64})"
+  HC=https://hc.example/ping/sonde-prod
+  preparer_secrets_de_test prod JETON=jeton-prod-7 "HC_SONDE=$HC"
+{%- if sauvegardes %}
+  # Les commandes de l'image sont celles du test, en plusieurs mots, et non celles que le projet
+  # déclare pour la sienne dans deploiement/projet.env.
+  printf '%s\n' 'SAUVEGARDER=outil sauvegarder --forme dossier' 'VERIFIER=outil verifier' \
+    >"$CLONE/deploiement/projet.env"
+{%- endif %}
+}
+
+deployer() {
+  run bash "$CLONE/deploiement/deployer.sh" "$@"
+}
+
+# deja_en_service <image> <version> : l'état laissé par un déploiement réussi de cette version, en
+# prod (en_service, aide.bash).
+deja_en_service() {
+  en_service prod "$1" "$2"
+}
+
+# dc_de <env> : le début de chaque appel de compose du déploiement, celui de `dc` (lib.sh) : le
+# projet de l'environnement, ses deux fichiers compose dans l'ordre, et son compose.env.
+dc_de() {
+  local projet={{ nom }}
+  [ "$1" = prod ] || projet="{{ nom }}-$1"
+  printf 'docker compose -p %s -f %s -f %s --env-file %s' "$projet" "$CLONE/deploiement/compose.yml" \
+    "$CLONE/deploiement/compose.projet.yml" "${{ prefixe }}RACINE_ETAT/$1/compose.env"
+}
+
+# signaux : les appels de curl vers la supervision.
+signaux() {
+  envois_supervision
+}
+
+signal() {
+  printf 'curl -fsS -m 10 --retry 3 --data-raw %s' "$1"
+}
+
+nombre_de_lancements() {
+  appels_de docker | grep -c ' up -d --wait --wait-timeout 120 --remove-orphans$' || true
+}
+
+# --- déploiement réussi ----------------------------------------------------------------------
+
+@test "deploiement_reussi_ecrit_l_etat" {
+  deja_en_service "$ANCIENNE" 0.1.0
+  echo "ghcr.io/edouardzemb/{{ nom }}@sha256:$(printf '9%.0s' {1..64})" >"$ETAT/echec"
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 0 ]
+  # état : la nouvelle version déployée, l'ancienne gardée comme précédente, plus d'échec
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+  [ "$(cat "$ETAT/precedent")" = "$ANCIENNE 0.1.0" ]
+  [ ! -e "$ETAT/echec" ]
+  [ "$(cat "$ETAT/compose.env")" = "$(contenu_compose_env prod "$NOUVELLE" 0.2.0)" ]
+  [ "$(cat "$ETAT/compose.env.precedent")" = "$(contenu_compose_env prod "$ANCIENNE" 0.1.0)" ]
+  [ "$(signaux)" = "$(signal 'déployé 0.2.0') $HC" ]
+  # l'adresse du signal n'est dans aucun argument : curl la reçoit sur son entrée standard
+  aucune_ligne 'hc.example' "$APPELS"
+{%- if sauvegardes %}
+  # l'instantané précède le lancement ; tout passe par le projet et le compose.env de la prod
+  local dc
+  dc="$(dc_de prod)"
+  appels_de docker | grep -E "^$dc exec -T app outil sauvegarder --forme dossier /sauvegardes/pre-deploiement/[0-9]{8}T[0-9]{6}Z\.partiel$"
+  appels_de docker | grep -Fx "$dc up -d --wait --wait-timeout 120 --remove-orphans"
+  [ "$(ligne_de ' exec -T app ')" -lt "$(ligne_de ' up -d ')" ]
+{%- else %}
+  # tout passe par le projet et le compose.env de la prod
+  appels_de docker | grep -Fx "$(dc_de prod) up -d --wait --wait-timeout 120 --remove-orphans"
+{%- endif %}
+  # santé sur la boucle locale, au port de la prod
+  appels_de curl | grep -Fx 'curl -fsS -m 5 http://127.0.0.1:{{ bloc_ports }}{{ chemin_sante }}'
+  grep -Fx "{{ prefixe }}IMAGE=$NOUVELLE" "$EN_SERVICE"
+}
+
+@test "deploiement_staging_utilise_son_projet_son_port_et_main" {
+  preparer_secrets_de_test staging JETON=jeton-staging-7 HC_SONDE=https://hc.example/ping/sonde-staging
+  deployer staging "$NOUVELLE" main
+  [ "$status" -eq 0 ]
+  local etat="${{ prefixe }}RACINE_ETAT/staging"
+  [ "$(cat "$etat/deploye")" = "$NOUVELLE main" ]
+  [ "$(cat "$etat/compose.env")" = "$(contenu_compose_env staging "$NOUVELLE" main)" ]
+  appels_de docker | grep -F "docker compose -p {{ nom }}-staging -f $CLONE/deploiement/compose.yml -f $CLONE/deploiement/compose.projet.yml --env-file $etat/compose.env up"
+  appels_de curl | grep -Fx 'curl -fsS -m 5 http://127.0.0.1:{{ bloc_ports + 1 }}{{ chemin_sante }}'
+  [ "$(signaux)" = "$(signal 'déployé main') https://hc.example/ping/sonde-staging" ]
+}
+
+# Le compose exige {{ prefixe }}URL_PUBLIQUE, et compose.env la porte (la valeur de
+# deploiement/env/<env>.env), pour que `docker compose --env-file compose.env …` lancé à la main ne
+# dépende pas du shell.
+@test "compose_env_contient_l_url_publique" {
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 0 ]
+  grep -Fx '{{ prefixe }}URL_PUBLIQUE=https://{{ sous_domaine }}.{{ domaine }}' "$ETAT/compose.env"
+  # et c'est cette valeur que reçoit l'application
+  grep -Fx '{{ prefixe }}URL_PUBLIQUE=https://{{ sous_domaine }}.{{ domaine }}' "$EN_SERVICE"
+  # le staging a la sienne
+  preparer_secrets_de_test staging JETON=jeton-staging-7 HC_SONDE=https://hc.example/ping/sonde-staging
+  deployer staging "$NOUVELLE" main
+  [ "$status" -eq 0 ]
+  grep -Fx '{{ prefixe }}URL_PUBLIQUE=https://{{ sous_domaine }}-staging.{{ domaine }}' "${{ prefixe }}RACINE_ETAT/staging/compose.env"
+}
+{%- if sauvegardes %}
+
+@test "pas_d_instantane_au_premier_deploiement" {
+  # aucun compose.env : `dc` échouerait, on ne demande même pas si l'application tourne
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 0 ]
+  [ "$(appels_de docker | grep -c ' ps ')" -eq 0 ]
+  [ "$(appels_de docker | grep -c ' exec ')" -eq 0 ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+  [ ! -e "$ETAT/precedent" ]
+  [ ! -e "$ETAT/compose.env.precedent" ]
+  [ "$(signaux)" = "$(signal 'déployé 0.2.0') $HC" ]
+}
+
+@test "pas_d_instantane_si_l_application_est_arretee" {
+  deja_en_service "$ANCIENNE" 0.1.0
+  rm "$EN_SERVICE"
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 0 ]
+  [ "$(appels_de docker | grep -c ' ps -q app$')" -eq 1 ]
+  [ "$(appels_de docker | grep -c ' exec ')" -eq 0 ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+}
+
+# --- instantané ------------------------------------------------------------------------------
+
+# Migration 4 : l'instantané d'avant déploiement est un dossier qui a la forme de /donnees, sous
+# /sauvegardes/pre-deploiement/<AAAAMMJJTHHMMSSZ>. Il est écrit dans le conteneur en service par la
+# commande SAUVEGARDER de deploiement/projet.env, passée mot à mot. Seul son code compte : une
+# sortie que le script ne comprend pas ne l'arrête pas. La commande écrit sous un nom provisoire,
+# <AAAAMMJJTHHMMSSZ>.partiel, que le script renomme après le code 0 (R13).
+@test "deployer_instantane_dans_un_dossier" {
+  deja_en_service "$ANCIENNE" 0.1.0
+  export DOUBLE_DOCKER_SAUVEGARDE_SORTIE='{"integrite":"inconnue"}'
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 0 ]
+  local dc ligne destination
+  dc="$(dc_de prod)"
+  ligne="$(appels_de docker | grep -F "$dc exec ")"
+  destination="${ligne##* }"
+  [[ "$destination" =~ ^/sauvegardes/pre-deploiement/[0-9]{8}T[0-9]{6}Z\.partiel$ ]]
+  [ "$ligne" = "$dc exec -T app outil sauvegarder --forme dossier $destination" ]
+  destination="${destination%.partiel}"
+  # sur l'hôte, dans les sauvegardes de la prod : un dossier, au contenu de /donnees, sous son nom
+  # définitif ; le nom provisoire ne reste pas
+  [ -d "${{ prefixe }}RACINE_SAUVEGARDES${destination#/sauvegardes}" ]
+  [ -f "${{ prefixe }}RACINE_SAUVEGARDES${destination#/sauvegardes}/donnees.txt" ]
+  [ ! -e "${{ prefixe }}RACINE_SAUVEGARDES${destination#/sauvegardes}.partiel" ]
+  [[ "$output" == *"instantané : $destination"* ]]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+}
+
+# Un instantané en échec annule le déploiement avant tout changement : rien n'est arrêté ni lancé,
+# l'application en service y reste, et rien n'est marqué en échec. La sonde réessaiera au prochain
+# passage. Les cas :
+#   - un code non nul ;
+#   - une commande qui écrit une partie puis échoue : le dossier garde son nom provisoire (R13) ;
+#   - une commande qui rend 0 sans écrire son dossier : rien à renommer ;
+#   - une destination déjà présente : rien n'est lancé ni écrasé ;
+#   - un dossier vide apparu au nom définitif pendant l'écriture : `mv -T` le remplacerait sans
+#     bruit, il ne doit pas ;
+#   - aucune commande SAUVEGARDER dans projet.env.
+@test "deployer_instantane_en_echec_n_arrete_rien" {
+  deja_en_service "$ANCIENNE" 0.1.0
+  cp "$ETAT/compose.env" "$BATS_TEST_TMPDIR/compose.env.avant"
+  local cas vrai pre="${{ prefixe }}RACINE_SAUVEGARDES/pre-deploiement"
+  vrai="$(command -v date)"
+  for cas in code-1 code-2 partiel sans-fichier deja-present apparu sans-commande; do
+    : >"$APPELS"
+    # chaque cas part de pre-deploiement/ vide : deux cas dans la même seconde viseraient le même nom
+    rm -rf "$pre" "$DOUBLES/date"
+    unset DOUBLE_DOCKER_SAUVEGARDE_CODE DOUBLE_DOCKER_SAUVEGARDE_SORTIE DOUBLE_DOCKER_SAUVEGARDE_FORME \
+      DOUBLE_DOCKER_SAUVEGARDE_SANS_FICHIER
+    case "$cas" in
+      code-*)
+        export DOUBLE_DOCKER_SAUVEGARDE_CODE="${cas#code-}"
+        export DOUBLE_DOCKER_SAUVEGARDE_SORTIE='données illisibles : /donnees'
+        ;;
+      partiel) export DOUBLE_DOCKER_SAUVEGARDE_FORME=partielle ;;
+      sans-fichier) export DOUBLE_DOCKER_SAUVEGARDE_SANS_FICHIER=1 ;;
+      deja-present)
+        # shellcheck disable=SC2016  # le corps du double se développe quand il s'exécute, pas ici
+        creer_double date 'if [ "$*" = "-u +%Y%m%dT%H%M%SZ" ]; then echo 20261018T024500Z; else exec '"$vrai"' "$@"; fi'
+        mkdir -p "$pre/20261018T024500Z"
+        echo "déjà là" >"$pre/20261018T024500Z/donnees.txt"
+        ;;
+      apparu) export DOUBLE_DOCKER_SAUVEGARDE_FORME=apparue ;;
+      sans-commande) printf '%s\n' 'VERIFIER=outil verifier' >"$CLONE/deploiement/projet.env" ;;
+    esac
+    deployer prod "$NOUVELLE" 0.2.0
+    [ "$status" -eq 1 ]
+    # rien n'est arrêté ni lancé : l'application en service y reste
+    [ "$(appels_de docker | grep -cE ' (up|stop|down) ')" -eq 0 ]
+    grep -Fx "{{ prefixe }}IMAGE=$ANCIENNE" "$EN_SERVICE"
+    # rien n'a changé : la sonde réessaiera au prochain passage
+    diff "$ETAT/compose.env" "$BATS_TEST_TMPDIR/compose.env.avant"
+    [ ! -e "$ETAT/compose.env.precedent" ]
+    [ ! -e "$ETAT/echec" ]
+    [ "$(cat "$ETAT/deploye")" = "$ANCIENNE 0.1.0" ]
+    [ "$(signaux)" = "$(signal 'instantané impossible avant 0.2.0, rien n'"'"'a changé') $HC/fail" ]
+    case "$cas" in
+      sans-commande)
+        [ "$(appels_de docker | grep -c ' exec ')" -eq 0 ]
+        [[ "$output" == *"réglage SAUVEGARDER absent"* ]]
+        ;;
+      partiel)
+        [[ "$output" == *"instantané impossible (code 1)"* ]]
+        # le dossier écrit en partie garde son nom provisoire ; aucun nom définitif
+        [ -n "$(find "$pre" -mindepth 1 -maxdepth 1 -name '*.partiel')" ]
+        [ -z "$(find "$pre" -mindepth 1 -maxdepth 1 ! -name '*.partiel')" ]
+        ;;
+      sans-fichier)
+        [[ "$output" == *"la commande a rendu 0, mais"*"ne peut pas prendre le nom"* ]]
+        [ -z "$(find "$pre" -mindepth 1 -maxdepth 1 2>/dev/null)" ]
+        ;;
+      deja-present)
+        [[ "$output" == *"$pre/20261018T024500Z existe déjà"* ]]
+        [ "$(appels_de docker | grep -c ' exec ')" -eq 0 ]
+        [ "$(cat "$pre/20261018T024500Z/donnees.txt")" = "déjà là" ]
+        [ "$(find "$pre" -mindepth 1 -maxdepth 1 | wc -l)" -eq 1 ]
+        ;;
+      apparu)
+        [[ "$output" == *"ne peut pas prendre le nom"* ]]
+        # le dossier apparu n'est pas remplacé ; l'instantané garde son nom provisoire
+        [ -n "$(find "$pre" -mindepth 1 -maxdepth 1 -type d -name '*Z' -empty)" ]
+        [ -n "$(find "$pre" -mindepth 2 -maxdepth 2 -path '*.partiel/donnees.txt')" ]
+        ;;
+      *) [[ "$output" == *"instantané impossible (code ${cas#code-}) : données illisibles"* ]] ;;
+    esac
+  done
+}
+
+# Docker injoignable avant tout changement : on s'arrête, sans marquer la version en échec.
+@test "refuse_de_deployer_si_l_etat_de_l_application_est_illisible" {
+  deja_en_service "$ANCIENNE" 0.1.0
+  mv "$DOUBLES/docker" "$DOUBLES/docker-double"
+  creer_double docker "[[ \" \$* \" != *' ps '* ]] || exit 1
+exec '$DOUBLES/docker-double' \"\$@\""
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 1 ]
+  [ "$(nombre_de_lancements)" -eq 0 ]
+  [ ! -e "$ETAT/echec" ]
+  [ ! -e "$ETAT/compose.env.precedent" ]
+  [ "$(signaux)" = "$(signal 'état de l'"'"'application illisible avant 0.2.0, rien n'"'"'a changé') $HC/fail" ]
+}
+{%- else %}
+
+# Sans sauvegardes, aucun instantané : ni `ps`, ni `exec` (le double de docker refuse `exec`), avant
+# un déploiement comme avant un retour arrière, et compose.env ne porte aucun dossier de sauvegardes.
+@test "deployer_sans_sauvegardes_sans_instantane" {
+  deja_en_service "$ANCIENNE" 0.1.0
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 0 ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+  [ "$(appels_de docker | grep -cE ' (ps|exec) ')" -eq 0 ]
+  [ "$(cat "$ETAT/compose.env")" = "$(contenu_compose_env prod "$NOUVELLE" 0.2.0)" ]
+  aucune_ligne 'SAUVEGARDES' "$ETAT/compose.env" "$EN_SERVICE"
+  # le retour arrière non plus
+  : >"$APPELS"
+  deployer prod --retour
+  [ "$status" -eq 0 ]
+  [ "$(cat "$ETAT/deploye")" = "$ANCIENNE 0.1.0" ]
+  [ "$(appels_de docker | grep -cE ' (ps|exec) ')" -eq 0 ]
+  [ ! -e "$HOME/backups" ]
+}
+{%- endif %}
+
+# --- échecs et retour arrière ----------------------------------------------------------------
+
+# Une image sans label de révision (« <no value> ») ne peut pas être vérifiée : échec.
+@test "image_sans_revision_compte_comme_echec" {
+  deja_en_service "$ANCIENNE" 0.1.0
+  mv "$DOUBLES/docker" "$DOUBLES/docker-double"
+  creer_double docker "if [[ \" \$* \" == *'image.revision'*' $NOUVELLE '* ]]; then echo '<no value>'; exit 0; fi
+exec '$DOUBLES/docker-double' \"\$@\""
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 1 ]
+  [ "$(cat "$ETAT/echec")" = "$NOUVELLE" ]
+  [ "$(cat "$ETAT/compose.env")" = "$(contenu_compose_env prod "$ANCIENNE" 0.1.0)" ]
+  [ "$(signaux)" = "$(signal 'échec 0.2.0, retour à 0.1.0') $HC/fail" ]
+  [[ "$output" == *"révision illisible"* ]]
+}
+
+@test "retour_arriere_si_la_sante_echoue" {
+  deja_en_service "$ANCIENNE" 0.1.0
+  export DOUBLE_CURL_SANTE_KO="$NOUVELLE"
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 1 ]
+  # la version est marquée en échec, l'ancienne est restaurée et de nouveau en service
+  [ "$(cat "$ETAT/echec")" = "$NOUVELLE" ]
+  [ "$(cat "$ETAT/compose.env")" = "$(contenu_compose_env prod "$ANCIENNE" 0.1.0)" ]
+  [ "$(cat "$ETAT/deploye")" = "$ANCIENNE 0.1.0" ]
+  [ ! -e "$ETAT/precedent" ]
+  grep -Fx "{{ prefixe }}IMAGE=$ANCIENNE" "$EN_SERVICE"
+  [ "$(nombre_de_lancements)" -eq 2 ]
+  # dix essais pour la nouvelle version, puis un contrôle réussi de l'ancienne
+  [ "$(appels_de curl | grep -c '127\.0\.0\.1')" -eq 11 ]
+  [ "$(signaux)" = "$(signal 'échec 0.2.0, retour à 0.1.0') $HC/fail" ]
+}
+
+@test "revision_inattendue_compte_comme_echec" {
+  deja_en_service "$ANCIENNE" 0.1.0
+  export DOUBLE_CURL_REVISION_FAUSSE="$NOUVELLE"
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 1 ]
+  [ "$(cat "$ETAT/echec")" = "$NOUVELLE" ]
+  [ "$(cat "$ETAT/compose.env")" = "$(contenu_compose_env prod "$ANCIENNE" 0.1.0)" ]
+  [ "$(cat "$ETAT/deploye")" = "$ANCIENNE 0.1.0" ]
+  [ "$(signaux)" = "$(signal 'échec 0.2.0, retour à 0.1.0') $HC/fail" ]
+  # la révision attendue est celle du label de l'image
+  appels_de docker | grep -Fx "docker image inspect -f {% raw %}{{index .Config.Labels \"org.opencontainers.image.revision\"}}{% endraw %} $NOUVELLE"
+}
+
+# Un 200 sans corps n'est pas une santé conforme (jq 1.6 rendrait 0 avec `-e` sur une entrée vide).
+@test "sante_sans_corps_compte_comme_echec" {
+  deja_en_service "$ANCIENNE" 0.1.0
+  export DOUBLE_CURL_SANTE_VIDE="$NOUVELLE"
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 1 ]
+  [ "$(cat "$ETAT/echec")" = "$NOUVELLE" ]
+  [ "$(cat "$ETAT/deploye")" = "$ANCIENNE 0.1.0" ]
+  [ "$(signaux)" = "$(signal 'échec 0.2.0, retour à 0.1.0') $HC/fail" ]
+}
+
+@test "echec_du_lancement_declenche_le_retour_arriere" {
+  deja_en_service "$ANCIENNE" 0.1.0
+  export DOUBLE_DOCKER_UP_ECHEC="$NOUVELLE"
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 1 ]
+  [ "$(cat "$ETAT/echec")" = "$NOUVELLE" ]
+  [ "$(cat "$ETAT/compose.env")" = "$(contenu_compose_env prod "$ANCIENNE" 0.1.0)" ]
+  grep -Fx "{{ prefixe }}IMAGE=$ANCIENNE" "$EN_SERVICE"
+  # pas de contrôle de santé d'une version qui n'a pas démarré : seul l'ancien est contrôlé
+  [ "$(appels_de curl | grep -c '127\.0\.0\.1')" -eq 1 ]
+  [ "$(signaux)" = "$(signal 'échec 0.2.0, retour à 0.1.0') $HC/fail" ]
+}
+
+@test "retour_arriere_en_echec_le_signale" {
+  deja_en_service "$ANCIENNE" 0.1.0
+  export DOUBLE_CURL_SANTE_KO="$NOUVELLE $ANCIENNE"
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 1 ]
+  [ "$(cat "$ETAT/echec")" = "$NOUVELLE" ]
+  [ "$(cat "$ETAT/compose.env")" = "$(contenu_compose_env prod "$ANCIENNE" 0.1.0)" ]
+  [ "$(cat "$ETAT/deploye")" = "$ANCIENNE 0.1.0" ]
+  [ "$(signaux)" = "$(signal 'échec 0.2.0, retour à 0.1.0 en échec') $HC/fail" ]
+}
+
+# echec est écrit avant le retour arrière : si celui-ci est coupé net, la sonde ne retentera pas la
+# version à chaque passage. Ici, le `up` du retour arrière tue deployer.sh (kill -9). La version
+# en échec tourne encore, sans qu'aucun signal soit parti : la sonde suivante doit le voir.
+@test "retour_arriere_coupe_net_est_signale_par_la_sonde_suivante" {
+  deja_en_service "$ANCIENNE" 0.1.0
+  export DOUBLE_CURL_SANTE_KO="$NOUVELLE"
+  mv "$DOUBLES/docker" "$DOUBLES/docker-double"
+  creer_double docker "
+if [[ \" \$* \" == *' up '* ]] && grep -qFx '{{ prefixe }}IMAGE=$ANCIENNE' '$ETAT/compose.env'; then
+  kill -9 \"\$PPID\"
+  exit 1
+fi
+exec '$DOUBLES/docker-double' \"\$@\""
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 137 ]
+  # l'état figé par la coupure : echec écrit, compose.env déjà restauré, mais la nouvelle version
+  # toujours en service, et aucun signal
+  [ "$(cat "$ETAT/echec")" = "$NOUVELLE" ]
+  [ "$(cat "$ETAT/deploye")" = "$ANCIENNE 0.1.0" ]
+  [ "$(cat "$ETAT/compose.env")" = "$(contenu_compose_env prod "$ANCIENNE" 0.1.0)" ]
+  grep -Fx "{{ prefixe }}IMAGE=$NOUVELLE" "$EN_SERVICE"
+  [ -z "$(signaux)" ]
+
+  # passage suivant de la sonde : alerte, et aucune relance automatique
+  mv -f "$DOUBLES/docker-double" "$DOUBLES/docker"
+  installer_doubles git
+  : >"$APPELS"
+  export DOUBLE_GIT_ETIQUETTES=v0.2.0 DOUBLE_DOCKER_EMPREINTE="$NOUVELLE"
+  run bash "$CLONE/deploiement/sonder.sh" prod
+  [ "$status" -eq 1 ]
+  [ "$(signaux)" = "$(signal 'retour arrière incomplet : la santé locale n'"'"'annonce pas la version déployée (0.1.0)') $HC/fail" ]
+  [ "$(nombre_de_lancements)" -eq 0 ]
+  [ "$(appels_de docker | grep -c ' exec ')" -eq 0 ]
+  # et de même à chaque passage, tant que personne n'est intervenu
+  : >"$APPELS"
+  run bash "$CLONE/deploiement/sonder.sh" prod
+  [ "$status" -eq 1 ]
+  [[ "$(signaux)" == *"retour arrière incomplet"*"$HC/fail" ]]
+}
+
+@test "premier_deploiement_en_echec_alerte_sans_retour" {
+  export DOUBLE_CURL_SANTE_KO="$NOUVELLE"
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 1 ]
+  [ "$(cat "$ETAT/echec")" = "$NOUVELLE" ]
+  [ ! -e "$ETAT/deploye" ]
+  [ ! -e "$ETAT/compose.env.precedent" ]
+  [ "$(nombre_de_lancements)" -eq 1 ]
+  # rien à restaurer : la version en échec est arrêtée plutôt que laissée en service
+  appels_de docker | grep -Fx "$(dc_de prod) stop"
+  [ ! -e "$EN_SERVICE" ]
+  [ "$(signaux)" = "$(signal 'échec 0.2.0, retour à aucun') $HC/fail" ]
+}
+
+# Un déploiement coupé (Ctrl-C, arrêt de l'unité) laisse un compose.env qui n'est pas celui de la
+# version déployée. Il ne doit pas devenir la cible du retour arrière suivant.
+@test "un_deploiement_interrompu_ne_devient_pas_la_cible_du_retour_arriere" {
+  local interrompue
+  interrompue="ghcr.io/edouardzemb/{{ nom }}@sha256:$(printf '3%.0s' {1..64})"
+  deja_en_service "$ANCIENNE" 0.1.0
+  cp "$ETAT/compose.env" "$ETAT/compose.env.precedent"
+  contenu_compose_env prod "$interrompue" 0.1.5 >"$ETAT/compose.env"
+  export DOUBLE_CURL_SANTE_KO="$NOUVELLE"
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 1 ]
+  [ "$(cat "$ETAT/compose.env")" = "$(contenu_compose_env prod "$ANCIENNE" 0.1.0)" ]
+  [ "$(cat "$ETAT/compose.env.precedent")" = "$(contenu_compose_env prod "$ANCIENNE" 0.1.0)" ]
+  [ "$(signaux)" = "$(signal 'échec 0.2.0, retour à 0.1.0') $HC/fail" ]
+}
+
+# --- retour arrière manuel : deployer.sh <env> --retour ---------------------------------------
+#
+# Revenir à la version de `precedent`. La version quittée est écrite dans `echec` avant tout
+# changement, et gardée : sans cela, la sonde (qui vise la plus haute étiquette) la redéploierait au
+# passage suivant.
+{%- if sauvegardes %}
+
+# horloge_qui_avance : l'horodatage d'un instantané (à la seconde) avance à chaque appel. Des
+# déploiements qui se suivent en moins d'une seconde, comme ici avec des doubles, viseraient sinon le
+# même dossier, que la commande de l'image refuse d'écraser. Les autres appels de `date` sont ceux
+# de la vraie.
+horloge_qui_avance() {
+  local reel
+  reel="$(command -v date)"
+  cat >"$DOUBLES/date" <<EOF
+#!/usr/bin/env bash
+if [ "\$*" = '-u +%Y%m%dT%H%M%SZ' ]; then
+  n=\$(( \$(cat '$BATS_TEST_TMPDIR/horloge' 2>/dev/null || echo 0) + 1 ))
+  echo "\$n" >'$BATS_TEST_TMPDIR/horloge'
+  printf '20261015T%06dZ\n' "\$n"
+else
+  exec '$reel' "\$@"
+fi
+EOF
+  chmod +x "$DOUBLES/date"
+}
+{%- endif %}
+
+# deux_versions : 0.1.0 (ANCIENNE) puis 0.2.0 (NOUVELLE) déployées pour de bon, comme sur une prod où
+# 0.2.0 pose problème. Les appels sont remis à zéro.
+deux_versions() {
+{%- if sauvegardes %}
+  horloge_qui_avance
+{%- endif %}
+  deployer prod "$ANCIENNE" 0.1.0
+  [ "$status" -eq 0 ]
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 0 ]
+  [ "$(cat "$ETAT/precedent")" = "$ANCIENNE 0.1.0" ]
+  : >"$APPELS"
+}
+
+# passage_de_la_sonde : un passage de la vraie sonde de prod, dont la plus haute étiquette est
+# v0.2.0 (image NOUVELLE).
+passage_de_la_sonde() {
+  installer_doubles git
+  export DOUBLE_GIT_ETIQUETTES=v0.2.0 DOUBLE_DOCKER_EMPREINTE="$NOUVELLE"
+  : >"$APPELS"
+  run bash "$CLONE/deploiement/sonder.sh" prod
+}
+
+# etat_fige : une copie de l'état, pour vérifier qu'un refus n'a rien touché.
+etat_fige() {
+  rm -rf "$BATS_TEST_TMPDIR/etat-avant"
+  cp -a "$ETAT" "$BATS_TEST_TMPDIR/etat-avant"
+  : >"$APPELS"
+}
+
+@test "retour_manuel_revient_a_la_version_precedente_et_garde_la_version_quittee_en_echec" {
+  deux_versions
+  # echec doit déjà valoir NOUVELLE quand la précédente est relancée : une coupure à ce moment ne
+  # laisse pas la sonde redéployer la version quittée
+  mv "$DOUBLES/docker" "$DOUBLES/docker-double"
+  cat >"$DOUBLES/docker" <<EOF
+#!/usr/bin/env bash
+if [[ " \$* " == *' up '* ]]; then
+  { cat '$ETAT/echec' 2>/dev/null || echo ABSENT; } >'$BATS_TEST_TMPDIR/echec-au-lancement'
+fi
+exec '$DOUBLES/docker-double' "\$@"
+EOF
+  chmod +x "$DOUBLES/docker"
+  deployer prod --retour
+  [ "$status" -eq 0 ]
+  [ "$(cat "$ETAT/deploye")" = "$ANCIENNE 0.1.0" ]
+  [ "$(cat "$BATS_TEST_TMPDIR/echec-au-lancement")" = "$NOUVELLE" ]
+  # gardée, pas effacée : c'est ce qui empêche la sonde de redéployer la version quittée
+  [ "$(cat "$ETAT/echec")" = "$NOUVELLE" ]
+  # plus de version précédente : un second --retour ne rebascule pas vers la version en échec
+  [ ! -e "$ETAT/precedent" ]
+  [ "$(cat "$ETAT/compose.env")" = "$(contenu_compose_env prod "$ANCIENNE" 0.1.0)" ]
+  grep -Fx "{{ prefixe }}IMAGE=$ANCIENNE" "$EN_SERVICE"
+{%- if sauvegardes %}
+  # comme un déploiement : instantané des données en service, un lancement, santé de la précédente
+  [ "$(ligne_de ' exec -T app ')" -lt "$(ligne_de ' up -d ')" ]
+{%- else %}
+  # comme un déploiement : un lancement, santé de la précédente
+{%- endif %}
+  [ "$(nombre_de_lancements)" -eq 1 ]
+  appels_de curl | grep -Fx 'curl -fsS -m 5 http://127.0.0.1:{{ bloc_ports }}{{ chemin_sante }}'
+  [ "$(signaux)" = "$(signal 'retour à 0.1.0 effectué (depuis 0.2.0)') $HC" ]
+
+  # le passage suivant de la sonde, dont la plus haute étiquette est encore v0.2.0, attend une
+  # nouvelle version : ni relance, ni instantané, ni alerte, ni signal (le silence tient l'incident
+  # ouvert) — à chaque passage
+  local _
+  for _ in 1 2; do
+    passage_de_la_sonde
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"version en échec, attente d'une nouvelle"* ]]
+    [ "$(nombre_de_lancements)" -eq 0 ]
+    [ "$(appels_de docker | grep -c ' exec ')" -eq 0 ]
+    [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
+    [ -z "$(signaux)" ]
+  done
+  [ "$(cat "$ETAT/deploye")" = "$ANCIENNE 0.1.0" ]
+}
+
+@test "apres_un_retour_manuel_la_version_suivante_se_deploie_normalement" {
+  local suivante
+  suivante="ghcr.io/edouardzemb/{{ nom }}@sha256:$(printf '3%.0s' {1..64})"
+  deux_versions
+  deployer prod --retour
+  [ "$status" -eq 0 ]
+  deployer prod "$suivante" 0.3.0
+  [ "$status" -eq 0 ]
+  [ "$(cat "$ETAT/deploye")" = "$suivante 0.3.0" ]
+  [ "$(cat "$ETAT/precedent")" = "$ANCIENNE 0.1.0" ]
+  [ ! -e "$ETAT/echec" ]
+  [ "$(cat "$ETAT/compose.env.precedent")" = "$(contenu_compose_env prod "$ANCIENNE" 0.1.0)" ]
+}
+
+@test "retour_manuel_refuse_sans_version_precedente_et_ne_touche_a_rien" {
+  # rien n'a jamais été déployé
+  deployer prod --retour
+  [ "$status" -eq 64 ]
+  [[ "$output" == *"aucune version en service"* ]]
+  [ ! -s "$APPELS" ]
+  [ ! -e "$ETAT/compose.env" ]
+  # une seule version déployée : pas de précédente
+  deployer prod "$ANCIENNE" 0.1.0
+  [ "$status" -eq 0 ]
+  etat_fige
+  deployer prod --retour
+  [ "$status" -eq 64 ]
+  [[ "$output" == *"aucune version précédente"* ]]
+  diff -r "$ETAT" "$BATS_TEST_TMPDIR/etat-avant"
+  [ ! -s "$APPELS" ]
+  # une précédente illisible, ou qui est la version en service : refus aussi
+  local contenu
+  for contenu in 'pas une image' "$ANCIENNE v0.1.0" "$ANCIENNE 0.1.0"; do
+    echo "$contenu" >"$ETAT/precedent"
+    etat_fige
+    deployer prod --retour
+    [ "$status" -eq 64 ]
+    diff -r "$ETAT" "$BATS_TEST_TMPDIR/etat-avant"
+    [ ! -s "$APPELS" ]
+  done
+}
+
+@test "un_second_retour_manuel_ne_revient_pas_sur_la_version_en_echec" {
+  deux_versions
+  deployer prod --retour
+  [ "$status" -eq 0 ]
+  etat_fige
+  deployer prod --retour
+  [ "$status" -eq 64 ]
+  diff -r "$ETAT" "$BATS_TEST_TMPDIR/etat-avant"
+  [ ! -s "$APPELS" ]
+}
+{%- if sauvegardes %}
+
+# Rien n'est marqué en échec avant le premier changement d'état : un retour qui n'a pas pu
+# commencer ne laisse aucune trace, et la sonde reste aussi sûre qu'avant.
+@test "retour_manuel_qui_ne_peut_pas_commencer_ne_change_rien" {
+  deux_versions
+  etat_fige
+  export DOUBLE_DOCKER_SAUVEGARDE_CODE=1
+  deployer prod --retour
+  [ "$status" -eq 1 ]
+  [ "$(nombre_de_lancements)" -eq 0 ]
+  diff -r "$ETAT" "$BATS_TEST_TMPDIR/etat-avant"
+  [ "$(signaux)" = "$(signal 'instantané impossible avant le retour à 0.1.0, rien n'"'"'a changé') $HC/fail" ]
+}
+{%- endif %}
+
+# Santé de la précédente en échec : comme tout déploiement raté, la version en service avant le
+# retour est remise en service, le résultat est signalé /fail, et l'état reste cohérent. `precedent`
+# est gardé, pour une nouvelle tentative une fois la cause réglée. La version quittée reste dans
+# `echec`, donc la sonde ne la redéploie pas et, comme elle est encore en service, n'envoie pas de
+# signal ok : le silence tient l'incident ouvert.
+@test "retour_manuel_dont_la_sante_echoue_remet_la_version_quittee_en_service" {
+  deux_versions
+  export DOUBLE_CURL_SANTE_KO="$ANCIENNE"
+  deployer prod --retour
+  [ "$status" -eq 1 ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+  [ "$(cat "$ETAT/precedent")" = "$ANCIENNE 0.1.0" ]
+  [ "$(cat "$ETAT/echec")" = "$NOUVELLE" ]
+  [ "$(cat "$ETAT/compose.env")" = "$(contenu_compose_env prod "$NOUVELLE" 0.2.0)" ]
+  grep -Fx "{{ prefixe }}IMAGE=$NOUVELLE" "$EN_SERVICE"
+  # dix essais pour la précédente, puis un contrôle réussi de la version remise en service
+  [ "$(nombre_de_lancements)" -eq 2 ]
+  [ "$(appels_de curl | grep -c '127\.0\.0\.1')" -eq 11 ]
+  [ "$(signaux)" = "$(signal 'échec du retour à 0.1.0, 0.2.0 remise en service') $HC/fail" ]
+
+  passage_de_la_sonde
+  [ "$status" -eq 0 ]
+  [ "$(nombre_de_lancements)" -eq 0 ]
+  [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
+  [ -z "$(signaux)" ]
+
+  # la cause réglée, une nouvelle tentative aboutit
+  unset DOUBLE_CURL_SANTE_KO
+  deployer prod --retour
+  [ "$status" -eq 0 ]
+  [ "$(cat "$ETAT/deploye")" = "$ANCIENNE 0.1.0" ]
+  [ "$(cat "$ETAT/echec")" = "$NOUVELLE" ]
+}
+
+# Et si la version quittée ne revient pas non plus : le signal le dit, et la sonde alerte à chaque
+# passage (elle ne relance rien).
+@test "retour_manuel_dont_la_version_quittee_ne_revient_pas_est_signale_par_la_sonde" {
+  deux_versions
+  export DOUBLE_CURL_SANTE_KO="$ANCIENNE $NOUVELLE"
+  deployer prod --retour
+  [ "$status" -eq 1 ]
+  [ "$(signaux)" = "$(signal 'échec du retour à 0.1.0, 0.2.0 remise en service en échec') $HC/fail" ]
+  [ "$(cat "$ETAT/echec")" = "$NOUVELLE" ]
+  [ "$(cat "$ETAT/precedent")" = "$ANCIENNE 0.1.0" ]
+
+  passage_de_la_sonde
+  [ "$status" -eq 1 ]
+  [[ "$(signaux)" == "$(signal 'retour arrière incomplet : ')"*" $HC/fail" ]]
+  [ "$(nombre_de_lancements)" -eq 0 ]
+}
+
+# Retour coupé net (kill -9) au lancement de la précédente : echec vaut déjà la version quittée,
+# compose.env décrit la précédente, la version quittée tourne encore. La sonde le voit.
+@test "retour_manuel_coupe_net_est_signale_par_la_sonde_suivante" {
+  deux_versions
+  mv "$DOUBLES/docker" "$DOUBLES/docker-double"
+  creer_double docker "
+if [[ \" \$* \" == *' up '* ]] && grep -qFx '{{ prefixe }}IMAGE=$ANCIENNE' '$ETAT/compose.env'; then
+  kill -9 \"\$PPID\"
+  exit 1
+fi
+exec '$DOUBLES/docker-double' \"\$@\""
+  deployer prod --retour
+  [ "$status" -eq 137 ]
+  [ "$(cat "$ETAT/echec")" = "$NOUVELLE" ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+  [ -z "$(signaux)" ]
+
+  mv -f "$DOUBLES/docker-double" "$DOUBLES/docker"
+  passage_de_la_sonde
+  [ "$status" -eq 1 ]
+  [ "$(signaux)" = "$(signal 'retour arrière incomplet : compose.env ne décrit pas la version déployée (0.2.0)') $HC/fail" ]
+  [ "$(nombre_de_lancements)" -eq 0 ]
+}
+
+# --- compose : deux fichiers, orphelins ------------------------------------------------------
+
+# dc compose les deux fichiers, dans l'ordre : compose.yml, géré par le modèle, puis
+# compose.projet.yml, les ajouts du projet, que compose fusionne au premier. Tous les appels de
+# compose du déploiement, retour arrière compris, passent par eux.
+@test "deployer_deux_fichiers_compose" {
+  deja_en_service "$ANCIENNE" 0.1.0
+  export DOUBLE_CURL_SANTE_KO="$NOUVELLE"
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 1 ]
+  local dc ligne n=0
+  dc="$(dc_de prod)"
+  while IFS= read -r ligne; do
+    [[ "$ligne" == "$dc "* ]] || {
+      echo "appel de compose hors de dc : $ligne" >&2
+      return 1
+    }
+    n=$((n + 1))
+  done < <(appels_de docker | grep '^docker compose ')
+{%- if sauvegardes %}
+  # ps et instantané, lancement de la nouvelle, puis retour à l'ancienne
+  [ "$n" -eq 4 ]
+{%- else %}
+  # lancement de la nouvelle, puis retour à l'ancienne
+  [ "$n" -eq 2 ]
+{%- endif %}
+}
+
+# Migration 1 : chaque `up`, celui du déploiement comme celui du retour arrière, porte
+# --remove-orphans. Un conteneur dont aucun des deux fichiers compose ne déclare plus le service (un
+# service retiré de compose.projet.yml) ne reste pas en service.
+@test "deployer_supprime_les_orphelins" {
+  deja_en_service "$ANCIENNE" 0.1.0
+  export DOUBLE_CURL_SANTE_KO="$NOUVELLE"
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 1 ]
+  [ "$(appels_de docker | grep -c ' up ')" -eq 2 ]
+  [ "$(nombre_de_lancements)" -eq 2 ]
+}
+
+# --- secrets et environnement ----------------------------------------------------------------
+
+# Migration 1 : le tunnel est commun au serveur. Le projet n'a plus de jeton de tunnel dans ses
+# secrets, ni de profil de compose pour le lever : des secrets sans jeton se déploient.
+@test "deployer_sans_jeton_de_tunnel_deploie" {
+  preparer_secrets_de_test prod "HC_SONDE=$HC"
+  deja_en_service "$ANCIENNE" 0.1.0
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 0 ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+  [ ! -e "$ETAT/echec" ]
+  [ "$(nombre_de_lancements)" -eq 1 ]
+  aucune_ligne ' --profile' "$APPELS"
+  grep -Fx "{{ prefixe }}IMAGE=$NOUVELLE" "$EN_SERVICE"
+  [ "$(signaux)" = "$(signal 'déployé 0.2.0') $HC" ]
+}
+
+# Compose donne la priorité au shell sur --env-file (le double de docker aussi) : une image
+# exportée ferait relancer la nouvelle version par le retour arrière. deployer.sh refuse de partir.
+@test "refuse_une_image_ou_une_version_posees_dans_l_environnement" {
+  deja_en_service "$ANCIENNE" 0.1.0
+  cp "$ETAT/compose.env" "$BATS_TEST_TMPDIR/compose.env.avant"
+  export DOUBLE_CURL_SANTE_KO="$NOUVELLE"
+  local variable
+  for variable in {{ prefixe }}IMAGE {{ prefixe }}VERSION; do
+    : >"$APPELS"
+    if [ "$variable" = {{ prefixe }}IMAGE ]; then
+      export {{ prefixe }}IMAGE="$NOUVELLE"
+    else
+      unset {{ prefixe }}IMAGE
+      export {{ prefixe }}VERSION=0.2.0
+    fi
+    deployer prod "$NOUVELLE" 0.2.0
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"$variable est posée dans l'environnement"* ]]
+    # rien n'a été tenté : ni instantané, ni lancement, ni état, ni signal
+    [ ! -s "$APPELS" ]
+    diff "$ETAT/compose.env" "$BATS_TEST_TMPDIR/compose.env.avant"
+    [ ! -e "$ETAT/echec" ]
+    grep -Fx "{{ prefixe }}IMAGE=$ANCIENNE" "$EN_SERVICE"
+  done
+}
+
+# poser_url_publique <valeur> : deploiement/env/prod.env du clone temporaire avec cette
+# {{ prefixe }}URL_PUBLIQUE (sans valeur : la ligne est retirée).
+poser_url_publique() {
+  grep -v '^{{ prefixe }}URL_PUBLIQUE=' "$DEPOT/deploiement/env/prod.env" >"$CLONE/deploiement/env/prod.env"
+  [ "$#" -eq 0 ] || printf '{{ prefixe }}URL_PUBLIQUE=%q
+' "$1" >>"$CLONE/deploiement/env/prod.env"
+}
+
+# Une adresse qui n'est pas http(s)://hôte[:port] ne s'écrit pas dans compose.env (une valeur sur
+# deux lignes y injecterait une variable), et ne fait pas lancer une application qui refuserait de
+# démarrer : refus net, avant tout.
+@test "deploiement_refuse_une_url_publique_invalide" {
+  deja_en_service "$ANCIENNE" 0.1.0
+  etat_fige
+  local url
+  for url in '' '{{ sous_domaine }}.{{ domaine }}' 'ftp://{{ sous_domaine }}.{{ domaine }}' 'https://'     'https://{{ sous_domaine }}.{{ domaine }}/' 'https://{{ sous_domaine }}.{{ domaine }}/chemin'     'https://{{ sous_domaine }}.{{ domaine }}?x=1' 'https://{{ sous_domaine }}.{{ domaine }}:'     'https://{{ sous_domaine }}.{{ domaine }}:44a' 'https://moi@{{ sous_domaine }}.{{ domaine }}'     'https://Majuscules.{{ domaine }}' 'https://{{ sous_domaine }}.{{ domaine }} '     $'https://{{ sous_domaine }}.{{ domaine }}
+{{ prefixe }}PORT=80'; do
+    poser_url_publique "$url"
+    : >"$APPELS"
+    deployer prod "$NOUVELLE" 0.2.0
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"{{ prefixe }}URL_PUBLIQUE invalide"* ]]
+    [[ "$output" == *"Rien n'a changé"* ]]
+    # rien n'a été tenté : ni instantané, ni lancement, ni état, ni signal
+    [ ! -s "$APPELS" ]
+    diff -r "$ETAT" "$BATS_TEST_TMPDIR/etat-avant"
+    grep -Fx "{{ prefixe }}IMAGE=$ANCIENNE" "$EN_SERVICE"
+  done
+  # absente du fichier d'environnement : même refus
+  poser_url_publique
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"{{ prefixe }}URL_PUBLIQUE invalide"* ]]
+  [ ! -s "$APPELS" ]
+  diff -r "$ETAT" "$BATS_TEST_TMPDIR/etat-avant"
+  # et un retour arrière, qui réécrit aussi compose.env, la refuse de la même façon
+  poser_url_publique 'https://{{ sous_domaine }}.{{ domaine }}/'
+  deployer prod --retour
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"{{ prefixe }}URL_PUBLIQUE invalide"* ]]
+  [ ! -s "$APPELS" ]
+  diff -r "$ETAT" "$BATS_TEST_TMPDIR/etat-avant"
+}
+
+# Les secrets de la version (charger_secrets) atteignent compose par son environnement, où
+# compose.projet.yml peut les lire ; jamais par un argument ni par un fichier d'état.
+@test "deployer_les_secrets_atteignent_compose" {
+  deja_en_service "$ANCIENNE" 0.1.0
+  export DOUBLE_DOCKER_SECRETS='JETON AUTRE_SECRET'
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 0 ]
+  # compose a reçu JETON dans son environnement (le double n'en note que le nom), et pas une
+  # variable que les secrets ne déclarent pas…
+  [ "$(cat "$BATS_TEST_TMPDIR/secrets-recus")" = JETON ]
+  # …et jamais en argument ni dans un fichier d'état
+  aucune_ligne jeton-prod-7 "$APPELS" "$ETAT"/*
+}
+
+@test "deployer_ne_laisse_aucun_secret_dans_une_trace" {
+  deja_en_service "$ANCIENNE" 0.1.0
+  run bash -x "$CLONE/deploiement/deployer.sh" prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 0 ]
+  [ "$(signaux)" = "$(signal 'déployé 0.2.0') $HC" ]
+  [[ "$output" != *jeton-prod-7* ]]
+  [[ "$output" != *hc.example* ]]
+}
+
+# --- verrou ----------------------------------------------------------------------------------
+
+# attendre_le_verrou <fichier> : attend (5 s au plus) qu'un autre processus tienne le verrou.
+attendre_le_verrou() {
+  local _
+  for _ in $(seq 1 100); do
+    flock -n "$1" true || return 0
+    sleep 0.05
+  done
+  echo "le verrou n'a jamais été pris" >&2
+  return 1
+}
+
+@test "deployer_attend_le_verrou_qu_il_ne_tient_pas" {
+  mkdir -p "$ETAT"
+  # 3>&- : le processus d'arrière-plan ne garde pas la sortie de bats ouverte
+  # shellcheck disable=SC2016  # $APPELS est développé par le bash d'arrière-plan
+  flock "$ETAT/verrou" bash -c 'sleep 1; echo "verrou libéré" >>"$APPELS"' 3>&- &
+  attendre_le_verrou "$ETAT/verrou"
+  deployer prod "$NOUVELLE" 0.2.0
+  wait
+  [ "$status" -eq 0 ]
+  # rien n'a été lancé avant que le verrou soit rendu
+  [ "$(head -n 1 "$APPELS")" = "verrou libéré" ]
+}
+
+@test "deployer_n_attend_pas_le_verrou_que_la_sonde_tient" {
+  mkdir -p "$ETAT"
+  exec 8>"$ETAT/verrou"
+  flock -n 8
+  export {{ prefixe }}VERROU_TENU=1
+  run timeout 60 bash "$CLONE/deploiement/deployer.sh" prod "$NOUVELLE" 0.2.0
+  exec 8>&-
+  [ "$status" -eq 0 ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+}
+
+# --- divers ----------------------------------------------------------------------------------
+
+# Le signal est un plus : un service de supervision injoignable ne change pas le résultat (son
+# silence finit par alerter de lui-même).
+@test "un_signal_impossible_ne_change_pas_le_resultat" {
+  export DOUBLE_CURL_SIGNAL_CODE=6
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 0 ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+  [ "$(signaux)" = "$(signal 'déployé 0.2.0') $HC" ]
+}
+
+@test "deployer_refuse_des_arguments_invalides" {
+  local -a cas=(
+    "prod"
+    "prod $NOUVELLE"
+    "prod $NOUVELLE 0.2.0 en-trop"
+    "essai $NOUVELLE 0.2.0"
+    "prod ghcr.io/edouardzemb/{{ nom }}:main main"
+    "prod ghcr.io/edouardzemb/{{ nom }}@sha256:1234 main"
+    "prod $NOUVELLE v0.2.0"
+    "prod $NOUVELLE 0.2"
+    "prod --retour en-trop"
+    "prod --retourner"
+    "--retour prod"
+    "essai --retour"
+  )
+  local arguments
+  for arguments in "${cas[@]}"; do
+    # shellcheck disable=SC2086  # découpage voulu
+    deployer $arguments
+    [ "$status" -eq 64 ]
+  done
+  # une version sur deux lignes injecterait une variable dans compose.env
+  deployer prod "$NOUVELLE" $'0.2.0\n{{ prefixe }}PORT=80'
+  [ "$status" -eq 64 ]
+  [ ! -s "$APPELS" ]
+  [ ! -e "$ETAT/compose.env" ]
+}

@@ -1,0 +1,408 @@
+{#- Gabarit Copier. `${ {{- prefixe }}X}` : l'espace et le tiret évitent `${{{`, que Jinja lit mal. -#}
+#!/usr/bin/env bash
+# Déploie une image d'{{ nom }}, contrôle sa santé, et revient à la version précédente si elle échoue.
+#
+#   deployer.sh <prod|staging> <image@sha256:…> <version>
+#   deployer.sh <prod|staging> --retour
+#
+# <version> est celle que {{ chemin_sante }} doit annoncer : `main` en staging, X.Y.Z (sans « v ») en
+# prod. Lancé par sonder.sh avec {{ prefixe }}VERROU_TENU=1 (la sonde tient déjà le verrou), ou à la
+# main pour un déploiement ou un retour arrière : il prend alors le verrou lui-même.
+#
+# Déroulé :
+{%- if sauvegardes %}
+#   1. verrou ${{ prefixe }}ETAT/verrou, partagé avec la sonde et la sauvegarde (600 s d'attente au
+#      plus), sauf si {{ prefixe }}VERROU_TENU=1 ;
+#   2. si l'application tourne, instantané de ses données dans le dossier
+#      /sauvegardes/pre-deploiement/<AAAAMMJJTHHMMSSZ>, qui a la forme de /donnees, par la commande
+#      SAUVEGARDER de deploiement/projet.env ; elle l'écrit sous un nom provisoire,
+#      <AAAAMMJJTHHMMSSZ>.partiel, que le dossier ne quitte qu'après le code 0 ; si elle ne rend pas
+#      0, on s'arrête là, et le dossier garde ce nom, pour le diagnostic ;
+{%- else %}
+#   1. verrou ${{ prefixe }}ETAT/verrou, partagé avec la sonde (600 s d'attente au plus), sauf si
+#      {{ prefixe }}VERROU_TENU=1 ;
+#   2. pas d'instantané : le projet n'a pas de données à sauvegarder ;
+{%- endif %}
+#   3. nouveau compose.env ; l'ancien devient compose.env.precedent s'il est bien celui de la
+#      version déployée (un déploiement interrompu ne devient pas la cible du retour arrière). Il
+#      porte l'image, la version et les variables de deploiement/env/<env>.env que le compose exige,
+#      dont {{ prefixe }}URL_PUBLIQUE ;
+#   4. `docker compose up -d --wait --remove-orphans` (un conteneur dont aucun des deux fichiers
+#      compose ne déclare plus le service est retiré), puis santé sur 127.0.0.1 : statut ok, la
+#      version attendue, et la révision du label org.opencontainers.image.revision de l'image ;
+#   5. succès : deploye ← "<image> <version>" (l'ancien dans precedent), echec effacé, signal ok ;
+#   6. échec : echec ← <image> d'abord (la sonde ne la retentera pas, même si la suite est
+#      coupée), puis retour à compose.env.precedent et contrôle de sa santé ; sans version
+#      précédente (premier déploiement), la version en échec est arrêtée. Signal /fail.
+{%- if sauvegardes %}
+#
+# L'étape 2 n'a rien changé quand elle échoue. Un instantané impossible ne marque pas la version en
+# échec : la sonde réessaiera, et alertera, à chaque passage.
+{%- endif %}
+#
+# Retour arrière manuel (`--retour`) : revient à l'image et à la version de `precedent`, par le même
+# déroulé et le même contrôle de santé qu'un déploiement. Ce que le retour change :
+#   - Refus, code 64 et rien de touché : pas de version en service (deploye), pas de version
+#     précédente (precedent absent ou illisible), ou précédente identique à la version en service.
+#   - La version quittée (premier champ de deploye) est écrite dans `echec` juste avant le premier
+{%- if sauvegardes %}
+#     changement d'état (après l'instantané, avant compose.env), et reste dans `echec` quoi qu'il
+#     arrive : jamais effacée. Sans cela la sonde, qui vise la plus haute étiquette (ou :main), la
+#     redéploierait au passage suivant. Elle attend alors en silence une nouvelle version.
+{%- else %}
+#     changement d'état (avant compose.env), et reste dans `echec` quoi qu'il arrive : jamais
+#     effacée. Sans cela la sonde, qui vise la plus haute étiquette (ou :main), la redéploierait au
+#     passage suivant. Elle attend alors en silence une nouvelle version.
+{%- endif %}
+#   - Succès : deploye ← la précédente, `precedent` supprimé (un second --retour ne rebascule pas
+#     vers la version en échec ; le prochain déploiement le recrée), signal ok « retour à <v>
+#     effectué (depuis <v>) ».
+#   - Santé de la précédente non conforme : comme pour tout déploiement raté, la version quittée est
+#     remise en service (compose.env.precedent, que l'étape 3 vient de remplir avec elle), signal
+#     /fail « échec du retour à <v>, <v quittée> remise en service ». deploye, precedent (pour une
+#     nouvelle tentative, la cause réglée) et echec ne changent pas. La version quittée, toujours en
+#     service et marquée en échec, n'envoie plus de signal ok (voir sonder.sh) ; la sonde alerte si
+#     elle ne répond pas non plus.
+#
+# État, dans ${{ prefixe }}ETAT (chaque fichier est remplacé d'un coup, jamais écrit à moitié) :
+#   compose.env             variables du compose en service, lues par `dc`
+#   compose.env.precedent   celui de la dernière version déployée avant celle-ci : cible du retour
+#   deploye                 "<image@sha256:…> <version>" de la version en service
+#   precedent               le contenu précédent de deploye
+#   echec                   l'image du dernier déploiement en échec
+#
+# Codes de sortie : 0 déployé ; 1 échec (signalé, sauf avant toute action : {{ prefixe }}IMAGE ou
+# {{ prefixe }}VERSION posée dans l'environnement, {{ prefixe }}URL_PUBLIQUE invalide ou absente de
+# deploiement/env/<env>.env, verrou toujours pris après 600 s) ; 3 secrets absents ; 64 usage, ou
+# retour arrière impossible.
+#
+# Variable de test : {{ prefixe }}SANTE_DELAI, secondes entre deux essais de santé (défaut 3).
+set -euo pipefail
+# shellcheck source=deploiement/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+
+# Posées par main.
+NOM_ENV=""
+REFERENCE=""
+VERSION=""
+RETOUR=0         # 1 pour --retour
+ECHEC_IMAGE=""   # l'image que echec doit nommer si le lancement échoue : REFERENCE, ou en retour la version quittée
+VERSION_QUITTEE="" # en retour : la version en service avant le retour
+
+# Ce qui s'écrit dans compose.env : une seule ligne chacune, sans surprise.
+MOTIF_REFERENCE='^[a-z0-9][a-z0-9._/:-]*@sha256:[0-9a-f]{64}$'
+MOTIF_VERSION='^(main|[0-9]+\.[0-9]+\.[0-9]+)$'
+# L'origine du site, sans chemin ni requête : la forme que l'application accepte, en plus strict
+# (hôte en minuscules, sans identifiants).
+MOTIF_URL_PUBLIQUE='^https?://[a-z0-9.-]+(:[0-9]+)?$'
+
+# ecrire_atomique <fichier> <ligne…> : remplace le fichier d'un coup (fichier temporaire, puis mv).
+ecrire_atomique() {
+  local fichier="$1"
+  shift
+  printf '%s\n' "$@" >"$fichier.tmp"
+  mv -f -- "$fichier.tmp" "$fichier"
+}
+
+# copier_atomique <source> <destination>
+copier_atomique() {
+  cp -- "$1" "$2.tmp"
+  mv -f -- "$2.tmp" "$2"
+}
+
+# signaler_sonde ok|echec <message> : le signal n'est qu'un plus. S'il ne part pas, signaler l'a
+# journalisé, et le silence alertera de lui-même : le résultat du déploiement ne change pas.
+signaler_sonde() {
+  signaler HC_SONDE "$@" || true
+}
+
+# lancer : `up` du compose.env courant. Les secrets dont compose.projet.yml a besoin viennent de
+# l'environnement (charger_secrets), jamais d'un argument ni d'un fichier. --remove-orphans retire
+# les conteneurs du projet dont aucun des deux fichiers compose ne déclare plus le service.
+lancer() {
+  dc up -d --wait --wait-timeout 120 --remove-orphans
+}
+
+# sante_conforme <version> <révision> : sante_locale (lib.sh), 10 essais, à {{ prefixe }}SANTE_DELAI
+# secondes d'écart.
+sante_conforme() {
+  local version="$1" revision="$2" delai="${ {{- prefixe }}SANTE_DELAI:-3}" essai reponse=""
+  for essai in 1 2 3 4 5 6 7 8 9 10; do
+    if reponse="$(sante_locale "$version" "$revision")"; then
+      journal "santé conforme (essai $essai) : version $version, révision $revision"
+      return 0
+    fi
+    [ "$essai" -eq 10 ] || sleep "$delai"
+  done
+  journal "santé non conforme après 10 essais (attendu : statut ok, version $version, révision $revision) ; dernière réponse : ${reponse//$'\n'/ }"
+  return 1
+}
+{%- if sauvegardes %}
+
+# instantane : copie des données en service, dans un dossier qui a la forme de /donnees, par la
+# commande SAUVEGARDER de deploiement/projet.env (lu, jamais sourcé), lancée dans le conteneur en
+# service. Seul son code de sortie fait foi : sa sortie n'est que journalisée. La commande écrit sous
+# un nom provisoire, <horodatage>.partiel, renommé après le code 0 : un instantané en échec garde ce
+# nom, et rien ne le prend pour un instantané complet. Une destination déjà présente est un échec.
+instantane() {
+  local horodatage destination hote sortie code=0
+  lire_projet_env SAUVEGARDER || return 1
+  horodatage="$(date -u +%Y%m%dT%H%M%SZ)"
+  destination="/sauvegardes/pre-deploiement/$horodatage"
+  hote="${{ prefixe }}SAUVEGARDES/pre-deploiement/$horodatage"
+  if [ -e "$hote" ] || [ -L "$hote" ] || [ -e "$hote.partiel" ] || [ -L "$hote.partiel" ]; then
+    journal "instantané impossible : $hote existe déjà (ou $hote.partiel), rien n'est écrasé"
+    return 1
+  fi
+  sortie="$(dc exec -T app "${PROJET_MOTS[@]}" "$destination.partiel")" || code=$?
+  if [ "$code" -ne 0 ]; then
+    journal "instantané impossible (code $code) : ${sortie//$'\n'/ }"
+    return 1
+  fi
+  # Le nom définitif est revérifié juste avant : avec -T, un dossier vide apparu entre-temps serait
+  # remplacé sans bruit.
+  if ! { [ -d "$hote.partiel" ] && [ ! -L "$hote.partiel" ] && [ ! -e "$hote" ] && [ ! -L "$hote" ] \
+    && mv -T -- "$hote.partiel" "$hote"; }; then
+    journal "instantané impossible : la commande a rendu 0, mais $hote.partiel ne peut pas prendre le nom $hote"
+    return 1
+  fi
+  journal "instantané : $destination"
+}
+{%- endif %}
+
+# lire_version <fichier> : l'image et la version d'un fichier "<image@sha256:…> <version>" (deploye,
+# precedent) dans IMAGE_LUE et VERSION_LUE. Échec si le fichier manque ou si l'une des deux n'a pas
+# la forme qu'on écrit dans compose.env.
+lire_version() {
+  IMAGE_LUE="" VERSION_LUE=""
+  [ -f "$1" ] || return 1
+  { read -r IMAGE_LUE VERSION_LUE _ || true; } <"$1"
+  [[ "$IMAGE_LUE" =~ $MOTIF_REFERENCE ]] && [[ "$VERSION_LUE" =~ $MOTIF_VERSION ]]
+}
+
+# preparer_retour : sous le verrou, REFERENCE et VERSION ← la précédente ; ECHEC_IMAGE et
+# VERSION_QUITTEE ← la version en service. Code 64 et aucune écriture si le retour est impossible.
+preparer_retour() {
+  local etat="${{ prefixe }}ETAT" image_quittee
+  lire_version "$etat/deploye" \
+    || arreter 64 "retour arrière impossible : aucune version en service ($etat/deploye absent ou illisible). Rien n'a changé"
+  image_quittee="$IMAGE_LUE"
+  VERSION_QUITTEE="$VERSION_LUE"
+  [ -f "$etat/precedent" ] \
+    || arreter 64 "retour arrière impossible : aucune version précédente ($etat/precedent absent : un seul déploiement, ou retour déjà fait). Rien n'a changé"
+  lire_version "$etat/precedent" \
+    || arreter 64 "retour arrière impossible : $etat/precedent illisible. Rien n'a changé"
+  [ "$IMAGE_LUE" != "$image_quittee" ] \
+    || arreter 64 "retour arrière impossible : la version précédente ($VERSION_LUE) est celle en service. Rien n'a changé"
+  REFERENCE="$IMAGE_LUE"
+  VERSION="$VERSION_LUE"
+  ECHEC_IMAGE="$image_quittee"
+}
+
+# echouer <raison> : la version est marquée en échec avant tout le reste, puis retour arrière. En
+# retour arrière manuel, la « version en échec » est celle qu'on quittait : echec la nomme déjà, et
+# la remettre en service est le comportement d'un déploiement raté.
+echouer() {
+  local raison="$1" etat="${{ prefixe }}ETAT" retour=aucun image_prec version_prec revision_prec message
+  ecrire_atomique "$etat/echec" "$ECHEC_IMAGE"
+  if [ "$RETOUR" -eq 1 ]; then
+    journal "échec du retour à $VERSION ($raison) : $ECHEC_IMAGE ($VERSION_QUITTEE) reste marquée en échec"
+  else
+    journal "échec du déploiement de $VERSION ($raison) : $REFERENCE marquée en échec"
+  fi
+
+  if [ -f "$etat/compose.env.precedent" ]; then
+    copier_atomique "$etat/compose.env.precedent" "$etat/compose.env"
+    image_prec="$(valeur_de {{ prefixe }}IMAGE "$etat/compose.env")" || image_prec=""
+    version_prec="$(valeur_de {{ prefixe }}VERSION "$etat/compose.env")" || version_prec=inconnue
+    retour="$version_prec"
+    journal "retour à $version_prec : $image_prec"
+    if lancer && revision_prec="$(revision_de "$image_prec")" \
+      && sante_conforme "$version_prec" "$revision_prec"; then
+      journal "retour à $version_prec réussi"
+    else
+      retour="$version_prec en échec"
+      journal "retour à $version_prec en échec : intervention nécessaire"
+    fi
+    if [ "$RETOUR" -eq 1 ]; then
+      message="échec du retour à $VERSION, $version_prec remise en service"
+      [ "$retour" = "$version_prec" ] || message="$message en échec"
+    else
+      message="échec $VERSION, retour à $retour"
+    fi
+  else
+    # Premier déploiement : rien à restaurer. La version en échec ne reste pas en service (elle
+{%- if sauvegardes %}
+    # pourrait redémarrer en boucle et bloquer l'instantané du déploiement suivant).
+{%- else %}
+    # pourrait redémarrer en boucle).
+{%- endif %}
+    journal "aucune version précédente : arrêt de la version en échec"
+    dc stop || journal "arrêt de la version en échec impossible"
+    if [ "$RETOUR" -eq 1 ]; then
+      message="échec du retour à $VERSION, aucune version à remettre en service (arrêt)"
+    else
+      message="échec $VERSION, retour à $retour"
+    fi
+  fi
+
+  signaler_sonde echec "$message"
+}
+
+main() {
+  if [ "$#" -eq 2 ] && [ "$2" = --retour ]; then
+    RETOUR=1
+    NOM_ENV="$1"
+  elif [ "$#" -eq 3 ]; then
+    NOM_ENV="$1"
+    REFERENCE="$2"
+    VERSION="$3"
+    ECHEC_IMAGE="$REFERENCE"
+    # Validées avant d'être écrites dans compose.env.
+    [[ "$REFERENCE" =~ $MOTIF_REFERENCE ]] \
+      || arreter 64 "référence invalide : '$REFERENCE' (attendu : image@sha256:<64 caractères hexadécimaux>)"
+    [[ "$VERSION" =~ $MOTIF_VERSION ]] \
+      || arreter 64 "version invalide : '$VERSION' (attendu : main ou X.Y.Z)"
+  else
+    arreter 64 "usage : deployer.sh <prod|staging> <image@sha256:…> <version> | deployer.sh <prod|staging> --retour"
+  fi
+
+  # Les secrets de cette version font foi : charger_secrets remplace ceux qu'hériteraient le shell
+  # ou la sonde (qui a chargé les siens avant de passer le clone sur la nouvelle version). L'adresse
+  # du signal est retirée d'abord : une version qui ne la déclare plus n'hérite pas de l'ancienne.
+  unset HC_SONDE
+  charger_env "$NOM_ENV"
+  charger_secrets "$NOM_ENV"
+  local etat="${{ prefixe }}ETAT" deployee=""{% if sauvegardes %} conteneurs=""{% endif %} revision raison="" variable quoi{% if sauvegardes %} avant{% endif %}
+
+  # L'image et la version ne viennent que de compose.env. Compose donne la priorité au shell sur
+  # --env-file : exportée, l'une d'elles l'emporterait, et le retour arrière relancerait la
+  # mauvaise version. Refus net plutôt qu'effacement silencieux : l'appelant a une erreur à voir.
+  for variable in {{ prefixe }}IMAGE {{ prefixe }}VERSION; do
+    if [ -n "${!variable+present}" ]; then
+      arreter 1 "$variable est posée dans l'environnement : elle prendrait le pas sur compose.env. Rien n'a changé ; relancer sans elle (unset $variable)"
+    fi
+  done
+
+  # L'adresse publique vient de deploiement/env/<env>.env (charger_env) et s'écrit dans compose.env :
+  # validée avant tout, comme la référence et la version. Le message ne reprend pas la valeur, qui
+  # pourrait porter des identifiants.
+  [[ "${ {{- prefixe }}URL_PUBLIQUE:-}" =~ $MOTIF_URL_PUBLIQUE ]] \
+    || arreter 1 "{{ prefixe }}URL_PUBLIQUE invalide ou absente de deploiement/env/$NOM_ENV.env (attendu : http(s)://hôte[:port], sans chemin ni requête). Rien n'a changé"
+
+  # 1. Verrou.
+  if [ "${ {{- prefixe }}VERROU_TENU:-}" != 1 ]; then
+    exec 9>"$etat/verrou"
+    quoi="déploiement de $VERSION"
+    [ "$RETOUR" -eq 0 ] || quoi="retour arrière"
+    flock -w 600 9 \
+      || arreter 1 "verrou $etat/verrou toujours pris après 600 s : $quoi abandonné, rien n'a changé"
+  fi
+  # La version précédente se lit sous le verrou : une sonde qui déploie en même temps l'aurait changée.
+{%- if sauvegardes %}
+  # `quoi` et `avant` servent aux messages : « déploiement de 0.2.0 » / « avant 0.2.0 », ou
+  # « retour à 0.1.0 » / « avant le retour à 0.1.0 ».
+  if [ "$RETOUR" -eq 1 ]; then
+    preparer_retour
+    quoi="retour à $VERSION"
+    avant="le retour à $VERSION"
+    journal "retour arrière en $NOM_ENV : $VERSION_QUITTEE ($ECHEC_IMAGE) → $VERSION ($REFERENCE)"
+  else
+    quoi="déploiement de $VERSION"
+    avant="$VERSION"
+    journal "déploiement de $VERSION en $NOM_ENV : $REFERENCE"
+  fi
+
+  # 2. Instantané, si l'application tourne. Sans compose.env (premier déploiement), `dc` ne peut
+  # pas tourner et il n'y a rien à copier.
+{%- else %}
+  if [ "$RETOUR" -eq 1 ]; then
+    preparer_retour
+    journal "retour arrière en $NOM_ENV : $VERSION_QUITTEE ($ECHEC_IMAGE) → $VERSION ($REFERENCE)"
+  else
+    journal "déploiement de $VERSION en $NOM_ENV : $REFERENCE"
+  fi
+
+  # 2. Pas d'instantané : le projet n'a pas de données à sauvegarder. La version en service sert à
+  # l'étape 3.
+{%- endif %}
+  if [ -f "$etat/deploye" ]; then
+    { read -r deployee _ || true; } <"$etat/deploye"
+  fi
+{%- if sauvegardes %}
+  if [ -f "$etat/compose.env" ]; then
+    if ! conteneurs="$(dc ps -q app)"; then
+      journal "état de l'application illisible (docker compose ps) : $quoi annulé, rien n'a changé"
+      signaler_sonde echec "état de l'application illisible avant $avant, rien n'a changé"
+      return 1
+    fi
+  fi
+  if [ -n "$conteneurs" ]; then
+    if ! instantane; then
+      journal "$quoi annulé, rien n'a changé"
+      signaler_sonde echec "instantané impossible avant $avant, rien n'a changé"
+      return 1
+    fi
+  else
+    journal "application arrêtée ou jamais déployée : pas d'instantané"
+  fi
+{%- endif %}
+
+  # 3. compose.env. Un retour arrière marque d'abord la version quittée : c'est le premier changement
+  # d'état, et la sonde ne doit jamais voir la précédente en service sans cette marque.
+  if [ "$RETOUR" -eq 1 ]; then
+    ecrire_atomique "$etat/echec" "$ECHEC_IMAGE"
+    journal "$VERSION_QUITTEE ($ECHEC_IMAGE) marquée en échec : la sonde ne la redéploiera pas"
+  fi
+  if [ -f "$etat/compose.env" ]; then
+    if [ -n "$deployee" ] && [ "$(valeur_de {{ prefixe }}IMAGE "$etat/compose.env")" = "$deployee" ]; then
+      copier_atomique "$etat/compose.env" "$etat/compose.env.precedent"
+    else
+      journal "compose.env ne décrit pas la version déployée (déploiement interrompu ?) : compose.env.precedent reste la cible du retour arrière"
+    fi
+  fi
+  ecrire_atomique "$etat/compose.env" \
+    "{{ prefixe }}IMAGE=$REFERENCE" \
+    "{{ prefixe }}VERSION=$VERSION" \
+    "{{ prefixe }}ENV=$NOM_ENV" \
+    "{{ prefixe }}PORT=${{ prefixe }}PORT" \
+    "{{ prefixe }}DONNEES=${{ prefixe }}DONNEES" \
+{%- if sauvegardes %}
+    "{{ prefixe }}SAUVEGARDES=${{ prefixe }}SAUVEGARDES" \
+{%- endif %}
+    "{{ prefixe }}URL_PUBLIQUE=${{ prefixe }}URL_PUBLIQUE"
+
+  # 4. Lancement et santé.
+  if ! lancer; then
+    raison="docker compose up en échec"
+  elif ! revision="$(revision_de "$REFERENCE")"; then
+    raison="révision de l'image illisible"
+  elif ! sante_conforme "$VERSION" "$revision"; then
+    raison="santé non conforme"
+  fi
+  if [ -n "$raison" ]; then
+    echouer "$raison"
+    return 1
+  fi
+
+  # 5. Succès. Un retour arrière garde `echec` (la version quittée) et consomme `precedent`.
+  if [ "$RETOUR" -eq 1 ]; then
+    ecrire_atomique "$etat/deploye" "$REFERENCE $VERSION"
+    rm -f -- "$etat/precedent"
+    journal "retour effectué : $VERSION ($REFERENCE) ; $VERSION_QUITTEE reste marquée en échec"
+    signaler_sonde ok "retour à $VERSION effectué (depuis $VERSION_QUITTEE)"
+    return 0
+  fi
+  if [ -f "$etat/deploye" ]; then
+    copier_atomique "$etat/deploye" "$etat/precedent"
+  fi
+  ecrire_atomique "$etat/deploye" "$REFERENCE $VERSION"
+  rm -f -- "$etat/echec"
+  journal "déployé : $VERSION ($REFERENCE)"
+  signaler_sonde ok "déployé $VERSION"
+  return 0
+}
+
+# Tout le corps est dans main, appelée sur la dernière ligne : bash a lu tout le fichier avant
+# qu'un `git checkout` ne le remplace.
+main "$@"; exit $?
