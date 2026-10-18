@@ -64,8 +64,9 @@ jobs:
             cp sops extrait/age/age extrait/age/age-keygen "$dossier"
             chmod +x "$dossier/sops" "$dossier/age" "$dossier/age-keygen"
             chemin_path="$dossier"
-            # shellcheck est préinstallé sur ubuntu-latest.
-            sans_saut=sops,age,age-keygen,pwsh,shellcheck
+            # shellcheck et Docker (serveur Linux, pour les tests bats de la mécanique) sont préinstallés
+            # sur ubuntu-latest.
+            sans_saut=sops,age,age-keygen,pwsh,shellcheck,docker
           fi
           echo "$chemin_path" >> "$GITHUB_PATH"
           echo "MODELE_TESTS_SANS_SAUT=$sans_saut" >> "$GITHUB_ENV"

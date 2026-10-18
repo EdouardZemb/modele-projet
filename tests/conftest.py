@@ -115,16 +115,20 @@ def depot(tmp_path, env):
     return d
 
 
-def exiger(*dependances):
-    """Saute le test si une dépendance du système manque, sauf si MODELE_TESTS_SANS_SAUT la nomme.
+def manque(dependance, raison):
+    """Une dépendance du système manque : saut, ou échec si MODELE_TESTS_SANS_SAUT la nomme.
 
     MODELE_TESTS_SANS_SAUT est une liste séparée par des virgules ; « 1 » les vaut toutes.
     Une dépendance nommée qui manque fait échouer le test au lieu de le sauter (LE-16).
     """
     liste = {d.strip() for d in os.environ.get("MODELE_TESTS_SANS_SAUT", "").split(",") if d.strip()}
+    if "1" in liste or dependance in liste:
+        pytest.fail(f"{raison}, et MODELE_TESTS_SANS_SAUT exige {dependance}")
+    pytest.skip(raison)
+
+
+def exiger(*dependances):
+    """Saute le test si une commande du système manque, sauf si MODELE_TESTS_SANS_SAUT la nomme."""
     for dependance in dependances:
-        if shutil.which(dependance):
-            continue
-        if "1" in liste or dependance in liste:
-            pytest.fail(f"{dependance} manque et MODELE_TESTS_SANS_SAUT l'exige")
-        pytest.skip(f"{dependance} absent")
+        if not shutil.which(dependance):
+            manque(dependance, f"{dependance} absent")

@@ -1,0 +1,293 @@
+{#- Gabarit Copier. `${ {{- prefixe }}X}` : l'espace et le tiret évitent `${{{`, que Jinja lit mal. -#}
+#!/usr/bin/env bash
+{%- if sauvegardes %}
+# Double de `docker` pour les tests de la sonde, du déploiement, de la sauvegarde et de la
+# restauration : il note chaque appel dans $APPELS (le nom puis les arguments, séparés par des
+# espaces) et simule ce que ces scripts attendent de Docker. Rien n'est réellement tiré ni lancé.
+{%- else %}
+# Double de `docker` pour les tests de la sonde et du déploiement : il note chaque appel dans
+# $APPELS (le nom puis les arguments, séparés par des espaces) et simule ce que ces scripts
+# attendent de Docker. Rien n'est réellement tiré ni lancé.
+{%- endif %}
+#
+# L'« application en service » est le fichier en-service.env, à côté de $APPELS : la configuration
+# effective du dernier `compose up` réussi, effacée par `compose stop|down`. Comme dans compose,
+# une variable posée dans l'environnement l'emporte sur le --env-file. Le double de curl y lit la
+# version et l'image en service pour répondre à {{ chemin_sante }}.
+#
+# Comme compose, qui interpole le fichier à chaque sous-commande, il refuse (code 1) tout appel
+# `compose` sans {{ prefixe }}URL_PUBLIQUE, ni dans l'environnement ni dans le --env-file : la variable
+# est obligatoire dans compose.yml (`${ {{- prefixe }}URL_PUBLIQUE:?}`). Les autres variables
+# obligatoires ne sont pas contrôlées ici.
+#
+# Pilotage :
+#   DOUBLE_DOCKER_PULL_ERREUR        `pull` échoue avec ce message (« manifest unknown »…)
+#   DOUBLE_DOCKER_EMPREINTE          réponse de `image inspect` pour RepoDigests (une référence
+#                                    image@sha256:… ; défaut : condensé de « a »)
+{%- if sauvegardes %}
+#   DOUBLE_DOCKER_SAUVEGARDE_CODE    code de `compose exec … <sauvegarder> <dossier>` (défaut 0)
+#   DOUBLE_DOCKER_SAUVEGARDE_SORTIE  sa sortie (défaut : rien)
+#   DOUBLE_DOCKER_SAUVEGARDE_SANS_FICHIER  `<sauvegarder>` répond 0 sans rien écrire
+#   DOUBLE_DOCKER_SAUVEGARDE_ATTENTE  `<sauvegarder>` dure autant de secondes avant de répondre
+{%- endif %}
+#   DOUBLE_DOCKER_UP_ECHEC           images (séparées par des espaces) dont le `compose up` échoue
+#   DOUBLE_DOCKER_START_ECHEC        `compose start` échoue
+#   DOUBLE_DOCKER_STOP_ECHEC         `compose stop` échoue
+{%- if sauvegardes %}
+#   DOUBLE_DOCKER_VERIFIER_CODE      code de `run --rm … <verifier> /donnees` (défaut 0 ; 2 = non conforme)
+#   DOUBLE_DOCKER_RUN_ECHEC          `run -d` échoue avec ce message (« port is already allocated »…)
+#   DOUBLE_DOCKER_RM_ECHEC           `rm` échoue
+#
+# Sauvegarde : `compose exec -T app <sauvegarder…> /sauvegardes/<chemin>` crée, dans le dossier des
+# sauvegardes de compose.env, le dossier de l'instantané, qui a la forme de /donnees (un fichier
+# donnees.txt), comme la commande de l'image. Une destination qui existe déjà est refusée (code 1).
+#
+# Conteneurs jetables : `run -d --name <nom>` crée conteneur-<nom>.env à côté de $APPELS (port,
+# image, dossier monté) ; le double de curl y lit de quoi répondre sur ce port. `stop` y ajoute
+# ARRET=1, `rm` le supprime. `run` sans -d est un conteneur à usage unique, la vérification d'un
+# instantané (`<verifier…> /donnees`) : il rend DOUBLE_DOCKER_VERIFIER_CODE, ou 2 si donnees.txt
+# commence par « CORROMPU ».
+{%- endif %}
+#
+# Invariants vérifiés à chaque appel (code 125 sinon) : DOCKER_CONFIG est posé, `--config` n'est
+# jamais passé, et un `compose` reçoit un --env-file qui existe (comme le vrai docker compose).
+{%- if sauvegardes %}
+# Pour `run` : l'image est celle de `deploye`, un conteneur détaché a un nom et un autre est
+# jetable (--rm), le seul port publié est 127.0.0.1:<port>:{{ port_app }} hors du port de la prod, et le seul
+# volume est un dossier existant monté sur /donnees, jamais les données ni les sauvegardes de la
+# prod.
+{%- endif %}
+{ printf '%s' docker; for argument in "$@"; do printf ' %s' "$argument"; done; printf '\n'; } >>"${APPELS:?APPELS non défini}"
+
+DOSSIER="$(dirname "$APPELS")"
+EN_SERVICE="$DOSSIER/en-service.env"
+
+refuser() {
+  echo "double docker : $*" >&2
+  exit 125
+}
+
+[ -n "${DOCKER_CONFIG:-}" ] || refuser "DOCKER_CONFIG absent"
+for argument in "$@"; do
+  [ "$argument" != --config ] || refuser "--config interdit"
+done
+
+# Le label de révision d'une image : les 40 premiers caractères hexadécimaux de son condensé (le
+# double de curl le calcule de la même façon).
+revision_de() {
+  local condense="${1##*:}"
+  printf '%s\n' "${condense:0:40}"
+}
+
+case "${1:-}" in
+  pull)
+    if [ -n "${DOUBLE_DOCKER_PULL_ERREUR:-}" ]; then
+      echo "Error response from daemon: $DOUBLE_DOCKER_PULL_ERREUR" >&2
+      exit 1
+    fi
+    printf '%s\n' "${!#}"
+    ;;
+
+  image)
+    # docker image inspect -f <format> <référence>
+    { [ "${2:-}" = inspect ] && [ "${3:-}" = -f ]; } || refuser "image : attendu « image inspect -f <format> <référence> »"
+    case "$4" in
+      *RepoDigests*) printf '%s\n' "${DOUBLE_DOCKER_EMPREINTE:-ghcr.io/edouardzemb/{{ nom }}@sha256:$(printf 'a%.0s' {1..64})}" ;;
+      *org.opencontainers.image.revision*) revision_de "$5" ;;
+      *) refuser "image inspect : format inconnu $4" ;;
+    esac
+    ;;
+
+  compose)
+    shift
+    fichier_env=""
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        -p | -f | --profile) shift 2 ;;
+        --env-file)
+          fichier_env="$2"
+          shift 2
+          ;;
+        *) break ;;
+      esac
+    done
+    [ -f "$fichier_env" ] || {
+      echo "couldn't find env file: $fichier_env" >&2
+      exit 1
+    }
+    if [ -z "${ {{- prefixe }}URL_PUBLIQUE:-}" ] && [ -z "$(sed -n 's/^{{ prefixe }}URL_PUBLIQUE=//p' "$fichier_env")" ]; then
+      echo "required variable {{ prefixe }}URL_PUBLIQUE is missing a value" >&2
+      exit 1
+    fi
+    case "${1:-}" in
+      ps)
+        # ps -q app : un identifiant si l'application est en service
+        [ ! -f "$EN_SERVICE" ] || echo c0ffee
+        ;;
+{%- if sauvegardes %}
+      exec)
+        # exec -T app <sauvegarder…> <destination> : la commande de sauvegarde de l'image
+        destination="${!#}"
+        code="${DOUBLE_DOCKER_SAUVEGARDE_CODE:-0}"
+        [ -z "${DOUBLE_DOCKER_SAUVEGARDE_ATTENTE:-}" ] || sleep "$DOUBLE_DOCKER_SAUVEGARDE_ATTENTE"
+        case "$destination" in
+          /sauvegardes/?*) ;;
+          *) refuser "exec : destination hors de /sauvegardes : $destination" ;;
+        esac
+        if [ "$code" -eq 0 ] && [ -z "${DOUBLE_DOCKER_SAUVEGARDE_SANS_FICHIER:-}" ]; then
+          # Comme la commande de l'image : /sauvegardes est le dossier des sauvegardes de
+          # compose.env ; une destination existante est refusée.
+          hote="$(sed -n 's/^{{ prefixe }}SAUVEGARDES=//p' "$fichier_env")${destination#/sauvegardes}"
+          if [ -e "$hote" ]; then
+            echo "destination existante : $destination"
+            exit 1
+          fi
+          mkdir -p "$hote"
+          echo "instantané de test $(basename "$destination")" >"$hote/donnees.txt"
+        fi
+        [ -z "${DOUBLE_DOCKER_SAUVEGARDE_SORTIE+x}" ] || echo "$DOUBLE_DOCKER_SAUVEGARDE_SORTIE"
+        exit "$code"
+        ;;
+{%- endif %}
+      up | start)
+        [ "$1" != start ] || [ -z "${DOUBLE_DOCKER_START_ECHEC:-}" ] || {
+          echo "Error response from daemon: cannot start" >&2
+          exit 1
+        }
+        # Configuration effective : l'environnement d'abord, puis le --env-file (règle de compose).
+        effective="$DOSSIER/effective.env"
+        for cle in {{ prefixe }}IMAGE {{ prefixe }}VERSION {{ prefixe }}ENV {{ prefixe }}PORT {{ prefixe }}DONNEES{% if sauvegardes %} {{ prefixe }}SAUVEGARDES{% endif %} {{ prefixe }}URL_PUBLIQUE; do
+          if [ -n "${!cle+x}" ]; then
+            printf '%s=%s\n' "$cle" "${!cle}"
+          else
+            printf '%s=%s\n' "$cle" "$(sed -n "s/^$cle=//p" "$fichier_env")"
+          fi
+        done >"$effective"
+        image="$(sed -n 's/^{{ prefixe }}IMAGE=//p' "$effective")"
+        case " ${DOUBLE_DOCKER_UP_ECHEC:-} " in
+          *" $image "*)
+            echo "dependency failed to start: container app is unhealthy" >&2
+            exit 1
+            ;;
+        esac
+        mv -f "$effective" "$EN_SERVICE"
+        ;;
+      stop | down)
+        [ "$1" != stop ] || [ -z "${DOUBLE_DOCKER_STOP_ECHEC:-}" ] || {
+          echo "Error response from daemon: cannot stop" >&2
+          exit 1
+        }
+        rm -f "$EN_SERVICE"
+        ;;
+      *) refuser "compose : sous-commande inattendue ${1:-}" ;;
+    esac
+    ;;
+{%- if sauvegardes %}
+
+  run)
+    shift
+    detache=0 jetable=0 nom="" ports=() volumes=()
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        -d) detache=1 && shift ;;
+        --rm) jetable=1 && shift ;;
+        --read-only) shift ;;
+        --name) nom="$2" && shift 2 ;;
+        -p) ports+=("$2") && shift 2 ;;
+        -v) volumes+=("$2") && shift 2 ;;
+        --user | --tmpfs | --cap-drop | --security-opt | --memory) shift 2 ;;
+        -*) refuser "run : option inattendue $1" ;;
+        *) break ;;
+      esac
+    done
+    image="${1:-}"
+    [ -n "$image" ] || refuser "run : image absente"
+    shift
+    deployee=""
+    { read -r deployee _ || true; } <"${ {{- prefixe }}ETAT:?}/deploye"
+    [ "$image" = "$deployee" ] || refuser "run : l'image $image n'est pas celle de deploye ($deployee)"
+    if [ "$detache" -eq 1 ]; then
+      [ -n "$nom" ] || refuser "run -d : un conteneur détaché porte un nom"
+    else
+      [ "$jetable" -eq 1 ] || refuser "run : un conteneur à usage unique est lancé avec --rm"
+    fi
+    [ "{% raw %}${#volumes[@]}{% endraw %}" -eq 1 ] || refuser "run : un seul volume attendu"
+    source_hote="${volumes[0]%:/donnees}"
+    [ "$source_hote:/donnees" = "${volumes[0]}" ] || refuser "run : le volume se monte sur /donnees : ${volumes[0]}"
+    [ -d "$source_hote" ] || refuser "run : dossier monté absent : $source_hote"
+    for interdit in "${ {{- prefixe }}SAUVEGARDES:?}" "${ {{- prefixe }}DONNEES:?}"; do
+      case "$source_hote" in
+        "$interdit" | "$interdit"/*) refuser "run : $source_hote est un dossier de la prod" ;;
+      esac
+    done
+    port=""
+    for publication in "${ports[@]}"; do
+      [[ "$publication" =~ ^127\.0\.0\.1:([0-9]+):{{ port_app }}$ ]] || refuser "run : publication interdite $publication"
+      [ "${BASH_REMATCH[1]}" != "${ {{- prefixe }}PORT:?}" ] || refuser "run : le port de la prod ne se publie pas"
+      port="${BASH_REMATCH[1]}"
+    done
+
+    if [ "$detache" -eq 1 ]; then
+      [ -n "$port" ] || refuser "run -d : port absent"
+      [ ! -f "$DOSSIER/conteneur-$nom.env" ] || {
+        echo "docker: Error response from daemon: Conflict. The container name \"/$nom\" is already in use." >&2
+        exit 125
+      }
+      [ -z "${DOUBLE_DOCKER_RUN_ECHEC:-}" ] || {
+        echo "docker: Error response from daemon: $DOUBLE_DOCKER_RUN_ECHEC" >&2
+        exit 125
+      }
+      printf 'PORT=%s\nIMAGE=%s\nDONNEES=%s\n' "$port" "$image" "$source_hote" >"$DOSSIER/conteneur-$nom.env"
+      printf 'cafe%s\n' "$(printf 'b%.0s' {1..60})"
+      exit 0
+    fi
+
+    # <verifier…> /donnees : la vérification d'un instantané monté sur /donnees.
+    { [ "$#" -ge 2 ] && [ "${!#}" = /donnees ]; } || refuser "run : commande inattendue $*"
+    if [ "$(head -c 8 "$source_hote/donnees.txt" 2>/dev/null)" = CORROMPU ]; then
+      echo "instantané non conforme : donnees.txt"
+      exit 2
+    fi
+    exit "${DOUBLE_DOCKER_VERIFIER_CODE:-0}"
+    ;;
+
+  stop)
+    # stop [-t <secondes>] <nom>
+    nom="${!#}"
+    [ -f "$DOSSIER/conteneur-$nom.env" ] || {
+      echo "Error response from daemon: No such container: $nom" >&2
+      exit 1
+    }
+    echo ARRET=1 >>"$DOSSIER/conteneur-$nom.env"
+    echo "$nom"
+    ;;
+
+  rm)
+    # rm [-f] <nom>
+    nom="${!#}"
+    [ -z "${DOUBLE_DOCKER_RM_ECHEC:-}" ] || {
+      echo "Error response from daemon: cannot remove container $nom" >&2
+      exit 1
+    }
+    [ -f "$DOSSIER/conteneur-$nom.env" ] || {
+      echo "Error response from daemon: No such container: $nom" >&2
+      exit 1
+    }
+    rm -f "$DOSSIER/conteneur-$nom.env"
+    echo "$nom"
+    ;;
+
+  logs)
+    # logs [--tail <n>] <nom>
+    nom="${!#}"
+    [ -f "$DOSSIER/conteneur-$nom.env" ] || {
+      echo "Error response from daemon: No such container: $nom" >&2
+      exit 1
+    }
+    echo "journal du conteneur $nom"
+    ;;
+{%- endif %}
+
+  *) refuser "commande inattendue ${1:-}" ;;
+esac
+exit 0

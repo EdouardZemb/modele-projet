@@ -1,0 +1,304 @@
+#!/usr/bin/env bash
+# Unités systemd utilisateur d'{{ nom }} : rendu des gabarits, installation, contrôle de dérive.
+#
+#   installer-unites.sh              rend les gabarits, installe les unités, recharge systemd et
+#                                    active les minuteries
+#   installer-unites.sh --verifier   compare les unités installées à leur rendu, sans rien modifier :
+#                                    code 0 si elles sont conformes, 1 sinon (liste des écarts sur
+#                                    stderr). La sonde de prod l'appelle à chaque passage.
+#
+# Les unités ne s'installent que par ce script, jamais à la main : une copie à la main finit par
+# diverger du dépôt sans que personne le voie (incident déjà vécu sur ce serveur).
+#
+# Gabarits : deploiement/systemd/*.in, lus dans le clone qui contient ce script. Le rendu est une
+{%- if sauvegardes %}
+# substitution pure de cinq marqueurs, sans autre mécanisme, pour que deux rendus identiques le
+# soient à l'octet près (le contrôle compare des octets) :
+#   @ENV@               prod ou staging
+#   @CLONE@             le clone de l'environnement de l'unité
+#   @CLONE_PROD@        le clone de prod, quelle que soit l'unité
+#   @HEURE_SAUVEGARDE@  l'heure de la sauvegarde quotidienne (OnCalendar=, *-*-* HH:MM:00)
+#   @HEURE_TEST@        l'heure du test de restauration hebdomadaire (OnCalendar=, Jjj *-*-* HH:MM:00)
+# Les deux heures se lisent dans la déclaration du projet sur le serveur, ~/serveur/projets/{{ nom }}.env
+# (clés SAUVEGARDE=HH:MM et TEST_RESTAURATION=Jjj HH:MM, de Mon à Sun) : c'est le serveur qui
+# répartit les heures des projets. Le fichier est lu, jamais sourcé ; ses autres clés sont ignorées.
+# S'il manque, ou si une heure est absente ou mal formée, rien n'est installé ni vérifié (code 1).
+{%- else %}
+# substitution pure de trois marqueurs, sans autre mécanisme, pour que deux rendus identiques le
+# soient à l'octet près (le contrôle compare des octets) :
+#   @ENV@          prod ou staging
+#   @CLONE@        le clone de l'environnement de l'unité
+#   @CLONE_PROD@   le clone de prod, quelle que soit l'unité
+{%- endif %}
+# Le gabarit {{ nom }}-sonde.* donne une unité par environnement ({{ nom }}-sonde-prod.*, puis
+# {{ nom }}-sonde-staging.*, chacune sur son clone) ; tous les autres sont rendus pour la prod, sur
+# son clone, sous leur nom sans « .in ».
+#
+# Seules les entrées {{ nom }}-* du dossier des unités sont lues, écrites ou retirées. Une entrée
+# {{ nom }}-* sans gabarit est une orpheline : le contrôle la signale, l'installation la désactive,
+# l'arrête et la retire (y compris un dossier de surcharge {{ nom }}-*.d, que crée
+# `systemctl --user edit`). Une unité attendue mais absente est aussi un écart.
+#
+# Variables :
+#   {{ prefixe }}CLONE_PROD      clone de prod (défaut ~/{{ nom }})
+#   {{ prefixe }}CLONE_STAGING   clone de staging (défaut ~/{{ nom }}-staging)
+#   {{ prefixe }}DOSSIER_UNITES  dossier des unités (défaut ~/.config/systemd/user)
+{%- if sauvegardes %}
+#   {{ prefixe }}PROJET_SERVEUR  déclaration du projet sur le serveur (défaut ~/serveur/projets/{{ nom }}.env)
+{%- endif %}
+#
+# Codes de sortie : 0 ; 1 = écart (--verifier) ou erreur ; 64 = usage ou chemin invalide.
+set -euo pipefail
+export LC_COLLATE=C # ordre des listes et des écarts indépendant de la langue du serveur
+# shellcheck source=deploiement/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+
+# Posés par main.
+CLONE_PROD=""
+CLONE_STAGING=""
+DOSSIER=""
+RENDU="" # dossier temporaire du rendu ; supprimé à la sortie
+ECARTS=0 # nombre d'écarts relevés par verifier
+{%- if sauvegardes %}
+HEURE_SAUVEGARDE="" # valeur d'OnCalendar= de la sauvegarde
+HEURE_TEST=""       # valeur d'OnCalendar= du test de restauration
+{%- endif %}
+
+# valider_chemin_de_clone <variable> <chemin> : un chemin absolu, sans caractère que systemd
+# interpréterait dans ExecStart (espace, guillemet, \, $, ;, %). Le rendu ne met rien entre
+# guillemets : un tel chemin couperait la commande ou serait développé.
+valider_chemin_de_clone() {
+  local variable="$1" chemin="$2"
+  case "$chemin" in
+    /*) ;;
+    *) arreter 64 "$variable : chemin absolu attendu (reçu : '$chemin')" ;;
+  esac
+  case "$chemin" in
+    *[[:space:][:cntrl:]\"\'\\\$\;%]*)
+      arreter 64 "$variable : '$chemin' contient un caractère que systemd interpréterait (espace, guillemet, \\, \$, ;, %)"
+      ;;
+  esac
+}
+{%- if sauvegardes %}
+
+# lire_heures <fichier> : SAUVEGARDE et TEST_RESTAURATION de la déclaration du projet sur le
+# serveur, rendues dans HEURE_SAUVEGARDE et HEURE_TEST (valeurs d'OnCalendar=). Lecteur strict : seules
+# les lignes qui commencent par l'une des deux clés comptent, chacune une fois, et chaque valeur a sa
+# forme exacte (HH:MM ; Jjj HH:MM, de Mon à Sun). Le fichier n'est jamais sourcé.
+lire_heures() {
+  local fichier="$1" ligne cle valeur sauvegarde="" test="" vues=" "
+  { [ -f "$fichier" ] && [ -r "$fichier" ]; } \
+    || arreter 1 "déclaration du projet illisible : $fichier (heures des sauvegardes)"
+  while IFS= read -r ligne || [ -n "$ligne" ]; do
+    case "$ligne" in
+      SAUVEGARDE=* | TEST_RESTAURATION=*) ;;
+      *) continue ;;
+    esac
+    cle="${ligne%%=*}"
+    valeur="${ligne#*=}"
+    case "$vues" in *" $cle "*) arreter 1 "$fichier : $cle est déclarée deux fois" ;; esac
+    vues="$vues$cle "
+    if [ "$cle" = SAUVEGARDE ]; then sauvegarde="$valeur"; else test="$valeur"; fi
+  done <"$fichier"
+  [[ "$sauvegarde" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]] \
+    || arreter 1 "$fichier : SAUVEGARDE absente ou mal formée (attendu : HH:MM)"
+  [[ "$test" =~ ^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\ ([01][0-9]|2[0-3]):[0-5][0-9]$ ]] \
+    || arreter 1 "$fichier : TEST_RESTAURATION absente ou mal formée (attendu : Jjj HH:MM, de Mon à Sun)"
+  HEURE_SAUVEGARDE="*-*-* $sauvegarde:00"
+  HEURE_TEST="${test%% *} *-*-* ${test#* }:00"
+}
+{%- endif %}
+
+{% if sauvegardes -%}
+# rendre_gabarit <gabarit> <env> <clone> <sortie> : substitue les cinq marqueurs. Un autre marqueur
+{%- else -%}
+# rendre_gabarit <gabarit> <env> <clone> <sortie> : substitue les trois marqueurs. Un autre marqueur
+{%- endif %}
+# du même genre (@MAJUSCULES@) est une faute du gabarit : on refuse plutôt que de l'installer tel quel.
+rendre_gabarit() {
+  local gabarit="$1" nom_env="$2" clone="$3" sortie="$4" contenu=""
+  { [ -f "$gabarit" ] && [ -r "$gabarit" ]; } || arreter 1 "gabarit illisible : $gabarit"
+  # -d '' : tout le fichier, sans perdre le saut de ligne final (une substitution de commande le
+  # supprimerait). Remplacements entre guillemets : une « & » du chemin reste une « & ».
+  IFS= read -r -d '' contenu <"$gabarit" || true
+  contenu="${contenu//@ENV@/"$nom_env"}"
+  contenu="${contenu//@CLONE@/"$clone"}"
+  contenu="${contenu//@CLONE_PROD@/"$CLONE_PROD"}"
+{%- if sauvegardes %}
+  contenu="${contenu//@HEURE_SAUVEGARDE@/"$HEURE_SAUVEGARDE"}"
+  contenu="${contenu//@HEURE_TEST@/"$HEURE_TEST"}"
+  if [[ "$contenu" =~ @[A-Z][A-Z_]*@ ]]; then
+    arreter 1 "gabarit ${gabarit##*/} : marqueur inconnu ${BASH_REMATCH[0]} (attendus : @ENV@, @CLONE@, @CLONE_PROD@, @HEURE_SAUVEGARDE@, @HEURE_TEST@)"
+  fi
+{%- else %}
+  if [[ "$contenu" =~ @[A-Z][A-Z_]*@ ]]; then
+    arreter 1 "gabarit ${gabarit##*/} : marqueur inconnu ${BASH_REMATCH[0]} (attendus : @ENV@, @CLONE@, @CLONE_PROD@)"
+  fi
+{%- endif %}
+  printf '%s' "$contenu" >"$sortie"
+}
+
+# rendre_tout <dossier> : rend tous les gabarits dans ce dossier, avant que quoi que ce soit soit
+# installé : un gabarit en faute n'installe rien.
+rendre_tout() {
+  local sortie="$1" gabarits="${{ prefixe }}CLONE/deploiement/systemd" gabarit nom trouves=0
+  for gabarit in "$gabarits"/*.in; do
+    [ -e "$gabarit" ] || break # aucun gabarit : le glob reste littéral
+    nom="${gabarit##*/}"
+    nom="${nom%.in}"
+    case "$nom" in
+      {{ nom }}-?*) ;;
+      *) arreter 1 "gabarit mal nommé : ${gabarit##*/} (préfixe {{ nom }}- attendu)" ;;
+    esac
+    trouves=$((trouves + 1))
+    case "$nom" in
+      {{ nom }}-sonde.*)
+        rendre_gabarit "$gabarit" prod "$CLONE_PROD" "$sortie/{{ nom }}-sonde-prod.${nom#{{ nom }}-sonde.}"
+        rendre_gabarit "$gabarit" staging "$CLONE_STAGING" "$sortie/{{ nom }}-sonde-staging.${nom#{{ nom }}-sonde.}"
+        ;;
+      *) rendre_gabarit "$gabarit" prod "$CLONE_PROD" "$sortie/$nom" ;;
+    esac
+  done
+  [ "$trouves" -gt 0 ] || arreter 1 "aucun gabarit dans $gabarits"
+}
+
+# conforme <rendu> <installee> : un fichier ordinaire (pas un lien, pas un dossier) aux mêmes octets.
+conforme() {
+  [ -f "$2" ] && [ ! -L "$2" ] && cmp -s "$1" "$2"
+}
+
+# existe <chemin> : vrai aussi pour un lien symbolique brisé.
+existe() {
+  [ -e "$1" ] || [ -L "$1" ]
+}
+
+# --- contrôle de dérive ----------------------------------------------------------------------
+
+# ecart <unité> <raison> : une ligne sur stderr et le compte des écarts.
+ecart() {
+  printf 'écart : %s : %s\n' "$1" "$2" >&2
+  ECARTS=$((ECARTS + 1))
+}
+
+verifier() {
+  local chemin nom
+  local -a rendues=("$RENDU"/*)
+  ECARTS=0
+
+  for chemin in "${rendues[@]}"; do
+    nom="${chemin##*/}"
+    if ! existe "$DOSSIER/$nom"; then
+      ecart "$nom" "absente (le dépôt la prévoit)"
+    elif ! conforme "$chemin" "$DOSSIER/$nom"; then
+      if [ -L "$DOSSIER/$nom" ] || [ ! -f "$DOSSIER/$nom" ]; then
+        ecart "$nom" "n'est pas un fichier ordinaire"
+      else
+        ecart "$nom" "différente de son rendu"
+      fi
+    fi
+  done
+  for chemin in "$DOSSIER"/{{ nom }}-*; do
+    existe "$chemin" || continue # aucun fichier : le glob reste littéral
+    nom="${chemin##*/}"
+    [ -e "$RENDU/$nom" ] || ecart "$nom" "orpheline (aucun gabarit ne la produit)"
+  done
+
+  if [ "$ECARTS" -gt 0 ]; then
+    journal "$ECARTS écart(s) entre les unités installées dans $DOSSIER et deploiement/systemd : corriger par deploiement/installer-unites.sh"
+    return 1
+  fi
+  journal "unités conformes : {% raw %}${#rendues[@]}{% endraw %} vérifiées dans $DOSSIER"
+}
+
+# --- installation ----------------------------------------------------------------------------
+
+# retirer <chemin> : supprime une entrée {{ nom }}-* du dossier des unités (fichier, lien symbolique
+# ou dossier de surcharge ; un lien est retiré, jamais suivi). Refuse tout autre nom.
+retirer() {
+  case "${1##*/}" in
+    {{ nom }}-?*) ;;
+    *) arreter 1 "refus de supprimer une entrée qui n'est pas {{ nom }}-* : $1" ;;
+  esac
+  rm -rf -- "$1"
+}
+
+installer() {
+  local chemin nom
+  local -a minuteries=()
+
+  mkdir -p "$DOSSIER"
+
+  # 1. Les orphelines : désactivées et arrêtées avant que leur fichier disparaisse (sinon systemd
+  # les garderait actives sans fichier), puis retirées. Si la désactivation échoue, on s'arrête.
+  for chemin in "$DOSSIER"/{{ nom }}-*; do
+    existe "$chemin" || continue
+    nom="${chemin##*/}"
+    [ ! -e "$RENDU/$nom" ] || continue
+    case "$nom" in
+      *.service | *.timer)
+        if [ -f "$chemin" ] || [ -L "$chemin" ]; then
+          systemctl --user disable --now "$nom" || arreter 1 "désactivation de $nom impossible"
+        fi
+        ;;
+    esac
+    retirer "$chemin"
+    journal "retirée : $nom (orpheline)"
+  done
+
+  # 2. Les unités du dépôt : seules celles qui diffèrent sont réécrites. Une entrée qui n'est pas
+  # un fichier ordinaire (lien, dossier) est retirée d'abord : `install` ne doit pas écrire à
+  # travers un lien.
+  for chemin in "$RENDU"/*; do
+    nom="${chemin##*/}"
+    case "$nom" in *.timer) minuteries+=("$nom") ;; esac
+    if conforme "$chemin" "$DOSSIER/$nom"; then
+      continue
+    fi
+    if existe "$DOSSIER/$nom"; then
+      retirer "$DOSSIER/$nom"
+    fi
+    install -m 0644 "$chemin" "$DOSSIER/$nom"
+    journal "installée : $nom"
+  done
+
+  # 3. systemd.
+  systemctl --user daemon-reload
+  [ "{% raw %}${#minuteries[@]}{% endraw %}" -eq 0 ] || systemctl --user enable --now "${minuteries[@]}"
+  journal "unités installées dans $DOSSIER : {% raw %}${#minuteries[@]}{% endraw %} minuteries actives"
+}
+
+main() {
+  local mode=installer
+  case "$#" in
+    0) ;;
+    1)
+      [ "$1" = --verifier ] || arreter 64 "usage : installer-unites.sh [--verifier]"
+      mode=verifier
+      ;;
+    *) arreter 64 "usage : installer-unites.sh [--verifier]" ;;
+  esac
+
+  CLONE_PROD="${ {{- prefixe }}CLONE_PROD:-$HOME/{{ nom }}}"
+  CLONE_STAGING="${ {{- prefixe }}CLONE_STAGING:-$HOME/{{ nom }}-staging}"
+  DOSSIER="${ {{- prefixe }}DOSSIER_UNITES:-$HOME/.config/systemd/user}"
+  valider_chemin_de_clone {{ prefixe }}CLONE_PROD "$CLONE_PROD"
+  valider_chemin_de_clone {{ prefixe }}CLONE_STAGING "$CLONE_STAGING"
+  [ -n "$DOSSIER" ] || arreter 64 "{{ prefixe }}DOSSIER_UNITES est vide"
+{%- if sauvegardes %}
+  lire_heures "${ {{- prefixe }}PROJET_SERVEUR:-$HOME/serveur/projets/{{ nom }}.env}"
+{%- endif %}
+
+  RENDU="$(mktemp -d "${TMPDIR:-/tmp}/{{ nom }}-unites.XXXXXX")" || arreter 1 "dossier temporaire impossible"
+  trap '[ -z "$RENDU" ] || rm -rf -- "$RENDU"' EXIT
+  rendre_tout "$RENDU"
+
+  if [ "$mode" = verifier ]; then
+    verifier
+  else
+    installer
+  fi
+}
+
+# Tout le corps est dans main : bash a lu tout le fichier avant qu'un `git checkout` ne le remplace.
+main "$@"
+exit $?

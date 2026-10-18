@@ -1,5 +1,6 @@
 """Les douze combinaisons du rendu : cible x visibilité x fusion."""
 
+import shutil
 import subprocess
 import sys
 
@@ -51,12 +52,34 @@ def test_combinaison(rendre, env_isole, cible, visibilite, fusion):
     r = lancer([sys.executable, "-m", "ruff", "check", "scripts/modele"], rendu)
     assert r.returncode == 0, r.stdout + r.stderr
 
-    dossier = rendu / "deploiement"
-    scripts_sh = sorted(dossier.glob("**/*.sh")) if dossier.is_dir() else []
-    if scripts_sh:
-        exiger("shellcheck")
-        r = lancer(["shellcheck", *[str(s) for s in scripts_sh]], rendu)
-        assert r.returncode == 0, r.stdout + r.stderr
-
     r = lancer([sys.executable, "scripts/modele/verifier_secrets.py"], rendu, env)
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+def scripts_shell(rendu):
+    """Les scripts shell de la mécanique rendue : deploiement/ et son banc bats."""
+    scripts = []
+    deploiement = rendu / "deploiement"
+    if deploiement.is_dir():
+        scripts += sorted(deploiement.glob("**/*.sh"))
+    banc = rendu / "tests/deploiement"
+    if banc.is_dir():
+        scripts += sorted(banc.glob("*.sh")) + sorted(banc.glob("*.bash")) + sorted(banc.glob("*.bats"))
+        scripts += sorted(p for p in (banc / "doubles").iterdir() if p.is_file())
+    return scripts
+
+
+# Seul ce contrôle demande shellcheck : sans lui, les autres contrôles de la combinaison ne sautent
+# pas (R7).
+@pytest.mark.parametrize("fusion", ["session", "edouard"])
+@pytest.mark.parametrize("visibilite", ["public", "prive"])
+@pytest.mark.parametrize("cible", list(CIBLES))
+def test_combinaison_shellcheck(rendre, cible, visibilite, fusion):
+    rendu = rendre(**{**CIBLES[cible], "visibilite": visibilite, "fusion": fusion})
+    scripts = scripts_shell(rendu)
+    assert bool(scripts) == (cible != "aucune"), scripts
+    if not scripts:
+        return
+    exiger("shellcheck")
+    r = lancer([shutil.which("shellcheck"), *[str(s) for s in scripts]], rendu)
     assert r.returncode == 0, r.stdout + r.stderr
