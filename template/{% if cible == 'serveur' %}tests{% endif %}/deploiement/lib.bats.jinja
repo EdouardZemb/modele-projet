@@ -1,0 +1,527 @@
+{#- Gabarit Copier. `${ {{- prefixe }}X}` : l'espace et le tiret évitent `${{{`, que Jinja lit mal. -#}
+#!/usr/bin/env bats
+# lib.sh : charger_env, dc, projet.env, signaler, journal, santé, verrou, état déployé. (charger_secrets : voir secrets.bats.)
+
+# Chaque test tourne dans son propre processus : les `export` d'un test ne fuient pas dans les autres
+# (SC2030, SC2031). Le code de avec_lib est entre apostrophes pour se développer dans le sous-shell
+# qui l'exécute, pas ici (SC2016).
+{%- if not sauvegardes %}
+# Sans sauvegardes, {{ prefixe }}SAUVEGARDES n'est jamais posée : les tests l'impriment avec la
+# valeur « absente » par défaut.
+{%- endif %}
+# shellcheck disable=SC2016,SC2030,SC2031
+
+bats_require_minimum_version 1.5.0
+
+load aide
+
+setup() {
+  preparer_environnement
+}
+
+teardown() {
+  abandonner_le_verrou
+}
+
+# Le contrat de lib.sh est son en-tête : une fonction publique (sans « _ » devant) qui n'y figure
+# pas est une fonction que personne ne sait exister.
+@test "l_en_tete_de_lib_liste_toutes_les_fonctions_publiques" {
+  local fonction absentes="" en_tete
+  en_tete="$(sed -n '1,/^{{ prefixe }}CLONE=/p' "$CLONE/deploiement/lib.sh")"
+  while read -r fonction; do
+    grep -qE "^#   $fonction( |\$)" <<<"$en_tete" || absentes="$absentes $fonction"
+  done < <(grep -oE '^[a-z][a-z_]*\(\)' "$CLONE/deploiement/lib.sh" | tr -d '()')
+  [ -z "$absentes" ] || {
+    echo "fonctions publiques absentes de l'en-tête :$absentes" >&2
+    return 1
+  }
+}
+
+@test "charger_env_exporte_les_chemins_de_prod" {
+  avec_lib 'charger_env prod
+    printf "%s\n" "${{ prefixe }}CLONE" "${{ prefixe }}ETAT" "${{ prefixe }}DONNEES" "${ {{- prefixe }}SAUVEGARDES-absente}" \
+      "$DOCKER_CONFIG" "${{ prefixe }}PROJET" "${{ prefixe }}PORT" "${{ prefixe }}URL_PUBLIQUE"
+    # exportées, pour docker compose et les scripts enfants
+    for v in {{ prefixe }}CLONE {{ prefixe }}ETAT {{ prefixe }}DONNEES{% if sauvegardes %} {{ prefixe }}SAUVEGARDES{% endif %} DOCKER_CONFIG \
+        {{ prefixe }}PROJET {{ prefixe }}PORT; do
+      [ -n "$(printenv "$v")" ] || { echo "$v non exportée"; exit 1; }
+    done'
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "$CLONE" ]
+  [ "${lines[1]}" = "${{ prefixe }}RACINE_ETAT/prod" ]
+  [ "${lines[2]}" = "${{ prefixe }}RACINE_DONNEES/prod/donnees" ]
+{%- if sauvegardes %}
+  [ "${lines[3]}" = "${{ prefixe }}RACINE_SAUVEGARDES" ]
+{%- else %}
+  [ "${lines[3]}" = absente ]
+{%- endif %}
+  [ "${lines[4]}" = "${{ prefixe }}DOCKER_CONFIG" ]
+  [ "${lines[5]}" = "{{ nom }}" ]
+  [ "${lines[6]}" = "{{ bloc_ports }}" ]
+  [ "${lines[7]}" = "https://{{ sous_domaine }}.{{ domaine }}" ]
+}
+
+@test "charger_env_cree_les_dossiers" {
+  avec_lib 'charger_env prod; charger_env staging'
+  [ "$status" -eq 0 ]
+  [ -d "${{ prefixe }}RACINE_ETAT/prod" ]
+  [ -d "${{ prefixe }}RACINE_DONNEES/prod/donnees" ]
+{%- if sauvegardes %}
+  [ -d "${{ prefixe }}RACINE_SAUVEGARDES" ]
+{%- endif %}
+  [ -d "${{ prefixe }}RACINE_ETAT/staging" ]
+  [ -d "${{ prefixe }}RACINE_DONNEES/staging/donnees" ]
+{%- if sauvegardes %}
+  [ -d "${{ prefixe }}RACINE_DONNEES/staging/sauvegardes" ]
+{%- else %}
+  # sans sauvegardes, aucun dossier de sauvegardes
+  [ ! -e "$HOME/backups" ]
+  [ ! -e "${{ prefixe }}RACINE_DONNEES/staging/sauvegardes" ]
+{%- endif %}
+}
+
+@test "charger_env_place_les_sauvegardes_de_staging_sous_les_donnees" {
+  avec_lib 'charger_env staging
+    printf "%s\n" "${ {{- prefixe }}SAUVEGARDES-absente}" "${{ prefixe }}PROJET" "${{ prefixe }}PORT" "${{ prefixe }}ENV"'
+  [ "$status" -eq 0 ]
+{%- if sauvegardes %}
+  [ "${lines[0]}" = "${{ prefixe }}RACINE_DONNEES/staging/sauvegardes" ]
+{%- else %}
+  [ "${lines[0]}" = absente ]
+{%- endif %}
+  [ "${lines[1]}" = "{{ nom }}-staging" ]
+  [ "${lines[2]}" = "{{ bloc_ports + 1 }}" ]
+  [ "${lines[3]}" = "staging" ]
+}
+
+@test "charger_env_valeurs_par_defaut_du_serveur" {
+  unset {{ prefixe }}RACINE_ETAT {{ prefixe }}RACINE_DONNEES {{ prefixe }}RACINE_SAUVEGARDES {{ prefixe }}DOCKER_CONFIG
+  avec_lib 'charger_env prod
+    printf "%s\n" "${{ prefixe }}ETAT" "${{ prefixe }}DONNEES" "${ {{- prefixe }}SAUVEGARDES-absente}" "$DOCKER_CONFIG"
+    charger_env staging
+    printf "%s\n" "${{ prefixe }}ETAT" "${{ prefixe }}DONNEES" "${ {{- prefixe }}SAUVEGARDES-absente}"'
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "$HOME/.local/state/{{ nom }}/prod" ]
+  [ "${lines[1]}" = "$HOME/.local/share/{{ nom }}/prod/donnees" ]
+{%- if sauvegardes %}
+  [ "${lines[2]}" = "$HOME/backups/{{ nom }}" ]
+{%- else %}
+  [ "${lines[2]}" = absente ]
+{%- endif %}
+  [ "${lines[3]}" = "$HOME/.config/serveur/docker" ]
+  [ "${lines[4]}" = "$HOME/.local/state/{{ nom }}/staging" ]
+  [ "${lines[5]}" = "$HOME/.local/share/{{ nom }}/staging/donnees" ]
+{%- if sauvegardes %}
+  [ "${lines[6]}" = "$HOME/.local/share/{{ nom }}/staging/sauvegardes" ]
+{%- else %}
+  [ "${lines[6]}" = absente ]
+{%- endif %}
+}
+
+# La configuration Docker du serveur est la sienne (identifiants GHCR posés par sa sonde) : un
+# DOCKER_CONFIG hérité du shell ne doit pas s'y substituer.
+@test "charger_env_ignore_un_docker_config_herite" {
+  export DOCKER_CONFIG=/ailleurs
+  avec_lib 'charger_env prod; printf "%s" "$DOCKER_CONFIG"'
+  [ "$status" -eq 0 ]
+  [ "$output" = "${{ prefixe }}DOCKER_CONFIG" ]
+}
+
+# Migration 3 : la configuration Docker est celle du serveur, commune aux projets, et non plus
+# un dossier propre au projet.
+@test "docker_config_par_defaut_serveur" {
+  unset {{ prefixe }}DOCKER_CONFIG
+  export DOCKER_CONFIG=/ailleurs
+  avec_lib 'charger_env prod; printf "%s" "$DOCKER_CONFIG"'
+  [ "$status" -eq 0 ]
+  [ "$output" = "$HOME/.config/serveur/docker" ]
+  # et c'est elle que reçoit docker compose
+  creer_double docker 'printf "%s\n" "$DOCKER_CONFIG" >"'"$BATS_TEST_TMPDIR"'/config-recue"'
+  avec_lib 'charger_env prod; dc ps -q app'
+  [ "$status" -eq 0 ]
+  [ "$(cat "$BATS_TEST_TMPDIR/config-recue")" = "$HOME/.config/serveur/docker" ]
+}
+
+# Migration 2 : l'identité age est la clé du serveur, commune aux projets ; une identité posée par
+# l'appelant (les tests, une restauration à la main) l'emporte.
+@test "cle_sops_par_defaut_serveur" {
+  avec_lib 'exporter_cle_sops; printf "%s" "$SOPS_AGE_KEY_FILE"'
+  [ "$status" -eq 0 ]
+  [ "$output" = "$HOME/.config/sops/age/serveur.txt" ]
+  SOPS_AGE_KEY_FILE="$BATS_TEST_TMPDIR/autre.txt" avec_lib 'exporter_cle_sops; printf "%s" "$SOPS_AGE_KEY_FILE"'
+  [ "$status" -eq 0 ]
+  [ "$output" = "$BATS_TEST_TMPDIR/autre.txt" ]
+  # le message d'un déchiffrement impossible nomme l'identité par défaut
+  mkdir -p "$CLONE/deploiement/secrets"
+  echo 'pas du sops' >"$CLONE/deploiement/secrets/prod.env.enc"
+  creer_double sops 'exit 1'
+  avec_lib 'charger_env prod; charger_secrets prod'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"(identité : $HOME/.config/sops/age/serveur.txt)"* ]]
+}
+
+@test "charger_env_prefixe_le_path_une_seule_fois" {
+  avec_lib 'charger_env prod; charger_env staging; printf "%s" "$PATH"'
+  [ "$status" -eq 0 ]
+  [[ "$output" == "$HOME/.local/bin:"* ]]
+  [[ "$output" != *"$HOME/.local/bin:$HOME/.local/bin"* ]]
+}
+
+@test "charger_env_refuse_un_fichier_d_environnement_incoherent" {
+  sed -i 's/^{{ prefixe }}ENV=.*/{{ prefixe }}ENV=staging/' "$CLONE/deploiement/env/prod.env"
+  avec_lib 'charger_env prod'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"prod.env"* ]]
+}
+
+@test "charger_env_ne_degrade_pas_le_shell_appelant" {
+  # le shell appelant n'avait pas `set -a` : il ne l'a toujours pas ensuite
+  avec_lib 'charger_env prod; case "$-" in *a*) echo "set -a reste actif"; exit 1;; esac'
+  [ "$status" -eq 0 ]
+}
+
+# Deux fichiers compose : celui du modèle, puis les ajouts du projet, que compose fusionne.
+@test "dc_passe_projet_fichier_compose_et_fichier_d_environnement" {
+  creer_double docker
+  avec_lib 'charger_env prod; dc ps -q app'
+  [ "$status" -eq 0 ]
+  [ "$(appels_de docker)" = "docker compose -p {{ nom }} -f $CLONE/deploiement/compose.yml -f $CLONE/deploiement/compose.projet.yml --env-file ${{ prefixe }}RACINE_ETAT/prod/compose.env ps -q app" ]
+  avec_lib 'charger_env staging; dc ps -q app'
+  [ "$status" -eq 0 ]
+  [ "$(appels_de docker | tail -n 1)" = "docker compose -p {{ nom }}-staging -f $CLONE/deploiement/compose.yml -f $CLONE/deploiement/compose.projet.yml --env-file ${{ prefixe }}RACINE_ETAT/staging/compose.env ps -q app" ]
+}
+
+@test "dc_exige_charger_env" {
+  creer_double docker
+  run bash -c 'set -euo pipefail; unset {{ prefixe }}PROJET; . "$CLONE/deploiement/lib.sh"; dc ps'
+  [ "$status" -ne 0 ]
+  [ "$(nombre_d_appels docker)" -eq 0 ]
+}
+
+# --- deploiement/projet.env : les réglages du projet, lus et jamais sourcés ----------------------
+
+# projet_env <ligne…> : remplace deploiement/projet.env du clone temporaire par ces lignes.
+projet_env() {
+  printf '%s\n' "$@" >"$CLONE/deploiement/projet.env"
+}
+
+@test "projet_env_jamais_source" {
+  local valeur ligne
+  for valeur in "\$(touch $BATS_TEST_TMPDIR/temoin)" "\`touch $BATS_TEST_TMPDIR/temoin\`" \
+    "sauvegarder;touch $BATS_TEST_TMPDIR/temoin" "sauvegarder && touch $BATS_TEST_TMPDIR/temoin" \
+    "sauvegarder | tee $BATS_TEST_TMPDIR/temoin" "sauvegarder >$BATS_TEST_TMPDIR/temoin" \
+    '"sauvegarder"' "sauvegarder \${HOME}" $'sauvegarder\tdossier' $'sauvegarder\r'; do
+    projet_env "# Réglages" "SAUVEGARDER=$valeur" "VERIFIER=verifier"
+    avec_lib 'lire_projet_env SAUVEGARDER; printf "%s|" "${PROJET_MOTS[@]}"'
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"projet.env, ligne 2 invalide"* ]]
+    [ ! -e "$BATS_TEST_TMPDIR/temoin" ]
+    # une ligne invalide rend tout le fichier illisible, même pour une autre clé
+    avec_lib 'lire_projet_env VERIFIER'
+    [ "$status" -eq 1 ]
+  done
+  # une clé qui n'est pas en majuscules, ou une ligne sans « = »
+  for ligne in 'sauvegarder=sauvegarder' 'SAUVEGARDER sauvegarder' '1CLE=x' 'CLE-X=x'; do
+    projet_env "$ligne" "VERIFIER=verifier"
+    avec_lib 'lire_projet_env VERIFIER'
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"ligne 1 invalide"* ]]
+  done
+}
+
+@test "projet_env_mots_separes" {
+  projet_env "# Commandes de l'image" "" "SAUVEGARDER=node  outils/instantane.js sauvegarder --forme=dossier " \
+    "VERIFIER=verifier" "AUTRE=a:b,c@d%e#f!g*h?i[j]k{l}m^n+o/p=q_r-s.t"
+  avec_lib 'lire_projet_env SAUVEGARDER; printf "%s\n" "{% raw %}${#PROJET_MOTS[@]}{% endraw %}" "${PROJET_MOTS[@]}"'
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = 4 ]
+  [ "${lines[1]}" = node ]
+  [ "${lines[2]}" = outils/instantane.js ]
+  [ "${lines[3]}" = sauvegarder ]
+  [ "${lines[4]}" = --forme=dossier ]
+  avec_lib 'lire_projet_env VERIFIER; printf "%s\n" "{% raw %}${#PROJET_MOTS[@]}{% endraw %}" "${PROJET_MOTS[@]}"'
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = 1 ]
+  [ "${lines[1]}" = verifier ]
+  # les symboles que valeur_sure accepte passent tels quels
+  avec_lib 'lire_projet_env AUTRE; printf "%s\n" "${PROJET_MOTS[@]}"'
+  [ "$status" -eq 0 ]
+  [ "$output" = 'a:b,c@d%e#f!g*h?i[j]k{l}m^n+o/p=q_r-s.t' ]
+}
+
+@test "projet_env_refuse_absente_vide_double_ou_fichier_manquant" {
+  projet_env "VERIFIER=verifier"
+  avec_lib 'lire_projet_env SAUVEGARDER'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"réglage SAUVEGARDER absent"* ]]
+  local valeur
+  for valeur in '' ' ' '   '; do
+    projet_env "SAUVEGARDER=$valeur"
+    avec_lib 'lire_projet_env SAUVEGARDER'
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"ligne 1 invalide"* ]]
+  done
+  projet_env "SAUVEGARDER=sauvegarder" "SAUVEGARDER=autre"
+  avec_lib 'lire_projet_env SAUVEGARDER; echo "mots : {% raw %}${#PROJET_MOTS[@]}{% endraw %}"'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"SAUVEGARDER est déclarée deux fois"* ]]
+  rm "$CLONE/deploiement/projet.env"
+  avec_lib 'lire_projet_env SAUVEGARDER'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"réglages du projet absents"* ]]
+  # une clé demandée qui n'en est pas une est une faute d'usage
+  projet_env "VERIFIER=verifier"
+  avec_lib 'lire_projet_env verifier'
+  [ "$status" -eq 64 ]
+}
+{%- if sauvegardes %}
+
+# Le projet.env semé par le modèle déclare les deux commandes de l'image.
+@test "projet_env_du_modele_declare_les_commandes_de_sauvegarde" {
+  avec_lib 'lire_projet_env SAUVEGARDER; printf "%s\n" "${PROJET_MOTS[@]}"
+    lire_projet_env VERIFIER; printf "%s\n" "${PROJET_MOTS[@]}"'
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = sauvegarder ]
+  [ "${lines[1]}" = verifier ]
+}
+{%- else %}
+
+# Sans sauvegardes, le projet.env semé par le modèle ne déclare aucune commande.
+@test "projet_env_du_modele_ne_declare_aucune_commande" {
+  avec_lib 'lire_projet_env SAUVEGARDER'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"réglage SAUVEGARDER absent"* ]]
+}
+{%- endif %}
+
+@test "signaler_ok_envoie_le_message_a_l_adresse_de_la_variable" {
+  creer_double curl
+  export HC_SONDE="https://hc.example/ping/abc"
+  avec_lib 'signaler HC_SONDE ok "déployé v1"'
+  [ "$status" -eq 0 ]
+  [ "$(envois_supervision)" = "curl -fsS -m 10 --retry 3 --data-raw déployé v1 https://hc.example/ping/abc" ]
+}
+
+@test "signaler_echec_ajoute_fail" {
+  creer_double curl
+  export HC_SONDE="https://hc.example/ping/abc"
+  avec_lib 'signaler HC_SONDE echec "échec v1"'
+  [ "$status" -eq 0 ]
+  [ "$(envois_supervision)" = "curl -fsS -m 10 --retry 3 --data-raw échec v1 https://hc.example/ping/abc/fail" ]
+}
+
+@test "signaler_sans_message_envoie_un_corps_vide" {
+  creer_double curl
+  export HC_SONDE="https://hc.example/ping/abc"
+  avec_lib 'signaler HC_SONDE ok'
+  [ "$status" -eq 0 ]
+  [ "$(envois_supervision)" = "curl -fsS -m 10 --retry 3 --data-raw  https://hc.example/ping/abc" ]
+}
+
+@test "signaler_variable_vide_journalise_et_renvoie_0" {
+  creer_double curl
+  unset HC_SONDE
+  avec_lib 'signaler HC_SONDE ok "x"'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"signal HC_SONDE non configuré"* ]]
+  [ "$(nombre_d_appels curl)" -eq 0 ]
+  export HC_SONDE=""
+  avec_lib 'signaler HC_SONDE echec "x"'
+  [ "$status" -eq 0 ]
+  [ "$(nombre_d_appels curl)" -eq 0 ]
+}
+
+@test "signaler_propage_l_echec_de_curl_sans_afficher_l_adresse" {
+  creer_double curl 'exit 22'
+  export HC_SONDE="https://hc.example/ping/secret-uuid"
+  avec_lib 'signaler HC_SONDE ok "x"'
+  [ "$status" -eq 22 ]
+  [[ "$output" == *"HC_SONDE"* ]]
+  [[ "$output" != *secret-uuid* ]]
+}
+
+# Sur un hôte partagé, la ligne de commande d'un processus est lisible par les autres comptes (ps) :
+# l'adresse du ping, qui suffit à envoyer de faux signaux, passe à curl par sa configuration
+# (`-K -`, `url = "…"`, lue sur l'entrée standard). Le double refuse une adresse en argument.
+@test "signaler_donne_l_adresse_a_curl_sur_l_entree_standard_et_jamais_en_argument" {
+  installer_doubles curl
+  export HC_SONDE="https://hc-ping.com/uuid-argv-8"
+  avec_lib 'signaler HC_SONDE ok "déployé v1"; signaler HC_SONDE echec "échec v1"'
+  [ "$status" -eq 0 ]
+  [ "$(appels_de curl)" = "$(printf '%s\n' \
+    'curl -fsS -m 10 --retry 3 --data-raw déployé v1 -K -' \
+    'curl -fsS -m 10 --retry 3 --data-raw échec v1 -K -')" ]
+  aucune_ligne 'hc-ping|uuid-argv-8|https?://' "$APPELS"
+  # l'adresse est bien arrivée par la configuration, /fail compris
+  [ "$(envois_supervision)" = "$(printf '%s\n' \
+    'curl -fsS -m 10 --retry 3 --data-raw déployé v1 https://hc-ping.com/uuid-argv-8' \
+    'curl -fsS -m 10 --retry 3 --data-raw échec v1 https://hc-ping.com/uuid-argv-8/fail')" ]
+}
+
+# Un guillemet, une barre oblique inverse ou un saut de ligne sortiraient de la chaîne de la
+# configuration (ou y ajouteraient une ligne : `output = …`). charger_secrets les refuse déjà ;
+# signaler ne les envoie pas non plus si la variable vient d'ailleurs.
+@test "signaler_refuse_une_adresse_qui_sortirait_de_la_configuration_de_curl" {
+  installer_doubles curl
+  local adresse
+  for adresse in 'https://hc.example/a"b' 'https://hc.example/a\b' \
+    $'https://hc.example/a\noutput = "/tmp/pris"'; do
+    export HC_SONDE="$adresse"
+    : >"$APPELS"
+    avec_lib 'signaler HC_SONDE ok "x"'
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"HC_SONDE"* ]]
+    [[ "$output" != *hc.example* ]]
+    [ "$(nombre_d_appels curl)" -eq 0 ]
+  done
+}
+
+@test "signaler_refuse_un_etat_inconnu" {
+  creer_double curl
+  export HC_SONDE="https://hc.example/ping/abc"
+  avec_lib 'signaler HC_SONDE peut-etre'
+  [ "$status" -eq 64 ]
+  [ "$(nombre_d_appels curl)" -eq 0 ]
+}
+
+@test "journal_ecrit_sur_stderr_avec_l_heure_iso" {
+  avec_lib 'journal bonjour le monde 2>/dev/null'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  avec_lib 'journal bonjour le monde 2>&1 >/dev/null'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\ bonjour\ le\ monde$ ]]
+}
+
+# Sous `bash -x` la trace va dans le journal : l'adresse de ping (qui suffit à envoyer de faux
+# signaux) ne doit pas y figurer, mais la trace doit reprendre ensuite.
+@test "signaler_n_ecrit_pas_l_adresse_sous_bash_x" {
+  creer_double curl
+  export HC_SONDE="https://hc.example/ping/uuid-trace-6"
+  run bash -x -c 'set -euo pipefail; . "$CLONE/deploiement/lib.sh"
+    signaler HC_SONDE echec bonjour; : marqueur-de-trace'
+  [ "$status" -eq 0 ]
+  [[ "$output" != *uuid-trace-6* ]]
+  [[ "$output" == *"+ : marqueur-de-trace"* ]]
+  [[ "$(envois_supervision)" == *"/ping/uuid-trace-6/fail" ]]
+
+  # même chose quand curl échoue (le message d'erreur ne répète pas l'adresse)
+  creer_double curl 'exit 22'
+  run bash -x -c 'set -uo pipefail; . "$CLONE/deploiement/lib.sh"; signaler HC_SONDE ok bonjour; echo "code=$?"'
+  [[ "$output" != *uuid-trace-6* ]]
+  [[ "$output" == *"code=22"* ]]
+}
+
+# --- Santé sur un port, verrou, état déployé --------------------------------------------------
+{%- if sauvegardes %}
+# (communs à la sonde, au déploiement, à la sauvegarde, au test de restauration et à la restauration)
+{%- else %}
+# (communs à la sonde et au déploiement)
+{%- endif %}
+
+@test "sante_sur_controle_le_port_et_le_filtre_demandes" {
+  creer_double curl 'echo "{\"statut\":\"ok\",\"environnement\":\"ci\"}"'
+  avec_lib 'sante_sur {{ bloc_ports + 9 }} ".statut == \"ok\" and .environnement == \$environnement" --arg environnement ci'
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = '{"statut":"ok","environnement":"ci"}' ]
+  [ "$(appels_de curl)" = "curl -fsS -m 5 http://127.0.0.1:{{ bloc_ports + 9 }}{{ chemin_sante }}" ]
+  # un autre environnement : la réponse est imprimée, le contrôle échoue
+  avec_lib 'sante_sur {{ bloc_ports + 9 }} ".statut == \"ok\" and .environnement == \$environnement" --arg environnement prod'
+  [ "$status" -eq 1 ]
+  [ "${lines[0]}" = '{"statut":"ok","environnement":"ci"}' ]
+  # curl échoue : l'erreur de curl est imprimée
+  creer_double curl 'echo "curl: (7) refusé" >&2; exit 7'
+  avec_lib 'sante_sur {{ bloc_ports + 9 }} ".statut == \"ok\""'
+  [ "$status" -eq 1 ]
+  [ "${lines[0]}" = "curl: (7) refusé" ]
+}
+
+@test "sante_locale_vise_le_port_de_l_environnement" {
+  creer_double curl 'echo "{\"statut\":\"ok\",\"version\":\"1.2.3\",\"revision\":\"abc\"}"'
+  avec_lib 'charger_env prod; sante_locale 1.2.3 abc'
+  [ "$status" -eq 0 ]
+  [ "$(appels_de curl)" = "curl -fsS -m 5 http://127.0.0.1:{{ bloc_ports }}{{ chemin_sante }}" ]
+  avec_lib 'charger_env prod; sante_locale 1.2.3 autre'
+  [ "$status" -eq 1 ]
+}
+
+@test "attendre_sante_reessaie_puis_reussit" {
+  export {{ prefixe }}SANTE_DELAI=0
+  # les deux premiers essais échouent, le troisième est bon
+  creer_double curl 'n=$(wc -l <"'"$APPELS"'"); if [ "$n" -lt 3 ]; then exit 22; fi; echo "{\"statut\":\"ok\"}"'
+  avec_lib 'attendre_sante {{ bloc_ports + 9 }} ".statut == \"ok\""'
+  [ "$status" -eq 0 ]
+  [ "$(nombre_d_appels curl)" -eq 3 ]
+  [[ "$output" == *"santé conforme sur le port {{ bloc_ports + 9 }} (essai 3)"* ]]
+}
+
+@test "attendre_sante_abandonne_apres_dix_essais" {
+  export {{ prefixe }}SANTE_DELAI=0
+  creer_double curl 'echo "curl: (22) 503" >&2; exit 22'
+  avec_lib 'attendre_sante {{ bloc_ports + 9 }} ".statut == \"ok\""'
+  [ "$status" -eq 1 ]
+  [ "$(nombre_d_appels curl)" -eq 10 ]
+  [[ "$output" == *"santé non conforme sur le port {{ bloc_ports + 9 }} après 10 essais"* ]]
+}
+{%- if sauvegardes %}
+
+@test "reserver_a_prod_refuse_le_staging_et_l_inconnu" {
+  avec_lib 'reserver_a_prod prod essai.sh; echo ok'
+  [ "$status" -eq 0 ]
+  [ "$output" = ok ]
+  avec_lib 'reserver_a_prod staging essai.sh'
+  [ "$status" -eq 64 ]
+  [[ "$output" == *"essai.sh est réservé à la prod (reçu : 'staging')"* ]]
+  avec_lib 'reserver_a_prod dev essai.sh'
+  [ "$status" -eq 64 ]
+  [[ "$output" == *"environnement inconnu"* ]]
+}
+{%- endif %}
+
+@test "refuser_image_heritee_refuse_image_et_version_du_shell" {
+  avec_lib 'refuser_image_heritee; echo ok'
+  [ "$status" -eq 0 ]
+  {{ prefixe }}IMAGE=x avec_lib 'refuser_image_heritee'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"{{ prefixe }}IMAGE est posée dans l'environnement"* ]]
+  {{ prefixe }}VERSION="" avec_lib 'refuser_image_heritee'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"{{ prefixe }}VERSION est posée dans l'environnement"* ]]
+}
+
+@test "prendre_verrou_est_le_verrou_de_l_etat_et_attend_le_delai" {
+  avec_lib 'charger_env prod; prendre_verrou; echo pris'
+  [ "$status" -eq 0 ]
+  [ "$output" = pris ]
+  [ -f "${{ prefixe }}RACINE_ETAT/prod/verrou" ]
+  # tenu par un autre processus (poignée de main par fichier marqueur : il tient le verrou quand
+  # la main revient) : échec, sans journal, après l'attente demandée
+  tenir_le_verrou "${{ prefixe }}RACINE_ETAT/prod/verrou"
+  {{ prefixe }}VERROU_ATTENTE=1 avec_lib 'charger_env prod; prendre_verrou'
+  relacher_le_verrou
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+}
+
+@test "lire_deploye_lit_l_image_et_la_version" {
+  local image
+  image="ghcr.io/edouardzemb/{{ nom }}@sha256:$(printf 'a%.0s' {1..64})"
+  en_service prod "$image" 0.4.2
+  avec_lib 'charger_env prod; lire_deploye; printf "%s\n" "$DEPLOYE_IMAGE" "$DEPLOYE_VERSION"'
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "$image" ]
+  [ "${lines[1]}" = 0.4.2 ]
+}
+
+@test "lire_deploye_refuse_un_etat_absent_ou_illisible" {
+  avec_lib 'charger_env prod; lire_deploye'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"aucune version déployée"* ]]
+  local etat="${{ prefixe }}RACINE_ETAT/prod" contenu
+  for contenu in "-v 0.1.0" "image-sans-condense 0.1.0" "ghcr.io/x/y@sha256:$(printf 'a%.0s' {1..64})"; do
+    echo "$contenu" >"$etat/deploye"
+    avec_lib 'charger_env prod; lire_deploye'
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"deploye illisible"* ]]
+  done
+}

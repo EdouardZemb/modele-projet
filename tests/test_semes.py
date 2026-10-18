@@ -3,7 +3,7 @@
 import re
 
 import yaml
-from conftest import RACINE, REGISTRE_ENTETE
+from conftest import RACINE, REGISTRE_ENTETE, REPONSES_SERVEUR
 
 
 def lire(rendu, chemin):
@@ -52,6 +52,8 @@ def test_gabarits_docs(rendre):
 
 def test_semes_declares(rendre):
     copier_yml = yaml.safe_load((RACINE / "copier.yml").read_text(encoding="utf-8"))
-    rendu = rendre()
-    rendus = {p.relative_to(rendu).as_posix() for p in rendu.rglob("*") if p.is_file()}
+    rendus = set()
+    for reponses in ({}, REPONSES_SERVEUR):
+        rendu = rendre(**reponses)
+        rendus |= {p.relative_to(rendu).as_posix() for p in rendu.rglob("*") if p.is_file()}
     assert set(copier_yml["_skip_if_exists"]) <= rendus

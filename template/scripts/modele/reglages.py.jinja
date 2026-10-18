@@ -4,4 +4,11 @@ BRANCHE_PRINCIPALE = "{{ branche_principale }}"
 # « public » : la porte de confidentialité refuse ; « prive » : elle avertit sans refuser.
 VISIBILITE = "{{ visibilite }}"
 # Clés que la mécanique du modèle exige dans chaque `.cles`, indexées par le chemin du `.cles`.
+{%- if cible == 'serveur' %}
+SECRETS_EXIGES: dict[str, list[str]] = {
+    "deploiement/secrets/prod.cles": [{% if sauvegardes %}"HC_SONDE", "HC_SAUVEGARDE", "HC_TEST_RESTAURATION"{% else %}"HC_SONDE"{% endif %}],
+    "deploiement/secrets/staging.cles": ["HC_SONDE"],
+}
+{%- else %}
 SECRETS_EXIGES: dict[str, list[str]] = {}
+{%- endif %}

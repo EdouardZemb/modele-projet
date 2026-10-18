@@ -4,7 +4,7 @@ import re
 
 import pytest
 import yaml
-from conftest import fichiers_texte
+from conftest import REPONSES_SERVEUR, fichiers_texte
 
 
 def test_reponses_enregistrees(rendre):
@@ -32,15 +32,28 @@ def test_nom_invalide_refuse(rendre, nom):
         rendre(nom=nom)
 
 
-def test_aucun_reste_de_gabarit(rendre):
-    rendu = rendre()
+# Un reste de Jinja : `{{` qui n'ouvre ni un `${{` de GitHub ni une action de gabarit Go.
+RESTE_DE_JINJA = re.compile(r"(?<!\$)\{\{(?!-?\s*(?:\.|index\b|json\b|range\b|end\b|if\b))")
+
+
+def test_regex_reste_de_jinja():
+    assert RESTE_DE_JINJA.search("image: {{ nom }}")
+    assert RESTE_DE_JINJA.search("{{nom}}")
+    assert not RESTE_DE_JINJA.search("{{index .RepoDigests 0}}")
+    assert not RESTE_DE_JINJA.search("{{ json .State.Health }}")
+    assert not RESTE_DE_JINJA.search("${{ secrets.X }}")
+
+
+@pytest.mark.parametrize("reponses", [{}, REPONSES_SERVEUR], ids=["aucune", "serveur"])
+def test_aucun_reste_de_gabarit(rendre, reponses):
+    rendu = rendre(**reponses)
     fichiers = fichiers_texte(rendu)
     assert fichiers, "aucun fichier rendu : le test passerait à vide"
     for chemin in fichiers:
         assert not chemin.name.endswith(".jinja"), chemin
         texte = chemin.read_text(encoding="utf-8")
         assert "{%" not in texte, chemin
-        assert not re.search(r"(?<!\$)\{\{", texte), chemin
+        assert not RESTE_DE_JINJA.search(texte), chemin
 
 
 def test_fins_de_ligne_lf(rendre):

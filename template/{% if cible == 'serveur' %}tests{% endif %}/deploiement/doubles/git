@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# Double de `git` pour les tests de la sonde : il note chaque appel dans $APPELS et simule le
+# clone (`-C <clone>` accepté devant la sous-commande). Aucun dépôt réel n'est lu ni modifié.
+#
+# Pilotage :
+#   DOUBLE_GIT_STATUS        sortie de `status --porcelain` (défaut : vide, clone propre)
+#   DOUBLE_GIT_ECHEC         sous-commande qui échoue (fetch, merge, checkout ou tag)
+#   DOUBLE_GIT_ETIQUETTES    étiquettes du clone, séparées par des espaces, pour `tag --list`.
+#                            Avec --sort=-v:refname, elles sortent dans l'ordre de version
+#                            décroissant, comme le fait git (sort -rV : même ordre que git sur
+#                            ces formes, vérifié par sonder.bats) ; sinon, dans l'ordre donné.
+#   DOUBLE_GIT_ORIGINE       étiquettes de l'origine, séparées par des espaces (peut être vide). Si
+#                            elle est posée, `fetch … --tags` met à jour les étiquettes du clone,
+#                            qui survivent d'un appel à l'autre : il ajoute celles de l'origine, et
+#                            ne retire celles que l'origine n'a plus qu'avec `--prune` ET
+#                            `--prune-tags`, comme git. Sans elle, `fetch` ne change rien.
+#   DOUBLE_GIT_REECRIRE      fichier que `merge` et `checkout` réécrivent sur place (même inode,
+#                            contenu plus long que l'original) : le pire cas d'un script qui se
+#                            remplace pendant qu'il tourne.
+{ printf '%s' git; for argument in "$@"; do printf ' %s' "$argument"; done; printf '\n'; } >>"${APPELS:?APPELS non défini}"
+
+# Les étiquettes du clone une fois qu'un fetch les a mises à jour (DOUBLE_GIT_ORIGINE posée).
+LOCALES="$(dirname "$APPELS")/etiquettes-git.locales"
+
+# etiquettes_locales : les étiquettes du clone, une par ligne.
+etiquettes_locales() {
+  if [ -f "$LOCALES" ]; then
+    cat "$LOCALES"
+  elif [ -n "${DOUBLE_GIT_ETIQUETTES:-}" ]; then
+    # shellcheck disable=SC2086  # liste séparée par des espaces, voulue
+    printf '%s\n' $DOUBLE_GIT_ETIQUETTES
+  fi
+}
+
+# mettre_a_jour_les_etiquettes <arguments du fetch…> : ce que `git fetch --tags` fait des étiquettes.
+mettre_a_jour_les_etiquettes() {
+  local origine="" locales
+  # shellcheck disable=SC2086  # liste séparée par des espaces, voulue
+  [ -z "$DOUBLE_GIT_ORIGINE" ] || origine="$(printf '%s\n' $DOUBLE_GIT_ORIGINE)"
+  if [[ " $* " == *" --prune "* && " $* " == *" --prune-tags "* ]]; then
+    printf '%s\n' "$origine" | sed '/^$/d' >"$LOCALES"
+  else
+    locales="$(etiquettes_locales)"
+    printf '%s\n%s\n' "$locales" "$origine" | sed '/^$/d' | sort -u >"$LOCALES"
+  fi
+}
+
+if [ "${1:-}" = -C ]; then
+  shift 2
+fi
+sous_commande="${1:-}"
+
+if [ -n "${DOUBLE_GIT_ECHEC:-}" ] && [ "$DOUBLE_GIT_ECHEC" = "$sous_commande" ]; then
+  echo "fatal: échec simulé de git $sous_commande" >&2
+  exit 128
+fi
+
+case "$sous_commande" in
+  status) [ -z "${DOUBLE_GIT_STATUS:-}" ] || printf '%s\n' "$DOUBLE_GIT_STATUS" ;;
+  fetch)
+    if [ -n "${DOUBLE_GIT_ORIGINE+x}" ] && [[ " $* " == *" --tags "* ]]; then
+      mettre_a_jour_les_etiquettes "$@"
+    fi
+    ;;
+  tag)
+    liste="$(etiquettes_locales)"
+    [ -n "$liste" ] || exit 0
+    if [[ " $* " == *" --sort=-v:refname "* ]]; then
+      sort -rV <<<"$liste"
+    else
+      printf '%s\n' "$liste"
+    fi
+    ;;
+  merge | checkout)
+    if [ -n "${DOUBLE_GIT_REECRIRE:-}" ]; then
+      # `>` tronque et réécrit le même fichier (même inode) : bash relirait ce contenu-là.
+      for _ in $(seq 1 2000); do echo 'exit 97 # réécrit pendant la sonde'; done >"$DOUBLE_GIT_REECRIRE"
+    fi
+    ;;
+esac
+exit 0
