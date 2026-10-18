@@ -1,6 +1,7 @@
 """Le dépôt modèle applique ses propres garde-fous, à sa racine."""
 
 import json
+import re
 
 import yaml
 from conftest import RACINE
@@ -11,8 +12,18 @@ CI = RACINE / ".github/workflows/ci.yml"
 def test_ruleset_du_depot_modele():
     ruleset = json.loads((RACINE / ".github/ruleset-main.json").read_text(encoding="utf-8"))
     regles = {r["type"]: r for r in ruleset["rules"]}
-    contextes = {c["context"] for c in regles["required_status_checks"]["parameters"]["required_status_checks"]}
-    assert contextes == {"tests (ubuntu-latest)", "tests (windows-latest)", "secrets", "confidentialite"}
+    contextes = {
+        c["context"]
+        for c in regles["required_status_checks"]["parameters"]["required_status_checks"]
+    }
+    assert contextes == {
+        "tests (ubuntu-latest)",
+        "tests (windows-latest)",
+        "secrets",
+        "confidentialite",
+        "mecanique",
+        "fausse-app",
+    }
 
     jobs = yaml.safe_load(CI.read_text(encoding="utf-8"))["jobs"]
     produits = set()
@@ -23,6 +34,51 @@ def test_ruleset_du_depot_modele():
         else:
             produits.add(job["name"])
     assert contextes <= produits
+
+
+def test_mecanique_et_fausse_app_dans_la_ci_du_depot_modele():
+    """R17 : seul le job mecanique lance les bats ; fausse-app passe l'action d'image d'un rendu."""
+    jobs = yaml.safe_load(CI.read_text(encoding="utf-8"))["jobs"]
+
+    def commandes(job):
+        return [e["run"] for e in jobs[job]["steps"] if "run" in e]
+
+    (pytest_tests,) = [c for c in commandes("tests") if "pytest" in c]
+    assert pytest_tests == "python -m pytest -q --ignore=tests/test_mecanique.py"
+    installation = next(c for c in commandes("tests") if "sans_saut=" in c)
+    for sans_saut in re.findall(r"sans_saut=(\S+)", installation):
+        assert "docker" not in sans_saut.split(","), sans_saut
+    assert "sans_saut=sops,age,age-keygen,pwsh,shellcheck\n" in installation
+
+    mecanique = jobs["mecanique"]
+    assert mecanique["runs-on"] == "ubuntu-latest"
+    (bats,) = [e for e in mecanique["steps"] if "test_mecanique" in e.get("run", "")]
+    assert bats["run"] == "python -m pytest -q tests/test_mecanique.py"
+    assert bats["env"] == {"MODELE_TESTS_SANS_SAUT": "1"}
+
+    fausse_app = jobs["fausse-app"]
+    assert fausse_app["runs-on"] == "ubuntu-latest"
+    texte = "\n".join(commandes("fausse-app"))
+    for fragment in (
+        "copier copy --vcs-ref HEAD --defaults --trust",
+        "--data nom=fausse-app",
+        "--data cible=serveur",
+        "--data bloc_ports=4310",
+        ". rendu",
+        "cp tests/modele/fausse-app/* rendu/",
+    ):
+        assert fragment in texte, fragment
+    (construire,) = [e for e in fausse_app["steps"] if "uses" in e and "modele-image" in e["uses"]]
+    assert construire == {
+        "uses": "./rendu/.github/actions/modele-image-construire",
+        "with": {"dossier": "rendu"},
+    }
+    rendu_avant = [
+        i for i, e in enumerate(fausse_app["steps"]) if "copier copy" in e.get("run", "")
+    ]
+    assert rendu_avant and rendu_avant[0] < fausse_app["steps"].index(construire)
+    assert fausse_app["steps"][-1]["if"] == "always()"
+    assert fausse_app["steps"][-1]["run"] == "docker rm -f -v fausse-app"
 
 
 def test_claude_md_du_depot_modele():
@@ -49,14 +105,18 @@ def test_settings_du_depot_modele():
 def test_dependabot_du_depot_modele():
     """Le second bloc tient à jour les épinglages des workflows gérés (revue finale, I6)."""
     doc = yaml.safe_load((RACINE / ".github/dependabot.yml").read_text(encoding="utf-8"))
-    dossiers = [u["directory"] for u in doc["updates"] if u["package-ecosystem"] == "github-actions"]
+    dossiers = [
+        u["directory"] for u in doc["updates"] if u["package-ecosystem"] == "github-actions"
+    ]
     assert dossiers == ["/", "/template/.github/workflows"]
     assert list((RACINE / "template/.github/workflows").glob("*.yml"))
 
 
 def test_historique_du_depot_modele():
     racine = (RACINE / ".github/workflows/historique.yml").read_text(encoding="utf-8")
-    modele = (RACINE / "template/.github/workflows/modele-historique.yml").read_text(encoding="utf-8")
+    modele = (RACINE / "template/.github/workflows/modele-historique.yml").read_text(
+        encoding="utf-8"
+    )
     assert racine.split("\n", 1)[1] == modele.split("\n", 1)[1]
 
 
@@ -73,7 +133,9 @@ def test_ci_du_depot_modele_suit_le_socle():
     )
     racine = yaml.safe_load(CI.read_text(encoding="utf-8"))
     attendues = [
-        {**e, "run": e["run"].replace("scripts/modele/", "template/scripts/modele/")} if "run" in e else e
+        {**e, "run": e["run"].replace("scripts/modele/", "template/scripts/modele/")}
+        if "run" in e
+        else e
         for e in socle["jobs"]["confidentialite"]["steps"]
     ]
     assert racine["jobs"]["confidentialite"]["steps"] == attendues

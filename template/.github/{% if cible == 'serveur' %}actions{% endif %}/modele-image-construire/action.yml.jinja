@@ -1,0 +1,56 @@
+# Géré par le modèle — ne pas modifier ici (docs/modele/methode.md).
+name: modele-image-construire
+description: >-
+  Construit l'image du Dockerfile du projet ({{ nom }}:ci, à la révision du commit), la lance comme
+  en production et la vérifie par deploiement/ci/verifier-image.sh. Le conteneur {{ nom }} reste
+  lancé pour les étapes suivantes du job (les tests de bout en bout du projet) ; le job le supprime.
+inputs:
+  dossier:
+    description: Le dossier du projet, où s'exécutent toutes les étapes
+    required: false
+    default: "."
+  variables:
+    description: >-
+      Variables de l'app, une ligne CLE=valeur chacune (la clé en majuscules), passées au conteneur
+      par -e
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Construire l'image
+      shell: bash
+      working-directory: {% raw %}${{ inputs.dossier }}{% endraw %}
+      run: docker build --build-arg REVISION="$GITHUB_SHA" -t {{ nom }}:ci .
+
+    # Comme en production (deploiement/compose.yml) : utilisateur 1000, système de fichiers en
+    # lecture seule, /tmp en mémoire et le port publié sur la boucle locale seulement. /donnees,
+    # monté en production, est ici un volume anonyme, que Docker remplit de ce que l'image y a mis :
+    # l'app y écrit comme sur le serveur.
+    - name: Lancer l'image
+      shell: bash
+      working-directory: {% raw %}${{ inputs.dossier }}{% endraw %}
+      env:
+        VARIABLES: {% raw %}${{ inputs.variables }}{% endraw %}
+      run: |
+        # Une ligne invalide arrête tout, sans être répétée : elle peut porter un secret.
+        options=()
+        numero=0
+        while IFS= read -r ligne || [ -n "$ligne" ]; do
+          numero=$((numero + 1))
+          [ -n "$ligne" ] || continue
+          if ! [[ "$ligne" =~ ^[A-Z][A-Z0-9_]*= ]]; then
+            echo "::error::variables, ligne $numero : attendu CLE=valeur, la clé en majuscules (la ligne n'est pas répétée)"
+            exit 1
+          fi
+          options+=(-e "$ligne")
+        done <<<"$VARIABLES"
+        docker run -d --name {{ nom }} -p 127.0.0.1:{{ port_app }}:{{ port_app }} \
+          -e {{ prefixe }}ENV=ci -e {{ prefixe }}URL_PUBLIQUE=http://localhost:{{ port_app }} \
+          --user 1000:1000 --read-only --tmpfs /tmp -v /donnees \
+          "${options[@]}" {{ nom }}:ci
+
+    - name: Vérifier l'image
+      shell: bash
+      working-directory: {% raw %}${{ inputs.dossier }}{% endraw %}
+      run: bash deploiement/ci/verifier-image.sh {{ nom }} "$GITHUB_SHA"

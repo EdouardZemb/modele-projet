@@ -1,0 +1,204 @@
+{#- Gabarit Copier. `${ {{- prefixe }}X}` : l'espace et le tiret évitent `${{{`, que Jinja lit mal. -#}
+#!/usr/bin/env bats
+# deploiement/ci/verifier-image.sh : la vérification de l'image que la CI vient de lancer (action
+{%- if sauvegardes %}
+# modele-image-construire) : santé, révision, environnement, puis un instantané dans le conteneur
+# et sa vérification.
+{%- else %}
+# modele-image-construire) : santé, révision et environnement.
+{%- endif %}
+#
+# curl et docker sont des doubles : curl répond SANTE_CORPS (connexion refusée s'il est vide)
+{%- if sauvegardes %}
+# et docker simule les commandes de l'image, `docker exec <conteneur> <commande…> <dossier>`, avec
+# les codes de DOUBLE_SAUVEGARDER_CODE et DOUBLE_VERIFIER_CODE.
+{%- else %}
+# et docker ne fait que noter ses appels.
+{%- endif %}
+
+# Chaque test tourne dans son propre processus : ses `export` ne fuient pas (SC2030, SC2031). Le
+# corps d'un double est entre apostrophes : il se développe quand le double tourne (SC2016).
+# shellcheck disable=SC2016,SC2030,SC2031
+
+bats_require_minimum_version 1.5.0
+
+load aide
+
+REVISION=0123456789abcdef0123456789abcdef01234567
+AUTRE_REVISION=fedcba9876543210fedcba9876543210fedcba98
+
+# corps <environnement> <révision> [statut] : un corps de santé.
+corps() {
+  printf '{"statut":"%s","environnement":"%s","version":"dev","revision":"%s"}' "${3:-ok}" "$1" "$2"
+}
+
+setup() {
+  preparer_environnement
+  export {{ prefixe }}SANTE_DELAI=0
+  SANTE_CORPS="$(corps ci "$REVISION")"
+  export SANTE_CORPS
+  creer_double curl '[ -n "${SANTE_CORPS:-}" ] || { echo "curl: (7) Failed to connect to 127.0.0.1" >&2; exit 7; }
+printf "%s\n" "$SANTE_CORPS"'
+{%- if sauvegardes %}
+  # Les commandes de l'image sont celles d'un projet.env de test, pas celles que le modèle sème
+  # (R11) : verifier-image.sh les lit, il ne les connaît pas.
+  printf '%s\n' 'SAUVEGARDER=outil sauvegarder --forme dossier' 'VERIFIER=outil verifier' \
+    >"$CLONE/deploiement/projet.env"
+  creer_double docker '[ "${1:-}" = exec ] || { echo "double docker : commande inattendue ${1:-}" >&2; exit 125; }
+case "${3:-} ${4:-}" in
+  "outil sauvegarder") exit "${DOUBLE_SAUVEGARDER_CODE:-0}" ;;
+  "outil verifier")
+    [ -z "${DOUBLE_VERIFIER_SORTIE:-}" ] || printf "%s\n" "$DOUBLE_VERIFIER_SORTIE"
+    exit "${DOUBLE_VERIFIER_CODE:-0}"
+    ;;
+esac
+echo "double docker : commande inattendue $*" >&2
+exit 125'
+{%- else %}
+  creer_double docker
+{%- endif %}
+}
+
+verifier_image() {
+  run bash "$CLONE/deploiement/ci/verifier-image.sh" "$@"
+}
+
+@test "verifier_image_conforme" {
+  verifier_image {{ nom }} "$REVISION"
+  [ "$status" -eq 0 ]
+  [ "$(appels_de curl)" = "curl -fsS -m 5 http://127.0.0.1:{{ port_app }}{{ chemin_sante }}" ]
+{%- if sauvegardes %}
+  # l'instantané puis sa vérification, dans le conteneur, mot à mot
+  [ "$(appels_de docker)" = "docker exec {{ nom }} outil sauvegarder --forme dossier /tmp/instantane
+docker exec {{ nom }} outil verifier /tmp/instantane" ]
+  [[ "$output" == *"instantané conforme"* ]]
+{%- else %}
+  [ "$(nombre_d_appels docker)" -eq 0 ]
+{%- endif %}
+}
+
+@test "verifier_image_attend_la_sante" {
+  # deux refus de connexion, une santé « ko », puis ok
+  local essais="$BATS_TEST_TMPDIR/essais"
+  creer_double curl 'n="$(cat "'"$essais"'" 2>/dev/null || echo 0)"
+n=$((n + 1))
+echo "$n" >"'"$essais"'"
+if [ "$n" -le 2 ]; then echo "curl: (7) Failed to connect" >&2; exit 7; fi
+if [ "$n" -eq 3 ]; then printf "%s\n" "{\"statut\":\"ko\"}"; exit 0; fi
+printf "%s\n" "$SANTE_CORPS"'
+  verifier_image {{ nom }} "$REVISION"
+  [ "$status" -eq 0 ]
+  [ "$(nombre_d_appels curl)" -eq 4 ]
+}
+
+@test "verifier_image_sante_jamais_conforme_echoue" {
+  export {{ prefixe }}SANTE_ATTENTE=1
+  for cas in refus ko; do
+    : >"$APPELS"
+    if [ "$cas" = refus ]; then
+      export SANTE_CORPS=""
+    else
+      SANTE_CORPS="$(corps ci "$REVISION" ko)"
+      export SANTE_CORPS
+    fi
+    verifier_image {{ nom }} "$REVISION"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"santé non conforme après"* ]]
+    [ "$(nombre_d_appels curl)" -ge 2 ]
+    [ "$(nombre_d_appels docker)" -eq 0 ]
+  done
+}
+
+@test "verifier_image_revision_differente_echoue" {
+  for revision in "$AUTRE_REVISION" local ""; do
+    : >"$APPELS"
+    SANTE_CORPS="$(corps ci "$revision")"
+    export SANTE_CORPS
+    verifier_image {{ nom }} "$REVISION"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"révision servie non conforme : attendue $REVISION"* ]]
+    # la santé était ok : pas d'attente, et pas d'instantané
+    [ "$(nombre_d_appels curl)" -eq 1 ]
+    [ "$(nombre_d_appels docker)" -eq 0 ]
+  done
+  # sans révision du tout
+  export SANTE_CORPS='{"statut":"ok","environnement":"ci","version":"dev"}'
+  verifier_image {{ nom }} "$REVISION"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"révision servie non conforme"* ]]
+}
+
+@test "verifier_image_environnement_autre_que_ci_echoue" {
+  for environnement in prod staging dev CI ""; do
+    : >"$APPELS"
+    SANTE_CORPS="$(corps "$environnement" "$REVISION")"
+    export SANTE_CORPS
+    verifier_image {{ nom }} "$REVISION"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"environnement servi non conforme : attendu ci"* ]]
+    [ "$(nombre_d_appels docker)" -eq 0 ]
+  done
+}
+{%- if sauvegardes %}
+
+@test "verifier_image_sauvegarde_non_conforme_echoue" {
+  # verifier rend 2 : non conforme, sa sortie au journal
+  export DOUBLE_VERIFIER_CODE=2 DOUBLE_VERIFIER_SORTIE="MARQUE absente"
+  verifier_image {{ nom }} "$REVISION"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"instantané non conforme (verifier : code 2) : MARQUE absente"* ]]
+  [ "$(nombre_d_appels docker)" -eq 2 ]
+
+  # verifier rend autre chose : la vérification n'a pas eu lieu
+  for code in 64 1 125; do
+    : >"$APPELS"
+    export DOUBLE_VERIFIER_CODE="$code"
+    verifier_image {{ nom }} "$REVISION"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"vérification impossible (verifier : code $code)"* ]]
+  done
+
+  # sauvegarder échoue : rien à vérifier
+  : >"$APPELS"
+  export DOUBLE_VERIFIER_CODE=0 DOUBLE_SAUVEGARDER_CODE=1
+  verifier_image {{ nom }} "$REVISION"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"instantané impossible (sauvegarder : code 1)"* ]]
+  [ "$(appels_de docker)" = "docker exec {{ nom }} outil sauvegarder --forme dossier /tmp/instantane" ]
+}
+
+@test "verifier_image_sans_commande_de_projet_env_echoue" {
+  for absente in SAUVEGARDER VERIFIER; do
+    : >"$APPELS"
+    printf '%s\n' 'SAUVEGARDER=outil sauvegarder' 'VERIFIER=outil verifier' \
+      | grep -v "^$absente=" >"$CLONE/deploiement/projet.env"
+    verifier_image {{ nom }} "$REVISION"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"réglage $absente absent"* ]]
+    [[ "$output" == *"pas de commande $absente lisible"* ]]
+    # les deux commandes sont lues avant de lancer quoi que ce soit
+    [ "$(nombre_d_appels docker)" -eq 0 ]
+  done
+}
+{%- else %}
+
+@test "verifier_image_sans_sauvegardes_saute_l_instantane" {
+  # même avec des commandes dans projet.env : le projet n'a pas de données à sauvegarder
+  printf '%s\n' 'SAUVEGARDER=outil sauvegarder' 'VERIFIER=outil verifier' >"$CLONE/deploiement/projet.env"
+  verifier_image {{ nom }} "$REVISION"
+  [ "$status" -eq 0 ]
+  [ "$(nombre_d_appels docker)" -eq 0 ]
+  [[ "$output" == *"pas d'instantané"* ]]
+}
+{%- endif %}
+
+@test "verifier_image_refuse_un_usage_invalide" {
+  for arguments in "" "{{ nom }}" "{{ nom }} $REVISION en-trop" "{{ nom }} local" "{{ nom }} ${REVISION^^}" "-x $REVISION"; do
+    : >"$APPELS"
+    # shellcheck disable=SC2086  # les arguments sont découpés exprès
+    verifier_image $arguments
+    [ "$status" -eq 64 ]
+    [ "$(nombre_d_appels curl)" -eq 0 ]
+    [ "$(nombre_d_appels docker)" -eq 0 ]
+  done
+}
