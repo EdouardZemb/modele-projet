@@ -276,13 +276,22 @@ projet_env() {
 }
 {%- if sauvegardes %}
 
-# Le projet.env semé par le modèle déclare les deux commandes de l'image.
-@test "projet_env_du_modele_declare_les_commandes_de_sauvegarde" {
-  avec_lib 'lire_projet_env SAUVEGARDER; printf "%s\n" "${PROJET_MOTS[@]}"
-    lire_projet_env VERIFIER; printf "%s\n" "${PROJET_MOTS[@]}"'
-  [ "$status" -eq 0 ]
-  [ "${lines[0]}" = sauvegarder ]
-  [ "${lines[1]}" = verifier ]
+# Le projet.env du dépôt déclare les deux commandes de l'image, lisibles et d'au moins un mot
+# chacune. Le banc en contrôle la forme, jamais les valeurs : chaque projet y met les commandes de
+# son image (le fichier n'est semé qu'une fois), et la valeur semée par le modèle est contrôlée
+# côté modèle.
+@test "projet_env_declare_les_commandes_de_sauvegarde" {
+  local cas
+  for cas in depot propres; do
+    # celui d'un projet qui a mis les commandes de son image à la place des valeurs semées
+    [ "$cas" = depot ] || projet_env "# Commandes de l'image" \
+      "SAUVEGARDER=node dist/cli.js sauvegarder" "VERIFIER=node dist/cli.js verifier"
+    avec_lib 'for cle in SAUVEGARDER VERIFIER; do
+        lire_projet_env "$cle"
+        [ -n "${PROJET_MOTS[0]:-}" ] || { echo "$cle : aucune commande"; exit 1; }
+      done'
+    [ "$status" -eq 0 ]
+  done
 }
 {%- else %}
 
