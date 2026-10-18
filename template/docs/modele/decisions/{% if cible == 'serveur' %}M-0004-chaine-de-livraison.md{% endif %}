@@ -28,7 +28,8 @@ sans geste, qu'une version arrive en production sur un seul geste d'Edouard, et 
    réécrire une version existante dont l'empreinte diffère, et crée la Release. La sonde de prod,
    qui vise la plus haute étiquette `vX.Y.Z`, suit dans les 5 minutes.
 3. **Le serveur va chercher.** `sonder.sh <env>`, toutes les 5 minutes : un verrou, un clone
-   propre (sinon une alerte), la cible (`:main`, ou la plus haute étiquette), `docker pull`, puis
+   propre (sinon une alerte), la cible (en staging, la branche principale et l'image `:main` ; en
+   prod, la plus haute étiquette), `docker pull`, puis
    `deployer.sh` si l'image diffère de celle en service. Le déploiement prend un instantané des
    données si le projet a des sauvegardes (M-0003), lance `docker compose up --wait`, et contrôle
    la santé sur le port local : statut, version et révision.

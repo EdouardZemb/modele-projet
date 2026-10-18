@@ -149,7 +149,9 @@ qu'au §1, dans un worktree `<dépôt>.worktrees\modele-serveur`.
   ```
 
   Ajouter `--data domaine=…`, `sous_domaine=…`, `port_app=…` ou `chemin_sante=…` si le projet
-  diffère des valeurs par défaut. Un conflit dans un fichier géré se résout en faveur du modèle.
+  diffère des valeurs par défaut. `branche_principale` reste la réponse du projet : le staging suit
+  cette branche, et l'image `:main` que la CI publie à chaque fusion sur elle. Un conflit dans un
+  fichier géré se résout en faveur du modèle.
 - [ ] **Les reports à la main de `ci.yml`**, que `copier update` ne touche plus. Rendre le modèle à
       côté, avec les mêmes réponses :
 

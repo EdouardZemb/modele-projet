@@ -41,7 +41,7 @@ Le staging n'a que des données factices (M-0001). `sauvegarder.sh`, `tester-res
 ### 3. Avant chaque déploiement
 
 `deployer.sh` prend un instantané, de même forme, dans `pre-deploiement/<horodatage>`, si l'app
-tourne. S'il échoue, le déploiement n'a pas lieu et rien ne change ; la sonde réessaie, et alerte,
+tourne ; il crée d'abord `pre-deploiement/` s'il manque. S'il échoue, le déploiement n'a pas lieu et rien ne change ; la sonde réessaie, et alerte,
 à chaque passage.
 
 ### 4. La clé hors ligne n'est jamais sur le serveur

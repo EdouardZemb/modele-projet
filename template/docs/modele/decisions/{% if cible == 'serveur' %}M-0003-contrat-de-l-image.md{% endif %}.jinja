@@ -63,9 +63,9 @@ Deux commandes de l'image, déclarées dans `deploiement/projet.env` (`SAUVEGARD
 `VERIFIER=…`). Ce fichier est au projet ; il est lu par un analyseur strict et **jamais sourcé** :
 une ligne `CLE=mots`, des mots séparés par des espaces, sans caractère que le shell interpréterait.
 
-- **`SAUVEGARDER <dossier>`** crée ce dossier, qui n'existe pas encore (ses parents compris s'ils
-  manquent), avec **la forme de `/donnees`** : ce que `/donnees` doit contenir pour que l'app
-  reparte. L'instantané est cohérent, pris l'app en marche, dans le conteneur en service
+- **`SAUVEGARDER <dossier>`** crée ce dossier, qui n'existe pas encore, avec **la forme de
+  `/donnees`** : ce que `/donnees` doit contenir pour que l'app reparte. Son parent existe : la
+  mécanique le crée avant de lancer la commande. L'instantané est cohérent, pris l'app en marche, dans le conteneur en service
   (`docker compose exec`) ; en CI, dans le conteneur lancé, vers `/tmp/instantane`. Il ne contient
   que des fichiers et des dossiers ; un lien physique y est accepté, il entre dans l'archive comme
   un fichier ordinaire. La commande rend 0 seulement si l'instantané est complet.
