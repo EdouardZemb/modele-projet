@@ -31,6 +31,9 @@
 #   DOUBLE_DOCKER_SAUVEGARDE_ATTENTE  `<sauvegarder>` dure autant de secondes avant de répondre
 {%- endif %}
 #   DOUBLE_DOCKER_UP_ECHEC           images (séparées par des espaces) dont le `compose up` échoue
+#   DOUBLE_DOCKER_SECRETS            noms de variables (séparés par des espaces) : `compose up` écrit
+#                                    dans secrets-recus, à côté de $APPELS, ceux que son
+#                                    environnement porte, non vides, un par ligne ; jamais une valeur
 #   DOUBLE_DOCKER_START_ECHEC        `compose start` échoue
 #   DOUBLE_DOCKER_STOP_ECHEC         `compose stop` échoue
 {%- if sauvegardes %}
@@ -103,7 +106,7 @@ case "${1:-}" in
     fichier_env=""
     while [ "$#" -gt 0 ]; do
       case "$1" in
-        -p | -f | --profile) shift 2 ;;
+        -p | -f) shift 2 ;;
         --env-file)
           fichier_env="$2"
           shift 2
@@ -164,6 +167,11 @@ case "${1:-}" in
           fi
         done >"$effective"
         image="$(sed -n 's/^{{ prefixe }}IMAGE=//p' "$effective")"
+        if [ "$1" = up ] && [ -n "${DOUBLE_DOCKER_SECRETS:-}" ]; then
+          for cle in $DOUBLE_DOCKER_SECRETS; do
+            [ -z "${!cle:-}" ] || printf '%s\n' "$cle"
+          done >"$DOSSIER/secrets-recus"
+        fi
         case " ${DOUBLE_DOCKER_UP_ECHEC:-} " in
           *" $image "*)
             echo "dependency failed to start: container app is unhealthy" >&2
