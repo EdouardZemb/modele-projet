@@ -184,6 +184,8 @@ REFUS = [
     ("gh release edit v1.2.0", "étiquette ou publication", "lot-1/x", True),
     ("gh release delete v1.2.0", "étiquette ou publication", "lot-1/x", True),
     ("gh api -X POST repos/o/d/releases", "étiquette ou publication", "lot-1/x", True),
+    ("git push origin tag release-1", "étiquette ou publication", "lot-1/x", True),
+    ("git push origin v1.2.0-rc1", "étiquette ou publication", "lot-1/x", True),
 ]
 
 
@@ -241,10 +243,11 @@ ADMIS = [
     ("gh release view v0.1.1", "lot-1/x", True),
     ("gh release list", "lot-1/x", True),
     ("gh api repos/o/d/releases", "lot-1/x", True),
+    ("git push origin modele/alignement", "lot-1/x", True),
 ]
 
 
-def refus(commande, courante="lot-1/x", verts=True, fusion=lambda: "session"):
+def refus(commande, courante="lot-1/x", verts=True, fusion=lambda d: "session"):
     return garde_claude.motif_de_refus(
         commande, BRANCHE, lambda chemin: courante, lambda pr: verts, fusion=fusion
     )
@@ -282,10 +285,10 @@ def test_checks_verts_recoit_l_argument_de_pr():
         return True
 
     garde_claude.motif_de_refus(
-        "gh pr merge 12 --squash", BRANCHE, lambda c: "x", verts, fusion=lambda: "session"
+        "gh pr merge 12 --squash", BRANCHE, lambda c: "x", verts, fusion=lambda d: "session"
     )
     garde_claude.motif_de_refus(
-        "gh pr merge --squash", BRANCHE, lambda c: "x", verts, fusion=lambda: "session"
+        "gh pr merge --squash", BRANCHE, lambda c: "x", verts, fusion=lambda d: "session"
     )
     assert vus == ["12", None]
 
@@ -527,7 +530,7 @@ def refus_outil(commande, outil, courante="lot-1/x", verts=True):
         return courante if chemin in (None, CHEMIN_WIN) else None
 
     return garde_claude.motif_de_refus(
-        commande, BRANCHE, lire, lambda pr: verts, outil, fusion=lambda: "session"
+        commande, BRANCHE, lire, lambda pr: verts, outil, fusion=lambda d: "session"
     )
 
 
@@ -643,13 +646,14 @@ def test_gh_api_apres_option_de_depot():
     assert "l'API" in refus("gh -R o/r api -X PUT repos/o/x/pulls/12/merge")
 
 
-def faux_gh_lent(dossier):
+def faux_gh_lent(dossier, texte="[]"):
+    """Un « gh » qui attend cinq secondes avant d'imprimer `texte`."""
     if sys.platform == "win32":
         f = dossier / "gh.cmd"
-        f.write_text("@echo off\r\nping -n 6 127.0.0.1 >nul\r\necho []\r\n", encoding="utf-8")
+        f.write_text(f"@echo off\r\nping -n 6 127.0.0.1 >nul\r\necho {texte}\r\n", encoding="utf-8")
     else:
         f = dossier / "gh"
-        f.write_text("#!/bin/sh\nexec sleep 5\n", encoding="utf-8")
+        f.write_text(f"#!/bin/sh\nsleep 5\necho '{texte}'\n", encoding="utf-8")
         f.chmod(0o755)
 
 
@@ -840,20 +844,20 @@ REFUS_EDOUARD = [
 
 @pytest.mark.parametrize("commande", REFUS_EDOUARD)
 def test_fusion_refusee_en_mode_edouard(commande):
-    motif = refus(commande, verts=True, fusion=lambda: "edouard")
+    motif = refus(commande, verts=True, fusion=lambda d: "edouard")
     assert motif is not None, commande
     assert "mode fusion : edouard" in motif, (commande, motif)
 
 
 @pytest.mark.parametrize(("commande", "courante", "verts"), [a for a in ADMIS if "merge" in a[0]])
 def test_mode_session_inchange(commande, courante, verts):
-    assert refus(commande, courante, verts, fusion=lambda: "session") is None
+    assert refus(commande, courante, verts, fusion=lambda d: "session") is None
 
 
 def test_fusion_lue_une_fois_et_seulement_pour_une_fusion():
     appels = []
 
-    def fusion():
+    def fusion(dossier):
         appels.append(1)
         return "session"
 
@@ -898,7 +902,7 @@ def test_fusion_du_depot_sans_gh(tmp_path, monkeypatch):
 
 
 def test_fusion_du_depot_budget_epuise(tmp_path, monkeypatch):
-    faux_gh_lent(tmp_path)
+    faux_gh_lent(tmp_path, "fusion: session")  # sans budget, il répondrait « session »
     gh_en_tete(monkeypatch, tmp_path)
     monkeypatch.setattr(garde_claude, "BUDGET", 0.5)
     assert garde_claude.fusion_du_depot("main", str(tmp_path)) == "edouard"
@@ -956,3 +960,89 @@ def test_cli_option_fusion_invalide(tmp_path):
     entree = _entree_fusion(tmp_path)
     r = lancer_avec_gh(tmp_path, entree, "--branche", "main", "--fusion", "oui")
     assert r.returncode == 64
+
+
+# --- correction n° 1 ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("mode", ["session", "edouard"])
+@pytest.mark.parametrize(
+    ("commande", "fragment", "courante", "verts"),
+    [r for r in REFUS if r[1] == "étiquette ou publication"],
+)
+def test_etiquette_refusee_dans_les_deux_modes(commande, fragment, courante, verts, mode):
+    motif = refus(commande, courante, verts, fusion=lambda d: mode)
+    assert motif is not None, commande
+    assert fragment in motif, (commande, motif)
+
+
+def _fusion_par_dossier(modes, vus=None):
+    def fusion(dossier):
+        if vus is not None:
+            vus.append(dossier)
+        return modes.get(dossier, "session")
+
+    return fusion
+
+
+def test_fusion_recoit_le_dossier_suivi_par_cd():
+    vus = []
+    fusion = _fusion_par_dossier({}, vus)
+    assert refus("gh pr merge 12 --squash", fusion=fusion) is None
+    assert refus("cd ../lot-2 && gh pr merge 12 --squash", fusion=fusion) is None
+    assert vus == [None, "../lot-2"]
+
+
+def test_fusion_apres_cd_en_mode_session_admise():
+    assert refus("cd ../lot-2 && gh pr merge 12 --squash", fusion=lambda d: "session") is None
+
+
+def test_fusion_apres_cd_en_mode_edouard_du_dossier_refusee():
+    fusion = _fusion_par_dossier({"../lot-2": "edouard"})
+    motif = refus("cd ../lot-2 && gh pr merge 12 --squash", fusion=fusion)
+    assert motif is not None
+    assert "mode fusion : edouard" in motif
+    assert refus("gh pr merge 12 --squash", fusion=fusion) is None
+
+
+@pytest.mark.parametrize(
+    "commande",
+    [
+        "gh pr merge https://github.com/o/B/pull/12",
+        "GH_REPO=o/B gh pr merge 12",
+        "env GH_REPO=o/B gh pr merge 12 --squash",
+    ],
+)
+def test_fusion_dans_un_autre_depot_refusee(commande):
+    motif = refus(commande, fusion=lambda d: "session")
+    assert motif is not None
+    assert "autre dépôt" in motif
+
+
+GRAPHQL_OPAQUES = [
+    "gh api graphql -F query=@q.graphql",
+    "gh api graphql --input q.json",
+    "gh api graphql -f query='mutation($id:ID!){mergePullRequest(input:{pullRequestId:$id}){clientMutationId}}' -f id=x",
+]
+
+
+@pytest.mark.parametrize("commande", GRAPHQL_OPAQUES)
+def test_graphql_opaque_refuse_en_mode_edouard(commande):
+    motif = refus(commande, fusion=lambda d: "edouard")
+    assert motif is not None
+    assert "mode fusion : edouard" in motif
+
+
+@pytest.mark.parametrize("commande", GRAPHQL_OPAQUES[:2])
+def test_graphql_opaque_admis_en_mode_session(commande):
+    assert refus(commande, fusion=lambda d: "session") is None
+
+
+def test_cli_fusion_admise_selon_github_et_branche_donnee(tmp_path):
+    faux_gh(
+        tmp_path,
+        {"pr checks": (0, '[{"bucket":"pass"}]'), "api": (0, "fusion: session\n")},
+    )
+    r = lancer_avec_gh(tmp_path, _entree_fusion(tmp_path), "--branche", "principal")
+    assert r.returncode == 0, r.stderr
+    assert "?ref=principal" in (tmp_path / "appels").read_text(encoding="utf-8")

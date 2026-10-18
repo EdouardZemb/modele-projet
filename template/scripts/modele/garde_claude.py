@@ -69,7 +69,7 @@ REFUS_ETIQUETTE = (
 )
 MODES_FUSION = ("session", "edouard")
 REPONSE_SESSION = re.compile(r"^fusion:[ \t]*session[ \t]*\r?$", re.MULTILINE)
-DESTINATION_ETIQUETTE = re.compile(r"^v[0-9]+(\.[0-9]+)*$")
+DESTINATION_ETIQUETTE = re.compile(r"^v[0-9]")
 RELEASE_LECTURE = {"view", "list", "download"}
 
 # Mots qui précèdent la vraie commande sans la changer.
@@ -154,8 +154,9 @@ class Contexte:
         self.outil = outil
         self._courante = branche_courante
         self._verts = checks_verts
-        self._fusion = fusion if fusion is not None else (lambda: "edouard")
+        self._fusion = fusion if fusion is not None else (lambda dossier: "edouard")
         self.dossier: str | None = None
+        self.depot_par_environnement = False  # GH_REPO=… devant gh
         self._memo: dict[tuple[str, str | None], Any] = {}
 
     def courante(self, chemin: str | None) -> str | None:
@@ -171,14 +172,17 @@ class Contexte:
         return self._memo[cle]
 
     def fusion(self) -> str:
-        """Le mode de fusion, lu au plus une fois ; tout ce qui n'est pas `session` vaut `edouard`."""
-        if "fusion" not in self._memo:
+        """Le mode de fusion du dépôt visé (le dossier suivi par les `cd`), lu une fois par dossier.
+
+        Tout ce qui n'est pas `session` vaut `edouard`."""
+        cle = ("fusion", self.dossier)
+        if cle not in self._memo:
             try:
-                mode = self._fusion()
+                mode = self._fusion(self.dossier)
             except Exception:  # noqa: BLE001 - fail-closed
                 mode = "edouard"
-            self._memo["fusion"] = "session" if mode == "session" else "edouard"
-        return self._memo["fusion"]
+            self._memo[cle] = "session" if mode == "session" else "edouard"
+        return self._memo[cle]
 
     def chemin(self, option_c: str | None) -> str | None:
         if self.dossier is None:
@@ -393,6 +397,8 @@ def _push(args: list[str], chemin: str | None, ctx: Contexte) -> str | None:
         i += 1
     refus = f"push vers {ctx.branche}"
     for refspec in refspecs:
+        if refspec == "tag":  # `git push origin tag <nom>` : syntaxe de refs/tags/<nom>
+            return REFUS_ETIQUETTE
         dest = _destination(refspec)
         if dest.startswith(("refs/tags/", "tags/")) or DESTINATION_ETIQUETTE.match(dest):
             return REFUS_ETIQUETTE
@@ -464,7 +470,7 @@ def _gh_merge(args: list[str], ctx: Contexte, depot: bool = False) -> str | None
         elif pr is None:
             pr = a
         i += 1
-    if depot:
+    if depot or (pr is not None and re.match(r"(?i)[a-z][a-z0-9+.-]*://", pr)):
         return "fusion dans un autre dépôt : contrôles invérifiables ici"
     if pr is None and ctx.dossier is not None:
         return "fusion : préciser le numéro de PR après un changement de dossier"
@@ -504,6 +510,15 @@ def _gh_api(args: list[str], ctx: Contexte) -> str | None:
     ecrit = effective != "GET" and point is not None
     if "mutation" in texte and GRAPHQL_FUSION.search(texte) and ctx.fusion() != "session":
         return REFUS_MODE
+    if point is not None and "graphql" in point.lower():
+        # Corps qu'on ne lit pas ici (@fichier, --input, variables) : fusion possible.
+        opaque = (
+            "$" in texte
+            or any(a.startswith("@") or "=@" in a for a in args)
+            or any(a == "--input" or a.startswith("--input=") for a in args)
+        )
+        if opaque and ctx.fusion() != "session":
+            return REFUS_MODE
     if ecrit and API_FUSION.search(point.lower()) and ctx.fusion() != "session":
         return REFUS_MODE
     if ecrit and "/releases" in point.lower():
@@ -535,6 +550,7 @@ def _gh(args: list[str], ctx: Contexte) -> str | None:
         if not a.startswith("-"):
             positions.append(i)
         i += 1
+    depot = depot or ctx.depot_par_environnement
     mots = [args[k] for k in positions]
     if mots and mots[0] not in COMMANDES_GH:
         return "commande gh inconnue (alias ou extension), qui pourrait masquer une fusion"
@@ -609,6 +625,9 @@ def _motif_segment(segment: list[str], ctx: Contexte, profondeur: int) -> str | 
     if commande == "git":
         return _git(reste, ctx)
     if commande == "gh":
+        ctx.depot_par_environnement = any(
+            jeton.split("=", 1)[0].upper() == "GH_REPO" and "=" in jeton for jeton in segment[:i]
+        )
         return _gh(reste, ctx)
     if commande in INTERPRETES and profondeur < PROFONDEUR_MAX:
         utiles = list(reste)
@@ -645,15 +664,15 @@ def motif_de_refus(
     branche_courante: Callable[[str | None], str | None],
     checks_verts: Callable[[str | None], bool],
     outil: str | None = None,
-    fusion: Callable[[], str] = lambda: "edouard",
+    fusion: Callable[[str | None], str] = lambda dossier: "edouard",
 ) -> str | None:
     """La raison du refus de `commande`, ou None si elle est admise.
 
     `branche_courante` reçoit le chemin d'un `git -C <chemin>` (ou d'un `cd`), ou None.
     `checks_verts` reçoit l'argument de PR de `gh pr merge`, ou None.
     `outil` (« Bash » ou « PowerShell ») choisit la lecture ; None les essaie toutes.
-    `fusion` rend le mode (« session » ou « edouard »), appelé au plus une fois et seulement
-    pour une fusion ; sans autre valeur que « session », toute fusion est refusée.
+    `fusion` reçoit le dossier suivi par les `cd` (None : celui du hook) et rend le mode
+    (« session » ou « edouard »), appelé au plus une fois par dossier et seulement pour une fusion ; sans autre valeur que « session », toute fusion est refusée.
     Aucune exception ne sort d'ici : une commande qu'on ne sait pas analyser est refusée.
     """
     try:
@@ -834,7 +853,9 @@ def _executer_garde(args) -> int:
         lambda chemin: branche_courante_git(chemin, cwd),
         lambda pr: checks_verts_gh(pr, cwd),
         LECTURES.get(outil),
-        (lambda: args.fusion) if args.fusion else (lambda: fusion_du_depot(branche, cwd)),
+        (lambda dossier: args.fusion)
+        if args.fusion
+        else (lambda dossier: fusion_du_depot(branche, os.path.join(cwd, dossier) if dossier else cwd)),
     )
     if motif is None:
         return 0
