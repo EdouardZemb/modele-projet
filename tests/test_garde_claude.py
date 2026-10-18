@@ -1046,3 +1046,30 @@ def test_cli_fusion_admise_selon_github_et_branche_donnee(tmp_path):
     r = lancer_avec_gh(tmp_path, _entree_fusion(tmp_path), "--branche", "principal")
     assert r.returncode == 0, r.stderr
     assert "?ref=principal" in (tmp_path / "appels").read_text(encoding="utf-8")
+
+
+# --- correction n° 2 ---------------------------------------------------------------------------
+
+GH_REPO_FUSIONS = [
+    "export GH_REPO=o/B; gh pr merge 12 --squash",
+    "$env:GH_REPO='o/B'; gh pr merge 12 --squash",
+    "GH_REPO=o/B; gh pr merge 12",
+    "declare -x GH_REPO=o/B && gh pr merge 12",
+    "Set-Item env:GH_REPO o/B; gh pr merge 12",
+    "export GH_REPO=o/B; gh api -X PUT repos/o/B/pulls/12/merge",
+    "export GH_REPO=o/B; gh api graphql -F query=@q.graphql",
+    "export GH_REPO=o/B; gh api graphql -f query='mutation{mergePullRequest(input:{pullRequestId:\"x\"}){clientMutationId}}'",
+]
+
+
+@pytest.mark.parametrize("mode", ["session", "edouard"])
+@pytest.mark.parametrize("commande", GH_REPO_FUSIONS)
+def test_gh_repo_dans_la_commande_refuse_la_fusion(commande, mode):
+    motif = refus(commande, fusion=lambda d: mode)
+    assert motif is not None, commande
+    assert "autre dépôt" in motif, (commande, motif)
+
+
+@pytest.mark.parametrize("mode", ["session", "edouard"])
+def test_gh_repo_sans_fusion_admis(mode):
+    assert refus("export GH_REPO=o/B; gh pr view 12", fusion=lambda d: mode) is None

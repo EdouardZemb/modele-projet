@@ -63,6 +63,7 @@ REFUS_CONFIG_ENVIRONNEMENT = (
     "configuration git par l'environnement (GIT_CONFIG_…), qui peut détourner les hooks"
 )
 REFUS_HOOKS = "hooks git détournés (core.hooksPath)"
+REFUS_AUTRE_DEPOT = "fusion dans un autre dépôt : contrôles invérifiables ici"
 REFUS_MODE = "fusion réservée à Edouard (mode fusion : edouard)"
 REFUS_ETIQUETTE = (
     "envoi d'une étiquette ou écriture de publication : à Edouard (étiquette ou publication)"
@@ -156,7 +157,7 @@ class Contexte:
         self._verts = checks_verts
         self._fusion = fusion if fusion is not None else (lambda dossier: "edouard")
         self.dossier: str | None = None
-        self.depot_par_environnement = False  # GH_REPO=… devant gh
+        self.depot_par_environnement = False  # la commande entière mentionne GH_REPO
         self._memo: dict[tuple[str, str | None], Any] = {}
 
     def courante(self, chemin: str | None) -> str | None:
@@ -454,6 +455,8 @@ def _git(args: list[str], ctx: Contexte) -> str | None:
 
 def _gh_merge(args: list[str], ctx: Contexte, depot: bool = False) -> str | None:
     pr = None
+    if ctx.depot_par_environnement:
+        return REFUS_AUTRE_DEPOT
     if ctx.fusion() != "session":
         return REFUS_MODE
     if any(a.split("=")[0] == "--admin" for a in args):
@@ -463,7 +466,7 @@ def _gh_merge(args: list[str], ctx: Contexte, depot: bool = False) -> str | None
         a = args[i]
         nom = a.split("=")[0]
         if nom in ("-R", "--repo"):
-            return "fusion dans un autre dépôt : contrôles invérifiables ici"
+            return REFUS_AUTRE_DEPOT
         if a.startswith("-"):
             if "=" not in a and nom in GH_MERGE_AVEC_VALEUR:
                 i += 1
@@ -471,12 +474,20 @@ def _gh_merge(args: list[str], ctx: Contexte, depot: bool = False) -> str | None
             pr = a
         i += 1
     if depot or (pr is not None and re.match(r"(?i)[a-z][a-z0-9+.-]*://", pr)):
-        return "fusion dans un autre dépôt : contrôles invérifiables ici"
+        return REFUS_AUTRE_DEPOT
     if pr is None and ctx.dossier is not None:
         return "fusion : préciser le numéro de PR après un changement de dossier"
     if not ctx.verts(pr):
         return "fusion avant que tous les contrôles soient verts"
     return None
+
+
+def _graphql_opaque(args: list[str], texte: str) -> bool:
+    return (
+        "$" in texte
+        or any(a.startswith("@") or "=@" in a for a in args)
+        or any(a == "--input" or a.startswith("--input=") for a in args)
+    )
 
 
 def _gh_api(args: list[str], ctx: Contexte) -> str | None:
@@ -508,17 +519,14 @@ def _gh_api(args: list[str], ctx: Contexte) -> str | None:
     texte = " ".join(args).lower()
     effective = (methode or ("POST" if champs else "GET")).upper()
     ecrit = effective != "GET" and point is not None
-    if "mutation" in texte and GRAPHQL_FUSION.search(texte) and ctx.fusion() != "session":
+    fusion_graphql = "mutation" in texte and bool(GRAPHQL_FUSION.search(texte))
+    # Corps qu'on ne lit pas ici (@fichier, --input, variables) : fusion possible.
+    opaque = point is not None and "graphql" in point.lower() and _graphql_opaque(args, texte)
+    fusion_rest = ecrit and bool(API_FUSION.search(point.lower()))
+    if (fusion_graphql or opaque or fusion_rest) and ctx.depot_par_environnement:
+        return REFUS_AUTRE_DEPOT  # GH_REPO quelque part dans la commande : cible invérifiable
+    if (fusion_graphql or opaque) and ctx.fusion() != "session":
         return REFUS_MODE
-    if point is not None and "graphql" in point.lower():
-        # Corps qu'on ne lit pas ici (@fichier, --input, variables) : fusion possible.
-        opaque = (
-            "$" in texte
-            or any(a.startswith("@") or "=@" in a for a in args)
-            or any(a == "--input" or a.startswith("--input=") for a in args)
-        )
-        if opaque and ctx.fusion() != "session":
-            return REFUS_MODE
     if ecrit and API_FUSION.search(point.lower()) and ctx.fusion() != "session":
         return REFUS_MODE
     if ecrit and "/releases" in point.lower():
@@ -550,7 +558,6 @@ def _gh(args: list[str], ctx: Contexte) -> str | None:
         if not a.startswith("-"):
             positions.append(i)
         i += 1
-    depot = depot or ctx.depot_par_environnement
     mots = [args[k] for k in positions]
     if mots and mots[0] not in COMMANDES_GH:
         return "commande gh inconnue (alias ou extension), qui pourrait masquer une fusion"
@@ -625,9 +632,6 @@ def _motif_segment(segment: list[str], ctx: Contexte, profondeur: int) -> str | 
     if commande == "git":
         return _git(reste, ctx)
     if commande == "gh":
-        ctx.depot_par_environnement = any(
-            jeton.split("=", 1)[0].upper() == "GH_REPO" and "=" in jeton for jeton in segment[:i]
-        )
         return _gh(reste, ctx)
     if commande in INTERPRETES and profondeur < PROFONDEUR_MAX:
         utiles = list(reste)
@@ -680,6 +684,7 @@ def motif_de_refus(
             return REFUS_CONFIG_ENVIRONNEMENT
         # Le dossier suivi (`cd`) ne doit pas passer d'une lecture à l'autre.
         ctx = Contexte(branche, branche_courante, checks_verts, outil, fusion)
+        ctx.depot_par_environnement = "gh_repo" in commande.lower()
         for texte, echappement, virgules in _variantes(commande, outil):
             if CONFIG_PAR_ENVIRONNEMENT.search(texte):
                 return REFUS_CONFIG_ENVIRONNEMENT
