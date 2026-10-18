@@ -92,7 +92,10 @@ printf "%s\n" "$SANTE_CORPS"'
 }
 
 @test "verifier_image_sante_jamais_conforme_echoue" {
-  export {{ prefixe }}SANTE_ATTENTE=1
+  # SECONDS compte en secondes entières : avec une limite de 1 s, la frontière d'une seconde peut
+  # tomber pendant le premier essai et n'en laisser qu'un. Avec 2 s, l'écart lu après un essai de
+  # moins d'une seconde vaut au plus 1 : deux essais au moins, où que tombe la frontière (R19).
+  export {{ prefixe }}SANTE_ATTENTE=2 {{ prefixe }}SANTE_DELAI=0.1
   for cas in refus ko; do
     : >"$APPELS"
     if [ "$cas" = refus ]; then

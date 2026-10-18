@@ -46,9 +46,12 @@ def test_mecanique_et_fausse_app_dans_la_ci_du_depot_modele():
     (pytest_tests,) = [c for c in commandes("tests") if "pytest" in c]
     assert pytest_tests == "python -m pytest -q --ignore=tests/test_mecanique.py"
     installation = next(c for c in commandes("tests") if "sans_saut=" in c)
-    for sans_saut in re.findall(r"sans_saut=(\S+)", installation):
-        assert "docker" not in sans_saut.split(","), sans_saut
-    assert "sans_saut=sops,age,age-keygen,pwsh,shellcheck\n" in installation
+    listes = [set(s.split(",")) for s in re.findall(r"sans_saut=(\S+)", installation)]
+    # Windows, puis Ubuntu. bash : les étapes de CI lancées par test_ci_serveur.py (R20).
+    assert listes == [
+        {"sops", "age", "age-keygen", "powershell", "bash"},
+        {"sops", "age", "age-keygen", "pwsh", "shellcheck", "bash"},
+    ]
 
     mecanique = jobs["mecanique"]
     assert mecanique["runs-on"] == "ubuntu-latest"
@@ -64,6 +67,8 @@ def test_mecanique_et_fausse_app_dans_la_ci_du_depot_modele():
         "--data nom=fausse-app",
         "--data cible=serveur",
         "--data bloc_ports=4310",
+        # explicite : la preuve de la sauvegarde ne dépend pas d'un défaut de copier.yml (R20)
+        "--data sauvegardes=true",
         ". rendu",
         "cp tests/modele/fausse-app/* rendu/",
     ):

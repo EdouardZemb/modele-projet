@@ -50,7 +50,8 @@ jobs:
             python -m zipfile -e age.zip extrait
             cp sops.exe extrait/age/age.exe extrait/age/age-keygen.exe "$dossier"
             chemin_path="$(cygpath -w "$dossier")"
-            sans_saut=sops,age,age-keygen,powershell
+            # bash est celui de Git : test_ci_serveur.py y lance les étapes de CI comme GitHub.
+            sans_saut=sops,age,age-keygen,powershell,bash
           else
             curl -fsSL -o sops "$SOPS_BASE/sops-v3.13.3.linux.amd64"
             curl -fsSL -o age.tar.gz "$AGE_BASE/age-v1.3.2-linux-amd64.tar.gz"
@@ -64,10 +65,10 @@ jobs:
             cp sops extrait/age/age extrait/age/age-keygen "$dossier"
             chmod +x "$dossier/sops" "$dossier/age" "$dossier/age-keygen"
             chemin_path="$dossier"
-            # Sur ubuntu-latest, shellcheck (test_combinaison_shellcheck) est préinstallé. Docker
-            # n'est pas exigé ici : les tests bats de la mécanique, qui le demandent, tournent dans
-            # le job mecanique.
-            sans_saut=sops,age,age-keygen,pwsh,shellcheck
+            # Sur ubuntu-latest, shellcheck (test_combinaison_shellcheck) et bash
+            # (test_ci_serveur.py) sont préinstallés. Docker n'est pas exigé ici : les tests bats de
+            # la mécanique, qui le demandent, tournent dans le job mecanique.
+            sans_saut=sops,age,age-keygen,pwsh,shellcheck,bash
           fi
           echo "$chemin_path" >> "$GITHUB_PATH"
           echo "MODELE_TESTS_SANS_SAUT=$sans_saut" >> "$GITHUB_ENV"
@@ -116,7 +117,7 @@ jobs:
         run: |
           copier copy --vcs-ref HEAD --defaults --trust \
             --data nom=fausse-app --data "description=La fausse app du modèle" \
-            --data cible=serveur --data bloc_ports=4310 . rendu
+            --data cible=serveur --data bloc_ports=4310 --data sauvegardes=true . rendu
           cp tests/modele/fausse-app/* rendu/
       - uses: ./rendu/.github/actions/modele-image-construire
         with:

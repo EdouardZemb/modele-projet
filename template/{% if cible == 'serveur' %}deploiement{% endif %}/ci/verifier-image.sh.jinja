@@ -35,7 +35,9 @@ INSTANTANE=/tmp/instantane
 {%- endif %}
 
 # attendre_sante_ok <attente> <délai> : jusqu'à <attente> secondes, toutes les <délai> secondes, une
-# santé qui dit .statut == "ok" ; sa réponse dans SANTE.
+# santé qui dit .statut == "ok" ; sa réponse dans SANTE. SECONDS compte en secondes entières :
+# l'attente réelle est comprise entre <attente> - 1 et <attente> secondes, et la boucle fait au
+# moins deux essais dès que <attente> vaut 2 ou plus et qu'un essai dure moins d'une seconde.
 attendre_sante_ok() {
   local limite=$((SECONDS + $1)) delai="$2" reponse=""
   while :; do
