@@ -32,7 +32,9 @@
 #                                    vide (un dossier vide), fichier (un fichier à la place du
 #                                    dossier), lien (un dossier qui contient un lien symbolique),
 #                                    physique (un dossier où deux noms sont un même fichier),
-#                                    partielle (une partie du dossier, puis le code 1)
+#                                    partielle (une partie du dossier, puis le code 1), apparue
+#                                    (le dossier, et un dossier vide au nom sans .partiel, comme
+#                                    s'il était apparu pendant l'écriture)
 #   DOUBLE_DOCKER_SAUVEGARDE_VIEILLI  le dossier écrit est daté d'autant de jours, comme une copie
 #                                    qui garde les dates de /donnees (cp -a, rsync -a)
 #   DOUBLE_DOCKER_SAUVEGARDE_ATTENTE  `<sauvegarder>` dure autant de secondes avant de répondre
@@ -165,13 +167,14 @@ case "${1:-}" in
             exit 1
           fi
           case "$forme" in
-            dossier | lien | physique)
+            dossier | lien | physique | apparue)
               mkdir -p "$hote/sous"
               echo "instantané de test $(basename "${destination%.partiel}")" >"$hote/donnees.txt"
               echo "fichier caché" >"$hote/.cachee"
               echo "fichier profond" >"$hote/sous/profond.txt"
               [ "$forme" != lien ] || ln -s /etc/hostname "$hote/lien"
               [ "$forme" != physique ] || ln "$hote/donnees.txt" "$hote/sous/physique.txt"
+              [ "$forme" != apparue ] || mkdir -p "${hote%.partiel}"
               ;;
             partielle)
               mkdir -p "$hote"

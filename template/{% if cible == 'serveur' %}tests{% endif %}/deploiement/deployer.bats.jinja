@@ -179,23 +179,41 @@ nombre_de_lancements() {
   [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
 }
 
-# Un instantané en échec (un code non nul, une commande qui écrit une partie puis échoue, ou aucune
-# commande SAUVEGARDER dans projet.env) annule le déploiement avant tout changement : rien n'est
-# arrêté ni lancé, l'application en service y reste, et rien n'est marqué en échec. La sonde
-# réessaiera au prochain passage. Un instantané écrit en partie garde son nom provisoire (R13).
+# Un instantané en échec annule le déploiement avant tout changement : rien n'est arrêté ni lancé,
+# l'application en service y reste, et rien n'est marqué en échec. La sonde réessaiera au prochain
+# passage. Les cas :
+#   - un code non nul ;
+#   - une commande qui écrit une partie puis échoue : le dossier garde son nom provisoire (R13) ;
+#   - une commande qui rend 0 sans écrire son dossier : rien à renommer ;
+#   - une destination déjà présente : rien n'est lancé ni écrasé ;
+#   - un dossier vide apparu au nom définitif pendant l'écriture : `mv -T` le remplacerait sans
+#     bruit, il ne doit pas ;
+#   - aucune commande SAUVEGARDER dans projet.env.
 @test "deployer_instantane_en_echec_n_arrete_rien" {
   deja_en_service "$ANCIENNE" 0.1.0
   cp "$ETAT/compose.env" "$BATS_TEST_TMPDIR/compose.env.avant"
-  local cas pre="${{ prefixe }}RACINE_SAUVEGARDES/pre-deploiement"
-  for cas in code-1 code-2 partiel sans-commande; do
+  local cas vrai pre="${{ prefixe }}RACINE_SAUVEGARDES/pre-deploiement"
+  vrai="$(command -v date)"
+  for cas in code-1 code-2 partiel sans-fichier deja-present apparu sans-commande; do
     : >"$APPELS"
-    unset DOUBLE_DOCKER_SAUVEGARDE_CODE DOUBLE_DOCKER_SAUVEGARDE_SORTIE DOUBLE_DOCKER_SAUVEGARDE_FORME
+    # chaque cas part de pre-deploiement/ vide : deux cas dans la même seconde viseraient le même nom
+    rm -rf "$pre" "$DOUBLES/date"
+    unset DOUBLE_DOCKER_SAUVEGARDE_CODE DOUBLE_DOCKER_SAUVEGARDE_SORTIE DOUBLE_DOCKER_SAUVEGARDE_FORME \
+      DOUBLE_DOCKER_SAUVEGARDE_SANS_FICHIER
     case "$cas" in
       code-*)
         export DOUBLE_DOCKER_SAUVEGARDE_CODE="${cas#code-}"
         export DOUBLE_DOCKER_SAUVEGARDE_SORTIE='données illisibles : /donnees'
         ;;
       partiel) export DOUBLE_DOCKER_SAUVEGARDE_FORME=partielle ;;
+      sans-fichier) export DOUBLE_DOCKER_SAUVEGARDE_SANS_FICHIER=1 ;;
+      deja-present)
+        # shellcheck disable=SC2016  # le corps du double se développe quand il s'exécute, pas ici
+        creer_double date 'if [ "$*" = "-u +%Y%m%dT%H%M%SZ" ]; then echo 20261018T024500Z; else exec '"$vrai"' "$@"; fi'
+        mkdir -p "$pre/20261018T024500Z"
+        echo "déjà là" >"$pre/20261018T024500Z/donnees.txt"
+        ;;
+      apparu) export DOUBLE_DOCKER_SAUVEGARDE_FORME=apparue ;;
       sans-commande) printf '%s\n' 'VERIFIER=outil verifier' >"$CLONE/deploiement/projet.env" ;;
     esac
     deployer prod "$NOUVELLE" 0.2.0
@@ -219,6 +237,22 @@ nombre_de_lancements() {
         # le dossier écrit en partie garde son nom provisoire ; aucun nom définitif
         [ -n "$(find "$pre" -mindepth 1 -maxdepth 1 -name '*.partiel')" ]
         [ -z "$(find "$pre" -mindepth 1 -maxdepth 1 ! -name '*.partiel')" ]
+        ;;
+      sans-fichier)
+        [[ "$output" == *"la commande a rendu 0, mais"*"ne peut pas prendre le nom"* ]]
+        [ -z "$(find "$pre" -mindepth 1 -maxdepth 1 2>/dev/null)" ]
+        ;;
+      deja-present)
+        [[ "$output" == *"$pre/20261018T024500Z existe déjà"* ]]
+        [ "$(appels_de docker | grep -c ' exec ')" -eq 0 ]
+        [ "$(cat "$pre/20261018T024500Z/donnees.txt")" = "déjà là" ]
+        [ "$(find "$pre" -mindepth 1 -maxdepth 1 | wc -l)" -eq 1 ]
+        ;;
+      apparu)
+        [[ "$output" == *"ne peut pas prendre le nom"* ]]
+        # le dossier apparu n'est pas remplacé ; l'instantané garde son nom provisoire
+        [ -n "$(find "$pre" -mindepth 1 -maxdepth 1 -type d -name '*Z' -empty)" ]
+        [ -n "$(find "$pre" -mindepth 2 -maxdepth 2 -path '*.partiel/donnees.txt')" ]
         ;;
       *) [[ "$output" == *"instantané impossible (code ${cas#code-}) : données illisibles"* ]] ;;
     esac

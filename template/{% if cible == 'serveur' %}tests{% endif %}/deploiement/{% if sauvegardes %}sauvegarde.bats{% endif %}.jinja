@@ -1407,11 +1407,64 @@ archive_chiffree() {
     restaurer prod "$BATS_TEST_TMPDIR/$SNAPSHOT.tar.age" $oui --cle "$cle"
     [ "$status" -eq 64 ]
     [[ "$output" == *"--cle attend un chemin vers un fichier d'identité, pas la clé elle-même"* ]]
-    aucune_ligne "AGE-SECRET-KEY|${cle#AGE-SECRET-KEY-}" <(printf '%s\n' "$output")
+    cle_non_repetee "$cle"
   done
   [ -z "$(appels_de docker)" ]
   contenu_courant_intact
   aucun_temporaire
+}
+
+# cle_non_repetee <clé> : la sortie du dernier `run` ne contient ni le préfixe d'une clé age, ni le
+# corps de celle-ci. En échec, rien de la clé n'est affiché (aucune_ligne afficherait son motif).
+cle_non_repetee() {
+  if printf '%s\n' "$output" | grep -qF -e 'AGE-SECRET-KEY' -e "${1#AGE-SECRET-KEY-}"; then
+    echo "la clé est répétée dans la sortie" >&2
+    return 1
+  fi
+}
+
+# R16 : la clé collée par d'autres chemins que `--cle <clé>` n'est pas répétée non plus. D'abord le
+# contenu entier du fichier d'identité, ses lignes de commentaire en tête : il ne commence pas par la
+# clé.
+@test "restaurer_refuse_un_fichier_d_identite_colle_sans_l_afficher" {
+  archive_chiffree
+  donnees_courantes
+  local cle
+  cle="$(grep '^AGE-SECRET-KEY-' "$AGE_IDENTITE_HORS_LIGNE")"
+  restaurer prod "$BATS_TEST_TMPDIR/$SNAPSHOT.tar.age" --oui --cle "$(cat "$AGE_IDENTITE_HORS_LIGNE")"
+  [ "$status" -eq 64 ]
+  cle_non_repetee "$cle"
+  [ -z "$(appels_de docker)" ]
+  contenu_courant_intact
+}
+
+# R16 : `--cle=<clé>`, que l'analyse des options prendrait pour une option inconnue.
+@test "restaurer_refuse_une_option_cle_egale_sans_l_afficher" {
+  archive_chiffree
+  donnees_courantes
+  local cle
+  cle="$(grep '^AGE-SECRET-KEY-' "$AGE_IDENTITE_HORS_LIGNE")"
+  restaurer prod "$BATS_TEST_TMPDIR/$SNAPSHOT.tar.age" --oui "--cle=$cle"
+  [ "$status" -eq 64 ]
+  cle_non_repetee "$cle"
+  [ -z "$(appels_de docker)" ]
+  contenu_courant_intact
+}
+
+# R16 : la clé collée à la place de la source, ou de l'environnement.
+@test "restaurer_refuse_une_cle_collee_comme_source_sans_l_afficher" {
+  archive_chiffree
+  donnees_courantes
+  local cle
+  cle="$(grep '^AGE-SECRET-KEY-' "$AGE_IDENTITE_HORS_LIGNE")"
+  restaurer prod "$cle" --oui
+  [ "$status" -eq 64 ]
+  cle_non_repetee "$cle"
+  restaurer "$cle" "$BATS_TEST_TMPDIR/$SNAPSHOT.tar.age" --oui
+  [ "$status" -eq 64 ]
+  cle_non_repetee "$cle"
+  [ -z "$(appels_de docker)" ]
+  contenu_courant_intact
 }
 
 @test "restaurer_depuis_une_archive_avec_la_mauvaise_cle_ne_touche_a_rien" {

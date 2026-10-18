@@ -159,7 +159,10 @@ instantane() {
     journal "instantané impossible (code $code) : ${sortie//$'\n'/ }"
     return 1
   fi
-  if ! { [ -d "$hote.partiel" ] && [ ! -L "$hote.partiel" ] && mv -T -- "$hote.partiel" "$hote"; }; then
+  # Le nom définitif est revérifié juste avant : avec -T, un dossier vide apparu entre-temps serait
+  # remplacé sans bruit.
+  if ! { [ -d "$hote.partiel" ] && [ ! -L "$hote.partiel" ] && [ ! -e "$hote" ] && [ ! -L "$hote" ] \
+    && mv -T -- "$hote.partiel" "$hote"; }; then
     journal "instantané impossible : la commande a rendu 0, mais $hote.partiel ne peut pas prendre le nom $hote"
     return 1
   fi

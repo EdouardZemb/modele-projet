@@ -25,11 +25,11 @@
 #        refusé (code 64) ;
 #      - une archive .tar.age exige --cle (l'identité hors ligne, apportée pour l'occasion et jamais
 #        gardée sur le serveur : voir /dev/stdin ci-dessus, lue une seule fois). La clé elle-même,
-#        collée à la place d'un chemin, est refusée sans être répétée (code 64). L'archive vient
-#        d'un distant et la clé publique n'est pas secrète : n'importe qui peut fabriquer une
-#        archive qui se déchiffre. Ses membres sont donc contrôlés avant toute extraction : un seul
-#        dossier, {{ nom }}-<horodatage>/, et rien à côté ; ni chemin absolu, ni « .. », ni lien, rien
-#        que des fichiers et des dossiers ;
+#        collée dans un argument quel qu'il soit, est refusée sans être répétée (code 64).
+#        L'archive vient d'un distant et la clé publique n'est pas secrète : n'importe qui peut
+#        fabriquer une archive qui se déchiffre. Ses membres sont donc contrôlés avant toute
+#        extraction : un seul dossier, {{ nom }}-<horodatage>/, et rien à côté ; ni chemin absolu, ni
+#        « .. », ni lien, rien que des fichiers et des dossiers ;
 #      dans les deux cas, un instantané vide, ou qui contient autre chose que des fichiers et des
 #      dossiers, est refusé ;
 #   4. contrôle, comme le test de restauration : la commande VERIFIER de deploiement/projet.env, dans
@@ -307,6 +307,15 @@ preparer_dossier() {
 }
 
 main() {
+  # Une clé age collée dans un argument (à la place de l'environnement, de la source, du chemin de
+  # l'identité, ou dans --cle=…), même après des lignes de commentaire, n'est jamais répétée : refus
+  # avant tout message qui pourrait citer un argument, plan compris.
+  local argument
+  for argument in "$@"; do
+    case "$argument" in
+      *AGE-SECRET-KEY-*) arreter 64 "un argument contient une clé privée age, qui n'est pas répétée : rien n'a changé. --cle attend un chemin vers un fichier d'identité, pas la clé elle-même (par exemple --cle /dev/stdin, la clé sur l'entrée standard)" ;;
+    esac
+  done
   [ "$#" -ge 1 ] || arreter 64 "$USAGE"
   reserver_a_prod "$1" restaurer.sh
   shift
@@ -318,10 +327,6 @@ main() {
         ;;
       --cle)
         [ "$#" -ge 2 ] || arreter 64 "--cle demande un fichier (l'identité age). $USAGE"
-        # Une clé collée à la place d'un chemin n'est jamais répétée, ni ici, ni dans le plan.
-        case "$2" in
-          AGE-SECRET-KEY-*) arreter 64 "--cle attend un chemin vers un fichier d'identité, pas la clé elle-même : rien n'a changé (par exemple --cle /dev/stdin, la clé sur l'entrée standard)" ;;
-        esac
         CLE="$2"
         shift 2
         ;;
