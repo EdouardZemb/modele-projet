@@ -34,9 +34,11 @@ jobs:
           #   (gh api repos/FiloSottile/age/releases/tags/v1.3.2).
           SOPS_BASE=https://github.com/getsops/sops/releases/download/v3.13.3
           AGE_BASE=https://github.com/FiloSottile/age/releases/download/v1.3.2
-          dossier="$RUNNER_TEMP/outils"
-          mkdir -p "$dossier"
-          cd "$dossier"
+          # Téléchargement et extraction à part : « age » est à la fois le dossier de l'archive et un binaire.
+          telechargement="$RUNNER_TEMP/outils-telechargement"
+          dossier="$RUNNER_TEMP/outils/bin"
+          mkdir -p "$telechargement" "$dossier"
+          cd "$telechargement"
           if [ "$RUNNER_OS" = Windows ]; then
             curl -fsSL -o sops.exe "$SOPS_BASE/sops-v3.13.3.amd64.exe"
             curl -fsSL -o age.zip "$AGE_BASE/age-v1.3.2-windows-amd64.zip"
@@ -45,8 +47,8 @@ jobs:
           f48d8f8f9ebe903ab5027ed067652f2cc1db94bc206976430133b905dcd8e8c7  age.zip
           SOMMES
             sha256sum -c sommes.txt
-            python -m zipfile -e age.zip .
-            cp age/age.exe age/age-keygen.exe .
+            python -m zipfile -e age.zip extrait
+            cp sops.exe extrait/age/age.exe extrait/age/age-keygen.exe "$dossier"
             chemin_path="$(cygpath -w "$dossier")"
             sans_saut=sops,age,age-keygen,powershell
           else
@@ -57,9 +59,10 @@ jobs:
           cbe24006683f8eb669266162894b9a522a1af52f2665fbc63a4bb032ed26ac10  age.tar.gz
           SOMMES
             sha256sum -c sommes.txt
-            tar -xzf age.tar.gz
-            cp age/age age/age-keygen .
-            chmod +x sops age age-keygen
+            mkdir extrait
+            tar -xzf age.tar.gz -C extrait
+            cp sops extrait/age/age extrait/age/age-keygen "$dossier"
+            chmod +x "$dossier/sops" "$dossier/age" "$dossier/age-keygen"
             chemin_path="$dossier"
             sans_saut=sops,age,age-keygen,pwsh
           fi
