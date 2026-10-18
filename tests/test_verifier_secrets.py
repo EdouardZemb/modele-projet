@@ -12,6 +12,7 @@ TEMOIN = "TEMOIN-NE-PAS-AFFICHER"
 # Construits par concaténation : le dépôt est public, aucune adresse ne s'y écrit en entier.
 DEST_A = "age1" + "a" * 58
 DEST_B = "age1" + "b" * 58
+BOM = chr(0xFEFF)
 
 
 def enc(cles, destinataires, valeur=TEMOIN):
@@ -134,9 +135,35 @@ def test_ne_divulgue_rien(tmp_path):
         monter(tmp_path / "d", cles=None, chiffre=enc(["TOKEN"], [DEST_A])),
         monter(tmp_path / "e", sops_yaml=None),
         monter(tmp_path / "f", chiffre=False),
+        monter(tmp_path / "g", chiffre=f"#ENC[AES256_GCM,data:{TEMOIN},iv:xx,tag:yy,type:comment]\n" + enc(["HC_SONDE", "TOKEN"], [DEST_A])),
+        monter(tmp_path / "h", chiffre=f"#ENC[AES256_GCM,data:{TEMOIN}" + enc(["HC_SONDE", "TOKEN"], [DEST_A])),
+        monter(tmp_path / "i", chiffre=enc(["TOKEN"], [DEST_A]) + f"HC_SONDE={TEMOIN}\n"),
     ]
     for d in cas:
         assert TEMOIN not in sortie(lancer(d))
+
+
+def test_commentaire_chiffre_ignore(tmp_path):
+    commentaire = f"#ENC[AES256_GCM,data:{TEMOIN},iv:xx,tag:yy,type:comment]\n"
+    r = lancer(monter(tmp_path, chiffre=commentaire + enc(["HC_SONDE", "TOKEN"], [DEST_A])))
+    assert r.returncode == 0, sortie(r)
+
+
+def test_valeur_en_clair_refusee(tmp_path):
+    r = lancer(monter(tmp_path, chiffre=enc(["TOKEN"], [DEST_A]) + f"HC_SONDE={TEMOIN}\n"))
+    assert r.returncode == 1
+    assert "valeur non chiffrée : HC_SONDE" in sortie(r)
+    assert TEMOIN not in sortie(r)
+
+
+def test_bom_dans_cles_et_enc(tmp_path):
+    d = monter(tmp_path)
+    cles = d / "deploiement/secrets/prod.cles"
+    cles.write_text(BOM + cles.read_text(encoding="utf-8"), encoding="utf-8")
+    chiffre = d / "deploiement/secrets/prod.env.enc"
+    chiffre.write_text(BOM + chiffre.read_text(encoding="utf-8"), encoding="utf-8")
+    r = lancer(d)
+    assert r.returncode == 0, sortie(r)
 
 
 def test_usage():
@@ -178,7 +205,7 @@ def test_vrai_fichier_sops(tmp_path):
         ],
         cwd=d,
         env=env,
-        input="HC_SONDE=valeur-un\nTOKEN=valeur-deux\n",
+        input="# commentaire\nHC_SONDE=valeur-un\nTOKEN=valeur-deux\n",
         capture_output=True,
         text=True,
         encoding="utf-8",

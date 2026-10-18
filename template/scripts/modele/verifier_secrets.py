@@ -55,7 +55,7 @@ class Constat:
 def lire_cles(chemin: Path) -> list[str]:
     """Une clé par ligne ; lignes vides et « # » ignorées ; un doublon est une erreur."""
     cles: list[str] = []
-    for numero, brut in enumerate(chemin.read_text(encoding="utf-8").splitlines(), start=1):
+    for numero, brut in enumerate(chemin.read_text(encoding="utf-8-sig").splitlines(), start=1):
         ligne = brut.strip()
         if not ligne or ligne.startswith("#"):
             continue
@@ -71,8 +71,9 @@ def lire_chiffre(chemin: Path) -> tuple[set[str], set[str]]:
     """(clés, destinataires) d'un dotenv chiffré par sops. Aucune valeur n'est conservée."""
     cles: set[str] = set()
     destinataires: set[str] = set()
-    for numero, brut in enumerate(chemin.read_text(encoding="utf-8").splitlines(), start=1):
-        if not brut.strip():
+    for numero, brut in enumerate(chemin.read_text(encoding="utf-8-sig").splitlines(), start=1):
+        # Un commentaire sops ressort chiffré (#ENC[…, type:comment]) : ni clé, ni citable.
+        if not brut.strip() or brut.lstrip().startswith("#"):
             continue
         correspondance = REGEX_NOM.match(brut)
         if not correspondance:
@@ -82,12 +83,14 @@ def lire_chiffre(chemin: Path) -> tuple[set[str], set[str]]:
             if REGEX_DESTINATAIRE.fullmatch(nom):
                 destinataires.add(brut[correspondance.end() :].strip())
         else:
+            if not brut[correspondance.end() :].startswith("ENC[AES256_GCM,"):
+                raise Illisible(numero, f"valeur non chiffrée : {nom}")
             cles.add(nom)
     return cles, destinataires
 
 
 def destinataires_sops_yaml(racine: Path) -> set[str]:
-    texte = (racine / ".sops.yaml").read_text(encoding="utf-8")
+    texte = (racine / ".sops.yaml").read_text(encoding="utf-8-sig")
     return set(REGEX_AGE.findall(texte))
 
 
