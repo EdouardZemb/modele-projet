@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh \"$CLAUDE_PROJECT_DIR/template/scripts/modele/lancer.sh\" \"$CLAUDE_PROJECT_DIR/template/scripts/modele/garde_claude.py\" --branche main",
+            "command": "sh \"$CLAUDE_PROJECT_DIR/template/scripts/modele/lancer.sh\" \"$CLAUDE_PROJECT_DIR/template/scripts/modele/garde_claude.py\" --branche main --fusion session",
             "timeout": 30
           }
         ]

@@ -23,6 +23,7 @@ REPONSES_PAR_DEFAUT = {
     "visibilite": "public",
     "cible": "aucune",
     "branche_principale": "main",
+    "fusion": "session",
 }
 
 

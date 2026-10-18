@@ -1,13 +1,18 @@
 """Garde de Claude Code (hook PreToolUse) : refuse ce qu'un agent ne doit pas faire seul.
 
-Trois choses sont refusées : un envoi vers la branche principale, tout contournement des hooks
-git, et la fusion d'une PR avant que tous ses contrôles soient verts. La vraie serrure est la
-protection de branche de GitHub ; ce garde évite seulement à l'agent de s'y heurter, et de la
-chercher.
+Cinq choses sont refusées : un envoi vers la branche principale, tout contournement des hooks
+git, la fusion d'une PR avant que tous ses contrôles soient verts, toute fusion quand le projet est
+en mode `fusion : edouard`, et dans les deux modes l'envoi d'une étiquette et l'écriture d'une
+publication. La vraie serrure est la protection de branche de GitHub ; ce garde évite seulement à
+l'agent de s'y heurter, et de la chercher.
+
+Le mode de fusion se lit sur GitHub (`.copier-answers.yml` de la branche principale), jamais dans la
+copie locale ni dans `origin/<branche>`, qu'une session peut réécrire. Tout ce qui est illisible
+vaut `edouard`.
 
 Bibliothèque standard seule, Python 3.10 ou plus.
 
-Usage : garde_claude.py [--branche NOM]  (lit sur l'entrée standard le JSON du hook :
+Usage : garde_claude.py [--branche NOM] [--fusion session|edouard]  (lit sur l'entrée standard le JSON du hook :
     {"tool_name": ..., "tool_input": {"command": ...}, "cwd": ...})
 
 Outils surveillés : `Bash` et `Monitor` (lecture Bash), `PowerShell` (lecture PowerShell), et
@@ -58,6 +63,15 @@ REFUS_CONFIG_ENVIRONNEMENT = (
     "configuration git par l'environnement (GIT_CONFIG_…), qui peut détourner les hooks"
 )
 REFUS_HOOKS = "hooks git détournés (core.hooksPath)"
+REFUS_AUTRE_DEPOT = "fusion dans un autre dépôt : contrôles invérifiables ici"
+REFUS_MODE = "fusion réservée à Edouard (mode fusion : edouard)"
+REFUS_ETIQUETTE = (
+    "envoi d'une étiquette ou écriture de publication : à Edouard (étiquette ou publication)"
+)
+MODES_FUSION = ("session", "edouard")
+REPONSE_SESSION = re.compile(r"^fusion:[ \t]*session[ \t]*\r?$", re.MULTILINE)
+DESTINATION_ETIQUETTE = re.compile(r"^v[0-9]")
+RELEASE_LECTURE = {"view", "list", "download"}
 
 # Mots qui précèdent la vraie commande sans la changer.
 PREFIXES = {
@@ -123,7 +137,10 @@ GH_API_AVEC_VALEUR = {
 GH_API_CHAMPS = {"-f", "-F", "--field", "--raw-field", "--input"}
 API_ECRITURE = re.compile(
     r"/merge|git/refs|/contents/|/rulesets|/protection|git/(commits|trees|tags)|/update-branch"
+    r"|/releases"
 )
+API_FUSION = re.compile(r"/merge")
+GRAPHQL_FUSION = re.compile(r"mergepullrequest|enablepullrequestautomerge|mergebranch")
 GRAPHQL_ECRITURE = re.compile(
     r"mergepullrequest|enablepullrequestautomerge|updateref|createref|deleteref"
     r"|createcommitonbranch|branchprotectionrule|ruleset|mergebranch"
@@ -133,12 +150,14 @@ GRAPHQL_ECRITURE = re.compile(
 class Contexte:
     """Les rappels (branche courante, contrôles) et le dossier courant suivi au fil des `cd`."""
 
-    def __init__(self, branche, branche_courante, checks_verts, outil=None):
+    def __init__(self, branche, branche_courante, checks_verts, outil=None, fusion=None):
         self.branche = branche
         self.outil = outil
         self._courante = branche_courante
         self._verts = checks_verts
+        self._fusion = fusion if fusion is not None else (lambda dossier: "edouard")
         self.dossier: str | None = None
+        self.depot_par_environnement = False  # la commande entière mentionne GH_REPO
         self._memo: dict[tuple[str, str | None], Any] = {}
 
     def courante(self, chemin: str | None) -> str | None:
@@ -151,6 +170,19 @@ class Contexte:
         cle = ("verts", pr)
         if cle not in self._memo:
             self._memo[cle] = bool(self._verts(pr))
+        return self._memo[cle]
+
+    def fusion(self) -> str:
+        """Le mode de fusion du dépôt visé (le dossier suivi par les `cd`), lu une fois par dossier.
+
+        Tout ce qui n'est pas `session` vaut `edouard`."""
+        cle = ("fusion", self.dossier)
+        if cle not in self._memo:
+            try:
+                mode = self._fusion(self.dossier)
+            except Exception:  # noqa: BLE001 - fail-closed
+                mode = "edouard"
+            self._memo[cle] = "session" if mode == "session" else "edouard"
         return self._memo[cle]
 
     def chemin(self, option_c: str | None) -> str | None:
@@ -349,6 +381,8 @@ def _push(args: list[str], chemin: str | None, ctx: Contexte) -> str | None:
             nom = a.split("=")[0]
             if _abrege(nom, "--all") or _abrege(nom, "--mirror"):
                 return "push de toutes les branches (--all, --mirror), main comprise"
+            if _abrege(nom, "--tags") or _abrege(nom, "--follow-tags"):
+                return REFUS_ETIQUETTE
             if _abrege(nom, "--repo"):
                 remote = a  # --repo donne le remote : tout argument positionnel est un refspec
             if "=" not in a and (
@@ -364,7 +398,11 @@ def _push(args: list[str], chemin: str | None, ctx: Contexte) -> str | None:
         i += 1
     refus = f"push vers {ctx.branche}"
     for refspec in refspecs:
+        if refspec == "tag":  # `git push origin tag <nom>` : syntaxe de refs/tags/<nom>
+            return REFUS_ETIQUETTE
         dest = _destination(refspec)
+        if dest.startswith(("refs/tags/", "tags/")) or DESTINATION_ETIQUETTE.match(dest):
+            return REFUS_ETIQUETTE
         if dest == ctx.branche:
             return refus
         if dest in ("HEAD", "@"):
@@ -417,6 +455,10 @@ def _git(args: list[str], ctx: Contexte) -> str | None:
 
 def _gh_merge(args: list[str], ctx: Contexte, depot: bool = False) -> str | None:
     pr = None
+    if ctx.depot_par_environnement:
+        return REFUS_AUTRE_DEPOT
+    if ctx.fusion() != "session":
+        return REFUS_MODE
     if any(a.split("=")[0] == "--admin" for a in args):
         return "fusion en contournant les règles de protection (--admin)"
     i = 0
@@ -424,15 +466,15 @@ def _gh_merge(args: list[str], ctx: Contexte, depot: bool = False) -> str | None
         a = args[i]
         nom = a.split("=")[0]
         if nom in ("-R", "--repo"):
-            return "fusion dans un autre dépôt : contrôles invérifiables ici"
+            return REFUS_AUTRE_DEPOT
         if a.startswith("-"):
             if "=" not in a and nom in GH_MERGE_AVEC_VALEUR:
                 i += 1
         elif pr is None:
             pr = a
         i += 1
-    if depot:
-        return "fusion dans un autre dépôt : contrôles invérifiables ici"
+    if depot or (pr is not None and re.match(r"(?i)[a-z][a-z0-9+.-]*://", pr)):
+        return REFUS_AUTRE_DEPOT
     if pr is None and ctx.dossier is not None:
         return "fusion : préciser le numéro de PR après un changement de dossier"
     if not ctx.verts(pr):
@@ -440,7 +482,15 @@ def _gh_merge(args: list[str], ctx: Contexte, depot: bool = False) -> str | None
     return None
 
 
-def _gh_api(args: list[str]) -> str | None:
+def _graphql_opaque(args: list[str], texte: str) -> bool:
+    return (
+        "$" in texte
+        or any(a.startswith("@") or "=@" in a for a in args)
+        or any(a == "--input" or a.startswith("--input=") for a in args)
+    )
+
+
+def _gh_api(args: list[str], ctx: Contexte) -> str | None:
     refus = "fusion ou écriture de branche par l'API GitHub, qui contourne la PR"
     methode = None
     champs = False
@@ -467,10 +517,23 @@ def _gh_api(args: list[str]) -> str | None:
         i += 1
     # Les deux contrôles valent pour tout appel, quel que soit le point d'accès.
     texte = " ".join(args).lower()
+    effective = (methode or ("POST" if champs else "GET")).upper()
+    ecrit = effective != "GET" and point is not None
+    fusion_graphql = "mutation" in texte and bool(GRAPHQL_FUSION.search(texte))
+    # Corps qu'on ne lit pas ici (@fichier, --input, variables) : fusion possible.
+    opaque = point is not None and "graphql" in point.lower() and _graphql_opaque(args, texte)
+    fusion_rest = ecrit and bool(API_FUSION.search(point.lower()))
+    if (fusion_graphql or opaque or fusion_rest) and ctx.depot_par_environnement:
+        return REFUS_AUTRE_DEPOT  # GH_REPO quelque part dans la commande : cible invérifiable
+    if (fusion_graphql or opaque) and ctx.fusion() != "session":
+        return REFUS_MODE
+    if ecrit and API_FUSION.search(point.lower()) and ctx.fusion() != "session":
+        return REFUS_MODE
+    if ecrit and "/releases" in point.lower():
+        return REFUS_ETIQUETTE
     if "mutation" in texte and GRAPHQL_ECRITURE.search(texte):
         return refus
-    effective = (methode or ("POST" if champs else "GET")).upper()
-    if effective != "GET" and point is not None and API_ECRITURE.search(point.lower()):
+    if ecrit and API_ECRITURE.search(point.lower()):
         return refus
     return None
 
@@ -511,8 +574,10 @@ def _gh(args: list[str], ctx: Contexte) -> str | None:
     if mots == ["pr", "merge"]:
         reste = args[positions[1] + 1 :]
         return _gh_merge(reste, ctx, depot)
+    if mots[:1] == ["release"] and len(mots) > 1 and mots[1] not in RELEASE_LECTURE:
+        return REFUS_ETIQUETTE
     if mots[:1] == ["api"]:
-        return _gh_api(args[positions[0] + 1 :])
+        return _gh_api(args[positions[0] + 1 :], ctx)
     return None
 
 
@@ -603,19 +668,23 @@ def motif_de_refus(
     branche_courante: Callable[[str | None], str | None],
     checks_verts: Callable[[str | None], bool],
     outil: str | None = None,
+    fusion: Callable[[str | None], str] = lambda dossier: "edouard",
 ) -> str | None:
     """La raison du refus de `commande`, ou None si elle est admise.
 
     `branche_courante` reçoit le chemin d'un `git -C <chemin>` (ou d'un `cd`), ou None.
     `checks_verts` reçoit l'argument de PR de `gh pr merge`, ou None.
     `outil` (« Bash » ou « PowerShell ») choisit la lecture ; None les essaie toutes.
+    `fusion` reçoit le dossier suivi par les `cd` (None : celui du hook) et rend le mode
+    (« session » ou « edouard »), appelé au plus une fois par dossier et seulement pour une fusion ; sans autre valeur que « session », toute fusion est refusée.
     Aucune exception ne sort d'ici : une commande qu'on ne sait pas analyser est refusée.
     """
     try:
         if CONFIG_PAR_ENVIRONNEMENT.search(commande):
             return REFUS_CONFIG_ENVIRONNEMENT
         # Le dossier suivi (`cd`) ne doit pas passer d'une lecture à l'autre.
-        ctx = Contexte(branche, branche_courante, checks_verts, outil)
+        ctx = Contexte(branche, branche_courante, checks_verts, outil, fusion)
+        ctx.depot_par_environnement = "gh_repo" in commande.lower()
         for texte, echappement, virgules in _variantes(commande, outil):
             if CONFIG_PAR_ENVIRONNEMENT.search(texte):
                 return REFUS_CONFIG_ENVIRONNEMENT
@@ -665,6 +734,23 @@ def checks_verts_gh(pr: str | None, cwd: str) -> bool:
     return all(isinstance(c, dict) and c.get("bucket") in ("pass", "skipping") for c in controles)
 
 
+def fusion_du_depot(branche: str, cwd: str | None) -> str:
+    """Le mode de fusion du projet, lu sur GitHub : `.copier-answers.yml` à `ref=<branche>`.
+
+    « session » seulement si une ligne vaut `fusion: session` ; « edouard » dans tous les autres
+    cas (gh absent, code non nul, budget épuisé, ligne absente ou autre valeur)."""
+    gh = shutil.which("gh")
+    if gh is None:
+        return "edouard"
+    point = "repos/{owner}/{repo}/contents/.copier-answers.yml?ref=" + branche
+    cmd = [gh, "api", "-H", "Accept: application/vnd.github.raw+json", point]
+    r = _executer(cmd, cwd or ".")
+    if r is None or r.returncode != 0:
+        return "edouard"
+    texte = r.stdout.decode("utf-8", errors="replace")
+    return "session" if REPONSE_SESSION.search(texte) else "edouard"
+
+
 def branche_courante_git(chemin: str | None, cwd: str) -> str | None:
     """La branche courante (`git rev-parse --abbrev-ref HEAD`), ou None si illisible."""
     cmd = ["git", *(["-C", chemin] if chemin else []), "rev-parse", "--abbrev-ref", "HEAD"]
@@ -688,6 +774,11 @@ def main(argv: list[str] | None = None) -> int:
             pass
     p = _Analyseur(prog="garde_claude.py", description="Garde PreToolUse de Claude Code.")
     p.add_argument("--branche", help="branche principale (défaut : reglages.BRANCHE_PRINCIPALE)")
+    p.add_argument(
+        "--fusion",
+        choices=MODES_FUSION,
+        help="mode de fusion, qui l'emporte sur la lecture de .copier-answers.yml sur GitHub",
+    )
     try:
         args = p.parse_args(argv)
     except SystemExit as sortie:
@@ -767,6 +858,9 @@ def _executer_garde(args) -> int:
         lambda chemin: branche_courante_git(chemin, cwd),
         lambda pr: checks_verts_gh(pr, cwd),
         LECTURES.get(outil),
+        (lambda dossier: args.fusion)
+        if args.fusion
+        else (lambda dossier: fusion_du_depot(branche, os.path.join(cwd, dossier) if dossier else cwd)),
     )
     if motif is None:
         return 0

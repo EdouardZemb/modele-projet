@@ -75,10 +75,31 @@ sessions à distance.
 | hook git `pre-commit` | confidentialité du contenu indexé, fichiers UTF-16 compris ; un autre binaire est signalé « non examiné ». La porte refuse dans un dépôt public ; dans un dépôt privé, elle avertit sur ce qui identifie et refuse toujours les secrets (voir plus bas), au hook comme en CI |
 | hook git `commit-msg` | format Conventional Commits, confidentialité du message |
 | hook git `pre-push` | refus d'envoyer sur la branche principale |
-| hook Claude `PreToolUse` (outils `Bash`, `PowerShell`, `Monitor`, et tout outil MCP qui porte une commande) | bloque `git push` vers la branche principale, tout force-push vers elle, `--no-verify`, toute modification de `core.hooksPath` sauf la réparation `git config core.hooksPath .githooks` (variables `GIT_CONFIG_*` comprises), `gh pr merge` tant que les contrôles ne sont pas tous verts, `gh pr merge --admin`, les alias et extensions de `gh`, ce qui affiche le jeton de `gh` ou les identifiants de git (`gh auth token`, `gh auth status --show-token`, `gh auth git-credential`, `git credential fill`, `git credential-manager get`), et l'effacement, le déplacement ou le renommage de `.githooks` et de `scripts/modele` (`rm`, `mv`, `Remove-Item`, `git rm`…). Il lit aussi les substitutions `$(…)`, même entre guillemets, le texte d'une here-string (`bash <<< '…'`) passée à un interprète, et les enveloppes (`timeout`, `Start-Process`, `Invoke-Expression`…) |
+| hook Claude `PreToolUse` (outils `Bash`, `PowerShell`, `Monitor`, et tout outil MCP qui porte une commande) | bloque `git push` vers la branche principale, tout force-push vers elle, `--no-verify`, toute modification de `core.hooksPath` sauf la réparation `git config core.hooksPath .githooks` (variables `GIT_CONFIG_*` comprises), `gh pr merge` tant que les contrôles ne sont pas tous verts (et toute fusion en mode `edouard`), `gh pr merge --admin`, l'envoi d'une étiquette (`git push --tags`, `--follow-tags`, un refspec `refs/tags/…` ou `v1.2.3`) et toute écriture de publication (`gh release` hors `view`, `list`, `download` ; l'API `…/releases`), les alias et extensions de `gh`, ce qui affiche le jeton de `gh` ou les identifiants de git (`gh auth token`, `gh auth status --show-token`, `gh auth git-credential`, `git credential fill`, `git credential-manager get`), et l'effacement, le déplacement ou le renommage de `.githooks` et de `scripts/modele` (`rm`, `mv`, `Remove-Item`, `git rm`…). Il lit aussi les substitutions `$(…)`, même entre guillemets, le texte d'une here-string (`bash <<< '…'`) passée à un interprète, et les enveloppes (`timeout`, `Start-Process`, `Invoke-Expression`…) |
 | CI de base | gitleaks examine les commits de chaque PR et de chaque envoi, et tout l'historique chaque semaine et à la demande (`modele-historique.yml`) ; confidentialité du diff, des messages de commit et du texte de la PR ; format des commits ; le garde de Claude toujours branché dans `.claude/settings.json` ; actions épinglées par SHA |
 | Dependabot | chaque lundi, les versions des actions épinglées (`.github/dependabot.yml`), après trois jours de recul |
 | règle de protection GitHub | tout commit qui arrive sur la branche principale est la tête d'une PR dont les contrôles requis sont verts ; un envoi direct de cette tête est accepté et marque la PR fusionnée, sans squash. Côté agent, c'est le refus de pousser vers la branche principale par le garde qui ferme ce chemin. Ni force-push ni suppression de la branche principale. Posée sur les dépôts publics |
+
+**Qui fusionne : la réponse `fusion`.** Deux modes, choisis à la création du projet et enregistrés
+dans `.copier-answers.yml` :
+
+- `session` : la session fusionne sa PR une fois tous les contrôles verts ;
+- `edouard` : la session ouvre la PR, attend que tout soit vert, le dit, et s'arrête. Le garde
+  refuse toute fusion : `gh pr merge` (y compris `--auto` et `--admin`), l'API (`…/merge`) et les
+  mutations GraphQL de fusion. Le refus dit `mode fusion : edouard`.
+
+Le garde lit le mode sur GitHub (`.copier-answers.yml` de la branche principale, par `gh api`),
+pas dans la copie locale ni dans `origin/<branche>`, qu'une session peut réécrire. Tout ce qui est
+illisible (`gh` absent, erreur, délai dépassé, ligne absente) vaut `edouard`. L'option `--fusion
+session|edouard` du garde l'emporte sur cette lecture : c'est ce que passe le dépôt modèle, qui n'a
+pas de `.copier-answers.yml`.
+
+**Les étiquettes et les publications sont à Edouard**, dans les deux modes : une étiquette peut
+mettre un projet en production. La session les prépare (`git tag` en local est permis), mais ne les
+envoie pas et n'écrit aucune publication.
+
+**La PR qui apporte l'option `fusion` à un projet se fusionne à la main**, puisque la branche
+principale n'a pas encore la réponse : le garde la lit comme `edouard` tant qu'elle n'y est pas.
 
 **Dépôt public, dépôt privé.** La visibilité est une réponse du modèle (`visibilite` dans
 `.copier-answers.yml`, `VISIBILITE` dans `scripts/modele/reglages.py`). Dans un dépôt **public**, un

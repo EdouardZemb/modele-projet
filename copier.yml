@@ -38,3 +38,8 @@ branche_principale:
   help: Branche par défaut du dépôt
   default: main
   validator: "{% if not (branche_principale | regex_search('^[a-z][a-z0-9/-]*$')) %}nom de branche invalide{% endif %}"
+fusion:
+  type: str
+  help: Qui fusionne les PR une fois tous les contrôles verts
+  choices: {la session fusionne quand tout est vert: session, Edouard fusionne: edouard}
+  default: session
