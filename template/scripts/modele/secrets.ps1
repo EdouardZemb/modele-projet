@@ -14,9 +14,21 @@ $script:EXIT_USAGE = 64
 # Les caracteres refuses, en plus des blancs et des caracteres de controle (valeur_sure d'ancrage).
 $script:INTERDITS = '"' + "'" + '\$`;&|<>()~'
 
-function Initialize-Sortie {
+function Set-SortieUtf8 {
     # Les messages portent des accents : la console de 5.1 est en OEM par defaut.
-    try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false) } catch { $null = $_ }
+    # Rend la page de sortie d'origine, a retablir par Restore-Sortie ($null sans console).
+    $avant = $null
+    try {
+        $avant = [Console]::OutputEncoding
+        [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+    }
+    catch { $null = $_ }
+    return $avant
+}
+
+function Restore-Sortie($Avant) {
+    if ($null -eq $Avant) { return }
+    try { [Console]::OutputEncoding = $Avant } catch { $null = $_ }
 }
 
 function Lire-Cles([string]$Chemin) {
@@ -66,7 +78,20 @@ function Invoke-Processus([string]$Exe, [string]$Arguments, [string]$Dossier, [b
     $info.RedirectStandardError = $true
     $info.StandardOutputEncoding = New-Object System.Text.UTF8Encoding($false)
     $info.StandardErrorEncoding = New-Object System.Text.UTF8Encoding($false)
-    $processus = [System.Diagnostics.Process]::Start($info)
+    # Process.Start ecrit sur stdin avec Console.InputEncoding, preambule compris : sous la page
+    # 65001 un BOM partirait vers sops. Le temps du Start, on la met a UTF-8 sans BOM.
+    $entreeAvant = $null
+    try {
+        $entreeAvant = [Console]::InputEncoding
+        [Console]::InputEncoding = New-Object System.Text.UTF8Encoding($false)
+    }
+    catch { $null = $_ }
+    try { $processus = [System.Diagnostics.Process]::Start($info) }
+    finally {
+        if ($null -ne $entreeAvant) {
+            try { [Console]::InputEncoding = $entreeAvant } catch { $null = $_ }
+        }
+    }
     try {
         $sortie = $processus.StandardOutput.ReadToEndAsync()
         $erreur = $processus.StandardError.ReadToEndAsync()
@@ -91,15 +116,24 @@ function Read-ValeurMasquee([string]$Cle) {
     finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
 }
 
-function Masquer([string]$Texte, [string[]]$Valeurs) {
+function Filtrer-Message([string]$Texte, [string[]]$Valeurs) {
+    # Un message qui contient une valeur saisie n'est pas montre : masquer laisserait voir
+    # la fin d'une valeur contenant une autre, et une valeur courte servirait d'oracle.
     foreach ($v in $Valeurs) {
-        if ($v.Length -gt 0) { $Texte = $Texte.Replace($v, '***') }
+        if ($v.Length -gt 0 -and $Texte.Contains($v)) {
+            return 'message de sops retenu : il contient une valeur saisie'
+        }
     }
     return $Texte
 }
 
 function Invoke-Refaire([string]$Fichier, [scriptblock]$LireValeur) {
-    Initialize-Sortie
+    $sortieAvant = Set-SortieUtf8
+    try { return (Invoke-RefaireInterne $Fichier $LireValeur) }
+    finally { Restore-Sortie $sortieAvant }
+}
+
+function Invoke-RefaireInterne([string]$Fichier, [scriptblock]$LireValeur) {
     if (-not $LireValeur) { $LireValeur = { param($cle) Read-ValeurMasquee $cle } }
 
     if (-not $Fichier -or -not $Fichier.EndsWith('.env.enc')) {
@@ -168,11 +202,23 @@ function Invoke-Refaire([string]$Fichier, [scriptblock]$LireValeur) {
         $resultat = Invoke-Processus $sops.Source $arguments $racineDepot $octets
         if ($resultat.Code -ne 0) {
             Write-Host "sops a échoué (code $($resultat.Code)). Le fichier n'est pas modifié."
-            $message = Masquer ($resultat.Erreur + $resultat.Sortie) ([string[]]@($valeurs.Values))
+            $message = Filtrer-Message ($resultat.Erreur + $resultat.Sortie) ([string[]]@($valeurs.Values))
             if ($message.Trim().Length -gt 0) { Write-Host $message.Trim() }
             return $script:EXIT_ECHEC
         }
-        Move-Item -LiteralPath $temporaire -Destination $complet -Force
+        try {
+            # Remplacement atomique quand le .enc existe ; une erreur rend 1.
+            if (Test-Path -LiteralPath $complet) {
+                [System.IO.File]::Replace($temporaire, $complet, [NullString]::Value)
+            }
+            else {
+                [System.IO.File]::Move($temporaire, $complet)
+            }
+        }
+        catch {
+            Write-Host "le remplacement de $Fichier a échoué : $($_.Exception.Message) Le fichier n'est pas modifié."
+            return $script:EXIT_ECHEC
+        }
     }
     finally {
         [System.Array]::Clear($octets, 0, $octets.Length)
@@ -186,8 +232,9 @@ function Invoke-Main([string[]]$Arguments) {
     if ($Arguments.Count -ge 1 -and $Arguments[0] -eq 'refaire' -and $Arguments.Count -eq 2) {
         return (Invoke-Refaire $Arguments[1] $null)
     }
-    Initialize-Sortie
+    $sortieAvant = Set-SortieUtf8
     Write-Host 'usage : secrets.ps1 refaire <fichier.env.enc>'
+    Restore-Sortie $sortieAvant
     return $script:EXIT_USAGE
 }
 

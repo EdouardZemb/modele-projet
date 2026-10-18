@@ -151,11 +151,12 @@ def monter(tmp_path, env, *, regle=REGLE_BONNE, sops_yaml=True, enc=b"ancien con
     return d, cle, dossier / "prod.env.enc"
 
 
-def appeler(tmp_path, d, env, valeurs, fichier):
+def appeler(tmp_path, d, env, valeurs, fichier, avant=""):
     """Invoke-Refaire avec un $LireValeur qui rend les valeurs données (clé -> valeur)."""
     table = "; ".join(f"'{k}' = '{v}'" for k, v in valeurs.items())
     corps = f"""
 $jeu_essai = @{{ {table} }}
+{avant}
 $code = Invoke-Refaire '{fichier}' {{ param($cle) $jeu_essai[$cle] }}
 Write-Output "CODE=$code"
 """
@@ -263,3 +264,64 @@ def test_bom_et_lf():
     assert octets.startswith(b"\xef\xbb\xbf")
     assert b"\r" not in octets
     octets[3:].decode("utf-8")
+
+
+def test_refaire_console_en_65001(tmp_path, env_isole):
+    """Console en UTF-8 : Process.Start ajouterait un BOM sur stdin ; la première clé doit rester intacte."""
+    env = env_isole()
+    d, cle, enc = monter(tmp_path, env)
+    code, sortie, erreur = appeler(
+        tmp_path,
+        d,
+        env,
+        {"HC_SONDE": VALEUR_1, "AUTRE": VALEUR_2},
+        enc,
+        avant="[Console]::InputEncoding = [System.Text.Encoding]::UTF8",
+    )
+    assert code == 0, sortie + erreur
+    assert dechiffrer(enc, cle, env) == f"HC_SONDE={VALEUR_1}\nAUTRE={VALEUR_2}\n".encode()
+
+
+@pytest.mark.skipif(not WINDOWS, reason="les pages de code de la console ne concernent que Windows")
+def test_pages_de_code_retablies(tmp_path, env_isole):
+    env = env_isole()
+    d, _cle, enc = monter(tmp_path, env)
+    avant = "[Console]::OutputEncoding = [System.Text.Encoding]::GetEncoding(850); [Console]::InputEncoding = [System.Text.Encoding]::GetEncoding(850)"
+    corps = f"""
+{avant}
+$jeu_essai = @{{ 'HC_SONDE' = 'abc'; 'AUTRE' = 'def' }}
+Invoke-Refaire '{enc}' {{ param($cle) $jeu_essai[$cle] }} | Out-Null
+Write-Output ('PAGES=' + [Console]::OutputEncoding.CodePage + ',' + [Console]::InputEncoding.CodePage)
+"""
+    code, sortie, erreur = lancer_ps(tmp_path, corps, env=env, cwd=d)
+    assert code == 0, erreur
+    assert "PAGES=850,850" in sortie
+
+
+def test_message_de_sops_sans_valeur(tmp_path):
+    corps = """
+Filtrer-Message 'x abcdef y' @('abc', 'abcdef')
+Filtrer-Message 'echec : aucune regle ne correspond' @('abc', 'abcdef')
+"""
+    code, sortie, erreur = lancer_ps(tmp_path, corps)
+    assert code == 0, erreur
+    lignes = sortie.splitlines()
+    assert "abc" not in lignes[0]
+    assert "retenu" in lignes[0]
+    assert lignes[1] == "echec : aucune regle ne correspond"
+
+
+@pytest.mark.skipif(not WINDOWS, reason="un fichier en lecture seule bloque le remplacement sous Windows")
+def test_remplacement_qui_echoue(tmp_path, env_isole):
+    env = env_isole()
+    d, _cle, enc = monter(tmp_path, env)
+    avant = enc.read_bytes()
+    os.chmod(enc, 0o444)
+    try:
+        code, sortie, erreur = appeler(tmp_path, d, env, {"HC_SONDE": VALEUR_1, "AUTRE": VALEUR_2}, enc)
+    finally:
+        os.chmod(enc, 0o666)
+    assert code == 1, sortie + erreur
+    assert "réécrit" not in sortie
+    assert enc.read_bytes() == avant
+    assert not list(enc.parent.glob("*.tmp-*"))
