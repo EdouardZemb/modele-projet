@@ -1,0 +1,137 @@
+# M-0003 — Contrat de l'image : ce que le projet fournit pour que la mécanique le déploie sans le connaître
+
+- **Statut** : accepté le 2026-10-18
+- **Contexte amont** : la chaîne de livraison d'`ancrage`, d'où vient la mécanique de la cible
+  `serveur` ; M-0004 (la chaîne de livraison){% if sauvegardes %} ; M-0005 (les sauvegardes){% endif %}
+
+## Contexte
+
+La mécanique de la cible `serveur` (`deploiement/`, ses unités, la CI) est gérée par le modèle :
+elle est la même pour tous les projets, et se corrige une fois pour tous. Elle ne sait rien de
+l'application, ni de sa pile, ni de sa base. Il lui faut un contrat, ce que l'image doit faire et
+rien de plus, pour la construire, la vérifier{% if sauvegardes %}, la déployer, la sauvegarder et la restaurer{% else %} et la déployer{% endif %}.
+
+## Décision
+
+### 1. L'image
+
+Un `Dockerfile` à la racine du dépôt. L'image :
+
+- écoute sur `0.0.0.0`, au port `{{ port_app }}` (la réponse `port_app`) : `deploiement/compose.yml` le
+  publie sur la boucle locale du serveur, et le tunnel commun l'atteint par le réseau du projet. La
+  mécanique ne pose pas `PORT` : une app qui le lit lui donne ce port par défaut ;
+- tourne en `1000:1000`, sur un système de fichiers en lecture seule, avec `/tmp` en mémoire, sans
+  capacité (`cap_drop: ALL`, `no-new-privileges`), dans 384 Mo. `compose.yml` le lui impose ;
+  `deploiement/compose.projet.yml` peut changer la mémoire ;
+- porte le label `org.opencontainers.image.revision`, rempli par l'argument de construction
+  `REVISION` (`docker build --build-arg REVISION=<sha>`) ;
+- **crée `/donnees`, à l'uid 1000.** En CI, `modele-image-construire` lance l'image avec
+  `--read-only --tmpfs /tmp --user 1000:1000 -v /donnees` : ce volume anonyme hérite du contenu et
+  du propriétaire du `/donnees` de l'image, et sans lui l'app n'y écrit pas. En production,
+  `/donnees` est un montage du dossier de l'hôte, `~/.local/share/{{ nom }}/<env>/donnees` ;
+- lit dans son environnement `{{ prefixe }}ENV`, `{{ prefixe }}VERSION` et `{{ prefixe }}URL_PUBLIQUE`, que `compose.yml`
+  lui passe. En CI, seuls `{{ prefixe }}ENV=ci` et `{{ prefixe }}URL_PUBLIQUE` sont posés ;
+- démarre par sa commande par défaut. Un `HEALTHCHECK` est conseillé : `docker compose up --wait`
+  attend alors que l'app soit saine.
+
+### 2. La route de santé
+
+À `{{ chemin_sante }}` (la réponse `chemin_sante`), elle rend au moins `{statut, environnement, version,
+revision}`, ou un 503 avec `{statut: "ko"}`.
+
+- `statut` vaut `ok` quand l'app peut servir.
+- `environnement` est `{{ prefixe }}ENV` : `dev`, `ci`, `staging` ou `prod`.
+- `version` est `{{ prefixe }}VERSION`, **jamais une valeur figée dans l'image** : la même image sert `main`
+  en staging, puis `X.Y.Z` en prod, et une étiquette de retour la redéploie sous un autre numéro
+  (M-0004). Absente, en CI, elle a une valeur par défaut.
+- `revision` est le SHA du commit construit, celui du label.
+
+Trois contrôles la lisent : la CI (`deploiement/ci/verifier-image.sh` : statut `ok`, la révision du
+commit, l'environnement `ci`) ; le déploiement, sur le port local (statut `ok`, la version et la
+révision attendues) ; la sonde, sur l'adresse publique (HTTP 200 sans redirection, statut `ok`,
+l'environnement servi).
+
+### 3. Les données
+
+Toutes dans `/donnees`. Rien d'autre ne survit à un redémarrage : le système de fichiers est en
+lecture seule et `/tmp` est en mémoire.
+{%- if sauvegardes %}
+
+### 4. Le contrat de l'instantané
+
+Deux commandes de l'image, déclarées dans `deploiement/projet.env` (`SAUVEGARDER=…`,
+`VERIFIER=…`). Ce fichier est au projet ; il est lu par un analyseur strict et **jamais sourcé** :
+une ligne `CLE=mots`, des mots séparés par des espaces, sans caractère que le shell interpréterait.
+
+- **`SAUVEGARDER <dossier>`** crée ce dossier, qui n'existe pas encore (ses parents compris s'ils
+  manquent), avec **la forme de `/donnees`** : ce que `/donnees` doit contenir pour que l'app
+  reparte. L'instantané est cohérent, pris l'app en marche, dans le conteneur en service
+  (`docker compose exec`) ; en CI, dans le conteneur lancé, vers `/tmp/instantane`. Il ne contient
+  que des fichiers et des dossiers ; un lien physique y est accepté, il entre dans l'archive comme
+  un fichier ordinaire. La commande rend 0 seulement si l'instantané est complet.
+- **Le nom est à la mécanique.** Elle passe un nom provisoire, `….partiel`, et le renomme par
+  `mv -T` une fois l'instantané contrôlé. Un `.partiel` n'est jamais pris pour le dernier
+  instantané ; une destination déjà présente est un échec, rien n'est écrasé.
+- **`VERIFIER <dossier>`** répond 0 si l'instantané est conforme, 2 s'il ne l'est pas, 64 en cas
+  d'erreur d'usage. Seul le code fait foi ; la sortie va au journal. Sur le serveur, elle tourne
+  dans un conteneur jetable (`docker run <image> <mots> /donnees`) qui ne voit que l'instantané,
+  monté sur `/donnees` : une image dont l'`ENTRYPOINT` ne lance pas ses arguments la fait échouer.
+- **`VERIFIER` ne modifie jamais son argument.** Le dossier est monté en écriture dans le conteneur
+  de vérification, et c'est son contenu que le test de restauration et la restauration mettent
+  ensuite en service.
+- **Restaurer, c'est remettre le contenu de l'instantané dans `/donnees`.** C'est ce qui rend
+  `restaurer.sh` et `tester-restauration.sh` génériques : la mécanique ne sait rien de la base.
+- **Un instantané vide est refusé.** Un `/donnees` vide, même légitimement, fait donc alerter la
+  sauvegarde chaque nuit. Une app qui peut n'avoir aucune donnée y garde au moins un fichier (une
+  marque, la version de son schéma).
+- **La commande de la version qui arrive tourne dans l'image de celle qui part.** Avant un
+  déploiement, l'instantané lance la commande `SAUVEGARDER` du `projet.env` de la version qui
+  arrive (la sonde a déjà placé le clone sur elle) dans le conteneur de la version en service. Une
+  version qui change `SAUVEGARDER` reste donc compatible avec l'image en service, ou se livre en
+  deux temps : d'abord une image qui connaît la nouvelle commande, `projet.env` inchangé, puis,
+  une version plus tard, le `projet.env` qui l'utilise. Dans l'autre sens, une image garde la
+  commande de la précédente : un retour par étiquette prend son instantané avec la commande de la
+  version visée, dans l'image qu'il quitte (invariant 4). `VERIFIER` suit la même règle : elle
+  tourne dans l'image déployée, avec le `projet.env` du clone.
+
+La mécanique fait le reste : l'archive, le chiffrement, l'envoi, la rétention, le test de
+restauration et la restauration (M-0005).
+{%- else %}
+
+### 4. Pas de sauvegardes
+
+Le projet a répondu non à `sauvegardes` : il ne déclare aucune commande dans
+`deploiement/projet.env`, et la mécanique ne prend aucun instantané, pas même avant un déploiement. Passer la réponse à oui
+ajoute deux commandes à ce contrat, `SAUVEGARDER` et `VERIFIER`, et l'ADR M-0005.
+{%- endif %}
+
+### 5. Ce qui reste au projet
+
+- `deploiement/compose.projet.yml` : ce qu'il ajoute au service `app` (volumes, variables, mémoire).
+- Les secrets de son app, nommés dans `deploiement/secrets/<env>.cles` (M-0004).
+- Ses vérifications dans le job `verifier` de `ci.yml`, et ses tests de bout en bout contre l'image,
+  entre `modele-image-construire` et `modele-image-publier`.
+
+## Conséquences
+
+- Toute pile convient, tant que son image tient le contrat.
+- Le contrat se vérifie à chaque PR : la CI lance l'image comme en production, et une image qui ne
+  le tient pas n'est jamais publiée.
+{%- if sauvegardes %}
+- Les deux commandes sont du code de l'app, que le projet teste. Leur compatibilité d'une version à
+  l'autre s'ajoute à l'invariant 4.
+- **Difficile à changer** : la forme de l'instantané. Les archives gardées 90 jours la portent.
+{%- else %}
+- **Difficile à changer** : peu de chose. Le contrat ne porte que sur l'image.
+{%- endif %}
+
+## Révision
+
+Cet ADR doit être rouvert si :
+
+- une app doit écrire hors de `/donnees`, ou a besoin d'un second service (une base à part) que
+  `compose.projet.yml` ne suffit pas à décrire ;
+{%- if sauvegardes %}
+- l'instantané complet de chaque nuit devient trop gros ou trop long à prendre ;
+{%- endif %}
+- le parc passe à un second serveur.

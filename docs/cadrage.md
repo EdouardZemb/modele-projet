@@ -4,6 +4,17 @@
 - **Entrée** : brief du 15/10 (hors dépôt)
 - **Statut** : validé à la fusion, puis figé
 
+> **Amendé le 2026-10-18, sans réécriture de ce texte figé.** Là où il diffère, ce sont les ADR
+> hérités qui font foi, dans `template/docs/modele/decisions/` :
+>
+> - **M-0002, amendé** : qui fusionne se choisit par la réponse `fusion` (`session` ou `edouard`),
+>   et les étiquettes et les publications sont à Edouard, dans les deux modes ;
+> - **M-0004** : le retour voulu passe par une étiquette, `deployer.sh <env> --retour` restant le
+>   secours (§6.3) ; les secrets se refont sur le poste par `scripts/modele/secrets.ps1`, sans
+>   `secrets.sh definir` ni rapatriement (§6.4) ; la mise en service ne demande plus aucune étape
+>   sur la machine : la sonde du dépôt `serveur` crée les clones, les dossiers et les réseaux,
+>   d'après `projets/<nom>.env`, qui porte aussi les heures des sauvegardes (§6.2, §6.5, §6.8).
+
 Ce cadrage est la partie publique de la spec de conception du modèle, issue d'une séance de questions avec Edouard : 12 questions, puis 5 parties de design validées une à une. La partie qui nomme le serveur est privée et n'est pas reproduite ici.
 
 ---

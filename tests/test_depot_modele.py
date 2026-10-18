@@ -174,6 +174,12 @@ def test_liste_d_alignement():
         "gh run list --branch",
         "--exiger-prives --index",
         ".gitleaksignore",
+        # passer en cible serveur (lot 2)
+        "## Passer en cible `serveur`",
+        "--data cible=serveur",
+        "modele-image-construire",
+        "modele-version.yml",
+        "se fusionne à la main",
     ):
         assert fragment in texte, fragment
     # avant le commit, --diff compare <base>...HEAD et n'examine rien (LE-15)

@@ -2,8 +2,9 @@
 
 import re
 
+import pytest
 import yaml
-from conftest import RACINE, REGISTRE_ENTETE
+from conftest import RACINE, REGISTRE_ENTETE, REPONSES_SERVEUR
 
 TEMPLATE = RACINE / "template"
 METHODE = TEMPLATE / "docs/modele/methode.md"
@@ -44,17 +45,41 @@ def test_invariants_communs():
     texte = lire(METHODE)
     section = texte.split("## Les invariants communs", 1)[1].split("\n## ", 1)[0]
     assert len(re.findall(r"^\d+\. ", section, flags=re.MULTILINE)) == 5
+    # L'invariant 3, au mot près de la spec (§5.2) : il vaut pour tous, Edouard compris.
+    assert (
+        "3. Personne n'écrit sur le serveur après son amorçage : tout y arrive par git. "
+        "Une session y lit, elle n'y écrit jamais." in " ".join(section.split())
+    )
 
 
-def test_adr_herites_format():
-    adr = sorted(DECISIONS.glob("*.md"))
-    assert [a.name[:6] for a in adr] == ["M-0001", "M-0002"]
+# Les ADR hérités selon la cible : M-0003 et M-0004 pour `serveur`, M-0005 avec les sauvegardes.
+ADR_SOCLE = [
+    "M-0001-ecosysteme-des-applications-personnelles.md",
+    "M-0002-garde-fous-et-confidentialite.md",
+]
+ADR_SERVEUR = ["M-0003-contrat-de-l-image.md", "M-0004-chaine-de-livraison.md"]
+ADR_SAUVEGARDES = ["M-0005-sauvegardes-et-restauration.md"]
+
+
+@pytest.mark.parametrize(
+    ("reponses", "attendus"),
+    [
+        ({}, ADR_SOCLE),
+        ({**REPONSES_SERVEUR, "sauvegardes": False}, ADR_SOCLE + ADR_SERVEUR),
+        (REPONSES_SERVEUR, ADR_SOCLE + ADR_SERVEUR + ADR_SAUVEGARDES),
+    ],
+    ids=["aucune", "serveur-sans-sauvegardes", "serveur-avec-sauvegardes"],
+)
+def test_adr_herites_format(rendre, reponses, attendus):
+    adr = sorted((rendre(**reponses) / "docs/modele/decisions").iterdir())
+    assert [a.name for a in adr] == attendus
     for chemin in adr:
-        texte = lire(chemin)
-        assert re.match(r"^# M-\d{4} — .+ : .+$", texte.splitlines()[0]), chemin.name
-        assert "**Statut** : accepté le 2026-10-16" in texte, chemin.name
+        lignes = lire(chemin).splitlines()
+        assert re.match(rf"^# {chemin.name[:6]} — .+ : .+$", lignes[0]), chemin.name
+        date = "2026-10-16" if chemin.name in ADR_SOCLE else "2026-10-18"
+        assert f"- **Statut** : accepté le {date}" in lignes, chemin.name
         for titre in ("## Contexte", "## Décision", "## Conséquences", "## Révision"):
-            assert titre in texte.splitlines(), (chemin.name, titre)
+            assert titre in lignes, (chemin.name, titre)
 
 
 def test_skill_consigner():
@@ -144,3 +169,7 @@ def test_m0002_amende():
     assert "git log -p --all" in texte
     assert "`Monitor`" in texte
     assert "PR obligatoire" not in texte
+    # amendement du 18/10 : qui fusionne (`fusion`), et les étiquettes réservées à Edouard
+    assert "- **Amendé** le 2026-10-18" in texte
+    assert "`fusion`" in texte
+    assert "étiquette" in texte

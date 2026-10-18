@@ -58,8 +58,8 @@ Ils s'ajoutent à ceux du projet.
 1. Aucun secret ne passe par la conversation. Les étapes 👤 le disent.
 2. Aucune donnée personnelle réelle dans le dépôt, les tests ou le staging. Le jeu de données
    factice est **écrit**, pas dérivé de données réelles (M-0001).
-3. Les sessions sont en lecture seule sur le serveur. Toute écriture passe par git ou par un script
-   que lance Edouard.
+3. Personne n'écrit sur le serveur après son amorçage : tout y arrive par git. Une session y lit,
+   elle n'y écrit jamais.
 4. Cible `serveur` : une migration, `compose.yml` et les `env/*.env` doivent laisser fonctionner
    l'image précédente. On ajoute avant d'enlever, et une variable nouvelle ne devient obligatoire
    qu'une version plus tard.
