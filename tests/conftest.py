@@ -1,6 +1,7 @@
 """Banc d'essai : rend le modèle Copier dans un dossier temporaire."""
 
 import os
+import shutil
 import subprocess
 import sys
 import warnings
@@ -110,3 +111,18 @@ def depot(tmp_path, env):
     git(d, env, "init", "-q", "-b", "main")
     git(d, env, "config", "core.autocrlf", "false")
     return d
+
+
+def exiger(*dependances):
+    """Saute le test si une dépendance du système manque, sauf si MODELE_TESTS_SANS_SAUT la nomme.
+
+    MODELE_TESTS_SANS_SAUT est une liste séparée par des virgules ; « 1 » les vaut toutes.
+    Une dépendance nommée qui manque fait échouer le test au lieu de le sauter (LE-16).
+    """
+    liste = {d.strip() for d in os.environ.get("MODELE_TESTS_SANS_SAUT", "").split(",") if d.strip()}
+    for dependance in dependances:
+        if shutil.which(dependance):
+            continue
+        if "1" in liste or dependance in liste:
+            pytest.fail(f"{dependance} manque et MODELE_TESTS_SANS_SAUT l'exige")
+        pytest.skip(f"{dependance} absent")
