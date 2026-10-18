@@ -213,7 +213,7 @@ def test_historique_complet(rendre):
     assert checkout["uses"].startswith("actions/checkout@")
     assert checkout["with"] == {"fetch-depth": 0, "persist-credentials": False}
     etapes_socle = charger(rendu, SOCLE)["jobs"]["secrets"]["steps"]
-    (gitleaks_socle,) = [e for e in etapes_socle if "gitleaks" in e["uses"]]
+    (gitleaks_socle,) = [e for e in etapes_socle if "gitleaks" in e.get("uses", "")]
     assert gitleaks["uses"] == gitleaks_socle["uses"]
     assert gitleaks["env"] == gitleaks_socle["env"]
     assert "${{ secrets.GITHUB_TOKEN }}" in (rendu / HISTORIQUE).read_text(encoding="utf-8")
@@ -238,3 +238,12 @@ def test_la_porte_recoit_la_visibilite_reelle(rendre):
     ]
     for e in portes:
         assert e["env"]["DEPOT_PRIVE"] == "${{ github.event.repository.private }}", e["name"]
+
+
+def test_secrets_chiffres_controles(rendre):
+    etapes = charger(rendre(), SOCLE)["jobs"]["secrets"]["steps"]
+    python = next(i for i, e in enumerate(etapes) if "setup-python" in e.get("uses", ""))
+    controle = next(i for i, e in enumerate(etapes) if e.get("run") == "python scripts/modele/verifier_secrets.py")
+    assert python < controle
+    depot = yaml.safe_load(Path(CI).read_text(encoding="utf-8"))["jobs"]["secrets"]["steps"]
+    assert any(e.get("run") == "python template/scripts/modele/verifier_secrets.py" for e in depot)

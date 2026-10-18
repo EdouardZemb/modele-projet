@@ -3,3 +3,5 @@
 BRANCHE_PRINCIPALE = "{{ branche_principale }}"
 # « public » : la porte de confidentialité refuse ; « prive » : elle avertit sans refuser.
 VISIBILITE = "{{ visibilite }}"
+# Clés que la mécanique du modèle exige dans chaque `.cles`, indexées par le chemin du `.cles`.
+SECRETS_EXIGES: dict[str, list[str]] = {}
