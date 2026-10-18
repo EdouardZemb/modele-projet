@@ -1,0 +1,9 @@
+# Chaque secret de deploiement/secrets/ est chiffré pour deux identités age :
+# - le serveur (deploiement/cles/serveur.pub), qui le déchiffre au déploiement ;
+# - la clé hors ligne du propriétaire (deploiement/cles/hors-ligne.pub), qui le relit si le serveur est perdu.
+# `[\\/]` : sops compare le chemin tel que le système le donne. Sous Windows c'est avec des
+# antislashs, et un motif écrit avec `/` seul ne chiffrerait alors pour personne.
+creation_rules:
+  - path_regex: ^deploiement[\\/]secrets[\\/][a-z]+\.env\.enc$
+    age: >-
+      age1a6ksgqxdj66j5h4f4t6wnhzzghnwc9mdy3q0lresn20sgamnyqus9ksnyg,age1km9nay02cl0lxfex0qw3al6aa6zqqelg9cv0k39j90lux0h82ysqzjc0ue

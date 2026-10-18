@@ -1,0 +1,51 @@
+{%- macro v(nom_variable, modificateur='') -%}
+{{ '${' ~ prefixe ~ nom_variable ~ modificateur ~ '}' }}
+{%- endmacro -%}
+# Toujours lancé avec un projet et un fichier d'environnement explicites :
+#   docker compose -p <projet> -f deploiement/compose.yml --env-file deploiement/env/<env>.env …
+# Pas de `name:` ici : le projet (`{{ nom }}`, `{{ nom }}-staging`, `{{ nom }}-local`…) vient de `-p`.
+# Les variables `${…:?}` sans valeur font échouer la commande : mieux vaut un arrêt net qu'un
+# conteneur lancé avec la mauvaise image ou les mauvais dossiers.
+# Les ajouts propres au projet (volumes, variables, mem_limit) vont dans `compose.projet.yml`.
+services:
+  app:
+    image: {{ v('IMAGE', ':?') }}
+    environment:
+      {{ prefixe }}ENV: {{ v('ENV', ':?') }}
+      {{ prefixe }}VERSION: {{ v('VERSION', ':?') }}
+      {{ prefixe }}URL_PUBLIQUE: {{ v('URL_PUBLIQUE', ':?') }}
+    volumes:
+      - {{ v('DONNEES', ':?') }}:/donnees
+{%- if sauvegardes %}
+      - {{ v('SAUVEGARDES', ':?') }}:/sauvegardes
+{%- endif %}
+    # Publié sur la boucle locale seulement : l'accès public passe par le tunnel.
+    ports:
+      - "127.0.0.1:{{ v('PORT', ':?') }}:{{ port_app }}"
+    # Le réseau du tunnel est créé par le serveur, un par projet et par environnement : le tunnel
+    # commun joint l'application par cet alias, sans port publié.
+    networks:
+      default: {}
+      tunnel:
+        aliases:
+          - {{ nom }}-{{ v('ENV') }}
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    user: "1000:1000"
+    mem_limit: 384m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: "3"
+
+networks:
+  tunnel:
+    external: true
+    name: tunnel-{{ nom }}-{{ v('ENV') }}

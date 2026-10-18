@@ -27,6 +27,8 @@ REPONSES_PAR_DEFAUT = {
     "fusion": "session",
 }
 
+REPONSES_SERVEUR = {**REPONSES_PAR_DEFAUT, "cible": "serveur", "bloc_ports": 4310, "sauvegardes": True}
+
 
 @pytest.fixture
 def rendre(tmp_path):

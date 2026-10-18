@@ -1,0 +1,4 @@
+# Ajouts du projet au service `app` du modèle (compose.yml, qui reste géré par le modèle) :
+# volumes, variables d'environnement, mem_limit… Compose fusionne ce fichier avec le premier.
+services:
+  app: {}

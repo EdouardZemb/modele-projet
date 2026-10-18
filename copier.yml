@@ -15,6 +15,10 @@ _skip_if_exists:
   - docs/registre.md
   - .github/workflows/ci.yml
   - .github/dependabot.yml
+  - deploiement/projet.env
+  - deploiement/compose.projet.yml
+  - deploiement/secrets/prod.cles
+  - deploiement/secrets/staging.cles
 nom:
   type: str
   help: Nom du projet, qui est aussi celui du dépôt
@@ -30,8 +34,8 @@ visibilite:
   default: public
 cible:
   type: str
-  help: Ce que le modèle déploie (les lots 2 et 3 ajouteront statique et serveur)
-  choices: [aucune]
+  help: Ce que le modèle déploie (le lot 3 ajoutera statique)
+  choices: [aucune, serveur]
   default: aucune
 branche_principale:
   type: str
@@ -43,3 +47,41 @@ fusion:
   help: Qui fusionne les PR une fois tous les contrôles verts
   choices: {la session fusionne quand tout est vert: session, Edouard fusionne: edouard}
   default: session
+domaine:
+  type: str
+  help: Domaine public sous lequel le projet est servi
+  default: testlens.dev
+  when: "{{ cible == 'serveur' }}"
+  validator: "{% if not (domaine | regex_search('^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$')) %}un nom de domaine en minuscules{% endif %}"
+sous_domaine:
+  type: str
+  help: Sous-domaine du projet (la préproduction ajoute -staging)
+  default: "{{ nom }}"
+  when: "{{ cible == 'serveur' }}"
+  validator: "{% if not (sous_domaine | regex_search('^[a-z0-9]([a-z0-9-]*[a-z0-9])?$')) %}sous-domaine non vide, en minuscules, chiffres et tirets{% endif %}"
+port_app:
+  type: int
+  help: Port d'écoute de l'application dans son conteneur
+  default: 3000
+  when: "{{ cible == 'serveur' }}"
+  validator: "{% if port_app < 1 or port_app > 65535 %}port de 1 à 65535{% endif %}"
+chemin_sante:
+  type: str
+  help: Chemin HTTP de la sonde de santé de l'application
+  default: /api/sante
+  when: "{{ cible == 'serveur' }}"
+  validator: "{% if not (chemin_sante | regex_search('^/[^ ]*$')) %}le chemin commence par / et ne contient pas d'espace{% endif %}"
+bloc_ports:
+  type: int
+  help: Premier port du bloc de dix réservé au projet sur le serveur (multiple de 10, de 4310 à 4990)
+  when: "{{ cible == 'serveur' }}"
+  validator: "{% if bloc_ports % 10 != 0 or bloc_ports < 4310 or bloc_ports > 4990 %}bloc de ports : multiple de 10, de 4310 à 4990{% endif %}"
+sauvegardes:
+  type: bool
+  help: Le projet a-t-il des données à sauvegarder ?
+  default: true
+  when: "{{ cible == 'serveur' }}"
+prefixe:
+  type: str
+  default: "{{ nom | upper | replace('-', '_') }}_"
+  when: false
