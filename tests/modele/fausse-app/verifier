@@ -1,0 +1,43 @@
+#!/usr/bin/env python3
+"""verifier <dossier> : l'instantané est-il conforme ? 0 oui, 2 non, 64 erreur d'usage.
+
+Conforme, pour la fausse app : un dossier, pas un lien, qui porte MARQUE, un fichier ordinaire au
+contenu que le Dockerfile sème dans /donnees. Tout le reste est non conforme : MARQUE absente,
+altérée ou d'une autre forme, ou un chemin qui n'est pas un dossier.
+"""
+
+import sys
+from pathlib import Path
+
+MARQUE = "MARQUE"
+CONTENU = "fausse-app\n"
+
+
+def lire_marque(dossier):
+    """Le contenu de MARQUE, ou None si ce n'est pas un fichier ordinaire lisible."""
+    marque = dossier / MARQUE
+    if marque.is_symlink() or not marque.is_file():
+        return None
+    try:
+        return marque.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def main(arguments):
+    if len(arguments) != 1 or not arguments[0]:
+        print("usage : verifier <dossier>", file=sys.stderr)
+        return 64
+    dossier = Path(arguments[0])
+    if dossier.is_symlink() or not dossier.is_dir():
+        print(f"non conforme : {dossier} n'est pas un dossier")
+        return 2
+    if lire_marque(dossier) != CONTENU:
+        print(f"non conforme : {MARQUE} absente, altérée ou illisible")
+        return 2
+    print("conforme")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

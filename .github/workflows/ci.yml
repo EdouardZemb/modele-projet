@@ -50,7 +50,8 @@ jobs:
             python -m zipfile -e age.zip extrait
             cp sops.exe extrait/age/age.exe extrait/age/age-keygen.exe "$dossier"
             chemin_path="$(cygpath -w "$dossier")"
-            sans_saut=sops,age,age-keygen,powershell
+            # bash est celui de Git : test_ci_serveur.py y lance les étapes de CI comme GitHub.
+            sans_saut=sops,age,age-keygen,powershell,bash
           else
             curl -fsSL -o sops "$SOPS_BASE/sops-v3.13.3.linux.amd64"
             curl -fsSL -o age.tar.gz "$AGE_BASE/age-v1.3.2-linux-amd64.tar.gz"
@@ -64,15 +65,69 @@ jobs:
             cp sops extrait/age/age extrait/age/age-keygen "$dossier"
             chmod +x "$dossier/sops" "$dossier/age" "$dossier/age-keygen"
             chemin_path="$dossier"
-            # shellcheck et Docker (serveur Linux, pour les tests bats de la mécanique) sont préinstallés
-            # sur ubuntu-latest.
-            sans_saut=sops,age,age-keygen,pwsh,shellcheck,docker
+            # Sur ubuntu-latest, shellcheck (test_combinaison_shellcheck) et bash
+            # (test_ci_serveur.py) sont préinstallés. Docker n'est pas exigé ici : les tests bats de
+            # la mécanique, qui le demandent, tournent dans le job mecanique.
+            sans_saut=sops,age,age-keygen,pwsh,shellcheck,bash
           fi
           echo "$chemin_path" >> "$GITHUB_PATH"
           echo "MODELE_TESTS_SANS_SAUT=$sans_saut" >> "$GITHUB_ENV"
       - run: pip install -r requirements-dev.txt
       - run: ruff check .
-      - run: python -m pytest -q
+      # tests/test_mecanique.py tourne dans le job mecanique, et seulement là.
+      - run: python -m pytest -q --ignore=tests/test_mecanique.py
+
+  # Les tests bats de la mécanique `serveur` (tests/deploiement/ d'un projet rendu, avec et sans
+  # sauvegardes), dans leur image Docker : le seul job qui lance tests/test_mecanique.py. Docker
+  # (serveur Linux) est préinstallé sur ubuntu-latest, et rien n'y saute.
+  mecanique:
+    name: mecanique
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-dev.txt
+      - run: python -m pytest -q tests/test_mecanique.py
+        env:
+          MODELE_TESTS_SANS_SAUT: "1"
+
+  # La fausse app (tests/modele/fausse-app/) dans un projet `serveur` rendu, par l'action
+  # modele-image-construire du rendu, en vrai Docker : construction, santé, révision, sauvegarde,
+  # vérification (spec §10.3).
+  fausse-app:
+    name: fausse-app
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-dev.txt
+      - name: Rendre le projet fausse-app et y poser la fausse app
+        run: |
+          copier copy --vcs-ref HEAD --defaults --trust \
+            --data nom=fausse-app --data "description=La fausse app du modèle" \
+            --data cible=serveur --data bloc_ports=4310 --data sauvegardes=true . rendu
+          cp tests/modele/fausse-app/* rendu/
+      - uses: ./rendu/.github/actions/modele-image-construire
+        with:
+          dossier: rendu
+      - name: Journal du conteneur
+        if: failure()
+        run: docker logs fausse-app || true
+      - name: Supprimer le conteneur
+        if: always()
+        run: docker rm -f -v fausse-app
 
   secrets:
     name: secrets
