@@ -15,8 +15,15 @@ def test_reponses_enregistrees(rendre):
     assert reponses["visibilite"] == "public"
     assert reponses["cible"] == "aucune"
     assert reponses["branche_principale"] == "main"
+    assert reponses["fusion"] == "session"
     assert "_commit" in reponses
     assert "_src_path" in reponses
+
+
+def test_fusion_edouard_enregistree(rendre):
+    rendu = rendre(fusion="edouard")
+    reponses = yaml.safe_load((rendu / ".copier-answers.yml").read_text(encoding="utf-8"))
+    assert reponses["fusion"] == "edouard"
 
 
 @pytest.mark.parametrize("nom", ["Ancrage", "1projet", "mon_projet", "a b"])

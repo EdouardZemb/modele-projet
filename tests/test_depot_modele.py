@@ -43,6 +43,7 @@ def test_settings_du_depot_modele():
     crochet = reglage["hooks"]["PreToolUse"][0]
     assert crochet["matcher"] == "Bash|PowerShell|Monitor|mcp__.*"
     assert "template/scripts/modele/garde_claude.py" in crochet["hooks"][0]["command"]
+    assert "--branche main --fusion session" in crochet["hooks"][0]["command"]
 
 
 def test_dependabot_du_depot_modele():
