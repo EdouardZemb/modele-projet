@@ -25,6 +25,46 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
+      - name: Installer sops et age
+        shell: bash
+        run: |
+          set -euo pipefail
+          # sops 3.13.3 : sommes de sops-v3.13.3.checksums.txt, dans la release de sops.
+          # age 1.3.2 : pas de fichier de sommes ; sommes = champ « digest » de l'API des releases
+          #   (gh api repos/FiloSottile/age/releases/tags/v1.3.2).
+          SOPS_BASE=https://github.com/getsops/sops/releases/download/v3.13.3
+          AGE_BASE=https://github.com/FiloSottile/age/releases/download/v1.3.2
+          dossier="$RUNNER_TEMP/outils"
+          mkdir -p "$dossier"
+          cd "$dossier"
+          if [ "$RUNNER_OS" = Windows ]; then
+            curl -fsSL -o sops.exe "$SOPS_BASE/sops-v3.13.3.amd64.exe"
+            curl -fsSL -o age.zip "$AGE_BASE/age-v1.3.2-windows-amd64.zip"
+            cat > sommes.txt <<'SOMMES'
+          a4a9a398858fe8b2ef72d9686d930bf7c5cece9be74ad83ac3b53cfdd70e6b1c  sops.exe
+          f48d8f8f9ebe903ab5027ed067652f2cc1db94bc206976430133b905dcd8e8c7  age.zip
+          SOMMES
+            sha256sum -c sommes.txt
+            python -m zipfile -e age.zip .
+            cp age/age.exe age/age-keygen.exe .
+            chemin_path="$(cygpath -w "$dossier")"
+            sans_saut=sops,age,age-keygen,powershell
+          else
+            curl -fsSL -o sops "$SOPS_BASE/sops-v3.13.3.linux.amd64"
+            curl -fsSL -o age.tar.gz "$AGE_BASE/age-v1.3.2-linux-amd64.tar.gz"
+            cat > sommes.txt <<'SOMMES'
+          e5bec3346a873ae91d871550f3e698c1aad962aff462a080e40f25fde17fef6b  sops
+          cbe24006683f8eb669266162894b9a522a1af52f2665fbc63a4bb032ed26ac10  age.tar.gz
+          SOMMES
+            sha256sum -c sommes.txt
+            tar -xzf age.tar.gz
+            cp age/age age/age-keygen .
+            chmod +x sops age age-keygen
+            chemin_path="$dossier"
+            sans_saut=sops,age,age-keygen,pwsh
+          fi
+          echo "$chemin_path" >> "$GITHUB_PATH"
+          echo "MODELE_TESTS_SANS_SAUT=$sans_saut" >> "$GITHUB_ENV"
       - run: pip install -r requirements-dev.txt
       - run: ruff check .
       - run: python -m pytest -q
