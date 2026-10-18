@@ -1,0 +1,117 @@
+{#- Gabarit Copier. `${ {{- prefixe }}X}` : l'espace et le tiret évitent `${{{`, que Jinja lit mal. -#}
+#!/usr/bin/env bash
+# Vérifie l'image que la CI vient de lancer (action modele-image-construire), avant les tests de
+# bout en bout du projet et la publication.
+#
+#   deploiement/ci/verifier-image.sh <conteneur> <révision>
+#
+# <révision> est le SHA du commit construit ($GITHUB_SHA), que l'image doit annoncer.
+#
+# Déroulé :
+#   1. santé : jusqu'à 90 s, `curl http://127.0.0.1:{{ port_app }}{{ chemin_sante }}` doit rendre
+#      .statut == "ok" (l'action publie le port de l'app sur la boucle locale) ;
+#   2. cette réponse doit annoncer .revision == <révision> et .environnement == "ci" ;
+{%- if sauvegardes %}
+#   3. instantané : `docker exec <conteneur> <SAUVEGARDER…> /tmp/instantane`, puis
+#      `docker exec <conteneur> <VERIFIER…> /tmp/instantane`, les commandes de
+#      deploiement/projet.env (lu, jamais sourcé), qui doivent rendre 0. Le contrat de l'image :
+#      VERIFIER rend 0 si l'instantané est conforme, 2 s'il ne l'est pas, 64 en cas d'usage refusé.
+{%- else %}
+#   3. pas d'instantané : le projet n'a pas de données à sauvegarder.
+{%- endif %}
+#
+# Codes de sortie : 0 image conforme ; 1 non conforme ; 64 usage.
+#
+# Variables de test : {{ prefixe }}SANTE_ATTENTE, secondes d'attente de la santé (défaut 90) ;
+# {{ prefixe }}SANTE_DELAI, secondes entre deux essais (défaut 2).
+set -euo pipefail
+
+# shellcheck source=deploiement/lib.sh
+. "$(dirname -- "${BASH_SOURCE[0]}")/../lib.sh"
+
+USAGE="usage : verifier-image.sh <conteneur> <révision>"
+{%- if sauvegardes %}
+INSTANTANE=/tmp/instantane
+{%- endif %}
+
+# attendre_sante_ok <attente> <délai> : jusqu'à <attente> secondes, toutes les <délai> secondes, une
+# santé qui dit .statut == "ok" ; sa réponse dans SANTE. SECONDS compte en secondes entières :
+# l'attente réelle est comprise entre <attente> - 1 et <attente> secondes, et la boucle fait au
+# moins deux essais dès que <attente> vaut 2 ou plus et qu'un essai dure moins d'une seconde.
+attendre_sante_ok() {
+  local limite=$((SECONDS + $1)) delai="$2" reponse=""
+  while :; do
+    if reponse="$(sante_sur {{ port_app }} '.statut == "ok"')"; then
+      SANTE="$reponse"
+      journal "santé ok après $SECONDS s : $SANTE"
+      return 0
+    fi
+    [ "$SECONDS" -lt "$limite" ] || break
+    sleep "$delai"
+  done
+  journal "santé non conforme après $SECONDS s (limite : $1 s) ; dernière réponse : ${reponse//$'\n'/ }"
+  return 1
+}
+{%- if sauvegardes %}
+
+# lancer_dans <conteneur> <mots…> : la commande, dans le conteneur, sur l'instantané. Sa sortie,
+# sur une ligne, dans SORTIE ; rend son code.
+lancer_dans() {
+  local conteneur="$1" code=0
+  shift
+  SORTIE="$(docker exec "$conteneur" "$@" "$INSTANTANE")" || code=$?
+  SORTIE="${SORTIE//$'\n'/ }"
+  return "$code"
+}
+{%- endif %}
+
+main() {
+  [ "$#" -eq 2 ] || arreter 64 "$USAGE"
+  local conteneur="$1" revision="$2"
+  local attente="${ {{- prefixe }}SANTE_ATTENTE:-90}" delai="${ {{- prefixe }}SANTE_DELAI:-2}"
+  [[ "$conteneur" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]] || arreter 64 "conteneur invalide : '$conteneur' ($USAGE)"
+  [[ "$revision" =~ ^[0-9a-f]{40}$ ]] \
+    || arreter 64 "révision invalide : '$revision' (attendu : les 40 caractères hexadécimaux du commit)"
+  [[ "$attente" =~ ^[0-9]+$ ]] || arreter 64 "{{ prefixe }}SANTE_ATTENTE invalide : '$attente'"
+
+  # 1. Santé.
+  attendre_sante_ok "$attente" "$delai" || arreter 1 "image non conforme : santé non conforme"
+
+  # 2. Révision et environnement.
+  # shellcheck disable=SC2016  # $revision est une variable de jq (--arg)
+  jq_vaut true "$SANTE" '.revision == $revision' --arg revision "$revision" \
+    || arreter 1 "image non conforme : révision servie non conforme : attendue $revision ; santé : $SANTE"
+  jq_vaut true "$SANTE" '.environnement == "ci"' \
+    || arreter 1 "image non conforme : environnement servi non conforme : attendu ci ; santé : $SANTE"
+  journal "révision $revision et environnement ci annoncés"
+{%- if sauvegardes %}
+
+  # 3. Instantané, puis sa vérification, par les commandes de l'image. Les deux sont lues avant de
+  # lancer quoi que ce soit.
+  local -a sauvegarder verifier
+  local code=0
+  lire_projet_env SAUVEGARDER \
+    || arreter 1 "image non conforme : pas de commande SAUVEGARDER lisible dans deploiement/projet.env"
+  sauvegarder=("${PROJET_MOTS[@]}")
+  lire_projet_env VERIFIER \
+    || arreter 1 "image non conforme : pas de commande VERIFIER lisible dans deploiement/projet.env"
+  verifier=("${PROJET_MOTS[@]}")
+  lancer_dans "$conteneur" "${sauvegarder[@]}" || code=$?
+  [ "$code" -eq 0 ] \
+    || arreter 1 "image non conforme : instantané impossible (sauvegarder : code $code)${SORTIE:+ : $SORTIE}"
+  journal "instantané écrit dans $conteneur:$INSTANTANE${SORTIE:+ : $SORTIE}"
+  lancer_dans "$conteneur" "${verifier[@]}" || code=$?
+  case "$code" in
+    0) journal "instantané conforme (verifier : code 0)${SORTIE:+ : $SORTIE}" ;;
+    2) arreter 1 "image non conforme : instantané non conforme (verifier : code 2)${SORTIE:+ : $SORTIE}" ;;
+    *) arreter 1 "image non conforme : vérification impossible (verifier : code $code)${SORTIE:+ : $SORTIE}" ;;
+  esac
+{%- else %}
+
+  # 3. Pas d'instantané.
+  journal "pas d'instantané : le projet n'a pas de données à sauvegarder"
+{%- endif %}
+  journal "image conforme"
+}
+
+main "$@"; exit $?

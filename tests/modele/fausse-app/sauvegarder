@@ -1,0 +1,37 @@
+#!/usr/bin/env python3
+"""sauvegarder <dossier> : l'instantané des données de la fausse app.
+
+Le contrat de la cible `serveur` (spec §6.1, et l'écart 4 du lot 2) : le dossier donné, qui ne doit
+pas exister, est créé avec ce que /donnees contient ; il en a donc la forme. Son nom est libre : la
+mécanique passe un nom provisoire (`….partiel`), qu'elle renomme ensuite. Un dossier qui existe déjà
+est refusé : rien n'est écrasé.
+
+Codes : 0 écrit, 1 échec, 64 usage. FAUSSE_APP_DONNEES remplace /donnees (pour les tests).
+"""
+
+import os
+import shutil
+import sys
+from pathlib import Path
+
+
+def main(arguments):
+    if len(arguments) != 1 or not arguments[0]:
+        print("usage : sauvegarder <dossier>", file=sys.stderr)
+        return 64
+    destination = Path(arguments[0])
+    if destination.exists() or destination.is_symlink():
+        print(f"sauvegarder : {destination} existe déjà, rien n'est écrasé", file=sys.stderr)
+        return 1
+    donnees = Path(os.environ.get("FAUSSE_APP_DONNEES", "/donnees"))
+    try:
+        shutil.copytree(donnees, destination, symlinks=True)
+    except OSError as erreur:
+        print(f"sauvegarder : copie de {donnees} impossible : {erreur}", file=sys.stderr)
+        return 1
+    print(f"instantané de {donnees} écrit dans {destination}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

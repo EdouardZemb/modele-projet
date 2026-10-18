@@ -10,6 +10,10 @@ permissions:
   contents: read
   pull-requests: read
 
+{% if cible == 'serveur' -%}
+# Une PR annule son exécution précédente. Un push n'annule jamais une publication d'image en
+# cours : il attend son tour (GitHub n'en garde alors qu'un en attente).
+{% endif -%}
 concurrency:
   group: {% raw %}ci-${{ github.ref }}{% endraw %}
   cancel-in-progress: {% raw %}${{ github.event_name == 'pull_request' }}{% endraw %}
@@ -18,6 +22,68 @@ jobs:
   socle:
     uses: ./.github/workflows/modele-socle.yml
     secrets: inherit
+{%- if cible == 'serveur' %}
+
+  # Les vérifications propres au projet (tests, lint, construction) : `deploiement` et `image` les
+  # attendent.
+  verifier:
+    name: verifier
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Les étapes du projet s'ajoutent ici.
+
+  # Les tests bats des scripts de déploiement, dans leur image (tests/deploiement/Dockerfile : age
+  # et sops aux versions du serveur) : la même commande qu'en local, rien à installer sur le runner.
+  deploiement:
+    name: deploiement
+    needs: verifier
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: sh tests/deploiement/lancer.sh
+
+  # Construit l'image du Dockerfile, la lance comme en production et la vérifie
+  # (deploiement/ci/verifier-image.sh). Au push sur la branche principale seulement, la publie sur
+  # GHCR : :sha-<sha>, que modele-version.yml réétiquette à chaque version, et :main, que le
+  # staging suit. Aucune image n'est publiée pour un commit dont la CI échoue, d'où socle,
+  # verifier et deploiement.
+  image:
+    name: image
+    needs: [socle, verifier, deploiement]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      # Nécessaire seulement au push sur {{ branche_principale }} ; sur une PR, la publication est sautée.
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Le conteneur {{ nom }} reste lancé, sur http://localhost:{{ port_app }}, pour les étapes suivantes.
+      - uses: ./.github/actions/modele-image-construire
+      # Les tests de bout en bout du projet contre l'image s'ajoutent ici.
+      - uses: ./.github/actions/modele-image-publier
+        if: github.event_name == 'push' && github.ref == 'refs/heads/{{ branche_principale }}'
+      # Après un échec, le journal de l'app aide à comprendre. Le conteneur peut ne pas exister
+      # (échec avant `docker run`) : on le tolère.
+      - name: Journal du conteneur
+        if: failure()
+        run: docker logs {{ nom }} || true
+      - name: Supprimer le conteneur
+        if: always()
+        run: docker rm -f -v {{ nom }}
+
+# Ce fichier est au projet : `copier update` n'y touche plus.
+{%- else %}
 
 # Les vérifications propres au projet (tests, lint, construction) s'ajoutent ici, dans un job `verifier`.
 # Ce fichier est au projet : `copier update` n'y touche plus.
+{%- endif %}

@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from conftest import git
+from conftest import REPONSES_SERVEUR, git
 
 SOCLE = ".github/workflows/modele-socle.yml"
 CI = ".github/workflows/ci.yml"
@@ -36,7 +36,9 @@ def test_socle_reutilisable(rendre):
 def test_actions_epinglees(rendre):
     rendu = rendre()
     for chemin in (rendu / ".github/workflows").glob("*.yml"):
-        for uses in re.findall(r"^\s*(?:-\s*)?uses:\s*(\S+)", chemin.read_text(encoding="utf-8"), re.MULTILINE):
+        for uses in re.findall(
+            r"^\s*(?:-\s*)?uses:\s*(\S+)", chemin.read_text(encoding="utf-8"), re.MULTILINE
+        ):
             if not uses.startswith("./"):
                 assert re.search(r"@[0-9a-f]{40}\b", uses), f"{chemin.name}: {uses}"
 
@@ -63,17 +65,33 @@ def test_ruleset_coherent(rendre):
     jobs = charger(rendu, SOCLE)["jobs"].values()
     ruleset = json.loads((rendu / ".github/modele/ruleset-main.json").read_text(encoding="utf-8"))
     regles = {r["type"]: r for r in ruleset["rules"]}
-    contextes = {c["context"] for c in regles["required_status_checks"]["parameters"]["required_status_checks"]}
+    contextes = {
+        c["context"]
+        for c in regles["required_status_checks"]["parameters"]["required_status_checks"]
+    }
     assert contextes == {f"socle / {job['name']}" for job in jobs}
     assert ruleset["conditions"]["ref_name"]["include"] == ["~DEFAULT_BRANCH"]
     assert {"deletion", "non_fast_forward", "pull_request"} <= set(regles)
 
 
-def test_dependabot(rendre):
-    doc = charger(rendre(), ".github/dependabot.yml")
+@pytest.mark.parametrize("cible", ["aucune", "serveur"])
+def test_dependabot(rendre, cible):
+    doc = charger(
+        rendre(**(REPONSES_SERVEUR if cible == "serveur" else {})), ".github/dependabot.yml"
+    )
     (maj,) = [u for u in doc["updates"] if u["package-ecosystem"] == "github-actions"]
     assert maj["cooldown"]["default-days"] == 3
     assert maj["schedule"]["timezone"] == "Europe/Zurich"
+    assert {u["package-ecosystem"] for u in doc["updates"]} <= {"github-actions", "docker"}
+    # En cible serveur, les images : le Dockerfile du projet et celui de l'image de test.
+    docker = [u for u in doc["updates"] if u["package-ecosystem"] == "docker"]
+    assert sorted(u["directory"] for u in docker) == (
+        ["/", "/tests/deploiement"] if cible == "serveur" else []
+    )
+    for u in docker:
+        assert u["schedule"] == maj["schedule"]
+        assert u["cooldown"] == maj["cooldown"]
+        assert u["commit-message"] == maj["commit-message"]
 
 
 # --- revue finale du lot 1 : messages de commit (I4), $RUNNER_TEMP (L.35), garde branché (m4),
@@ -81,7 +99,9 @@ def test_dependabot(rendre):
 
 HISTORIQUE = ".github/workflows/modele-historique.yml"
 SH = shutil.which("sh") or (
-    r"C:\Program Files\Git\bin\sh.exe" if Path(r"C:\Program Files\Git\bin\sh.exe").exists() else None
+    r"C:\Program Files\Git\bin\sh.exe"
+    if Path(r"C:\Program Files\Git\bin\sh.exe").exists()
+    else None
 )
 
 
@@ -223,7 +243,10 @@ def test_historique_hors_contextes_requis(rendre):
     rendu = rendre()
     ruleset = json.loads((rendu / ".github/modele/ruleset-main.json").read_text(encoding="utf-8"))
     regles = {r["type"]: r for r in ruleset["rules"]}
-    contextes = {c["context"] for c in regles["required_status_checks"]["parameters"]["required_status_checks"]}
+    contextes = {
+        c["context"]
+        for c in regles["required_status_checks"]["parameters"]["required_status_checks"]
+    }
     assert contextes == {"socle / secrets", "socle / confidentialite"}
 
 
@@ -243,7 +266,11 @@ def test_la_porte_recoit_la_visibilite_reelle(rendre):
 def test_secrets_chiffres_controles(rendre):
     etapes = charger(rendre(), SOCLE)["jobs"]["secrets"]["steps"]
     python = next(i for i, e in enumerate(etapes) if "setup-python" in e.get("uses", ""))
-    controle = next(i for i, e in enumerate(etapes) if e.get("run") == "python scripts/modele/verifier_secrets.py")
+    controle = next(
+        i
+        for i, e in enumerate(etapes)
+        if e.get("run") == "python scripts/modele/verifier_secrets.py"
+    )
     assert python < controle
     depot = yaml.safe_load(Path(CI).read_text(encoding="utf-8"))["jobs"]["secrets"]["steps"]
     assert any(e.get("run") == "python template/scripts/modele/verifier_secrets.py" for e in depot)

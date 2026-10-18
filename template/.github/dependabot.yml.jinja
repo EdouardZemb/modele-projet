@@ -1,0 +1,48 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:00"
+      timezone: Europe/Zurich
+    cooldown:
+      default-days: 3
+    commit-message:
+      prefix: chore
+    groups:
+      actions:
+        patterns: ["*"]
+{%- if cible == 'serveur' %}
+  # Les images épinglées par empreinte : le Dockerfile du projet, à la racine, et celui de l'image
+  # de test de la mécanique (tests/deploiement/Dockerfile, géré par le modèle).
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:00"
+      timezone: Europe/Zurich
+    cooldown:
+      default-days: 3
+    commit-message:
+      prefix: chore
+    groups:
+      images:
+        patterns: ["*"]
+  - package-ecosystem: docker
+    directory: /tests/deploiement
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:00"
+      timezone: Europe/Zurich
+    cooldown:
+      default-days: 3
+    commit-message:
+      prefix: chore
+    groups:
+      images:
+        patterns: ["*"]
+{%- endif %}
