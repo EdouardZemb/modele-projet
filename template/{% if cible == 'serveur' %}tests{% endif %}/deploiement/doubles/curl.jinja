@@ -35,6 +35,8 @@
 #   DOUBLE_CURL_REVISION_FAUSSE    images dont l'application annonce une autre révision
 {%- if sauvegardes %}
 #   DOUBLE_CURL_TEST_KO            le conteneur jetable répond 503
+#   DOUBLE_CURL_TEST_CORPS         le corps que répond le conteneur jetable (défaut : statut ok,
+#                                  sans instance)
 {%- endif %}
 #   DOUBLE_CURL_PUBLIC_CODE        code de sortie de curl pour l'adresse publique (défaut 0)
 #   DOUBLE_CURL_PUBLIC_HTTP        code HTTP de l'adresse publique (défaut 200 ; 302 = redirection)
@@ -88,7 +90,11 @@ case "$adresse" in
         echo "curl: (22) The requested URL returned error: 503" >&2
         exit 22
       fi
-      printf '{"statut":"ok","environnement":"dev","version":"dev","revision":"local"}\n'
+      if [ -n "${DOUBLE_CURL_TEST_CORPS+x}" ]; then
+        printf '%s\n' "$DOUBLE_CURL_TEST_CORPS"
+      else
+        printf '{"statut":"ok","environnement":"dev","version":"dev","revision":"local"}\n'
+      fi
       exit 0
     done
     if [ "$port" = {{ bloc_ports + 9 }} ] || [ ! -f "$EN_SERVICE" ]; then

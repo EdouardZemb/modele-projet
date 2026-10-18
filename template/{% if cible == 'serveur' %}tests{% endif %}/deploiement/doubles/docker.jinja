@@ -28,6 +28,9 @@
 #   DOUBLE_DOCKER_SAUVEGARDE_CODE    code de `compose exec … <sauvegarder> <dossier>` (défaut 0)
 #   DOUBLE_DOCKER_SAUVEGARDE_SORTIE  sa sortie (défaut : rien)
 #   DOUBLE_DOCKER_SAUVEGARDE_SANS_FICHIER  `<sauvegarder>` répond 0 sans rien écrire
+#   DOUBLE_DOCKER_SAUVEGARDE_FORME   ce que `<sauvegarder>` écrit à la destination : dossier (défaut),
+#                                    vide (un dossier vide), fichier (un fichier à la place du
+#                                    dossier), lien (un dossier qui contient un lien symbolique)
 #   DOUBLE_DOCKER_SAUVEGARDE_ATTENTE  `<sauvegarder>` dure autant de secondes avant de répondre
 {%- endif %}
 #   DOUBLE_DOCKER_UP_ECHEC           images (séparées par des espaces) dont le `compose up` échoue
@@ -38,18 +41,23 @@
 #   DOUBLE_DOCKER_STOP_ECHEC         `compose stop` échoue
 {%- if sauvegardes %}
 #   DOUBLE_DOCKER_VERIFIER_CODE      code de `run --rm … <verifier> /donnees` (défaut 0 ; 2 = non conforme)
+#   DOUBLE_DOCKER_VERIFIER_SORTIE    sa sortie (défaut : rien)
 #   DOUBLE_DOCKER_RUN_ECHEC          `run -d` échoue avec ce message (« port is already allocated »…)
 #   DOUBLE_DOCKER_RM_ECHEC           `rm` échoue
 #
 # Sauvegarde : `compose exec -T app <sauvegarder…> /sauvegardes/<chemin>` crée, dans le dossier des
-# sauvegardes de compose.env, le dossier de l'instantané, qui a la forme de /donnees (un fichier
-# donnees.txt), comme la commande de l'image. Une destination qui existe déjà est refusée (code 1).
+# sauvegardes de compose.env, le dossier de l'instantané, qui a la forme de /donnees (donnees.txt,
+# un fichier caché .cachee et un sous-dossier sous/profond.txt), comme la commande de l'image. Une
+# destination qui existe déjà est refusée (code 1). Les mots de la commande (ce qui suit « app »,
+# destination comprise) sont écrits un par ligne dans exec-mots, à côté de $APPELS.
 #
 # Conteneurs jetables : `run -d --name <nom>` crée conteneur-<nom>.env à côté de $APPELS (port,
 # image, dossier monté) ; le double de curl y lit de quoi répondre sur ce port. `stop` y ajoute
 # ARRET=1, `rm` le supprime. `run` sans -d est un conteneur à usage unique, la vérification d'un
 # instantané (`<verifier…> /donnees`) : il rend DOUBLE_DOCKER_VERIFIER_CODE, ou 2 si donnees.txt
-# commence par « CORROMPU ».
+# commence par « CORROMPU ». Il écrit les mots de la commande (ce qui suit l'image) un par ligne
+# dans run-mots, et copie le dossier monté dans verifie/, à côté de $APPELS : ce que la
+# vérification a vu.
 {%- endif %}
 #
 # Invariants vérifiés à chaque appel (code 125 sinon) : DOCKER_CONFIG est posé, `--config` n'est
@@ -130,6 +138,11 @@ case "${1:-}" in
 {%- if sauvegardes %}
       exec)
         # exec -T app <sauvegarder…> <destination> : la commande de sauvegarde de l'image
+        shift
+        { [ "${1:-}" = -T ] && [ "${2:-}" = app ]; } || refuser "exec : attendu « exec -T app <commande…> »"
+        shift 2
+        [ "$#" -ge 2 ] || refuser "exec : commande ou destination absente"
+        printf '%s\n' "$@" >"$DOSSIER/exec-mots"
         destination="${!#}"
         code="${DOUBLE_DOCKER_SAUVEGARDE_CODE:-0}"
         [ -z "${DOUBLE_DOCKER_SAUVEGARDE_ATTENTE:-}" ] || sleep "$DOUBLE_DOCKER_SAUVEGARDE_ATTENTE"
@@ -145,8 +158,21 @@ case "${1:-}" in
             echo "destination existante : $destination"
             exit 1
           fi
-          mkdir -p "$hote"
-          echo "instantané de test $(basename "$destination")" >"$hote/donnees.txt"
+          case "${DOUBLE_DOCKER_SAUVEGARDE_FORME:-dossier}" in
+            dossier | lien)
+              mkdir -p "$hote/sous"
+              echo "instantané de test $(basename "$destination")" >"$hote/donnees.txt"
+              echo "fichier caché" >"$hote/.cachee"
+              echo "fichier profond" >"$hote/sous/profond.txt"
+              [ "${DOUBLE_DOCKER_SAUVEGARDE_FORME:-dossier}" = dossier ] || ln -s /etc/hostname "$hote/lien"
+              ;;
+            vide) mkdir -p "$hote" ;;
+            fichier)
+              mkdir -p "$(dirname "$hote")"
+              echo "un fichier" >"$hote"
+              ;;
+            *) refuser "exec : forme inconnue ${DOUBLE_DOCKER_SAUVEGARDE_FORME}" ;;
+          esac
         fi
         [ -z "${DOUBLE_DOCKER_SAUVEGARDE_SORTIE+x}" ] || echo "$DOUBLE_DOCKER_SAUVEGARDE_SORTIE"
         exit "$code"
@@ -252,10 +278,14 @@ case "${1:-}" in
 
     # <verifier…> /donnees : la vérification d'un instantané monté sur /donnees.
     { [ "$#" -ge 2 ] && [ "${!#}" = /donnees ]; } || refuser "run : commande inattendue $*"
+    printf '%s\n' "$@" >"$DOSSIER/run-mots"
+    rm -rf "$DOSSIER/verifie"
+    cp -R "$source_hote" "$DOSSIER/verifie"
     if [ "$(head -c 8 "$source_hote/donnees.txt" 2>/dev/null)" = CORROMPU ]; then
       echo "instantané non conforme : donnees.txt"
       exit 2
     fi
+    [ -z "${DOUBLE_DOCKER_VERIFIER_SORTIE+x}" ] || echo "$DOUBLE_DOCKER_VERIFIER_SORTIE"
     exit "${DOUBLE_DOCKER_VERIFIER_CODE:-0}"
     ;;
 

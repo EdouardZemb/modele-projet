@@ -36,6 +36,7 @@
 #   prendre_verrou                     le verrou de l'état, partagé, sur le descripteur 9
 #   lire_deploye                       DEPLOYE_IMAGE et DEPLOYE_VERSION, depuis le fichier deploye
 {%- if sauvegardes %}
+#   verifier_copie <image> <dossier>   contrôle d'un dossier qui a la forme de /donnees, par la commande VERIFIER
 # Variables posées : {{ prefixe }}CLONE (racine du clone qui lance le script) et {{ prefixe }}OPTIONS_JETABLES
 # (options des conteneurs jetables).
 {%- else %}
@@ -320,9 +321,40 @@ lire_deploye() {
 
 # Options des conteneurs jetables (`docker run`), les mêmes restrictions que le service de
 # deploiement/compose.yml : utilisateur 1000, système de fichiers en lecture seule, aucune capacité.
-# shellcheck disable=SC2034  # lu par les scripts qui sourcent lib.sh (test de restauration, restauration)
 {{ prefixe }}OPTIONS_JETABLES=(--user 1000:1000 --read-only --tmpfs /tmp --cap-drop ALL
   --security-opt no-new-privileges:true --memory 384m)
+
+# verifier_copie <image> <dossier> : contrôle <dossier>, qui a la forme de /donnees (un instantané,
+# ou sa copie), par la commande VERIFIER de deploiement/projet.env (lu, jamais sourcé), dans un
+# conteneur jetable (--rm) qui ne voit que ce dossier, monté sur /donnees : `<VERIFIER…> /donnees`.
+# Le contrat de l'image : 0 conforme, 2 non conforme, 64 usage. Seul le code fait foi ; la sortie
+# de la commande va au journal, jamais sur stdout. Rend 0 si la copie est conforme, 2 si l'image la
+# dit non conforme, 1 si la vérification n'a pas eu lieu (commande VERIFIER absente ou illisible,
+# code 64, tout autre code).
+verifier_copie() {
+  local image="$1" dossier="$2" sortie code=0
+  lire_projet_env VERIFIER || return 1
+  sortie="$(docker run --rm "${ {{- prefixe }}OPTIONS_JETABLES[@]}" -v "$dossier:/donnees" "$image" \
+    "${PROJET_MOTS[@]}" /donnees)" || code=$?
+  case "$code" in
+    0)
+      journal "copie conforme (verifier : code 0)${sortie:+ : ${sortie//$'\n'/ }}"
+      return 0
+      ;;
+    2)
+      journal "copie non conforme (verifier : code 2) : ${sortie//$'\n'/ }"
+      return 2
+      ;;
+    64)
+      journal "vérification impossible (verifier : code 64) : usage refusé, l'image déployée ne connaît pas la commande VERIFIER de projet.env : ${sortie//$'\n'/ }"
+      return 1
+      ;;
+    *)
+      journal "vérification impossible (verifier : code $code) : ${sortie//$'\n'/ }"
+      return 1
+      ;;
+  esac
+}
 {%- endif %}
 
 # _sans_trace <fonction> <args…> : exécute la fonction sans trace (`bash -x`, `set -x`), puis rétablit

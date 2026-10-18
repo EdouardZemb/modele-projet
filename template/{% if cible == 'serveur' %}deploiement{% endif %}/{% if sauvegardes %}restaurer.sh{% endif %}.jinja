@@ -1,0 +1,443 @@
+{#- Gabarit Copier. `${ {{- prefixe }}X}` : l'espace et le tiret évitent `${{{`, que Jinja lit mal. -#}
+#!/usr/bin/env bash
+# Restaure les données de prod depuis un instantané (un dossier de quotidiennes/ ou de
+# pre-deploiement/, qui a la forme de /donnees) ou depuis une archive chiffrée du distant (.tar.age :
+# le dossier de l'instantané, chiffré pour la clé hors ligne). Opération manuelle, réservée à la
+# prod (code 64) :
+#
+#   restaurer.sh prod <dossier|archive .tar.age> [--oui] [--cle <identité age>]
+#
+# Archive chiffrée sans écrire la clé hors ligne sur le disque du serveur (M-0005) : --cle accepte
+# tout chemin lisible qui n'est pas un dossier, donc /dev/stdin, la clé arrivant par ssh :
+#
+#   ssh <le serveur> '~/{{ nom }}/deploiement/restaurer.sh prod <archive>.tar.age --oui --cle /dev/stdin' \
+#     < hors-ligne.txt
+#
+# Sans --oui, le script affiche ce qu'il ferait et rend 64, sans aucun effet (ni verrou, ni
+# conteneur, ni déchiffrement ; charger_env crée au plus des dossiers déjà présents en prod). Avec
+# --oui :
+#   1. verrou ${{ prefixe }}ETAT/verrou, partagé avec la sonde, le déploiement et la sauvegarde (600 s
+#      d'attente au plus) : la sonde ne relancera rien pendant que l'application est arrêtée ;
+#   2. l'image est la première colonne de ${{ prefixe }}ETAT/deploye : sans version déployée, on
+#      déploie d'abord (deployer.sh), puis on restaure ;
+#   3. l'instantané, dans un dossier temporaire 0700, détruit (shred) à la sortie :
+#      - un dossier y est copié ;
+#      - une archive .tar.age exige --cle (l'identité hors ligne, apportée pour l'occasion et jamais
+#        gardée sur le serveur : voir /dev/stdin ci-dessus, lue une seule fois). L'archive vient
+#        d'un distant et la clé publique n'est pas secrète : n'importe qui peut fabriquer une
+#        archive qui se déchiffre. Ses membres sont donc contrôlés avant toute extraction : un seul
+#        dossier, {{ nom }}-<horodatage>/, et rien à côté ; ni chemin absolu, ni « .. », ni lien, rien
+#        que des fichiers et des dossiers ;
+#      dans les deux cas, un instantané vide, ou qui contient autre chose que des fichiers et des
+#      dossiers, est refusé ;
+#   4. contrôle, comme le test de restauration : la commande VERIFIER de deploiement/projet.env, dans
+#      un conteneur jetable, sur la copie. Rien n'est touché si elle ne rend pas 0 ;
+#   5. le reste d'une restauration interrompue (${{ prefixe }}DONNEES.nouvelle, la copie de travail
+#      qu'un SIGKILL ou un plantage de l'hôte laisse, hors de portée du trap) est retiré, puis
+#      l'instantané y est copié, à côté des données, et le dossier
+#      ${{ prefixe }}SAUVEGARDES/avant-restauration-<AAAAMMJJTHHMMSSZ>/ (0700) est créé : tout ce qui
+#      peut échouer sans toucher à l'application échoue ici. Retirer plutôt que refuser : ce nom
+#      n'est celui d'aucune donnée en service, et un refus bloquerait une reprise d'activité sur un
+#      reste que l'opérateur ne peut pas évaluer. Si on ne peut pas le retirer, en revanche, on
+#      refuse ;
+#   6. `dc stop app` ;
+#   7. tout le contenu de ${{ prefixe }}DONNEES, fichiers cachés compris, est déplacé dans ce dossier,
+#      jamais supprimé ; le dossier lui-même reste : c'est lui que le conteneur monte ;
+#   8. le contenu de l'instantané prend sa place (des déplacements, sans copie) ; `dc start app` ;
+#      santé sur 127.0.0.1:${{ prefixe }}PORT : statut ok, la version et la révision déployées.
+#
+# Si quelque chose échoue entre l'arrêt et la fin de la mise en place, un trap retire ce qui était
+# entré de l'instantané, remet l'ancien contenu en place (s'il avait été déplacé) et relance
+# l'application : la restauration n'a pas eu lieu. Si l'ancien contenu ne peut pas être remis en
+# place, l'application reste arrêtée (relancée, elle démarrerait sur des données vides ou
+# incomplètes, sous une santé que la sonde jugerait verte) et le message dit où il est :
+# intervention nécessaire, code 1. Si c'est le redémarrage ou la santé qui échoue après la mise en
+# place, l'instantané reste en place (rien n'est défait en douce) ; l'ancien contenu est dans
+# avant-restauration-*/ (s'il y en avait un), et le message dit où.
+#
+# Les dossiers avant-restauration-* sont des copies en clair des données : sauvegarder.sh les efface
+# après 30 jours, comme les autres copies locales.
+#
+# Codes de sortie : 0 ; 1 échec ; 3 secrets absents ; 64 usage, environnement refusé, ou --oui absent ;
+# 129, 130, 143 interruption.
+#
+# Variables de test : {{ prefixe }}VERROU_ATTENTE, {{ prefixe }}SANTE_DELAI.
+set -euo pipefail
+# shellcheck source=deploiement/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+
+# Posées par main.
+SOURCE=""
+FORME="" # dossier ou archive
+CLE=""
+OUI=0
+TMP=""
+SOMMET="" # le dossier unique d'une archive, posé par verifier_membres
+AVANT=""
+ANCIEN=0 # 1 si les données courantes avaient un contenu, déplacé dans $AVANT
+PHASE=rien # rien, arretee, deplacee (l'ancien contenu sort, puis l'instantané entre), installee, demarree
+INSTALLATION=0 # 1 dès que le contenu de l'instantané a commencé d'entrer dans les données
+NOUVELLE=""
+
+USAGE="usage : restaurer.sh prod <dossier|archive .tar.age> [--oui] [--cle <identité age>]
+exemple, la clé hors ligne sur l'entrée standard (jamais écrite sur le disque du serveur) :
+  ssh <hôte> '<clone>/deploiement/restaurer.sh prod <archive>.tar.age --oui --cle /dev/stdin' < hors-ligne.txt"
+
+ATTENDU="(attendu : un seul dossier {{ nom }}-<horodatage>/, fait de fichiers et de dossiers)"
+
+# retirer <dossier> : retire un dossier de travail, droits rendus d'abord (une copie peut avoir des
+# sous-dossiers en lecture seule) ; un lien est retiré, jamais suivi.
+retirer() {
+  if [ -d "$1" ] && [ ! -L "$1" ]; then
+    chmod -R u+rwX -- "$1" 2>/dev/null || true
+  fi
+  rm -rf -- "$1"
+}
+
+# detruire_tmp : le dossier temporaire a pu contenir du clair déchiffré.
+# shellcheck disable=SC2317,SC2329  # appelée par sortie, elle-même sous trap
+detruire_tmp() {
+  [ -n "$TMP" ] || return 0
+  chmod -R u+rwX -- "$TMP" 2>/dev/null || true
+  find "$TMP" -type f -exec shred -u -n 1 -- {} + 2>/dev/null || true
+  rm -rf -- "$TMP"
+  TMP=""
+}
+
+# deplacer_contenu <de> <vers> : déplace chaque entrée de <de> (cachées comprises, dans l'ordre des
+# noms) dans <vers>, sans jamais en écraser une : un nom déjà pris dans <vers> est un échec. Échec
+# dès la première entrée qui ne passe pas, journalisé ; celles qui sont passées y restent.
+deplacer_contenu() {
+  local de="$1" vers="$2" entree nom
+  { [ -d "$de" ] && [ -d "$vers" ]; } || {
+    journal "déplacement de $de vers $vers impossible : dossier absent"
+    return 1
+  }
+  while IFS= read -r -d '' entree; do
+    nom="${entree##*/}"
+    if [ -e "$vers/$nom" ] || [ -L "$vers/$nom" ]; then
+      journal "$entree non déplacé : $vers/$nom existe déjà"
+      return 1
+    fi
+    mv -T -- "$entree" "$vers/$nom" || {
+      journal "$entree non déplacé vers $vers"
+      return 1
+    }
+  done < <(find "$de" -mindepth 1 -maxdepth 1 -print0 | sort -z)
+}
+
+# retablir : la restauration a échoué après l'arrêt de l'application, l'ancien contenu sorti des
+# données ou en train de l'être. Ce qui était entré de l'instantané repart dans la copie de travail
+# (les données ne contenaient alors rien d'autre), puis l'ancien contenu revient. Succès si tout est
+# revenu, ou s'il n'y avait rien à remettre ; échec dès qu'une entrée n'est pas revenue.
+# shellcheck disable=SC2317,SC2329  # appelée par sortie, elle-même sous trap
+retablir() {
+  if [ "$INSTALLATION" -eq 1 ] && ! deplacer_contenu "${{ prefixe }}DONNEES" "$NOUVELLE"; then
+    journal "instantané : son contenu n'a pas pu être retiré de ${{ prefixe }}DONNEES"
+    return 1
+  fi
+  if ! deplacer_contenu "$AVANT" "${{ prefixe }}DONNEES"; then
+    journal "ancien contenu : non remis en place depuis $AVANT"
+    return 1
+  fi
+  if [ "$ANCIEN" -eq 1 ]; then
+    journal "ancien contenu remis en place"
+  else
+    journal "aucun ancien contenu à remettre en place"
+  fi
+}
+
+# ancien_contenu : où est l'ancien contenu, pour les messages. Sans ancien contenu, le dossier
+# avant-restauration-* est vide, et sortie le supprime : on ne l'annonce pas.
+ancien_contenu() {
+  if [ "$ANCIEN" -eq 1 ]; then
+    printf "l'ancien contenu est dans %s" "$AVANT"
+  else
+    printf "aucun ancien contenu n'existait avant la restauration"
+  fi
+}
+
+# conseil_de_retour : comment revenir à l'ancien contenu, s'il y en a un.
+conseil_de_retour() {
+  [ "$ANCIEN" -eq 1 ] || return 0
+  printf " (pour revenir en arrière : arrêter l'application, remplacer le contenu de %s par celui de %s, la relancer)" \
+    "${{ prefixe }}DONNEES" "$AVANT"
+}
+
+# sortie : trap EXIT. Sur une sortie en erreur après l'arrêt de l'application, l'ancien contenu est
+# remis en place s'il avait été déplacé, et l'application relancée. S'il n'a pas pu être remis en
+# place, l'application reste arrêtée : relancée, elle démarrerait sur des données vides ou
+# incomplètes, sous une santé que la sonde jugerait verte.
+# shellcheck disable=SC2317,SC2329  # appelée par trap EXIT
+sortie() {
+  local code=$? relancer=1
+  trap - EXIT INT TERM HUP
+  if [ "$code" -ne 0 ]; then
+    if [ "$PHASE" = deplacee ] && ! retablir; then
+      relancer=0
+      journal "intervention nécessaire : le contenu d'avant est dans $AVANT. L'application reste arrêtée (relancée, elle démarrerait sur des données vides ou incomplètes). Vider ${{ prefixe }}DONNEES, y remettre le contenu de $AVANT, puis lancer docker compose start app"
+    fi
+    if [ "$relancer" -eq 1 ]; then
+      case "$PHASE" in
+        arretee | deplacee | installee)
+          journal "relance de l'application"
+          dc start app || journal "relance impossible : intervention nécessaire (docker compose start app)"
+          ;;
+      esac
+    fi
+    # La copie de travail : laissée, elle serait le reste d'une restauration interrompue. Un rm qui
+    # échoue ne doit pas empêcher la destruction du clair, plus bas (set -e).
+    if [ -n "$NOUVELLE" ] && { [ -e "$NOUVELLE" ] || [ -L "$NOUVELLE" ]; }; then
+      retirer "$NOUVELLE" || journal "$NOUVELLE non retiré : à retirer avant la prochaine restauration"
+    fi
+  fi
+  # Un dossier vide ne reste pas (la copie échoue avant le déplacement, ou il n'y avait pas
+  # d'ancien contenu) ; un dossier qui garde des entrées reste.
+  [ -z "$AVANT" ] || rmdir "$AVANT" 2>/dev/null || true
+  detruire_tmp
+  exit "$code"
+}
+
+# afficher_plan : ce que --oui ferait, sur stdout. Aucun effet.
+afficher_plan() {
+  local forme="dossier d'instantané, copié dans un dossier temporaire détruit à la fin"
+  [ "$FORME" != archive ] || forme="archive chiffrée, déchiffrée avec $CLE dans un dossier temporaire détruit à la fin"
+  cat <<PLAN
+Restauration des données de prod (rien n'est fait sans --oui).
+
+  source        : $SOURCE
+  forme         : $forme
+  données       : ${{ prefixe }}DONNEES (tout son contenu)
+  gardées dans  : ${{ prefixe }}SAUVEGARDES/avant-restauration-<horodatage UTC>/
+
+Étapes :
+  1. verrou partagé avec la sonde et le déploiement (600 s d'attente au plus)
+  2. contrôle de l'instantané par la commande VERIFIER de l'image déployée ; rien n'est touché s'il n'est pas conforme
+  3. arrêt de l'application
+  4. contenu courant des données mis de côté, contenu de l'instantané mis à sa place
+  5. redémarrage, puis contrôle de la santé sur 127.0.0.1:${{ prefixe }}PORT
+
+Pour l'exécuter, relancer la même commande avec --oui.
+PLAN
+}
+
+# verifier_membres <archive.tar> : les membres de l'archive, avant toute extraction : tous sous un
+# seul dossier {{ nom }}-<horodatage>/, sans chemin absolu ni « .. », et rien que des fichiers et des
+# dossiers (ni lien symbolique ou physique, ni tube, ni périphérique). Pose SOMMET, le nom de ce
+# dossier. Refus (code 1) sinon : rien n'a été extrait.
+verifier_membres() {
+  local archive="$1" noms types nom type premier i
+  local motif='^{{ nom }}-[0-9]{8}T[0-9]{6}Z$'
+  local liste_noms=() liste_types=()
+  SOMMET=""
+  # tar échappe les caractères de contrôle des noms (\n…) : un membre par ligne, dans les deux listes.
+  noms="$(tar -tf "$archive")" || arreter 1 "archive illisible : $SOURCE"
+  types="$(tar -tvf "$archive" | cut -c1)" || arreter 1 "archive illisible : $SOURCE"
+  [ -n "$noms" ] || arreter 1 "contenu inattendu dans $SOURCE : archive vide $ATTENDU"
+  mapfile -t liste_noms <<<"$noms"
+  mapfile -t liste_types <<<"$types"
+  [ "{% raw %}${#liste_noms[@]}{% endraw %}" -eq "{% raw %}${#liste_types[@]}{% endraw %}" ] \
+    || arreter 1 "archive illisible : $SOURCE (les deux listes de ses membres diffèrent)"
+  for i in "${!liste_noms[@]}"; do
+    nom="${liste_noms[i]}"
+    type="${liste_types[i]}"
+    case "$type" in
+      - | d) ;;
+      *) arreter 1 "contenu inattendu dans $SOURCE : $nom n'est ni un fichier ni un dossier (type $type : un lien, un tube…) $ATTENDU" ;;
+    esac
+    case "$nom" in
+      /*) arreter 1 "contenu inattendu dans $SOURCE : chemin absolu $nom $ATTENDU" ;;
+    esac
+    case "/$nom/" in
+      */../*) arreter 1 "contenu inattendu dans $SOURCE : $nom remonte d'un dossier (..) $ATTENDU" ;;
+    esac
+    premier="${nom%%/*}"
+    [[ "$premier" =~ $motif ]] \
+      || arreter 1 "contenu inattendu dans $SOURCE : $nom n'est pas dans un dossier {{ nom }}-<horodatage> $ATTENDU"
+    [ -z "$SOMMET" ] || [ "$premier" = "$SOMMET" ] \
+      || arreter 1 "contenu inattendu dans $SOURCE : deux dossiers, $SOMMET et $premier $ATTENDU"
+    SOMMET="$premier"
+    if [ "$nom" = "$premier" ] || [ "$nom" = "$premier/" ]; then
+      [ "$type" = d ] || arreter 1 "contenu inattendu dans $SOURCE : $premier n'est pas un dossier $ATTENDU"
+    fi
+  done
+}
+
+# preparer_archive : déchiffre l'archive, contrôle ses membres, puis l'extrait : $TMP/donnees est son
+# dossier unique.
+preparer_archive() {
+  local archive="$TMP/archive.tar"
+  mkdir -m 700 "$TMP/extrait"
+  age -d -i "$CLE" -o "$archive" "$SOURCE" \
+    || arreter 1 "déchiffrement impossible : $SOURCE (identité : $CLE)"
+  verifier_membres "$archive"
+  tar -xf "$archive" -C "$TMP/extrait" --no-same-owner --no-same-permissions \
+    || arreter 1 "extraction impossible : $SOURCE"
+  rm -f -- "$archive"
+  # Ce que tar a écrit : le seul dossier annoncé.
+  { [ "$(find "$TMP/extrait" -mindepth 1 -maxdepth 1 | wc -l)" -eq 1 ] && [ -d "$TMP/extrait/$SOMMET" ] \
+    && [ ! -L "$TMP/extrait/$SOMMET" ]; } \
+    || arreter 1 "contenu inattendu dans $SOURCE : l'extraction n'a pas donné le seul dossier $SOMMET $ATTENDU"
+  mv -- "$TMP/extrait/$SOMMET" "$TMP/donnees"
+}
+
+# preparer_dossier : copie le contenu du dossier dans $TMP/donnees.
+preparer_dossier() {
+  mkdir -m 700 "$TMP/donnees"
+  cp -R -- "$SOURCE/." "$TMP/donnees/" || arreter 1 "copie de $SOURCE impossible : rien n'a changé"
+}
+
+main() {
+  [ "$#" -ge 1 ] || arreter 64 "$USAGE"
+  reserver_a_prod "$1" restaurer.sh
+  shift
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --oui)
+        OUI=1
+        shift
+        ;;
+      --cle)
+        [ "$#" -ge 2 ] || arreter 64 "--cle demande un fichier (l'identité age). $USAGE"
+        CLE="$2"
+        shift 2
+        ;;
+      -*) arreter 64 "option inconnue : $1. $USAGE" ;;
+      *)
+        [ -z "$SOURCE" ] || arreter 64 "une seule source attendue. $USAGE"
+        SOURCE="$1"
+        shift
+        ;;
+    esac
+  done
+  [ -n "$SOURCE" ] || arreter 64 "$USAGE"
+  if [ -d "$SOURCE" ]; then
+    FORME=dossier
+  elif [[ "$SOURCE" == *.tar.age ]]; then
+    FORME=archive
+    [ -f "$SOURCE" ] || arreter 64 "archive introuvable : $SOURCE"
+  elif [ -e "$SOURCE" ]; then
+    arreter 64 "forme inconnue : '$SOURCE' (attendu : un dossier d'instantané, ou une archive .tar.age)"
+  else
+    arreter 64 "source introuvable : '$SOURCE' (attendu : un dossier d'instantané, ou une archive .tar.age)"
+  fi
+  if [ "$FORME" = archive ]; then
+    [ -n "$CLE" ] || arreter 64 "une archive .tar.age exige --cle <identité age> (la clé hors ligne, apportée pour l'occasion)"
+    # -r et non -f : /dev/stdin (un tube) ou tout autre chemin lisible, jamais un dossier. Le test ne
+    # lit rien : une identité sur l'entrée standard n'est consommée que par age.
+    { [ -r "$CLE" ] && [ ! -d "$CLE" ]; } || arreter 64 "identité age introuvable ou illisible : $CLE"
+  elif [ -n "$CLE" ]; then
+    journal "--cle ignorée : elle ne sert qu'aux archives .tar.age"
+  fi
+
+  charger_env prod
+  if [ "$OUI" -ne 1 ]; then
+    afficher_plan
+    return 64
+  fi
+
+  charger_secrets prod
+  trap sortie EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  trap 'exit 129' HUP
+  refuser_image_heritee
+
+  local etat="${{ prefixe }}ETAT" donnees="${{ prefixe }}DONNEES" revision nombre fichiers code=0
+
+  # 1. Verrou, gardé jusqu'à la fin du script.
+  prendre_verrou \
+    || arreter 1 "verrou $etat/verrou toujours pris après ${ {{- prefixe }}VERROU_ATTENTE:-600} s : restauration abandonnée, rien n'a changé"
+
+  # 2. Image en service.
+  lire_deploye \
+    || arreter 1 "restauration impossible sans version déployée : déployer d'abord (deployer.sh), puis restaurer"
+  [ -f "$etat/compose.env" ] \
+    || arreter 1 "compose.env absent ($etat) : déployer d'abord (deployer.sh), puis restaurer"
+  journal "restauration de prod depuis $SOURCE (image $DEPLOYE_IMAGE, version $DEPLOYE_VERSION)"
+
+  # 3. L'instantané, dans un dossier temporaire privé.
+  TMP="$(umask 077 && mktemp -d "${TMPDIR:-/tmp}/{{ nom }}-restauration.XXXXXX")" \
+    || arreter 1 "dossier temporaire impossible dans ${TMPDIR:-/tmp}"
+  if [ "$FORME" = archive ]; then
+    preparer_archive
+  else
+    preparer_dossier
+  fi
+  [ -n "$(find "$TMP/donnees" -mindepth 1 -print -quit)" ] \
+    || arreter 1 "instantané vide : $SOURCE : rien n'a changé"
+  [ -z "$(find "$TMP/donnees" -mindepth 1 ! -type f ! -type d -print -quit)" ] \
+    || arreter 1 "contenu inattendu dans $SOURCE : des entrées ne sont ni des fichiers ni des dossiers (liens…) : rien n'a changé"
+  nombre="$(find "$TMP/donnees" -type f | wc -l)"
+  fichiers="$nombre fichier"
+  [ "$nombre" -le 1 ] || fichiers="${fichiers}s"
+
+  # 4. Contrôle par la commande VERIFIER de l'image.
+  verifier_copie "$DEPLOYE_IMAGE" "$TMP/donnees" || code=$?
+  case "$code" in
+    0) ;;
+    2) arreter 1 "$SOURCE non conforme : rien n'a changé (le détail est dans le journal)" ;;
+    *) arreter 1 "vérification de $SOURCE impossible : rien n'a changé (le détail est dans le journal)" ;;
+  esac
+  journal "instantané conforme : $SOURCE ($fichiers)"
+
+  # 5. Tout ce qui peut échouer sans toucher à l'application.
+  AVANT="${{ prefixe }}SAUVEGARDES/avant-restauration-$(date -u +%Y%m%dT%H%M%SZ)"
+  mkdir -m 700 "$AVANT" || arreter 1 "dossier $AVANT impossible à créer : rien n'a changé"
+  NOUVELLE="$donnees.nouvelle"
+  # Le reste d'une restauration interrompue (un déplacement tué par SIGKILL ou un plantage de
+  # l'hôte, hors de portée du trap) : rien de lui ne doit entrer dans les données. On le retire ici,
+  # application encore en service.
+  if [ -e "$NOUVELLE" ] || [ -L "$NOUVELLE" ]; then
+    retirer "$NOUVELLE" \
+      || arreter 1 "reste d'une restauration interrompue ($NOUVELLE) impossible à retirer : rien n'a changé, l'application n'a pas été arrêtée"
+    journal "reste d'une restauration interrompue retiré : $NOUVELLE"
+  fi
+  cp -R -- "$TMP/donnees" "$NOUVELLE" \
+    || arreter 1 "copie vers $NOUVELLE impossible : rien n'a changé, l'application n'a pas été arrêtée"
+
+  # 6. Arrêt. La phase est posée avant : un arrêt à moitié raté doit aussi être suivi d'une relance.
+  PHASE=arretee
+  journal "arrêt de l'application"
+  dc stop app || arreter 1 "arrêt de l'application impossible (docker compose stop : code $?)"
+
+  # 7. L'ancien contenu, entier, est gardé.
+  if [ -n "$(find "$donnees" -mindepth 1 -print -quit)" ]; then
+    ANCIEN=1
+  fi
+  PHASE=deplacee
+  deplacer_contenu "$donnees" "$AVANT" \
+    || arreter 1 "mise de côté du contenu courant de $donnees impossible"
+  if [ "$ANCIEN" -eq 1 ]; then
+    journal "ancien contenu gardé dans $AVANT"
+  else
+    journal "aucun ancien contenu à garder"
+  fi
+  [ -z "$(find "$donnees" -mindepth 1 -print -quit)" ] \
+    || arreter 1 "$donnees n'est pas vide après la mise de côté : l'instantané n'est pas mis en place"
+
+  # 8. Mise en place, redémarrage, santé.
+  INSTALLATION=1
+  deplacer_contenu "$NOUVELLE" "$donnees" \
+    || arreter 1 "mise en place de l'instantané impossible"
+  PHASE=installee
+  rmdir -- "$NOUVELLE" || journal "$NOUVELLE non retiré : à retirer avant la prochaine restauration"
+  NOUVELLE=""
+  journal "démarrage de l'application"
+  dc start app \
+    || arreter 1 "redémarrage de l'application impossible (docker compose start app : code $?) : l'instantané est en place, $(ancien_contenu)"
+  PHASE=demarree
+  revision="$(revision_de "$DEPLOYE_IMAGE")" \
+    || arreter 1 "révision de l'image $DEPLOYE_IMAGE illisible : l'instantané est en place, $(ancien_contenu)"
+  # shellcheck disable=SC2016  # $version et $revision sont des variables de jq (--arg)
+  attendre_sante "${{ prefixe }}PORT" '.statut == "ok" and .version == $version and .revision == $revision' \
+    --arg version "$DEPLOYE_VERSION" --arg revision "$revision" \
+    || arreter 1 "santé non conforme après la restauration : l'instantané est en place, $(ancien_contenu)$(conseil_de_retour)"
+
+  journal "restauration terminée : $SOURCE ; $(ancien_contenu)"
+  return 0
+}
+
+# Tout le corps est dans main, appelée sur la dernière ligne : bash a lu tout le fichier avant
+# qu'un `git checkout` ne le remplace.
+main "$@"; exit $?

@@ -1,6 +1,11 @@
 {#- Gabarit Copier. `${ {{- prefixe }}X}` : l'espace et le tiret évitent `${{{`, que Jinja lit mal. -#}
 #!/usr/bin/env bats
+{%- if sauvegardes %}
+# lib.sh : charger_env, dc, projet.env, signaler, journal, santé, verrou, état déployé, vérification
+# d'une copie. (charger_secrets : voir secrets.bats.)
+{%- else %}
 # lib.sh : charger_env, dc, projet.env, signaler, journal, santé, verrou, état déployé. (charger_secrets : voir secrets.bats.)
+{%- endif %}
 
 # Chaque test tourne dans son propre processus : les `export` d'un test ne fuient pas dans les autres
 # (SC2030, SC2031). Le code de avec_lib est entre apostrophes pour se développer dans le sous-shell
@@ -534,3 +539,51 @@ projet_env() {
     [[ "$output" == *"deploye illisible"* ]]
   done
 }
+{%- if sauvegardes %}
+
+# --- verifier_copie : la commande VERIFIER de l'image, sur un dossier qui a la forme de /donnees ---
+# Le contrat de l'instantané : `<VERIFIER…> <dossier>` rend 0 (conforme), 2 (non conforme) ou 64
+# (usage). Seul le code fait foi.
+
+@test "verifier_copie_lance_verifier_dans_un_conteneur_jetable" {
+  local image
+  image="ghcr.io/edouardzemb/{{ nom }}@sha256:$(printf 'a%.0s' {1..64})"
+  projet_env "SAUVEGARDER=outil sauvegarder" "VERIFIER=outil verifier --strict"
+  creer_double docker 'echo "conforme : 3 fichiers"'
+  run --separate-stderr bash -c 'set -euo pipefail; . "$CLONE/deploiement/lib.sh"; verifier_copie '"$image"' /un/dossier'
+  [ "$status" -eq 0 ]
+  # rien sur stdout : la sortie de la commande va au journal
+  [ -z "$output" ]
+  # shellcheck disable=SC2154  # $stderr est posée par run --separate-stderr
+  [[ "$stderr" == *"copie conforme (verifier : code 0) : conforme : 3 fichiers"* ]]
+  # un conteneur jetable, avec les restrictions du service, qui ne voit que ce dossier, sur
+  # /donnees ; la commande de projet.env mot à mot, puis /donnees
+  [ "$(appels_de docker)" = "docker run --rm --user 1000:1000 --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true --memory 384m -v /un/dossier:/donnees $image outil verifier --strict /donnees" ]
+}
+
+@test "verifier_copie_rend_0_2_ou_1_selon_le_code_de_verifier" {
+  local image code
+  image="ghcr.io/edouardzemb/{{ nom }}@sha256:$(printf 'a%.0s' {1..64})"
+  projet_env "VERIFIER=outil verifier"
+  # 2 : l'image dit « non conforme » ; la sortie va au journal, rien sur stdout
+  creer_double docker 'echo "écart : donnees.txt"; exit 2'
+  run --separate-stderr bash -c 'set -euo pipefail; . "$CLONE/deploiement/lib.sh"; verifier_copie '"$image"' /d'
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  [[ "$stderr" == *"copie non conforme (verifier : code 2) : écart : donnees.txt"* ]]
+  # 64 (usage refusé par l'image), ou tout autre code : la vérification n'a pas eu lieu
+  for code in 64 1 125; do
+    creer_double docker 'echo "usage : outil <commande>"; exit '"$code"
+    avec_lib 'verifier_copie '"$image"' /d'
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"vérification impossible (verifier : code $code)"*"usage : outil <commande>"* ]]
+  done
+  # sans commande VERIFIER dans projet.env, rien n'est lancé
+  : >"$APPELS"
+  projet_env "SAUVEGARDER=outil sauvegarder"
+  avec_lib 'verifier_copie '"$image"' /d'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"réglage VERIFIER absent"* ]]
+  [ "$(nombre_d_appels docker)" -eq 0 ]
+}
+{%- endif %}
