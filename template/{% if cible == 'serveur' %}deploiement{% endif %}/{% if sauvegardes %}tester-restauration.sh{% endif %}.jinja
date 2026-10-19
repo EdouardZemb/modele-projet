@@ -4,7 +4,7 @@
 # conteneur jetable, contrôlée, et l'application y démarre (M-0005). Une sauvegarde qu'on n'a
 # jamais relue ne prouve rien.
 #
-#   tester-restauration.sh prod
+#   bash deploiement/tester-restauration.sh prod
 #
 # Lancé chaque dimanche par {{ nom }}-test-restauration.timer. Réservé à la prod (code 64).
 #
@@ -97,7 +97,7 @@ dernier_instantane() {
 }
 
 main() {
-  [ "$#" -eq 1 ] || arreter 64 "usage : tester-restauration.sh prod"
+  [ "$#" -eq 1 ] || arreter 64 "usage : bash deploiement/tester-restauration.sh prod"
   reserver_a_prod "$1" tester-restauration.sh
   # Les secrets de ce déploiement font seuls foi : rien d'hérité du shell.
   unset HC_TEST_RESTAURATION

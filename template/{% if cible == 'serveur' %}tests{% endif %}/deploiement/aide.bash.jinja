@@ -247,6 +247,31 @@ aucune_ligne() {
   fi
 }
 
+{%- if sauvegardes %}
+
+# --- Horloge des instantanés (déploiement, sauvegarde) ----------------------------------------
+
+# horloge_qui_avance : l'horodatage d'un instantané (à la seconde) avance à chaque appel. Des
+# déploiements ou des sauvegardes qui se suivent en moins d'une seconde, comme ici avec des doubles,
+# viseraient sinon le même dossier, que la commande de l'image refuse d'écraser. Les autres appels de
+# `date` sont ceux de la vraie.
+horloge_qui_avance() {
+  local reel
+  reel="$(command -v date)"
+  cat >"$DOUBLES/date" <<EOF
+#!/usr/bin/env bash
+if [ "\$*" = '-u +%Y%m%dT%H%M%SZ' ]; then
+  n=\$(( \$(cat '$BATS_TEST_TMPDIR/horloge' 2>/dev/null || echo 0) + 1 ))
+  echo "\$n" >'$BATS_TEST_TMPDIR/horloge'
+  printf '20261015T%06dZ\n' "\$n"
+else
+  exec '$reel' "\$@"
+fi
+EOF
+  chmod +x "$DOUBLES/date"
+}
+{%- endif %}
+
 # --- Verrou tenu par un autre processus (sauvegarde, restauration, lib) -------------------------
 
 # tenir_le_verrou <fichier> : un autre script tient ce verrou jusqu'à relacher_le_verrou.

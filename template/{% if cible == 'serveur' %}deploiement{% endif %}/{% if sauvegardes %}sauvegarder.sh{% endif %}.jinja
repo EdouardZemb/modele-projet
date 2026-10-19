@@ -3,7 +3,7 @@
 # Sauvegarde nocturne des données de prod : un instantané en clair gardé 30 jours sur le serveur, et
 # sa copie chiffrée pour la clé hors ligne, envoyée au distant et gardée 90 jours (M-0005).
 #
-#   sauvegarder.sh prod
+#   bash deploiement/sauvegarder.sh prod
 #
 # Lancé chaque nuit par {{ nom }}-sauvegarde.timer. Réservé à la prod : le staging n'a que des données
 # factices (code 64).
@@ -17,17 +17,19 @@
 #   1. verrou ${{ prefixe }}ETAT/verrou, partagé avec la sonde, le déploiement et la restauration (600 s
 #      d'attente au plus) : pendant un déploiement ou une restauration, les données bougent ;
 #   2. nom {{ nom }}-<AAAAMMJJTHHMMSSZ> (UTC) ; un dossier déjà présent à ce nom, ou à ce nom suivi
-#      de .partiel, est une erreur : rien n'est écrasé ;
+#      de .partiel, est une erreur : rien n'est écrasé. Puis les .partiel des sauvegardes en échec
+#      sont retirés de quotidiennes/ : il n'en reste que celui de la dernière (R31). Un retrait
+#      impossible est journalisé et n'arrête rien ;
 #   3. instantané dans le conteneur : `<SAUVEGARDER…> /sauvegardes/quotidiennes/<nom>.partiel`, qui
 #      crée ce dossier, à la forme de /donnees (le contrat de l'image, M-0003). Le code de sortie
 #      d'abord (0, sinon échec), puis le dossier lui-même : un dossier, non vide, fait de fichiers et
 #      de dossiers seulement (restaurer.sh refuse tout le reste) ; jamais le seul code 0. La sortie
 #      de la commande n'est pas interprétée : elle va au journal. Contrôlé, le dossier prend son nom,
-#      <nom> (`mv -T`). Une sauvegarde en échec garde le suffixe .partiel, pour le diagnostic : le
-#      test de restauration et la restauration ne le prennent jamais, et la rétention l'efface comme
-#      les autres. Le verrou est relâché dès que l'instantané est en place : la suite (chiffrement,
-#      envoi, rétention) ne lit plus les données, et un déploiement ou la sonde n'ont pas à attendre
-#      les quotas et les reprises du distant ;
+#      <nom> (`mv -T`). Une sauvegarde en échec garde le suffixe .partiel, pour le diagnostic,
+#      jusqu'à la suivante (étape 2) : le test de restauration et la restauration ne le prennent
+#      jamais, et la rétention l'efface comme les autres. Le verrou est relâché dès que l'instantané
+#      est en place : la suite (chiffrement, envoi, rétention) ne lit plus les données, et un
+#      déploiement ou la sonde n'ont pas à attendre les quotas et les reprises du distant ;
 #   4. archive tar du dossier (`tar --hard-dereference -C quotidiennes -cf - <nom>` : tous ses
 #      membres sont sous <nom>/, et un lien physique y est un fichier ordinaire, que restaurer.sh
 #      accepte), chiffrée par `age -R deploiement/cles/hors-ligne.pub`, dans un dossier temporaire
@@ -125,7 +127,7 @@ retention_locale() {
 }
 
 main() {
-  [ "$#" -eq 1 ] || arreter 64 "usage : sauvegarder.sh prod"
+  [ "$#" -eq 1 ] || arreter 64 "usage : bash deploiement/sauvegarder.sh prod"
   reserver_a_prod "$1" sauvegarder.sh
   # Les secrets de ce déploiement font seuls foi : rien d'hérité du shell.
   unset HC_SAUVEGARDE
@@ -172,6 +174,11 @@ main() {
     || echouer "droits de ${{ prefixe }}SAUVEGARDES impossibles à restreindre"
   if [ -e "$instantane" ] || [ -L "$instantane" ] || [ -e "$partiel" ] || [ -L "$partiel" ]; then
     echouer "$instantane existe déjà (ou $partiel) : rien n'est écrasé, rien n'est sauvegardé"
+  fi
+  # R31 : la rétention ne tourne qu'après un envoi réussi ; sans ce retrait, chaque nuit en échec
+  # laisserait son .partiel, une copie en clair des données.
+  if ! retirer_partiels "$quotidiennes" '^{{ nom }}-[0-9]{8}T[0-9]{6}Z\.partiel$'; then
+    journal "sauvegardes en échec de $quotidiennes : retrait impossible, plus d'un .partiel y reste ; la sauvegarde se fait quand même"
   fi
   journal "sauvegarde $nom"
 

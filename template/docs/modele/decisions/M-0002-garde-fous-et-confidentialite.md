@@ -62,10 +62,14 @@ pas de la discipline de celui qui travaille ?
 - **Qui fusionne : la réponse `fusion`** (amendement du 2026-10-18), choisie à la création du
   projet. En mode `session`, la session fusionne sa PR une fois tous les contrôles verts. En mode
   `edouard`, elle ouvre la PR, attend le vert, le dit et s'arrête : le garde refuse toute fusion,
-  par `gh pr merge` (`--auto` et `--admin` compris), par l'API ou par GraphQL. Le garde lit le mode
-  sur GitHub, dans le `.copier-answers.yml` de la branche principale, jamais dans la copie locale
-  ni dans `origin/<branche>`, qu'une session peut réécrire. Tout ce qui est illisible vaut
-  `edouard`.
+  par `gh pr merge` (`--auto` et `--admin` compris), par l'API ou par GraphQL. Le mode lui-même se
+  lit sur GitHub, par l'API (`gh api`), dans le `.copier-answers.yml` de la branche principale, et
+  non dans celui de la copie locale ni dans `origin/<branche>`, qu'une session peut réécrire. Tout
+  ce qui est illisible vaut `edouard`. Deux entrées restent locales : le nom de la branche passée
+  en `ref=` vient des réglages de la copie (`BRANCHE_PRINCIPALE`, dans
+  `scripts/modele/reglages.py`, ou l'option `--branche` du garde) ; et l'option `--fusion` du
+  garde, posée sur la commande du hook dans un `settings.json` de la copie, l'emporte sur cette
+  lecture.
 - **Les étiquettes et les publications sont à Edouard**, dans les deux modes (amendement du
   2026-10-18) : une étiquette `vX.Y.Z` met un projet `serveur` en production. Le garde refuse
   l'envoi d'une étiquette et toute écriture de publication (`gh release` en écriture, l'API

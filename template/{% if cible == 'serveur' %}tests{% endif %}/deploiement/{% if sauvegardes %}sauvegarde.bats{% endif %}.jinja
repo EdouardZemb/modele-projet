@@ -308,6 +308,68 @@ exec '"$vrai"' "$@"'
   [ -z "$(appels_de rclone)" ]
 }
 
+# R31 : seule la dernière sauvegarde en échec garde son .partiel. Chaque nuit en échec laisserait
+# sinon une copie en clair de plus, que la rétention, qui ne tourne qu'après un envoi réussi,
+# n'efface jamais. Avant chaque instantané, les .partiel de quotidiennes/ sont retirés. Une
+# sauvegarde complète, ou un nom d'une autre forme, ne part jamais, et un lien n'est pas suivi.
+@test "sauvegarde_ne_garde_que_le_dernier_partiel" {
+  local q="$SAUVEGARDES/quotidiennes" complet ailleurs nom partiels _
+  local autres=()
+  complet="{{ nom }}-$(il_y_a 1)"
+  instantane "$complet"
+  autres=("$complet.partiel.copie" autre.partiel "x$complet.partiel" "autre-projet-$(il_y_a 2).partiel")
+  for nom in "${autres[@]}"; do
+    mkdir -p "$q/$nom"
+    echo "$nom" >"$q/$nom/donnees.txt"
+  done
+  # un ancien .partiel qui est un fichier part aussi ; un lien au nom d'un .partiel reste, et ce
+  # qu'il désigne n'est pas touché
+  echo "fichier" >"$q/{{ nom }}-$(il_y_a 3).partiel"
+  ailleurs="$BATS_TEST_TMPDIR/ailleurs"
+  mkdir -p "$ailleurs"
+  echo "à garder" >"$ailleurs/donnees.txt"
+  ln -s "$ailleurs" "$q/{{ nom }}-$(il_y_a 4).partiel"
+  horloge_qui_avance
+  for _ in 1 2; do
+    DOUBLE_DOCKER_SAUVEGARDE_FORME=partielle sauvegarder prod
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"instantané impossible (code 1)"* ]]
+  done
+  # un seul .partiel qui ne soit pas un lien : celui de la seconde nuit, intact
+  partiels="$(find "$q" -mindepth 1 -maxdepth 1 ! -type l -regextype posix-extended \
+    -regex '.*/{{ nom }}-[0-9]{8}T[0-9]{6}Z\.partiel')"
+  [ "$partiels" = "$q/{{ nom }}-20261015T000002Z.partiel" ]
+  [ -f "$q/{{ nom }}-20261015T000002Z.partiel/donnees.txt" ]
+  # la sauvegarde complète et les autres noms restent, en entier ; le lien et sa cible aussi
+  [ "$(cat "$q/$complet/donnees.txt")" = "instantané de test $complet" ]
+  [ -f "$q/$complet/sous/profond.txt" ]
+  for nom in "${autres[@]}"; do
+    [ "$(cat "$q/$nom/donnees.txt")" = "$nom" ]
+  done
+  [ "$(find "$q" -mindepth 1 -maxdepth 1 -type l | wc -l)" -eq 1 ]
+  [ "$(cat "$ailleurs/donnees.txt")" = "à garder" ]
+  [ "$(nombre_d_entrees "$q")" -eq 7 ]
+  [ -z "$(appels_de rclone)" ]
+  [ "$(envois_echec "$HC_SAUVEGARDE" | wc -l)" -eq 2 ]
+}
+
+# Un .partiel qui ne peut pas être retiré est journalisé, et la sauvegarde se fait quand même.
+@test "sauvegarde_se_fait_meme_si_un_ancien_partiel_ne_part_pas" {
+  local q="$SAUVEGARDES/quotidiennes" ancien
+  ancien="{{ nom }}-$(il_y_a 1).partiel"
+  mkdir -p "$q/$ancien/verrouille"
+  echo "reste" >"$q/$ancien/verrouille/donnees.txt"
+  # un sous-dossier sans droit d'écriture : rm -rf ne peut pas le vider (teardown rend les droits)
+  chmod 500 "$q/$ancien/verrouille"
+  sauvegarder prod
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"sauvegardes en échec de $q : retrait impossible"* ]]
+  [ -f "$q/$ancien/verrouille/donnees.txt" ]
+  [ "$(nombre_d_entrees "$DISTANT")" -eq 1 ]
+  [ "$(envois_ok "$HC_SAUVEGARDE" | wc -l)" -eq 1 ]
+  [ -z "$(envois_echec "$HC_SAUVEGARDE")" ]
+}
+
 # Une destination déjà présente, sous son nom définitif ou provisoire, est une erreur : rien n'est
 # écrasé, et la commande n'est pas lancée.
 @test "sauvegarde_ne_reutilise_jamais_une_destination" {

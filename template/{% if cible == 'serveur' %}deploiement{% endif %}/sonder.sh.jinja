@@ -3,7 +3,7 @@
 # Elle suit la cible de l'environnement, déploie toute nouvelle image par deployer.sh, et sinon
 # contrôle la version en service.
 #
-#   sonder.sh <prod|staging>
+#   bash deploiement/sonder.sh <prod|staging>
 #
 # Déroulé :
 {%- if sauvegardes %}
@@ -133,7 +133,7 @@ controler_adresse_publique() {
 }
 
 main() {
-  [ "$#" -eq 1 ] || arreter 64 "usage : sonder.sh <prod|staging>"
+  [ "$#" -eq 1 ] || arreter 64 "usage : bash deploiement/sonder.sh <prod|staging>"
   local nom_env="$1"
   charger_env "$nom_env"
   charger_secrets "$nom_env"
