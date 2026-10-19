@@ -151,6 +151,40 @@ nombre_de_lancements() {
   [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
 }
 
+# I3 : `sauvegardes` passe de non à oui sur un projet en service. La version en service a été
+# lancée sans le montage /sauvegardes, et son compose.env n'a pas {{ prefixe }}SAUVEGARDES (ou l'a
+# vide) : la commande SAUVEGARDER, lancée dans son conteneur, échouerait à chaque passage de la
+# sonde, et plus rien ne se déploierait. Pas d'instantané, et le journal le dit ; la version qui
+# arrive monte /sauvegardes, et le déploiement suivant prend le sien.
+@test "pas_d_instantane_si_la_version_en_service_ne_monte_pas_les_sauvegardes" {
+  local cas suivante pre="${{ prefixe }}RACINE_SAUVEGARDES/pre-deploiement"
+  suivante="ghcr.io/edouardzemb/{{ nom }}@sha256:$(printf '3%.0s' {1..64})"
+  for cas in absente vide; do
+    rm -rf "$ETAT" "$pre"
+    : >"$APPELS"
+    deja_en_service "$ANCIENNE" 0.1.0
+    if [ "$cas" = absente ]; then
+      sed -i '/^{{ prefixe }}SAUVEGARDES=/d' "$ETAT/compose.env"
+    else
+      sed -i 's/^{{ prefixe }}SAUVEGARDES=.*/{{ prefixe }}SAUVEGARDES=/' "$ETAT/compose.env"
+    fi
+    deployer prod "$NOUVELLE" 0.2.0
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"la version en service ne monte pas /sauvegardes : pas d'instantané"* ]]
+    [ "$(appels_de docker | grep -c ' exec ')" -eq 0 ]
+    [ ! -e "$pre" ]
+    [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+    [ "$(cat "$ETAT/compose.env")" = "$(contenu_compose_env prod "$NOUVELLE" 0.2.0)" ]
+    [ "$(signaux)" = "$(signal 'déployé 0.2.0') $HC" ]
+  done
+  # la version déployée monte /sauvegardes : le déploiement suivant prend son instantané
+  : >"$APPELS"
+  deployer prod "$suivante" 0.3.0
+  [ "$status" -eq 0 ]
+  [ "$(appels_de docker | grep -c ' exec -T app ')" -eq 1 ]
+  [ -n "$(find "$pre" -mindepth 1 -maxdepth 1 -type d -regextype posix-extended -regex '.*/[0-9]{8}T[0-9]{6}Z')" ]
+}
+
 # --- instantané ------------------------------------------------------------------------------
 
 # Migration 4 : l'instantané d'avant déploiement est un dossier qui a la forme de /donnees, sous

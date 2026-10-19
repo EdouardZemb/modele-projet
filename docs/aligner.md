@@ -191,6 +191,28 @@ qu'au §1, dans un worktree `<dépôt>.worktrees\modele-serveur`.
       `projets/<nom>.env` déclare ce qui existe, et la sonde de `serveur` n'y crée rien.
 - [ ] `gh pr checks` entièrement vert : `socle`, `verifier`, `deploiement` et `image`.
 
+### Activer les sauvegardes sur un projet en service
+
+Pour un projet `serveur` en service, rendu avec `sauvegardes=false` : `copier update --defaults
+--vcs-ref <étiquette> --data sauvegardes=true`. La mise à jour apporte les scripts, les unités et
+le montage `/sauvegardes`, mais elle ne remplit pas les fichiers semés.
+
+- [ ] **`deploiement/projet.env`**, semé : y déclarer les deux commandes de l'image,
+      `SAUVEGARDER=<mots>` et `VERIFIER=<mots>` (M-0003). Sans elles, le job `image` refuse
+      l'image (`deploiement/ci/verifier-image.sh`).
+- [ ] **`deploiement/secrets/prod.cles`**, semé : y ajouter `HC_SAUVEGARDE` et
+      `HC_TEST_RESTAURATION`, que le contrôle des secrets de la CI exige (`SECRETS_EXIGES`, dans
+      `scripts/modele/reglages.py`). Puis 👤 les deux contrôles Healthchecks, et `secrets.ps1
+      refaire` pour la prod, avec leurs adresses.
+- [ ] **Avant l'étiquette**, une PR dans `serveur` qui ajoute les heures `SAUVEGARDE` et
+      `TEST_RESTAURATION` à `projets/<nom>.env` : sans elles, `installer-unites.sh` refuse, et la
+      sonde de prod ne déploie pas la version.
+- [ ] **Le premier déploiement ne prend pas d'instantané** : la version qu'il remplace ne monte pas
+      `/sauvegardes`. `deployer.sh` le dit au journal (« la version en service ne monte pas
+      /sauvegardes : pas d'instantané ») et continue. Les déploiements suivants prennent le leur.
+- [ ] Ensuite, 👤 une fois, sur le serveur, la première sauvegarde et le test de restauration,
+      comme à l'étape 6 de la mise en service (`docs/exploitation.md`).
+
 ### Revenir en cible `aucune`
 
 `copier update --data cible=aucune` retire `deploiement/`, `tests/deploiement/`, `.sops.yaml` et

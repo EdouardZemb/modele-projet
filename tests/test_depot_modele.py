@@ -182,6 +182,13 @@ def test_liste_d_alignement():
         "se fusionne à la main",
         "--data fusion=<session|edouard>",
         "que le modèle ne sème pas",
+        # I3 : activer les sauvegardes sur un projet en service
+        "### Activer les sauvegardes sur un projet en service",
+        "--data sauvegardes=true",
+        "`SAUVEGARDER=<mots>` et `VERIFIER=<mots>`",
+        "`HC_TEST_RESTAURATION`",
+        "`TEST_RESTAURATION` à `projets/<nom>.env`",
+        "Le premier déploiement ne prend pas d'instantané",
     ):
         assert fragment in texte, fragment
     # avant le commit, --diff compare <base>...HEAD et n'examine rien (LE-15)
