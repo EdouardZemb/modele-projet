@@ -256,6 +256,79 @@ nombre_de_lancements() {
   [ "$(signaux)" = "$(signal 'déployé 0.2.0') $HC" ]
 }
 
+# R31 : un instantané en échec garde son nom provisoire, pour le diagnostic (R13), mais la sonde
+# retente le déploiement toutes les 5 minutes, et chaque tentative laisserait le sien : 12 copies
+# en clair par heure. Avant chaque instantané, les .partiel de pre-deploiement/ sont retirés ; seul
+# reste celui de la dernière tentative. Un instantané complet, ou un nom d'une autre forme, ne part
+# jamais, et un lien n'est pas suivi.
+@test "deployer_ne_garde_que_le_dernier_instantane_partiel" {
+  deja_en_service "$ANCIENNE" 0.1.0
+  local pre="${{ prefixe }}RACINE_SAUVEGARDES/pre-deploiement" complet ailleurs nom partiels _
+  local autres=()
+  complet="$(date -u -d '1 hour ago' +%Y%m%dT%H%M%SZ)"
+  autres=("$complet.partiel.copie" autre.partiel "x$complet.partiel" "${complet%Z}.partiel")
+  for nom in "$complet" "${autres[@]}"; do
+    mkdir -p "$pre/$nom/sous"
+    echo "$nom" >"$pre/$nom/sous/donnees.txt"
+  done
+  # un ancien .partiel qui est un fichier part aussi ; un lien au nom d'un .partiel reste, et ce
+  # qu'il désigne n'est pas touché
+  echo "fichier" >"$pre/$(date -u -d '2 hours ago' +%Y%m%dT%H%M%SZ).partiel"
+  ailleurs="$BATS_TEST_TMPDIR/ailleurs"
+  mkdir -p "$ailleurs"
+  echo "à garder" >"$ailleurs/donnees.txt"
+  ln -s "$ailleurs" "$pre/$(date -u -d '3 hours ago' +%Y%m%dT%H%M%SZ).partiel"
+  horloge_qui_avance
+  export DOUBLE_DOCKER_SAUVEGARDE_FORME=partielle
+  for _ in 1 2; do
+    deployer prod "$NOUVELLE" 0.2.0
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"instantané impossible (code 1)"* ]]
+  done
+  # un seul .partiel qui ne soit pas un lien : celui de la seconde tentative, intact
+  partiels="$(find "$pre" -mindepth 1 -maxdepth 1 ! -type l -regextype posix-extended \
+    -regex '.*/[0-9]{8}T[0-9]{6}Z\.partiel')"
+  [ "$partiels" = "$pre/20261015T000002Z.partiel" ]
+  [ -f "$pre/20261015T000002Z.partiel/donnees.txt" ]
+  # l'instantané complet et les autres noms restent, en entier ; le lien et sa cible aussi
+  for nom in "$complet" "${autres[@]}"; do
+    [ "$(cat "$pre/$nom/sous/donnees.txt")" = "$nom" ]
+  done
+  [ "$(find "$pre" -mindepth 1 -maxdepth 1 -type l | wc -l)" -eq 1 ]
+  [ "$(cat "$ailleurs/donnees.txt")" = "à garder" ]
+  [ "$(find "$pre" -mindepth 1 -maxdepth 1 | wc -l)" -eq 7 ]
+  # rien n'a changé : la version en service y reste
+  [ "$(cat "$ETAT/deploye")" = "$ANCIENNE 0.1.0" ]
+  # la tentative suivante réussit : le .partiel d'avant part, l'instantané complet reste
+  unset DOUBLE_DOCKER_SAUVEGARDE_FORME
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 0 ]
+  [ -z "$(find "$pre" -mindepth 1 -maxdepth 1 ! -type l -regextype posix-extended \
+    -regex '.*/[0-9]{8}T[0-9]{6}Z\.partiel')" ]
+  [ "$(cat "$pre/$complet/sous/donnees.txt")" = "$complet" ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+}
+
+# Un .partiel qui ne peut pas être retiré est journalisé, et l'instantané se fait quand même : le
+# retrait ne sert qu'à borner la place prise, il ne change rien à la version.
+@test "deployer_instantane_meme_si_un_ancien_partiel_ne_part_pas" {
+  deja_en_service "$ANCIENNE" 0.1.0
+  local pre="${{ prefixe }}RACINE_SAUVEGARDES/pre-deploiement" ancien
+  ancien="$(date -u -d '1 hour ago' +%Y%m%dT%H%M%SZ).partiel"
+  mkdir -p "$pre/$ancien/verrouille"
+  echo "reste" >"$pre/$ancien/verrouille/donnees.txt"
+  # un sous-dossier sans droit d'écriture : rm -rf ne peut pas le vider
+  chmod 500 "$pre/$ancien/verrouille"
+  deployer prod "$NOUVELLE" 0.2.0
+  chmod 700 "$pre/$ancien/verrouille"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"instantanés en échec de $pre : retrait impossible"* ]]
+  [ -f "$pre/$ancien/verrouille/donnees.txt" ]
+  [ -n "$(find "$pre" -mindepth 1 -maxdepth 1 -type d -regextype posix-extended -regex '.*/[0-9]{8}T[0-9]{6}Z')" ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+  [ "$(signaux)" = "$(signal 'déployé 0.2.0') $HC" ]
+}
+
 # Un instantané en échec annule le déploiement avant tout changement : rien n'est arrêté ni lancé,
 # l'application en service y reste, et rien n'est marqué en échec. La sonde réessaiera au prochain
 # passage. Les cas :
@@ -534,28 +607,6 @@ exec '$DOUBLES/docker-double' \"\$@\""
 # Revenir à la version de `precedent`. La version quittée est écrite dans `echec` avant tout
 # changement, et gardée : sans cela, la sonde (qui vise la plus haute étiquette) la redéploierait au
 # passage suivant.
-{%- if sauvegardes %}
-
-# horloge_qui_avance : l'horodatage d'un instantané (à la seconde) avance à chaque appel. Des
-# déploiements qui se suivent en moins d'une seconde, comme ici avec des doubles, viseraient sinon le
-# même dossier, que la commande de l'image refuse d'écraser. Les autres appels de `date` sont ceux
-# de la vraie.
-horloge_qui_avance() {
-  local reel
-  reel="$(command -v date)"
-  cat >"$DOUBLES/date" <<EOF
-#!/usr/bin/env bash
-if [ "\$*" = '-u +%Y%m%dT%H%M%SZ' ]; then
-  n=\$(( \$(cat '$BATS_TEST_TMPDIR/horloge' 2>/dev/null || echo 0) + 1 ))
-  echo "\$n" >'$BATS_TEST_TMPDIR/horloge'
-  printf '20261015T%06dZ\n' "\$n"
-else
-  exec '$reel' "\$@"
-fi
-EOF
-  chmod +x "$DOUBLES/date"
-}
-{%- endif %}
 
 # deux_versions : 0.1.0 (ANCIENNE) puis 0.2.0 (NOUVELLE) déployées pour de bon, comme sur une prod où
 # 0.2.0 pose problème. Les appels sont remis à zéro.

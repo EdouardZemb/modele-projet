@@ -38,6 +38,7 @@
 {%- if sauvegardes %}
 #   verifier_copie <image> <dossier>   contrôle d'un dossier qui a la forme de /donnees, par la commande VERIFIER
 #   purger_par_nom <dossier> <regex> <limite>  retire les dossiers dont le nom date d'avant <limite>
+#   retirer_partiels <dossier> <regex> retire les instantanés en échec (.partiel) avant un nouvel essai
 # Variables posées : {{ prefixe }}CLONE (racine du clone qui lance le script) et {{ prefixe }}OPTIONS_JETABLES
 # (options des conteneurs jetables).
 {%- else %}
@@ -371,6 +372,24 @@ purger_par_nom() {
     [[ "${BASH_REMATCH[1]}" < "$limite" ]] || continue
     rm -rf -- "$chemin" || return 1
   done
+}
+
+# retirer_partiels <dossier> <regex> : retire de <dossier> les instantanés en échec, les entrées
+# dont le nom suit <regex> et finit par .partiel, dossiers emportés en entier. À appeler juste
+# avant un nouvel instantané : il ne reste alors que le .partiel de la dernière tentative, pour le
+# diagnostic (R13), et non un par tentative (R31). Ni un lien (jamais suivi), ni un nom d'une autre
+# forme, ni un instantané complet. Chaque entrée est tentée ; échec si l'une n'a pas pu partir.
+# Utilisée par deployer.sh (pre-deploiement/) et sauvegarder.sh (quotidiennes/).
+retirer_partiels() {
+  local dossier="$1" motif="$2" chemin code=0
+  [ -d "$dossier" ] || return 0
+  for chemin in "$dossier"/*.partiel; do
+    [ ! -L "$chemin" ] || continue
+    { [ -d "$chemin" ] || [ -f "$chemin" ]; } || continue
+    [[ "${chemin##*/}" =~ $motif ]] || continue
+    rm -rf -- "$chemin" || code=1
+  done
+  return "$code"
 }
 {%- endif %}
 

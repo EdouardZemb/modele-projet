@@ -19,8 +19,10 @@
 #      manque, car la commande crée son dossier, pas ses parents, puis ramené à 700 avec le dossier
 #      des sauvegardes) ; elle l'écrit sous un nom provisoire, <AAAAMMJJTHHMMSSZ>.partiel, que le
 #      dossier ne quitte qu'après le code 0 ; si elle ne rend pas 0, on s'arrête là, et le dossier
-#      garde ce nom, pour le diagnostic. Après le renommage, pre-deploiement/ est purgé des
-#      instantanés de plus de 30 jours, d'après leur nom ; une purge en échec n'arrête rien ;
+#      garde ce nom, pour le diagnostic, jusqu'à la tentative suivante, qui retire les .partiel
+#      avant d'écrire : il n'en reste qu'un, le dernier. Après le renommage, pre-deploiement/ est
+#      purgé des instantanés de plus de 30 jours, d'après leur nom ; une purge ou un retrait en
+#      échec n'arrête rien ;
 {%- else %}
 #   1. verrou ${{ prefixe }}ETAT/verrou, partagé avec la sonde (600 s d'attente au plus), sauf si
 #      {{ prefixe }}VERROU_TENU=1 ;
@@ -150,6 +152,8 @@ sante_conforme() {
 # La commande crée son dossier, pas ses parents : pre-deploiement/ est créé ici, sur l'hôte, comme
 # sauvegarder.sh crée quotidiennes/ (R22), et ramené à 700 avec le dossier des sauvegardes, car un
 # instantané est une copie en clair des données (R24). Si l'un ou l'autre échoue, rien n'est lancé.
+# Juste avant la commande, les .partiel des tentatives précédentes sont retirés : il n'en reste que
+# celui de la dernière (R31). Un retrait impossible est journalisé et n'arrête rien.
 # Après un instantané réussi, pre-deploiement/ est purgé de ce qui a plus de 30 jours (R24).
 instantane() {
   local horodatage destination hote sortie code=0 pre="${{ prefixe }}SAUVEGARDES/pre-deploiement"
@@ -168,6 +172,11 @@ instantane() {
   if [ -e "$hote" ] || [ -L "$hote" ] || [ -e "$hote.partiel" ] || [ -L "$hote.partiel" ]; then
     journal "instantané impossible : $hote existe déjà (ou $hote.partiel), rien n'est écrasé"
     return 1
+  fi
+  # R31 : la sonde retente toutes les 5 minutes ; sans ce retrait, chaque tentative en échec
+  # laisserait son .partiel, une copie en clair des données.
+  if ! retirer_partiels "$pre" '^[0-9]{8}T[0-9]{6}Z\.partiel$'; then
+    journal "instantanés en échec de $pre : retrait impossible, plus d'un .partiel y reste ; l'instantané se fait quand même"
   fi
   sortie="$(dc exec -T app "${PROJET_MOTS[@]}" "$destination.partiel")" || code=$?
   if [ "$code" -ne 0 ]; then
