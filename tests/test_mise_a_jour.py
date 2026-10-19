@@ -87,9 +87,16 @@ def test_mise_a_jour_sans_changement(tmp_path, env_isole):
     assert git(projet, env, "status", "--porcelain").strip() == ""
 
 
+LIGNE_GABARIT = "Ligne ajoutée au gabarit en v0.0.2"
+SEMES_RETOUCHES = ("template/CLAUDE.md.jinja", "template/docs/registre.md")
+
+
 def _modele_v2(modele, env):
-    """Une v0.0.2 sans autre changement que l'étiquette : seul le changement de cible compte."""
-    git(modele, env, "commit", "-q", "--allow-empty", "-m", "v0.0.2")
+    """Une v0.0.2 qui ajoute une ligne aux gabarits de deux semés : ils ne doivent pas l'accueillir."""
+    for gabarit in SEMES_RETOUCHES:
+        with (modele / gabarit).open("a", encoding="utf-8", newline="\n") as f:
+            f.write(f"\n{LIGNE_GABARIT}\n")
+    git(modele, env, "commit", "-q", "-am", "v0.0.2")
     git(modele, env, "tag", "v0.0.2")
 
 
@@ -137,6 +144,8 @@ def test_passage_en_cible_serveur(tmp_path, env_isole):
     assert (projet / "docs/modele/decisions/M-0003-contrat-de-l-image.md").is_file()
     assert (projet / "CLAUDE.md").read_bytes() == claude
     assert (projet / "docs/registre.md").read_bytes() == registre
+    assert LIGNE_GABARIT not in (projet / "CLAUDE.md").read_text(encoding="utf-8")
+    assert LIGNE_GABARIT not in (projet / "docs/registre.md").read_text(encoding="utf-8")
     _sans_conflit(projet)
     reponses = yaml.safe_load((projet / ".copier-answers.yml").read_text(encoding="utf-8"))
     assert reponses["cible"] == "serveur"
@@ -185,6 +194,8 @@ def test_retour_en_cible_aucune(tmp_path, env_isole):
     # Les semés qui ne sont pas propres à la cible survivent, retouches comprises.
     assert (projet / "CLAUDE.md").read_bytes() == claude
     assert (projet / "docs/registre.md").read_bytes() == registre
+    assert LIGNE_GABARIT not in (projet / "CLAUDE.md").read_text(encoding="utf-8")
+    assert LIGNE_GABARIT not in (projet / "docs/registre.md").read_text(encoding="utf-8")
     _sans_conflit(projet)
     reponses = yaml.safe_load((projet / ".copier-answers.yml").read_text(encoding="utf-8"))
     assert reponses["cible"] == "aucune"
