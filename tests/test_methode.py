@@ -197,3 +197,18 @@ def test_m0002_amende():
     assert "- **Amendé** le 2026-10-18" in texte
     assert "`fusion`" in texte
     assert "étiquette" in texte
+
+
+# m3 : ce qui est garanti, exactement. Le mode lui-même se lit par l'API de GitHub ; la branche de
+# `ref=` vient des réglages locaux, et `--fusion` posé dans un `settings.json` local l'emporte.
+@pytest.mark.parametrize("chemin", [METHODE, DECISIONS / "M-0002-garde-fous-et-confidentialite.md"])
+def test_lecture_du_mode_de_fusion_exacte(chemin):
+    texte = " ".join(lire(chemin).split())
+    assert "jamais dans la copie locale" not in texte
+    assert "pas dans la copie locale" not in texte
+    assert "Le mode lui-même se lit sur GitHub, par l'API (`gh api`)" in texte
+    assert "Deux entrées restent locales" in texte
+    assert "`BRANCHE_PRINCIPALE`" in texte
+    assert "`ref=`" in texte
+    assert "`--fusion" in texte
+    assert "dans un `settings.json` de la copie" in texte

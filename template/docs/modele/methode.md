@@ -88,11 +88,16 @@ dans `.copier-answers.yml` :
   refuse toute fusion : `gh pr merge` (y compris `--auto` et `--admin`), l'API (`…/merge`) et les
   mutations GraphQL de fusion. Le refus dit `mode fusion : edouard`.
 
-Le garde lit le mode sur GitHub (`.copier-answers.yml` de la branche principale, par `gh api`),
-pas dans la copie locale ni dans `origin/<branche>`, qu'une session peut réécrire. Tout ce qui est
-illisible (`gh` absent, erreur, délai dépassé, ligne absente) vaut `edouard`. L'option `--fusion
-session|edouard` du garde l'emporte sur cette lecture : c'est ce que passe le dépôt modèle, qui n'a
-pas de `.copier-answers.yml`.
+Le mode lui-même se lit sur GitHub, par l'API (`gh api`) : le `.copier-answers.yml` de la branche
+principale, et non celui de la copie locale ni `origin/<branche>`, qu'une session peut réécrire.
+Tout ce qui est illisible (`gh` absent, erreur, délai dépassé, ligne absente) vaut `edouard`. Deux
+entrées restent locales :
+
+- le nom de la branche passée en `ref=` vient des réglages de la copie : `BRANCHE_PRINCIPALE`,
+  dans `scripts/modele/reglages.py`, ou l'option `--branche` du garde ;
+- l'option `--fusion session|edouard` du garde l'emporte sur la lecture, y compris posée sur la
+  commande du hook dans un `settings.json` de la copie. C'est ce que passe le dépôt modèle, qui n'a
+  pas de `.copier-answers.yml`.
 
 **Les étiquettes et les publications sont à Edouard**, dans les deux modes : une étiquette peut
 mettre un projet en production. La session les prépare (`git tag` en local est permis), mais ne les
