@@ -1,6 +1,7 @@
 """La cible `serveur` : questions, arborescence de départ, secrets exigés."""
 
 import importlib.util
+import itertools
 import re
 
 import pytest
@@ -209,6 +210,7 @@ SECTIONS_EXPLOITATION = [
     "La mise en service",
     "Mettre en ligne",
     "Revenir en arrière",
+    "Débloquer un déploiement",
     "Restaurer",
     "Exercice trimestriel",
     "Secrets",
@@ -216,7 +218,7 @@ SECTIONS_EXPLOITATION = [
     "Unités",
     "Tout arrêter",
 ]
-SECTIONS_DES_SAUVEGARDES = ("Restaurer", "Exercice trimestriel")
+SECTIONS_DES_SAUVEGARDES = ("Débloquer un déploiement", "Restaurer", "Exercice trimestriel")
 
 
 def section(texte, titre):
@@ -271,3 +273,125 @@ def test_exploitation_sections(rendre, sauvegardes, visibilite):
     secrets = section(texte, "Secrets")
     assert "scripts/modele/secrets.ps1 refaire" in secrets
     assert "KeePassXC" in secrets
+
+
+# I1 : un projet né sous Windows enregistre ses scripts sans bit d'exécution (100644). Un geste qui
+# lance `~/<nom>/deploiement/<script>` directement répond « Permission denied », au moment d'un
+# secours. Le runbook, les en-têtes et les usages des scripts les lancent donc par `bash`, comme les
+# unités et la CI.
+CHEMIN_DE_SCRIPT = re.compile(r"[^\s'\"`(]*deploiement/(?:ci/)?[a-z][a-z-]*\.sh\b")
+NOM_DE_SCRIPT = re.compile(r"[^\s'\"`(]*\b[a-z][a-z-]*\.sh\b")
+# La ligne de synopsis d'un en-tête : « #   <script>.sh <arguments> ».
+SYNOPSIS = re.compile(r"#   [\w~./<>-]*\.sh(?: |$)")
+USAGES = re.compile(r'USAGE="((?:[^"\\]|\\.)*)"|"(usage : (?:[^"\\]|\\.)*)"', re.DOTALL)
+
+
+def sans_bash(texte, motif):
+    """Les appels de script (le motif) que `bash ` ne précède pas, le chemin entre guillemets ou non."""
+    return [
+        m.group(0)
+        for m in motif.finditer(texte)
+        if not texte[: m.start()].rstrip("\"'").endswith("bash ")
+    ]
+
+
+def en_tete(script):
+    """Les lignes de commentaire du début d'un script, après le shebang."""
+    return list(itertools.takewhile(lambda ligne: ligne.startswith("#"), script.splitlines()[1:]))
+
+
+def a_plat(texte):
+    """Le texte sur une ligne, les blancs réduits à une espace : les retours à la ligne du
+    Markdown ne comptent pas."""
+    return " ".join(texte.split())
+
+
+@pytest.mark.parametrize("sauvegardes", [True, False])
+def test_scripts_lances_par_bash(rendre, sauvegardes):
+    rendu = rendre(**{**REPONSES_SERVEUR, "sauvegardes": sauvegardes})
+    runbook = lire(rendu, "docs/exploitation.md")
+    fautes = [f"docs/exploitation.md : {a}" for a in sans_bash(runbook, CHEMIN_DE_SCRIPT)]
+    scripts = sorted((rendu / "deploiement").rglob("*.sh"))
+    assert len(scripts) >= 6, scripts
+    for chemin in scripts:
+        nom = chemin.relative_to(rendu).as_posix()
+        texte = chemin.read_text(encoding="utf-8")
+        # tout chemin de script, dans un commentaire comme dans un message, hors directive shellcheck
+        code = "\n".join(
+            ligne for ligne in texte.splitlines() if not ligne.startswith("# shellcheck source=")
+        )
+        fautes += [f"{nom} : {a}" for a in sans_bash(code, CHEMIN_DE_SCRIPT)]
+        # le synopsis de l'en-tête
+        synopsis = [ligne for ligne in en_tete(texte) if SYNOPSIS.match(ligne)]
+        fautes += [f"{nom} : en-tête « {ligne} »" for ligne in synopsis]
+        # les usages, chaque forme comprise
+        for m in USAGES.finditer(texte):
+            usage = m.group(1) or m.group(2)
+            fautes += [f"{nom} : usage {a}" for a in sans_bash(usage, NOM_DE_SCRIPT)]
+    assert not fautes, "\n".join(fautes)
+
+
+# m1 : l'en-tête et l'usage de restaurer.sh donnent la forme du runbook, la clé hors ligne collée
+# dans `read -rs` puis passée par l'entrée standard, jamais un fichier en clair du poste.
+def test_restaurer_ne_garde_pas_la_cle_hors_ligne_dans_un_fichier(rendre):
+    texte = lire(rendre(**REPONSES_SERVEUR), "deploiement/restaurer.sh")
+    usage = USAGES.search(texte).group(1)
+    for partie in ("\n".join(en_tete(texte)), usage):
+        assert "hors-ligne.txt" not in partie
+        assert "read -rs CLE" in partie
+        assert "| ssh <le serveur> 'bash ~/essai/deploiement/restaurer.sh prod " in partie
+        assert "--cle /dev/stdin" in partie
+        assert "unset CLE" in partie
+
+
+# I4 (R30) : un instantané impossible (une app qui redémarre en boucle) bloque tout déploiement,
+# retour compris, puisque tous deux le prennent d'abord. Le runbook donne le geste : arrêter l'app,
+# avec les fichiers, le fichier d'environnement et le projet que compose `dc` (lib.sh) ; la sonde
+# suivante déploie sans instantané. Sans sauvegardes, pas d'instantané, donc pas de section.
+@pytest.mark.parametrize("sauvegardes", [True, False])
+def test_exploitation_debloquer_un_deploiement(rendre, sauvegardes):
+    texte = lire(rendre(**{**REPONSES_SERVEUR, "sauvegardes": sauvegardes}), "docs/exploitation.md")
+    assert ("Débloquer un déploiement" in texte) is sauvegardes
+    if not sauvegardes:
+        return
+    debloquer = a_plat(section(texte, "Débloquer un déploiement"))
+    environnements = (("prod", "essai", "~/essai"), ("staging", "essai-staging", "~/essai-staging"))
+    for env, projet, clone in environnements:
+        geste = (
+            f"docker compose -p {projet} -f {clone}/deploiement/compose.yml"
+            f" -f {clone}/deploiement/compose.projet.yml"
+            f" --env-file ~/.local/state/essai/{env}/compose.env stop app"
+        )
+        assert geste in debloquer, geste
+    assert "pas d'instantané" in debloquer
+    assert "la nuit" in debloquer
+    assert "bash ~/essai/deploiement/deployer.sh prod --retour" in debloquer
+    # renvoyée par l'instantané qui échoue, et par le retour en arrière
+    renvoi = "« Débloquer un déploiement »"
+    mettre_en_ligne = a_plat(section(texte, "Mettre en ligne"))
+    assert renvoi in mettre_en_ligne.split("S'il échoue, rien ne change", 1)[1]
+    assert renvoi in a_plat(section(texte, "Revenir en arrière"))
+
+
+# m11 : après `--retour`, la sonde attend une nouvelle image. Une étiquette neuve sur le même commit
+# donne la même image, à la même empreinte, toujours en échec : la sonde attendrait en silence.
+def test_exploitation_le_retour_attend_une_nouvelle_image(rendre):
+    texte = lire(rendre(**REPONSES_SERVEUR), "docs/exploitation.md")
+    retour = a_plat(section(texte, "Revenir en arrière"))
+    assert "attend une nouvelle étiquette" not in retour
+    assert "attend une nouvelle image" in retour
+    assert "même empreinte" in retour
+    assert "un nouveau commit" in retour
+    # le seul geste des scripts qui efface la marque : un déploiement réussi de cette image
+    assert "bash ~/essai/deploiement/deployer.sh prod <image@sha256:…> <X.Y.Z>" in retour
+    assert "~/.local/state/essai/prod/echec" in retour
+
+
+# m12 : l'ancien contenu des données est déplacé par la restauration, et effacé par la rétention
+# après 30 jours. C'est parfois la seule copie de ce qui a changé depuis la dernière nuit.
+def test_exploitation_avant_restauration(rendre):
+    restaurer = a_plat(section(lire(rendre(**REPONSES_SERVEUR), "docs/exploitation.md"), "Restaurer"))
+    assert "jamais supprimé, et la sauvegarde l'efface" not in restaurer
+    assert "avant-restauration-<horodatage>/" in restaurer
+    assert "30 jours" in restaurer
+    assert "seule copie" in restaurer

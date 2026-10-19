@@ -3,7 +3,7 @@
 # Sauvegarde nocturne des données de prod : un instantané en clair gardé 30 jours sur le serveur, et
 # sa copie chiffrée pour la clé hors ligne, envoyée au distant et gardée 90 jours (M-0005).
 #
-#   sauvegarder.sh prod
+#   bash deploiement/sauvegarder.sh prod
 #
 # Lancé chaque nuit par {{ nom }}-sauvegarde.timer. Réservé à la prod : le staging n'a que des données
 # factices (code 64).
@@ -127,7 +127,7 @@ retention_locale() {
 }
 
 main() {
-  [ "$#" -eq 1 ] || arreter 64 "usage : sauvegarder.sh prod"
+  [ "$#" -eq 1 ] || arreter 64 "usage : bash deploiement/sauvegarder.sh prod"
   reserver_a_prod "$1" sauvegarder.sh
   # Les secrets de ce déploiement font seuls foi : rien d'hérité du shell.
   unset HC_SAUVEGARDE

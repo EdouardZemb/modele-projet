@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Unités systemd utilisateur d'{{ nom }} : rendu des gabarits, installation, contrôle de dérive.
 #
-#   installer-unites.sh              rend les gabarits, installe les unités, recharge systemd et
-#                                    active les minuteries
-#   installer-unites.sh --verifier   compare les unités installées à leur rendu, sans rien modifier :
-#                                    code 0 si elles sont conformes, 1 sinon (liste des écarts sur
-#                                    stderr). La sonde de prod l'appelle à chaque passage.
+#   bash deploiement/installer-unites.sh              rend les gabarits, installe les unités,
+#                                                     recharge systemd et active les minuteries
+#   bash deploiement/installer-unites.sh --verifier   compare les unités installées à leur rendu,
+#                                                     sans rien modifier : code 0 si elles sont
+#                                                     conformes, 1 sinon (liste des écarts sur
+#                                                     stderr). La sonde de prod l'appelle à chaque
+#                                                     passage.
 #
 # Les unités ne s'installent que par ce script, jamais à la main : une copie à la main finit par
 # diverger du dépôt sans que personne le voie (incident déjà vécu sur ce serveur).
@@ -204,7 +206,7 @@ verifier() {
   done
 
   if [ "$ECARTS" -gt 0 ]; then
-    journal "$ECARTS écart(s) entre les unités installées dans $DOSSIER et deploiement/systemd : corriger par deploiement/installer-unites.sh"
+    journal "$ECARTS écart(s) entre les unités installées dans $DOSSIER et deploiement/systemd : corriger par bash ${{ prefixe }}CLONE/deploiement/installer-unites.sh"
     return 1
   fi
   journal "unités conformes : {% raw %}${#rendues[@]}{% endraw %} vérifiées dans $DOSSIER"
@@ -272,10 +274,10 @@ main() {
   case "$#" in
     0) ;;
     1)
-      [ "$1" = --verifier ] || arreter 64 "usage : installer-unites.sh [--verifier]"
+      [ "$1" = --verifier ] || arreter 64 "usage : bash deploiement/installer-unites.sh [--verifier]"
       mode=verifier
       ;;
-    *) arreter 64 "usage : installer-unites.sh [--verifier]" ;;
+    *) arreter 64 "usage : bash deploiement/installer-unites.sh [--verifier]" ;;
   esac
 
   CLONE_PROD="${ {{- prefixe }}CLONE_PROD:-$HOME/{{ nom }}}"

@@ -2,7 +2,7 @@
 # Alerte d'échec d'une unité systemd : lancé par {{ nom }}-alerte@<unité>.service, que l'OnFailure=
 # des unités d'{{ nom }} déclenche avec le nom de l'unité en échec (%n).
 #
-#   alerter.sh <nom d'unité>
+#   bash deploiement/alerter.sh <nom d'unité>
 #
 # Le nom est traduit en environnement et en variable de signal (secrets de l'environnement), puis
 # signaler envoie « échec » à l'adresse de cette variable (Healthchecks : adresse + /fail).
@@ -23,7 +23,7 @@ set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 main() {
-  [ "$#" -eq 1 ] || arreter 64 "usage : alerter.sh <nom d'unité>"
+  [ "$#" -eq 1 ] || arreter 64 "usage : bash deploiement/alerter.sh <nom d'unité>"
   local unite="$1" nom_env variable
   case "$unite" in
     {{ nom }}-sonde-prod.service) nom_env=prod variable=HC_SONDE ;;

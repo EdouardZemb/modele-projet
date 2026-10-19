@@ -3,7 +3,7 @@
 # Vérifie l'image que la CI vient de lancer (action modele-image-construire), avant les tests de
 # bout en bout du projet et la publication.
 #
-#   deploiement/ci/verifier-image.sh <conteneur> <révision>
+#   bash deploiement/ci/verifier-image.sh <conteneur> <révision>
 #
 # <révision> est le SHA du commit construit ($GITHUB_SHA), que l'image doit annoncer.
 #
@@ -29,7 +29,7 @@ set -euo pipefail
 # shellcheck source=deploiement/lib.sh
 . "$(dirname -- "${BASH_SOURCE[0]}")/../lib.sh"
 
-USAGE="usage : verifier-image.sh <conteneur> <révision>"
+USAGE="usage : bash deploiement/ci/verifier-image.sh <conteneur> <révision>"
 {%- if sauvegardes %}
 INSTANTANE=/tmp/instantane
 {%- endif %}

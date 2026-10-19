@@ -5,13 +5,18 @@
 # le dossier de l'instantané, chiffré pour la clé hors ligne). Opération manuelle, réservée à la
 # prod (code 64) :
 #
-#   restaurer.sh prod <dossier|archive .tar.age> [--oui] [--cle <identité age>]
+#   bash deploiement/restaurer.sh prod <dossier|archive .tar.age> [--oui] [--cle <identité age>]
 #
-# Archive chiffrée sans écrire la clé hors ligne sur le disque du serveur (M-0005) : --cle accepte
-# tout chemin lisible qui n'est pas un dossier, donc /dev/stdin, la clé arrivant par ssh :
+# Toujours par `bash`, depuis le clone de prod : un projet né sous Windows enregistre les scripts
+# sans bit d'exécution.
 #
-#   ssh <le serveur> '~/{{ nom }}/deploiement/restaurer.sh prod <archive>.tar.age --oui --cle /dev/stdin' \
-#     < hors-ligne.txt
+# Archive chiffrée sans écrire la clé hors ligne sur aucun disque, ni celui du serveur ni celui du
+# poste (M-0005) : --cle accepte tout chemin lisible qui n'est pas un dossier, donc /dev/stdin, la
+# clé arrivant par ssh. Sur le poste, dans Git Bash : `read -rs CLE`, coller la clé hors ligne
+# depuis KeePassXC, puis Entrée ; puis
+#
+#   printf '%s\n' "$CLE" | ssh <le serveur> 'bash ~/{{ nom }}/deploiement/restaurer.sh prod <archive>.tar.age --oui --cle /dev/stdin'
+#   unset CLE
 #
 # Sans --oui, le script affiche ce qu'il ferait et rend 64, sans aucun effet (ni verrou, ni
 # conteneur, ni déchiffrement ; charger_env crée au plus des dossiers déjà présents en prod). Avec
@@ -87,9 +92,11 @@ INSTALLATION=0 # 1 dès que le contenu de l'instantané a commencé d'entrer dan
 NOUVELLE=""
 ECHEC_RETABLIR="" # ce que retablir n'a pas pu faire : instantane (le ressortir) ou ancien (le remettre)
 
-USAGE="usage : restaurer.sh prod <dossier|archive .tar.age> [--oui] [--cle <identité age>]
-exemple, la clé hors ligne sur l'entrée standard (jamais écrite sur le disque du serveur) :
-  ssh <hôte> '<clone>/deploiement/restaurer.sh prod <archive>.tar.age --oui --cle /dev/stdin' < hors-ligne.txt"
+USAGE="usage : bash deploiement/restaurer.sh prod <dossier|archive .tar.age> [--oui] [--cle <identité age>]
+exemple, la clé hors ligne sur l'entrée standard, jamais écrite sur un disque ; sur le poste, dans
+Git Bash, read -rs CLE (coller la clé, puis Entrée), puis :
+  printf '%s\n' \"\$CLE\" | ssh <le serveur> 'bash ~/{{ nom }}/deploiement/restaurer.sh prod <archive>.tar.age --oui --cle /dev/stdin'
+  unset CLE"
 
 ATTENDU="(attendu : un seul dossier {{ nom }}-<horodatage>/, fait de fichiers et de dossiers)"
 

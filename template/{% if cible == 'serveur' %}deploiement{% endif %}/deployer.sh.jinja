@@ -2,12 +2,14 @@
 #!/usr/bin/env bash
 # Déploie une image d'{{ nom }}, contrôle sa santé, et revient à la version précédente si elle échoue.
 #
-#   deployer.sh <prod|staging> <image@sha256:…> <version>
-#   deployer.sh <prod|staging> --retour
+#   bash deploiement/deployer.sh <prod|staging> <image@sha256:…> <version>
+#   bash deploiement/deployer.sh <prod|staging> --retour
 #
 # <version> est celle que {{ chemin_sante }} doit annoncer : `main` en staging, X.Y.Z (sans « v ») en
 # prod. Lancé par sonder.sh avec {{ prefixe }}VERROU_TENU=1 (la sonde tient déjà le verrou), ou à la
-# main pour un déploiement ou un retour arrière : il prend alors le verrou lui-même.
+# main pour un déploiement ou un retour arrière : il prend alors le verrou lui-même. Toujours par
+# `bash`, depuis le clone de l'environnement : un projet né sous Windows enregistre les scripts sans
+# bit d'exécution.
 #
 # Déroulé :
 {%- if sauvegardes %}
@@ -313,7 +315,7 @@ main() {
     [[ "$VERSION" =~ $MOTIF_VERSION ]] \
       || arreter 64 "version invalide : '$VERSION' (attendu : main ou X.Y.Z)"
   else
-    arreter 64 "usage : deployer.sh <prod|staging> <image@sha256:…> <version> | deployer.sh <prod|staging> --retour"
+    arreter 64 "usage : bash deploiement/deployer.sh <prod|staging> <image@sha256:…> <version> | bash deploiement/deployer.sh <prod|staging> --retour"
   fi
 
   # Les secrets de cette version font foi : charger_secrets remplace ceux qu'hériteraient le shell
