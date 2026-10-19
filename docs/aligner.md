@@ -191,6 +191,14 @@ qu'au §1, dans un worktree `<dépôt>.worktrees\modele-serveur`.
       `projets/<nom>.env` déclare ce qui existe, et la sonde de `serveur` n'y crée rien.
 - [ ] `gh pr checks` entièrement vert : `socle`, `verifier`, `deploiement` et `image`.
 
+### Revenir en cible `aucune`
+
+`copier update --data cible=aucune` retire tout `deploiement/`, `tests/deploiement/` et `.sops.yaml`,
+**fichiers semés compris** (`projet.env`, `compose.projet.yml`, les `.cles`, `docs/exploitation.md`),
+même retouchés par le projet : Copier ne garde pas un semé dont le gabarit disparaît. Le §8 de la
+spec disait qu'ils restaient. Ce qu'il faut garder (commandes `SAUVEGARDER` et `VERIFIER`, secrets de l'app) se
+récupère donc avant la mise à jour, ou dans l'historique git de la PR.
+
 ## Avant de passer un dépôt privé en public
 
 Dans un dépôt privé, la porte de confidentialité avertit sur ce qui identifie (elle ne refuse que
