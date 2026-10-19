@@ -4,7 +4,7 @@ import shutil
 
 import copier
 import yaml
-from conftest import RACINE, REPONSES_PAR_DEFAUT, git
+from conftest import RACINE, REPONSES_PAR_DEFAUT, REPONSES_SERVEUR, git
 
 IGNORES = shutil.ignore_patterns(
     ".git", ".superpowers", "__pycache__", ".pytest_cache", ".ruff_cache", ".venv"
@@ -24,12 +24,12 @@ def _modele_v1(tmp_path, env):
     return modele
 
 
-def _projet_v1(tmp_path, env, modele):
+def _projet_v1(tmp_path, env, modele, reponses=REPONSES_PAR_DEFAUT):
     projet = tmp_path / "projet"
     copier.run_copy(
         str(modele),
         str(projet),
-        data=REPONSES_PAR_DEFAUT,
+        data=reponses,
         defaults=True,
         vcs_ref="v0.0.1",
         quiet=True,
@@ -85,3 +85,117 @@ def test_mise_a_jour_sans_changement(tmp_path, env_isole):
     )
 
     assert git(projet, env, "status", "--porcelain").strip() == ""
+
+
+LIGNE_GABARIT = "Ligne ajoutée au gabarit en v0.0.2"
+SEMES_RETOUCHES = ("template/CLAUDE.md.jinja", "template/docs/registre.md")
+
+
+def _modele_v2(modele, env):
+    """Une v0.0.2 qui ajoute une ligne aux gabarits de deux semés : ils ne doivent pas l'accueillir."""
+    for gabarit in SEMES_RETOUCHES:
+        with (modele / gabarit).open("a", encoding="utf-8", newline="\n") as f:
+            f.write(f"\n{LIGNE_GABARIT}\n")
+    git(modele, env, "commit", "-q", "-am", "v0.0.2")
+    git(modele, env, "tag", "v0.0.2")
+
+
+def _sans_conflit(projet):
+    assert not list(projet.rglob("*.rej"))
+    for chemin in projet.rglob("*"):
+        if chemin.is_file() and ".git" not in chemin.relative_to(projet).parts:
+            try:
+                texte = chemin.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                continue
+            assert "<<<<<<<" not in texte, chemin
+
+
+def _retoucher(*chemins):
+    for chemin in chemins:
+        with chemin.open("a", encoding="utf-8", newline="\n") as f:
+            f.write(f"\n# {LIGNE_PROJET}\n")
+
+
+def test_passage_en_cible_serveur(tmp_path, env_isole):
+    env = env_isole()
+    modele = _modele_v1(tmp_path, env)
+    projet = _projet_v1(tmp_path, env, modele)
+    _retoucher(projet / "CLAUDE.md", projet / "docs/registre.md")
+    git(projet, env, "commit", "-q", "-am", "semés retouchés par le projet")
+    claude = (projet / "CLAUDE.md").read_bytes()
+    registre = (projet / "docs/registre.md").read_bytes()
+    assert LIGNE_PROJET.encode() in claude
+    assert not (projet / "deploiement").exists()
+    _modele_v2(modele, env)
+
+    copier.run_update(
+        str(projet),
+        data={"cible": "serveur", "bloc_ports": 4310, "sauvegardes": True, "fusion": "session"},
+        defaults=True,
+        overwrite=True,
+        vcs_ref="v0.0.2",
+        quiet=True,
+    )
+
+    assert (projet / "deploiement/lib.sh").is_file()
+    assert (projet / "deploiement/projet.env").is_file()
+    assert (projet / ".sops.yaml").is_file()
+    assert (projet / "docs/modele/decisions/M-0003-contrat-de-l-image.md").is_file()
+    assert (projet / "CLAUDE.md").read_bytes() == claude
+    assert (projet / "docs/registre.md").read_bytes() == registre
+    assert LIGNE_GABARIT not in (projet / "CLAUDE.md").read_text(encoding="utf-8")
+    assert LIGNE_GABARIT not in (projet / "docs/registre.md").read_text(encoding="utf-8")
+    _sans_conflit(projet)
+    reponses = yaml.safe_load((projet / ".copier-answers.yml").read_text(encoding="utf-8"))
+    assert reponses["cible"] == "serveur"
+    assert reponses["bloc_ports"] == 4310
+
+
+def test_retour_en_cible_aucune(tmp_path, env_isole):
+    env = env_isole()
+    modele = _modele_v1(tmp_path, env)
+    projet = _projet_v1(tmp_path, env, modele, REPONSES_SERVEUR)
+    lib = projet / "deploiement/lib.sh"
+    for present in (
+        lib,
+        projet / "deploiement/projet.env",
+        projet / "deploiement/compose.projet.yml",
+        projet / ".sops.yaml",
+        projet / "tests/deploiement",
+        projet / "docs/exploitation.md",
+    ):
+        assert present.exists(), present
+    _retoucher(
+        projet / "deploiement/projet.env", lib, projet / "CLAUDE.md", projet / "docs/registre.md"
+    )
+    claude = (projet / "CLAUDE.md").read_bytes()
+    registre = (projet / "docs/registre.md").read_bytes()
+    git(projet, env, "commit", "-q", "-am", "retouches du projet")
+    _modele_v2(modele, env)
+
+    copier.run_update(
+        str(projet),
+        data={"cible": "aucune", "fusion": "session"},
+        defaults=True,
+        overwrite=True,
+        vcs_ref="v0.0.2",
+        quiet=True,
+    )
+
+    # Le géré de l'ancienne cible disparaît, retouché ou non.
+    assert not lib.exists()
+    assert not (projet / ".sops.yaml").exists()
+    # Écart au §8 de la spec : Copier supprime aussi les semés de l'ancienne cible, dossier
+    # compris, retouchés ou non (observé avec Copier 9.19.1).
+    assert not (projet / "deploiement").exists()
+    assert not (projet / "tests/deploiement").exists()
+    assert not (projet / "docs/exploitation.md").exists()
+    # Les semés qui ne sont pas propres à la cible survivent, retouches comprises.
+    assert (projet / "CLAUDE.md").read_bytes() == claude
+    assert (projet / "docs/registre.md").read_bytes() == registre
+    assert LIGNE_GABARIT not in (projet / "CLAUDE.md").read_text(encoding="utf-8")
+    assert LIGNE_GABARIT not in (projet / "docs/registre.md").read_text(encoding="utf-8")
+    _sans_conflit(projet)
+    reponses = yaml.safe_load((projet / ".copier-answers.yml").read_text(encoding="utf-8"))
+    assert reponses["cible"] == "aucune"

@@ -1,0 +1,129 @@
+# M-0004 — Chaîne de livraison : la CI publie l'image, le serveur va la chercher, une étiquette la met en production
+
+- **Statut** : accepté le 2026-10-18
+- **Contexte amont** : la chaîne de livraison d'`ancrage` (son ADR-0006), généralisée par le
+  modèle ; M-0002 (les étiquettes sont à Edouard) ; M-0003 (le contrat de l'image)
+
+## Contexte
+
+Plusieurs projets partagent un serveur, qui n'a aucun port entrant et ne doit rien recevoir à la
+main : un fichier posé sur l'hôte finit par diverger du dépôt, en silence. Personne n'écrit sur le
+serveur après son amorçage (invariant 3). Il faut pourtant qu'une fusion arrive en préproduction
+sans geste, qu'une version arrive en production sur un seul geste d'Edouard, et qu'une version qui
+échoue s'en aille d'elle-même.
+
+## Décision
+
+### 1. Le chemin d'une version
+
+1. **Une fusion sur la branche principale.** La CI (`ci.yml` : `socle`, `verifier`,
+   `deploiement`, puis `image`) construit l'image, la lance comme en production, contrôle sa route
+   de santé et sa révision, passe les tests de bout en bout du projet contre elle, puis la publie
+   sous `:sha-<sha>` et `:main` (actions `modele-image-construire` et `modele-image-publier`).
+   Aucune image n'est publiée pour un commit dont la CI échoue. La sonde de staging la déploie dans
+   les 5 minutes.
+2. **Une étiquette `vX.Y.Z`, posée par Edouard** (M-0002). `modele-version.yml` vérifie que le
+   commit est un ancêtre de la branche principale et que `:sha-<sha>` existe, puis il
+   **réétiquette sans reconstruire** : la prod reçoit les octets testés en staging. Il refuse de
+   réécrire une version existante dont l'empreinte diffère, et crée la Release. La sonde de prod,
+   qui vise la plus haute étiquette `vX.Y.Z`, suit dans les 5 minutes.
+3. **Le serveur va chercher.** `sonder.sh <env>`, toutes les 5 minutes : un verrou, un clone
+   propre (sinon une alerte), la cible (en staging, la branche principale et l'image `:main` ; en
+   prod, la plus haute étiquette), `docker pull`, puis `deployer.sh` si l'image diffère de celle
+   en service. Le déploiement {% if sauvegardes %}prend un instantané des données (M-0003, M-0005), {% endif %}lance
+   `docker compose up --wait` et contrôle la santé sur le port local : statut, version et révision.
+4. **Un déploiement qui échoue** : la version est marquée `echec` et **jamais retentée**, la
+   précédente revient d'elle-même, et Healthchecks reçoit `/fail`. Sans version précédente,
+   l'application est arrêtée.
+
+### 2. Revenir en arrière : par une étiquette
+
+Un retour voulu passe par git. 👤 Edouard pose une nouvelle étiquette, plus haute que celle en
+service, sur le commit de la version visée. `modele-version.yml` la réétiquette sans reconstruire,
+et la sonde de prod la déploie comme une autre version ; le clone de prod suit l'étiquette.
+L'invariant 4 garantit que l'image précédente fonctionne encore avec les données, `compose.yml` et
+les `env/*.env` actuels. C'est pourquoi la version vient de l'environnement, jamais de l'image
+(M-0003).
+
+`deployer.sh <env> --retour` reste l'outil de secours, lancé à la main sur le serveur quand le
+chemin par étiquette ne passe pas. Il revient à la version précédente, marque la version quittée en
+échec pour que la sonde ne la redéploie pas, refuse un second retour, et laisse le clone sur
+l'étiquette quittée.
+
+### 3. Les environnements et les images
+
+- Un seul `compose.yml` pour les deux environnements ; seuls `env/<env>.env` et le nom du projet
+  Compose changent. Le staging suit `:main`, avec des données factices (M-0001) ; la prod suit la
+  plus haute étiquette.
+- Les adresses : `<sous_domaine>.<domaine>` et `<sous_domaine>-staging.<domaine>`, un seul niveau
+  de sous-domaine, celui que couvre le certificat gratuit de Cloudflare.
+- Les images vont sur GHCR, `ghcr.io/edouardzemb/<nom>`. **Un paquet GHCR est privé par
+  défaut** : à la mise en service d'un dépôt public, 👤 Edouard le passe en public
+  (`docs/exploitation.md`). Le serveur tire avec un seul jeton `read:packages` pour tout le parc,
+  rangé dans `~/.config/serveur/docker` par la sonde de `serveur`.
+
+### 4. Les secrets : refaits sur le poste
+
+- `deploiement/secrets/<env>.env.enc`, chiffrés par `sops` et `age` vers les deux clés publiques du
+  parc, `deploiement/cles/serveur.pub` et `hors-ligne.pub` (`.sops.yaml`). Les clés attendues sont
+  nommées, sans valeur, dans `deploiement/secrets/<env>.cles`.
+- Sur le serveur, chaque script les déchiffre dans un fichier de mode 600 sous `/dev/shm`, détruit
+  par `shred -u` avant qu'une seule ligne soit interprétée, et ne les source jamais. Sans fichier
+  chiffré, il rend le code 3.
+- **Changer une valeur, c'est refaire le fichier, sur le poste.** 👤 Edouard lance
+  `scripts/modele/secrets.ps1 refaire <fichier .env.enc>` dans son propre terminal et colle chaque
+  valeur depuis KeePassXC, en saisie masquée ; le script chiffre vers les destinataires de
+  `.sops.yaml` et n'affiche aucune valeur. 🤖 La session commite le fichier dans une PR. La valeur
+  entre en service à la fusion en staging, à l'étiquette suivante en prod.
+- La CI contrôle sans rien déchiffrer (`scripts/modele/verifier_secrets.py`) : chaque `.enc` porte
+  exactement les clés de son `.cles`, chiffrées pour les deux clés du parc.
+- **KeePassXC est la source de chaque valeur.** Une valeur perdue se régénère : une adresse se
+  relit dans Healthchecks, un jeton se refait.
+- **Écartés** : changer une valeur sur le serveur puis rapatrier le fichier, qui est une écriture
+  sur le serveur ; déchiffrer sur le poste avec la clé hors ligne, faite pour la perte du serveur
+  et non pour chaque changement.
+
+### 5. Le tunnel commun
+
+Un seul tunnel Cloudflare pour tout le parc, décrit dans le dépôt `serveur` ; le projet n'a pas de
+jeton de tunnel. Chaque environnement a son réseau Docker, `tunnel-<nom>-<env>`, déclaré `external`
+dans `compose.yml` ; l'app y porte l'alias `<nom>-<env>`, et les routes de Cloudflare visent
+`http://<nom>-prod:<port_app>` et `http://<nom>-staging:<port_app>`. Un réseau par environnement, et
+non le réseau de l'hôte : le tunnel n'atteint que les apps, jamais les autres ports locaux de la
+machine.
+
+### 6. Qui crée quoi
+
+**La sonde de `serveur` crée ce qui manque, la sonde du projet fait vivre ses versions.** Depuis la
+déclaration `projets/<nom>.env` du dépôt `serveur`, la première crée les clones, les dossiers, les
+réseaux et la première installation des unités ; elle ne supprime jamais rien. La seconde
+déploie, et tient les unités à jour : à chaque nouvelle version elle les réinstalle, à chaque
+passage elle les compare à leur rendu (`installer-unites.sh --verifier`) et alerte au moindre écart.
+Aucune étape de la mise en service ne se passe sur la machine.
+
+### 7. La supervision
+
+Un contrôle Healthchecks par sonde{% if sauvegardes %} (et par sauvegarde, M-0005){% endif %}, dont l'adresse est un secret
+(`HC_*`). Une unité en échec déclenche `<nom>-alerte@.service` par `OnFailure=`. Une adresse de
+ping passe à `curl` par `-K -`, jamais en argument, et n'est jamais journalisée.
+
+## Conséquences
+
+- Ce qu'Edouard seul fait : les étiquettes, les routes Cloudflare, les contrôles Healthchecks,
+  chaque saisie de secret, le passage du paquet en public, la clé de déploiement d'un dépôt privé.
+- Une version met au plus 5 minutes à arriver après sa publication.
+- Un retour arrière ne restaure pas les données : une migration, une variable ou un service
+  s'ajoutent avant de s'enlever (invariant 4). Une version qui ne peut pas le respecter le
+  déclare{% if sauvegardes %}, et son retour passe par une restauration (M-0005){% endif %}.
+- Une valeur de secret absente de KeePassXC empêche de refaire le fichier : on la régénère d'abord.
+- **Difficile à changer** : peu de chose. Le modèle par tirage, GHCR et la convention « étiquette =
+  prod » se remplacent sans toucher l'application.
+
+## Révision
+
+Cet ADR doit être rouvert si :
+
+- le parc passe à un second serveur ;
+- un projet doit être mis en production sans GitHub, ou plus vite que la sonde ;
+- un projet ne peut plus tenir l'invariant 4, et son retour arrière demande davantage qu'une
+  étiquette.

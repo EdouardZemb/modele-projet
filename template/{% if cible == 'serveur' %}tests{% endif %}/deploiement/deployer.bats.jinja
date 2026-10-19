@@ -179,6 +179,83 @@ nombre_de_lancements() {
   [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
 }
 
+# R22 : la commande SAUVEGARDER crée son dossier, pas ses parents. pre-deploiement/ n'existe pas
+# avant le premier instantané d'avant déploiement (la sauvegarde de la nuit ne crée que
+# quotidiennes/, et le staging n'en a pas) : le script le crée sur l'hôte, comme sauvegarder.sh
+# crée quotidiennes/. Le double de docker refuse un parent absent, comme le ferait la commande.
+@test "deployer_cree_pre_deploiement_avant_l_instantane" {
+  deja_en_service "$ANCIENNE" 0.1.0
+  local pre="${{ prefixe }}RACINE_SAUVEGARDES/pre-deploiement" instantane
+  rm -rf "$pre"
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 0 ]
+  [ -d "$pre" ]
+  # un seul instantané, un dossier sous son nom définitif
+  [ "$(find "$pre" -mindepth 1 -maxdepth 1 | wc -l)" -eq 1 ]
+  instantane="$(find "$pre" -mindepth 1 -maxdepth 1)"
+  [[ "$(basename "$instantane")" =~ ^[0-9]{8}T[0-9]{6}Z$ ]]
+  [ -d "$instantane" ]
+  [ -f "$instantane/donnees.txt" ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+}
+
+# R24 : l'instantané d'avant déploiement est une copie en clair des données. Comme sauvegarder.sh
+# pour quotidiennes/, le script ramène le dossier des sauvegardes et pre-deploiement/ à 700, même
+# s'ils existaient déjà avec des droits plus larges.
+@test "deployer_protege_pre_deploiement" {
+  deja_en_service "$ANCIENNE" 0.1.0
+  local sauvegardes="${{ prefixe }}RACINE_SAUVEGARDES" pre="${{ prefixe }}RACINE_SAUVEGARDES/pre-deploiement"
+  mkdir -p "$pre"
+  chmod 755 "$sauvegardes" "$pre"
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 0 ]
+  [ "$(stat -c %a "$sauvegardes")" = 700 ]
+  [ "$(stat -c %a "$pre")" = 700 ]
+}
+
+# R24 : la sauvegarde de la nuit, qui purge pre-deploiement/, ne tourne qu'en prod, alors que le
+# staging se déploie à chaque fusion. Le déploiement purge donc son propre pre-deploiement/ après un
+# instantané réussi : 30 jours, d'après le nom (la regex de sauvegarder.sh), jamais un autre nom.
+@test "deployer_purge_ses_instantanes_de_plus_de_30_jours" {
+  preparer_secrets_de_test staging JETON=jeton-staging-7 HC_SONDE=https://hc.example/ping/sonde-staging
+  en_service staging "$ANCIENNE" main
+  local pre="${{ prefixe }}RACINE_DONNEES/staging/sauvegardes/pre-deploiement" vieux recent nom
+  vieux="$(date -u -d '31 days ago' +%Y%m%dT%H%M%SZ)"
+  recent="$(date -u -d '1 hour ago' +%Y%m%dT%H%M%SZ)"
+  for nom in "$vieux" "$vieux.partiel" "$recent" "$vieux.copie" garder; do
+    mkdir -p "$pre/$nom/sous"
+    echo "$nom" >"$pre/$nom/sous/donnees.txt"
+  done
+  deployer staging "$NOUVELLE" main
+  [ "$status" -eq 0 ]
+  # plus de 30 jours, par le nom : partent en entier, .partiel compris
+  [ ! -e "$pre/$vieux" ]
+  [ ! -e "$pre/$vieux.partiel" ]
+  # le récent, les noms d'une autre forme et l'instantané du jour restent
+  [ -f "$pre/$recent/sous/donnees.txt" ]
+  [ -f "$pre/$vieux.copie/sous/donnees.txt" ]
+  [ -f "$pre/garder/sous/donnees.txt" ]
+  [ "$(find "$pre" -mindepth 1 -maxdepth 1 | wc -l)" -eq 4 ]
+  [ "$(cat "${{ prefixe }}RACINE_ETAT/staging/deploye")" = "$NOUVELLE main" ]
+}
+
+# Une purge en échec est journalisée, et le déploiement continue : elle ne change rien à la version.
+@test "deployer_continue_si_la_purge_echoue" {
+  deja_en_service "$ANCIENNE" 0.1.0
+  local pre="${{ prefixe }}RACINE_SAUVEGARDES/pre-deploiement" vieux
+  vieux="$(date -u -d '31 days ago' +%Y%m%dT%H%M%SZ)"
+  mkdir -p "$pre/$vieux/verrouille"
+  echo "reste" >"$pre/$vieux/verrouille/donnees.txt"
+  # un sous-dossier sans droit d'écriture : rm -rf ne peut pas le vider
+  chmod 500 "$pre/$vieux/verrouille"
+  deployer prod "$NOUVELLE" 0.2.0
+  chmod 700 "$pre/$vieux/verrouille"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"purge de $pre en échec"* ]]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+  [ "$(signaux)" = "$(signal 'déployé 0.2.0') $HC" ]
+}
+
 # Un instantané en échec annule le déploiement avant tout changement : rien n'est arrêté ni lancé,
 # l'application en service y reste, et rien n'est marqué en échec. La sonde réessaiera au prochain
 # passage. Les cas :
@@ -188,13 +265,14 @@ nombre_de_lancements() {
 #   - une destination déjà présente : rien n'est lancé ni écrasé ;
 #   - un dossier vide apparu au nom définitif pendant l'écriture : `mv -T` le remplacerait sans
 #     bruit, il ne doit pas ;
+#   - pre-deploiement/ impossible à créer (un fichier à sa place) : la commande n'est pas lancée ;
 #   - aucune commande SAUVEGARDER dans projet.env.
 @test "deployer_instantane_en_echec_n_arrete_rien" {
   deja_en_service "$ANCIENNE" 0.1.0
   cp "$ETAT/compose.env" "$BATS_TEST_TMPDIR/compose.env.avant"
   local cas vrai pre="${{ prefixe }}RACINE_SAUVEGARDES/pre-deploiement"
   vrai="$(command -v date)"
-  for cas in code-1 code-2 partiel sans-fichier deja-present apparu sans-commande; do
+  for cas in code-1 code-2 partiel sans-fichier deja-present apparu pre-impossible sans-commande; do
     : >"$APPELS"
     # chaque cas part de pre-deploiement/ vide : deux cas dans la même seconde viseraient le même nom
     rm -rf "$pre" "$DOUBLES/date"
@@ -214,6 +292,7 @@ nombre_de_lancements() {
         echo "déjà là" >"$pre/20261018T024500Z/donnees.txt"
         ;;
       apparu) export DOUBLE_DOCKER_SAUVEGARDE_FORME=apparue ;;
+      pre-impossible) echo "pas un dossier" >"$pre" ;;
       sans-commande) printf '%s\n' 'VERIFIER=outil verifier' >"$CLONE/deploiement/projet.env" ;;
     esac
     deployer prod "$NOUVELLE" 0.2.0
@@ -253,6 +332,11 @@ nombre_de_lancements() {
         # le dossier apparu n'est pas remplacé ; l'instantané garde son nom provisoire
         [ -n "$(find "$pre" -mindepth 1 -maxdepth 1 -type d -name '*Z' -empty)" ]
         [ -n "$(find "$pre" -mindepth 2 -maxdepth 2 -path '*.partiel/donnees.txt')" ]
+        ;;
+      pre-impossible)
+        [[ "$output" == *"instantané impossible : le dossier $pre ne peut pas être créé"* ]]
+        [ "$(appels_de docker | grep -c ' exec ')" -eq 0 ]
+        [ "$(cat "$pre")" = "pas un dossier" ]
         ;;
       *) [[ "$output" == *"instantané impossible (code ${cas#code-}) : données illisibles"* ]] ;;
     esac

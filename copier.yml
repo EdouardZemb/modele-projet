@@ -13,6 +13,7 @@ _skip_if_exists:
   - docs/decisions/README.md
   - docs/pistes.md
   - docs/registre.md
+  - docs/exploitation.md
   - .github/workflows/ci.yml
   - .github/dependabot.yml
   - deploiement/projet.env

@@ -15,9 +15,12 @@
 #      plus), sauf si {{ prefixe }}VERROU_TENU=1 ;
 #   2. si l'application tourne, instantané de ses données dans le dossier
 #      /sauvegardes/pre-deploiement/<AAAAMMJJTHHMMSSZ>, qui a la forme de /donnees, par la commande
-#      SAUVEGARDER de deploiement/projet.env ; elle l'écrit sous un nom provisoire,
-#      <AAAAMMJJTHHMMSSZ>.partiel, que le dossier ne quitte qu'après le code 0 ; si elle ne rend pas
-#      0, on s'arrête là, et le dossier garde ce nom, pour le diagnostic ;
+#      SAUVEGARDER de deploiement/projet.env (pre-deploiement/ est d'abord créé sur l'hôte s'il
+#      manque, car la commande crée son dossier, pas ses parents, puis ramené à 700 avec le dossier
+#      des sauvegardes) ; elle l'écrit sous un nom provisoire, <AAAAMMJJTHHMMSSZ>.partiel, que le
+#      dossier ne quitte qu'après le code 0 ; si elle ne rend pas 0, on s'arrête là, et le dossier
+#      garde ce nom, pour le diagnostic. Après le renommage, pre-deploiement/ est purgé des
+#      instantanés de plus de 30 jours, d'après leur nom ; une purge en échec n'arrête rien ;
 {%- else %}
 #   1. verrou ${{ prefixe }}ETAT/verrou, partagé avec la sonde (600 s d'attente au plus), sauf si
 #      {{ prefixe }}VERROU_TENU=1 ;
@@ -144,12 +147,24 @@ sante_conforme() {
 # service. Seul son code de sortie fait foi : sa sortie n'est que journalisée. La commande écrit sous
 # un nom provisoire, <horodatage>.partiel, renommé après le code 0 : un instantané en échec garde ce
 # nom, et rien ne le prend pour un instantané complet. Une destination déjà présente est un échec.
+# La commande crée son dossier, pas ses parents : pre-deploiement/ est créé ici, sur l'hôte, comme
+# sauvegarder.sh crée quotidiennes/ (R22), et ramené à 700 avec le dossier des sauvegardes, car un
+# instantané est une copie en clair des données (R24). Si l'un ou l'autre échoue, rien n'est lancé.
+# Après un instantané réussi, pre-deploiement/ est purgé de ce qui a plus de 30 jours (R24).
 instantane() {
-  local horodatage destination hote sortie code=0
+  local horodatage destination hote sortie code=0 pre="${{ prefixe }}SAUVEGARDES/pre-deploiement"
   lire_projet_env SAUVEGARDER || return 1
+  if ! mkdir -p -- "$pre"; then
+    journal "instantané impossible : le dossier $pre ne peut pas être créé"
+    return 1
+  fi
+  if ! chmod 700 -- "${{ prefixe }}SAUVEGARDES" "$pre"; then
+    journal "instantané impossible : les droits de ${{ prefixe }}SAUVEGARDES et de $pre ne peuvent pas être restreints"
+    return 1
+  fi
   horodatage="$(date -u +%Y%m%dT%H%M%SZ)"
   destination="/sauvegardes/pre-deploiement/$horodatage"
-  hote="${{ prefixe }}SAUVEGARDES/pre-deploiement/$horodatage"
+  hote="$pre/$horodatage"
   if [ -e "$hote" ] || [ -L "$hote" ] || [ -e "$hote.partiel" ] || [ -L "$hote.partiel" ]; then
     journal "instantané impossible : $hote existe déjà (ou $hote.partiel), rien n'est écrasé"
     return 1
@@ -167,6 +182,19 @@ instantane() {
     return 1
   fi
   journal "instantané : $destination"
+  purger_pre_deploiement "$pre"
+}
+
+# purger_pre_deploiement <dossier> : retire de pre-deploiement/ les instantanés de plus de 30 jours,
+# d'après leur nom, avec la regex et la limite de la rétention de sauvegarder.sh. Celle-ci ne tourne
+# qu'en prod : le staging, qui se déploie à chaque fusion, n'aurait sinon aucune purge. Un nom d'une
+# autre forme n'est jamais retiré. Un échec est journalisé et n'arrête pas le déploiement.
+purger_pre_deploiement() {
+  local limite
+  if ! limite="$(date -u -d '30 days ago' +%Y%m%dT%H%M%SZ)" \
+    || ! purger_par_nom "$1" '^([0-9]{8}T[0-9]{6}Z)(\.partiel)?$' "$limite"; then
+    journal "purge de $1 en échec : des instantanés de plus de 30 jours peuvent rester"
+  fi
 }
 {%- endif %}
 

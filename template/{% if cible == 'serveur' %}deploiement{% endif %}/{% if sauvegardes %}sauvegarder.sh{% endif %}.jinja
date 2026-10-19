@@ -112,21 +112,6 @@ valider_distant() {
     || echouer "destination distante refusée : '$1' (attendu : <remote>:<dossier>[/<sous-dossier>…], jamais la racine du remote)"
 }
 
-# purger_par_nom <dossier> <regex> <limite> : retire, emportés en entier, les dossiers de <dossier>
-# dont le nom suit <regex> et dont l'horodatage, le premier groupe de la regex (AAAAMMJJTHHMMSSZ),
-# est antérieur à <limite>, de la même forme : l'ordre lexical est celui du temps. Ni un fichier,
-# ni un lien, ni un nom d'une autre forme. La date du dossier n'est jamais lue.
-purger_par_nom() {
-  local dossier="$1" motif="$2" limite="$3" chemin
-  [ -d "$dossier" ] || return 0
-  for chemin in "$dossier"/*; do
-    { [ -d "$chemin" ] && [ ! -L "$chemin" ]; } || continue
-    [[ "${chemin##*/}" =~ $motif ]] || continue
-    [[ "${BASH_REMATCH[1]}" < "$limite" ]] || continue
-    rm -rf -- "$chemin" || return 1
-  done
-}
-
 # retention_locale : plus de 30 jours d'après leur nom, rien que des dossiers que ce script,
 # deployer.sh ou restaurer.sh écrivent, emportés en entier.
 retention_locale() {

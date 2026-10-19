@@ -129,6 +129,83 @@ Une sonde ne prouve rien si un autre mécanisme refuse à la place de celui qu'e
 - [ ] Retirer le worktree d'alignement et sa branche, locale et distante. Un `node_modules` de pnpm
       se retire sans suivre ses jonctions.
 
+## Passer en cible `serveur`
+
+Pour un projet déjà aligné qui se déploie sur le serveur. Changer de cible, c'est changer une
+réponse puis lancer `copier update` (`methode.md`, « Les fichiers gérés par le modèle ») ; la mise
+en service elle-même suit `docs/exploitation.md` du projet, une fois rendu. Mêmes préparatifs
+qu'au §1, dans un worktree `<dépôt>.worktrees\modele-serveur`.
+
+- [ ] **La PR qui apporte `fusion` se fusionne à la main.** Un projet aligné avant l'option la
+      reçoit au premier `copier update` vers une étiquette qui la connaît, souvent celui qui le
+      passe en cible `serveur`. Tant que la branche principale n'a pas la réponse, le garde la lit
+      comme `edouard` et refuse toute fusion : 👤 Edouard fusionne cette PR.
+- [ ] **Rendre**, sur un arbre propre, avec le bloc de ports que `projets/<nom>.env` réserve dans
+      `serveur` :
+
+  ```sh
+  copier update --defaults --vcs-ref <étiquette> --data cible=serveur --data bloc_ports=<bloc> \
+    --data sauvegardes=<true|false> --data fusion=<session|edouard>
+  ```
+
+  `--data fusion=…` est nécessaire tant que le projet n'a pas la réponse : `--defaults` lui
+  donnerait en silence `fusion=session`, alors que le mode se choisit (M-0002). Ajouter
+  `--data domaine=…`, `sous_domaine=…`, `port_app=…` ou `chemin_sante=…` si le projet
+  diffère des valeurs par défaut. `branche_principale` reste la réponse du projet : le staging suit
+  cette branche, et l'image `:main` que la CI publie à chaque fusion sur elle. Un conflit dans un
+  fichier géré se résout en faveur du modèle.
+- [ ] **Les reports à la main de `ci.yml`**, que `copier update` ne touche plus. Rendre le modèle à
+      côté, avec les mêmes réponses :
+
+  ```sh
+  copier copy --defaults --vcs-ref <étiquette> --data <les réponses du projet> \
+    gh:EdouardZemb/modele-projet <dossier temporaire>
+  ```
+
+  puis en reporter dans le `ci.yml` du projet :
+  - le commentaire et le bloc `concurrency`, qui n'annule jamais une publication en cours ;
+  - le job `verifier`, où vont les vérifications du projet (son lint, ses tests, sa construction) :
+    renommer en `verifier` le job qui les porte déjà ;
+  - le job `deploiement` (`sh tests/deploiement/lancer.sh`, `needs: verifier`) ;
+  - le job `image` (`needs: [socle, verifier, deploiement]`, `packages: write`) : l'action
+    `modele-image-construire`, puis les tests de bout en bout du projet contre l'image, puis
+    `modele-image-publier`, au push sur la branche principale seulement, et ses deux étapes de fin.
+- [ ] **Retirer l'ancien workflow de version**, s'il existe (un `version.yml` qui publie l'image à
+      l'étiquette), et toute publication d'image de l'ancien `ci.yml`, dans la même PR. Avec
+      `modele-version.yml`, deux workflows tourneraient sur la même étiquette.
+- [ ] **Le `Dockerfile` à la racine, à fournir ou à adapter**, que le modèle ne sème pas : il tient
+      le contrat de M-0003, dont `/donnees` à l'uid 1000.
+- [ ] **Les fichiers semés de la cible**, à remplir : `deploiement/projet.env` (les commandes
+      `SAUVEGARDER` et `VERIFIER`) ; `deploiement/compose.projet.yml` ; les secrets de l'app dans
+      `deploiement/secrets/<env>.cles` ; `docs/exploitation.md`, avec ce qui est propre à l'app.
+- [ ] **Un projet qui avait déjà ses scripts de déploiement** : ils cèdent la place à ceux de
+      `deploiement/`. Chaque déploiement prend son instantané avec la commande de la version qui
+      arrive, dans l'image de celle qui part (M-0003). La version qui précède l'alignement connaît
+      donc déjà la commande `SAUVEGARDER` du modèle, et la version alignée garde l'ancienne forme
+      une version au moins : sans cela, ni l'alignement ni le retour à la version d'avant ne
+      passent (invariant 4).
+- [ ] **Les secrets avant `serveur`.** 👤 `secrets.ps1 refaire` pour chaque environnement, puis 🤖
+      la PR des deux `.enc`, fusionnée **avant** la PR de `serveur` qui déclare le projet : la
+      sonde d'un projet sans ses secrets alerte (code 3). L'ordre complet est celui de
+      `docs/exploitation.md`, « La mise en service ». Pour un projet déjà en service,
+      `projets/<nom>.env` déclare ce qui existe, et la sonde de `serveur` n'y crée rien.
+- [ ] `gh pr checks` entièrement vert : `socle`, `verifier`, `deploiement` et `image`.
+
+### Revenir en cible `aucune`
+
+`copier update --data cible=aucune` retire `deploiement/`, `tests/deploiement/`, `.sops.yaml` et
+`docs/exploitation.md`, **fichiers semés compris** (`projet.env`, `compose.projet.yml`, les `.cles`),
+même retouchés par le projet. Copier ne garde pas un semé dont le gabarit disparaît, et la
+suppression est silencieuse : ni `.rej`, ni conflit. Le §8 de la spec disait que ces semés
+restaient. `CLAUDE.md` et `docs/registre.md`, eux, survivent.
+
+- [ ] **Avant** : noter le commit d'avant (`git rev-parse HEAD`) et mettre à l'abri ce que le projet
+      y a écrit, au moins `deploiement/projet.env` et `deploiement/compose.projet.yml` (commandes
+      `SAUVEGARDER` et `VERIFIER`, services propres à l'app), puis les `.cles` et
+      `docs/exploitation.md`.
+- [ ] **Après** : récupérer ce qui est utile, par `git show <commit>:deploiement/projet.env` ou
+      `git checkout <commit> -- deploiement/`.
+
 ## Avant de passer un dépôt privé en public
 
 Dans un dépôt privé, la porte de confidentialité avertit sur ce qui identifie (elle ne refuse que

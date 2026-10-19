@@ -3,6 +3,8 @@
 - **Statut** : accepté le 2026-10-16
 - **Amendé** le 2026-10-17, après la revue finale du lot 1 : dans un dépôt privé, la porte de
   confidentialité avertit sur ce qui identifie et refuse toujours les secrets (décision d'Edouard)
+- **Amendé** le 2026-10-18, avec la cible `serveur` : qui fusionne se choisit par la réponse
+  `fusion`, et les étiquettes et les publications sont à Edouard (décision d'Edouard)
 - **Contexte amont** : M-0001 (les garde-fous de qualité comme condition d'entrée)
 
 ## Contexte
@@ -57,6 +59,17 @@ pas de la discipline de celui qui travaille ?
   l'historique ou l'on publie un nouveau dépôt depuis un commit unique propre ; un passage complet
   de `modele-historique.yml` est vert ; `copier update` avec `visibilite=public`, puis la règle de
   protection. Les binaires de l'historique ne sont pas examinés.
+- **Qui fusionne : la réponse `fusion`** (amendement du 2026-10-18), choisie à la création du
+  projet. En mode `session`, la session fusionne sa PR une fois tous les contrôles verts. En mode
+  `edouard`, elle ouvre la PR, attend le vert, le dit et s'arrête : le garde refuse toute fusion,
+  par `gh pr merge` (`--auto` et `--admin` compris), par l'API ou par GraphQL. Le garde lit le mode
+  sur GitHub, dans le `.copier-answers.yml` de la branche principale, jamais dans la copie locale
+  ni dans `origin/<branche>`, qu'une session peut réécrire. Tout ce qui est illisible vaut
+  `edouard`.
+- **Les étiquettes et les publications sont à Edouard**, dans les deux modes (amendement du
+  2026-10-18) : une étiquette `vX.Y.Z` met un projet `serveur` en production. Le garde refuse
+  l'envoi d'une étiquette et toute écriture de publication (`gh release` en écriture, l'API
+  `…/releases`) ; une session peut préparer l'étiquette en local.
 - **Le modèle lui-même est public.** Rien de ce qu'il contient ne nomme le serveur, son utilisateur
   ou son réseau.
 - **Un refus se corrige, il ne se contourne jamais.**
@@ -74,6 +87,11 @@ pas de la discipline de celui qui travaille ?
   lui exposerait tout ce qui a été averti.
 - Les journaux d'Actions d'un dépôt public sont publics : la porte n'y affiche jamais la valeur
   trouvée, seulement l'emplacement et le nom du motif.
+- En mode `edouard`, chaque fusion attend Edouard : c'est le prix d'un dépôt dont une fusion
+  touche une machine partagée. La PR qui apporte l'option `fusion` à un projet existant se fusionne
+  à la main : tant que la branche principale n'a pas la réponse, le garde la lit comme `edouard`.
+- Une mise en production attend toujours Edouard, quel que soit le mode : la session prépare
+  l'étiquette, il l'envoie.
 - **Difficile à changer** : la visibilité d'un dépôt, une fois son historique publié.
 
 ## Révision
@@ -83,4 +101,5 @@ Cet ADR doit être rouvert si :
 - GitHub étend la protection de branche aux dépôts privés des comptes gratuits ;
 - Edouard prend un abonnement qui l'autorise ;
 - un contournement des hooks est constaté dans un projet : la règle correspondante devient alors une
-  porte côté serveur.
+  porte côté serveur ;
+- une fusion en mode `edouard`, une étiquette ou une publication passe sans Edouard.
