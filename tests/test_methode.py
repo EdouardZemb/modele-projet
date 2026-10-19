@@ -157,6 +157,30 @@ def test_garde_fous_a_jour():
     assert "gitleaks sur tout l'historique ;" not in section
 
 
+def adr_rendu(rendre, nom, **reponses):
+    rendu = rendre(**{**REPONSES_SERVEUR, **reponses})
+    return " ".join(lire(rendu / "docs/modele/decisions" / nom).split())
+
+
+def test_m0003_dit_ce_que_la_ci_ne_prouve_pas(rendre):
+    """R23 : la CI lance les deux commandes par `docker exec`, qui contourne l'`ENTRYPOINT`."""
+    texte = adr_rendu(rendre, "M-0003-contrat-de-l-image.md")
+    assert "Le contrat se vérifie à chaque PR" not in texte
+    assert "`SAUVEGARDER` et `VERIFIER` dans le conteneur, par `docker exec`" in texte
+    assert "La CI ne prouve pas la clause de l'`ENTRYPOINT`" in texte
+    assert "le test de restauration" in texte
+    # R24 : la mécanique ne pose que deux variables en CI, le projet peut en ajouter
+    assert "la mécanique ne pose que `ESSAI_ENV=ci` et `ESSAI_URL_PUBLIQUE`" in texte
+
+
+@pytest.mark.parametrize("sauvegardes", [True, False])
+def test_m0004_ne_renvoie_a_m0005_qu_avec_sauvegardes(rendre, sauvegardes):
+    """R24 : sans sauvegardes, M-0005 n'est pas rendu, et M-0004 n'y renvoie pas."""
+    texte = adr_rendu(rendre, "M-0004-chaine-de-livraison.md", sauvegardes=sauvegardes)
+    assert ("M-0005" in texte) is sauvegardes
+    assert ("instantané" in texte) is sauvegardes
+
+
 def test_m0002_amende():
     texte = lire(DECISIONS / "M-0002-garde-fous-et-confidentialite.md")
     assert "le contrôle de dérive en tient compte" not in texte

@@ -145,10 +145,12 @@ qu'au §1, dans un worktree `<dépôt>.worktrees\modele-serveur`.
 
   ```sh
   copier update --defaults --vcs-ref <étiquette> --data cible=serveur --data bloc_ports=<bloc> \
-    --data sauvegardes=<true|false>
+    --data sauvegardes=<true|false> --data fusion=<session|edouard>
   ```
 
-  Ajouter `--data domaine=…`, `sous_domaine=…`, `port_app=…` ou `chemin_sante=…` si le projet
+  `--data fusion=…` est nécessaire tant que le projet n'a pas la réponse : `--defaults` lui
+  donnerait en silence `fusion=session`, alors que le mode se choisit (M-0002). Ajouter
+  `--data domaine=…`, `sous_domaine=…`, `port_app=…` ou `chemin_sante=…` si le projet
   diffère des valeurs par défaut. `branche_principale` reste la réponse du projet : le staging suit
   cette branche, et l'image `:main` que la CI publie à chaque fusion sur elle. Un conflit dans un
   fichier géré se résout en faveur du modèle.
@@ -171,8 +173,9 @@ qu'au §1, dans un worktree `<dépôt>.worktrees\modele-serveur`.
 - [ ] **Retirer l'ancien workflow de version**, s'il existe (un `version.yml` qui publie l'image à
       l'étiquette), et toute publication d'image de l'ancien `ci.yml`, dans la même PR. Avec
       `modele-version.yml`, deux workflows tourneraient sur la même étiquette.
-- [ ] **Les fichiers semés de la cible**, à remplir : le `Dockerfile` à la racine, qui tient le
-      contrat de M-0003 (dont `/donnees` à l'uid 1000) ; `deploiement/projet.env` (les commandes
+- [ ] **Le `Dockerfile` à la racine, à fournir ou à adapter**, que le modèle ne sème pas : il tient
+      le contrat de M-0003, dont `/donnees` à l'uid 1000.
+- [ ] **Les fichiers semés de la cible**, à remplir : `deploiement/projet.env` (les commandes
       `SAUVEGARDER` et `VERIFIER`) ; `deploiement/compose.projet.yml` ; les secrets de l'app dans
       `deploiement/secrets/<env>.cles` ; `docs/exploitation.md`, avec ce qui est propre à l'app.
 - [ ] **Un projet qui avait déjà ses scripts de déploiement** : ils cèdent la place à ceux de

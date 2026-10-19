@@ -30,7 +30,8 @@ Un `Dockerfile` à la racine du dépôt. L'image :
   du propriétaire du `/donnees` de l'image, et sans lui l'app n'y écrit pas. En production,
   `/donnees` est un montage du dossier de l'hôte, `~/.local/share/{{ nom }}/<env>/donnees` ;
 - lit dans son environnement `{{ prefixe }}ENV`, `{{ prefixe }}VERSION` et `{{ prefixe }}URL_PUBLIQUE`, que `compose.yml`
-  lui passe. En CI, seuls `{{ prefixe }}ENV=ci` et `{{ prefixe }}URL_PUBLIQUE` sont posés ;
+  lui passe. En CI, la mécanique ne pose que `{{ prefixe }}ENV=ci` et `{{ prefixe }}URL_PUBLIQUE` ; le projet
+  peut y ajouter les siennes, par l'entrée `variables` de `modele-image-construire` ;
 - démarre par sa commande par défaut. Un `HEALTHCHECK` est conseillé : `docker compose up --wait`
   attend alors que l'app soit saine.
 
@@ -75,7 +76,8 @@ une ligne `CLE=mots`, des mots séparés par des espaces, sans caractère que le
 - **`VERIFIER <dossier>`** répond 0 si l'instantané est conforme, 2 s'il ne l'est pas, 64 en cas
   d'erreur d'usage. Seul le code fait foi ; la sortie va au journal. Sur le serveur, elle tourne
   dans un conteneur jetable (`docker run <image> <mots> /donnees`) qui ne voit que l'instantané,
-  monté sur `/donnees` : une image dont l'`ENTRYPOINT` ne lance pas ses arguments la fait échouer.
+  monté sur `/donnees` : une image dont l'`ENTRYPOINT` ne lance pas ses arguments la fait échouer,
+  et la CI ne le voit pas (« Conséquences »).
 - **`VERIFIER` ne modifie jamais son argument.** Le dossier est monté en écriture dans le conteneur
   de vérification, et c'est son contenu que le test de restauration et la restauration mettent
   ensuite en service.
@@ -115,9 +117,16 @@ ajoute deux commandes à ce contrat, `SAUVEGARDER` et `VERIFIER`, et l'ADR M-000
 ## Conséquences
 
 - Toute pile convient, tant que son image tient le contrat.
-- Le contrat se vérifie à chaque PR : la CI lance l'image comme en production, et une image qui ne
-  le tient pas n'est jamais publiée.
+- À chaque PR, la CI lance l'image comme en production et contrôle sa santé, sa révision et son
+  environnement{% if sauvegardes %}, puis lance `SAUVEGARDER` et `VERIFIER` dans le conteneur, par `docker exec`{% endif %}.
+  Une image qui échoue n'est jamais publiée.
 {%- if sauvegardes %}
+- **La CI ne prouve pas la clause de l'`ENTRYPOINT`** : `docker exec` le contourne, alors que le
+  serveur lance `VERIFIER` par `docker run`. C'est le test de restauration qui la prouve : la mise
+  en service le lance une fois après le premier déploiement en prod (`docs/exploitation.md`), puis
+  il tourne chaque dimanche. Une image qui la viole passe la CI, puis fait échouer ce test et toute
+  restauration. Faire passer la vérification de la CI par `verifier_copie` est une piste de
+  `modele-projet`.
 - Les deux commandes sont du code de l'app, que le projet teste. Leur compatibilité d'une version à
   l'autre s'ajoute à l'invariant 4.
 - **Difficile à changer** : la forme de l'instantané. Les archives gardées 90 jours la portent.

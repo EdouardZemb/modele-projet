@@ -257,6 +257,17 @@ def test_exploitation_sections(rendre, sauvegardes, visibilite):
     retour = section(texte, "Revenir en arrière")
     assert retour.index("git tag -a") < retour.index("deployer.sh prod --retour")
 
+    # R23 : avec sauvegardes, la mise en service lance une fois le test de restauration, seul à
+    # prouver la clause de l'ENTRYPOINT (M-0003).
+    assert ("~/essai/deploiement/tester-restauration.sh prod" in mise_en_service) is sauvegardes
+    # R24 : l'instantané d'avant déploiement du staging, où il vit et ce qui le purge
+    pre_staging = "~/.local/share/essai/staging/sauvegardes/pre-deploiement/"
+    assert (pre_staging in texte) is sauvegardes
+    # R24 : l'archive rapatriée se retire après usage ; rien ne prétend qu'aucun fichier n'est posé
+    assert "aucune n'y pose de fichier" not in texte
+    if sauvegardes:
+        assert "rm ~/backups/essai/essai-<horodatage>.tar.age" in section(texte, "Restaurer")
+
     secrets = section(texte, "Secrets")
     assert "scripts/modele/secrets.ps1 refaire" in secrets
     assert "KeePassXC" in secrets

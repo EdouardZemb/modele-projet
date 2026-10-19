@@ -5,8 +5,14 @@
 - **Statut** : validé à la fusion, puis figé
 
 > **Amendé le 2026-10-18, sans réécriture de ce texte figé.** Là où il diffère, ce sont les ADR
-> hérités qui font foi, dans `template/docs/modele/decisions/` :
+> hérités qui font foi, dans `template/docs/modele/decisions/`, et la méthode,
+> `template/docs/modele/methode.md` :
 >
+> - **`methode.md`** : l'invariant 3 devient « Personne n'écrit sur le serveur après son
+>   amorçage : tout y arrive par git. Une session y lit, elle n'y écrit jamais » (§5.2) ;
+> - **M-0003** : l'instantané est un dossier qui a la forme de `/donnees`. Il est créé par
+>   `SAUVEGARDER <dossier>` et contrôlé par `VERIFIER <dossier>` ; ce ne sont plus des fichiers
+>   écrits dans un dossier (§6.1) ;
 > - **M-0002, amendé** : qui fusionne se choisit par la réponse `fusion` (`session` ou `edouard`),
 >   et les étiquettes et les publications sont à Edouard, dans les deux modes ;
 > - **M-0004** : le retour voulu passe par une étiquette, `deployer.sh <env> --retour` restant le

@@ -29,10 +29,9 @@ sans geste, qu'une version arrive en production sur un seul geste d'Edouard, et 
    qui vise la plus haute étiquette `vX.Y.Z`, suit dans les 5 minutes.
 3. **Le serveur va chercher.** `sonder.sh <env>`, toutes les 5 minutes : un verrou, un clone
    propre (sinon une alerte), la cible (en staging, la branche principale et l'image `:main` ; en
-   prod, la plus haute étiquette), `docker pull`, puis
-   `deployer.sh` si l'image diffère de celle en service. Le déploiement prend un instantané des
-   données si le projet a des sauvegardes (M-0003), lance `docker compose up --wait`, et contrôle
-   la santé sur le port local : statut, version et révision.
+   prod, la plus haute étiquette), `docker pull`, puis `deployer.sh` si l'image diffère de celle
+   en service. Le déploiement {% if sauvegardes %}prend un instantané des données (M-0003, M-0005), {% endif %}lance
+   `docker compose up --wait` et contrôle la santé sur le port local : statut, version et révision.
 4. **Un déploiement qui échoue** : la version est marquée `echec` et **jamais retentée**, la
    précédente revient d'elle-même, et Healthchecks reçoit `/fail`. Sans version précédente,
    l'application est arrêtée.
@@ -104,7 +103,7 @@ Aucune étape de la mise en service ne se passe sur la machine.
 
 ### 7. La supervision
 
-Un contrôle Healthchecks par sonde (et par sauvegarde, M-0005), dont l'adresse est un secret
+Un contrôle Healthchecks par sonde{% if sauvegardes %} (et par sauvegarde, M-0005){% endif %}, dont l'adresse est un secret
 (`HC_*`). Une unité en échec déclenche `<nom>-alerte@.service` par `OnFailure=`. Une adresse de
 ping passe à `curl` par `-K -`, jamais en argument, et n'est jamais journalisée.
 
@@ -114,8 +113,8 @@ ping passe à `curl` par `-K -`, jamais en argument, et n'est jamais journalisé
   chaque saisie de secret, le passage du paquet en public, la clé de déploiement d'un dépôt privé.
 - Une version met au plus 5 minutes à arriver après sa publication.
 - Un retour arrière ne restaure pas les données : une migration, une variable ou un service
-  s'ajoutent avant de s'enlever (invariant 4). Une version qui ne peut pas le respecter le déclare,
-  et son retour passe par une restauration.
+  s'ajoutent avant de s'enlever (invariant 4). Une version qui ne peut pas le respecter le
+  déclare{% if sauvegardes %}, et son retour passe par une restauration (M-0005){% endif %}.
 - Une valeur de secret absente de KeePassXC empêche de refaire le fichier : on la régénère d'abord.
 - **Difficile à changer** : peu de chose. Le modèle par tirage, GHCR et la convention « étiquette =
   prod » se remplacent sans toucher l'application.

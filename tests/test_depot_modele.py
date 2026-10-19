@@ -180,6 +180,8 @@ def test_liste_d_alignement():
         "modele-image-construire",
         "modele-version.yml",
         "se fusionne à la main",
+        "--data fusion=<session|edouard>",
+        "que le modèle ne sème pas",
     ):
         assert fragment in texte, fragment
     # avant le commit, --diff compare <base>...HEAD et n'examine rien (LE-15)

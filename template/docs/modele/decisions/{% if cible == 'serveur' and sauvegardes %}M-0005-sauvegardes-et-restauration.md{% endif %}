@@ -40,9 +40,12 @@ Le staging n'a que des données factices (M-0001). `sauvegarder.sh`, `tester-res
 
 ### 3. Avant chaque déploiement
 
-`deployer.sh` prend un instantané, de même forme, dans `pre-deploiement/<horodatage>`, si l'app
-tourne ; il crée d'abord `pre-deploiement/` s'il manque. S'il échoue, le déploiement n'a pas lieu et rien ne change ; la sonde réessaie, et alerte,
-à chaque passage.
+En prod comme en staging, `deployer.sh` prend un instantané, de même forme, dans le
+`pre-deploiement/<horodatage>` de l'environnement, si l'app tourne. Il crée d'abord
+`pre-deploiement/` s'il manque, et le ramène à 700 avec le dossier des sauvegardes. S'il échoue,
+le déploiement n'a pas lieu et rien ne change ; la sonde réessaie, et alerte, à chaque passage.
+Après un instantané réussi, il purge `pre-deploiement/` de ce qui a plus de 30 jours, d'après le
+nom : la sauvegarde de la nuit ne tourne qu'en prod, et le staging n'aurait sinon aucune purge.
 
 ### 4. La clé hors ligne n'est jamais sur le serveur
 
