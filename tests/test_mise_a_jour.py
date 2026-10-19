@@ -104,12 +104,21 @@ def _sans_conflit(projet):
             assert "<<<<<<<" not in texte, chemin
 
 
+def _retoucher(*chemins):
+    for chemin in chemins:
+        with chemin.open("a", encoding="utf-8", newline="\n") as f:
+            f.write(f"\n# {LIGNE_PROJET}\n")
+
+
 def test_passage_en_cible_serveur(tmp_path, env_isole):
     env = env_isole()
     modele = _modele_v1(tmp_path, env)
     projet = _projet_v1(tmp_path, env, modele)
+    _retoucher(projet / "CLAUDE.md", projet / "docs/registre.md")
+    git(projet, env, "commit", "-q", "-am", "semés retouchés par le projet")
     claude = (projet / "CLAUDE.md").read_bytes()
     registre = (projet / "docs/registre.md").read_bytes()
+    assert LIGNE_PROJET.encode() in claude
     assert not (projet / "deploiement").exists()
     _modele_v2(modele, env)
 
@@ -138,12 +147,21 @@ def test_retour_en_cible_aucune(tmp_path, env_isole):
     env = env_isole()
     modele = _modele_v1(tmp_path, env)
     projet = _projet_v1(tmp_path, env, modele, REPONSES_SERVEUR)
-    assert (projet / "deploiement/projet.env").is_file()
-    assert (projet / ".sops.yaml").is_file()
     lib = projet / "deploiement/lib.sh"
-    for retouche in (projet / "deploiement/projet.env", lib):
-        with retouche.open("a", encoding="utf-8", newline="\n") as f:
-            f.write(f"\n# {LIGNE_PROJET}\n")
+    for present in (
+        lib,
+        projet / "deploiement/projet.env",
+        projet / "deploiement/compose.projet.yml",
+        projet / ".sops.yaml",
+        projet / "tests/deploiement",
+        projet / "docs/exploitation.md",
+    ):
+        assert present.exists(), present
+    _retoucher(
+        projet / "deploiement/projet.env", lib, projet / "CLAUDE.md", projet / "docs/registre.md"
+    )
+    claude = (projet / "CLAUDE.md").read_bytes()
+    registre = (projet / "docs/registre.md").read_bytes()
     git(projet, env, "commit", "-q", "-am", "retouches du projet")
     _modele_v2(modele, env)
 
@@ -164,6 +182,9 @@ def test_retour_en_cible_aucune(tmp_path, env_isole):
     assert not (projet / "deploiement").exists()
     assert not (projet / "tests/deploiement").exists()
     assert not (projet / "docs/exploitation.md").exists()
+    # Les semés qui ne sont pas propres à la cible survivent, retouches comprises.
+    assert (projet / "CLAUDE.md").read_bytes() == claude
+    assert (projet / "docs/registre.md").read_bytes() == registre
     _sans_conflit(projet)
     reponses = yaml.safe_load((projet / ".copier-answers.yml").read_text(encoding="utf-8"))
     assert reponses["cible"] == "aucune"

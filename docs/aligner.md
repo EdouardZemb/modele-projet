@@ -193,11 +193,18 @@ qu'au §1, dans un worktree `<dépôt>.worktrees\modele-serveur`.
 
 ### Revenir en cible `aucune`
 
-`copier update --data cible=aucune` retire tout `deploiement/`, `tests/deploiement/` et `.sops.yaml`,
-**fichiers semés compris** (`projet.env`, `compose.projet.yml`, les `.cles`, `docs/exploitation.md`),
-même retouchés par le projet : Copier ne garde pas un semé dont le gabarit disparaît. Le §8 de la
-spec disait qu'ils restaient. Ce qu'il faut garder (commandes `SAUVEGARDER` et `VERIFIER`, secrets de l'app) se
-récupère donc avant la mise à jour, ou dans l'historique git de la PR.
+`copier update --data cible=aucune` retire `deploiement/`, `tests/deploiement/`, `.sops.yaml` et
+`docs/exploitation.md`, **fichiers semés compris** (`projet.env`, `compose.projet.yml`, les `.cles`),
+même retouchés par le projet. Copier ne garde pas un semé dont le gabarit disparaît, et la
+suppression est silencieuse : ni `.rej`, ni conflit. Le §8 de la spec disait que ces semés
+restaient. `CLAUDE.md` et `docs/registre.md`, eux, survivent.
+
+- [ ] **Avant** : noter le commit d'avant (`git rev-parse HEAD`) et mettre à l'abri ce que le projet
+      y a écrit, au moins `deploiement/projet.env` et `deploiement/compose.projet.yml` (commandes
+      `SAUVEGARDER` et `VERIFIER`, services propres à l'app), puis les `.cles` et
+      `docs/exploitation.md`.
+- [ ] **Après** : récupérer ce qui est utile, par `git show <commit>:deploiement/projet.env` ou
+      `git checkout <commit> -- deploiement/`.
 
 ## Avant de passer un dépôt privé en public
 
