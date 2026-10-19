@@ -37,6 +37,7 @@
 #   lire_deploye                       DEPLOYE_IMAGE et DEPLOYE_VERSION, depuis le fichier deploye
 {%- if sauvegardes %}
 #   verifier_copie <image> <dossier>   contrôle d'un dossier qui a la forme de /donnees, par la commande VERIFIER
+#   purger_par_nom <dossier> <regex> <limite>  retire les dossiers dont le nom date d'avant <limite>
 # Variables posées : {{ prefixe }}CLONE (racine du clone qui lance le script) et {{ prefixe }}OPTIONS_JETABLES
 # (options des conteneurs jetables).
 {%- else %}
@@ -354,6 +355,22 @@ verifier_copie() {
       return 1
       ;;
   esac
+}
+
+# purger_par_nom <dossier> <regex> <limite> : retire, emportés en entier, les dossiers de <dossier>
+# dont le nom suit <regex> et dont l'horodatage, le premier groupe de la regex (AAAAMMJJTHHMMSSZ),
+# est antérieur à <limite>, de la même forme : l'ordre lexical est celui du temps. Ni un fichier,
+# ni un lien, ni un nom d'une autre forme. La date du dossier n'est jamais lue. Utilisée par la
+# rétention de sauvegarder.sh et par la purge de pre-deploiement/ de deployer.sh.
+purger_par_nom() {
+  local dossier="$1" motif="$2" limite="$3" chemin
+  [ -d "$dossier" ] || return 0
+  for chemin in "$dossier"/*; do
+    { [ -d "$chemin" ] && [ ! -L "$chemin" ]; } || continue
+    [[ "${chemin##*/}" =~ $motif ]] || continue
+    [[ "${BASH_REMATCH[1]}" < "$limite" ]] || continue
+    rm -rf -- "$chemin" || return 1
+  done
 }
 {%- endif %}
 

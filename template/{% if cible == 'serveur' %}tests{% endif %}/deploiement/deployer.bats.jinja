@@ -199,6 +199,63 @@ nombre_de_lancements() {
   [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
 }
 
+# R24 : l'instantané d'avant déploiement est une copie en clair des données. Comme sauvegarder.sh
+# pour quotidiennes/, le script ramène le dossier des sauvegardes et pre-deploiement/ à 700, même
+# s'ils existaient déjà avec des droits plus larges.
+@test "deployer_protege_pre_deploiement" {
+  deja_en_service "$ANCIENNE" 0.1.0
+  local sauvegardes="${{ prefixe }}RACINE_SAUVEGARDES" pre="${{ prefixe }}RACINE_SAUVEGARDES/pre-deploiement"
+  mkdir -p "$pre"
+  chmod 755 "$sauvegardes" "$pre"
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 0 ]
+  [ "$(stat -c %a "$sauvegardes")" = 700 ]
+  [ "$(stat -c %a "$pre")" = 700 ]
+}
+
+# R24 : la sauvegarde de la nuit, qui purge pre-deploiement/, ne tourne qu'en prod, alors que le
+# staging se déploie à chaque fusion. Le déploiement purge donc son propre pre-deploiement/ après un
+# instantané réussi : 30 jours, d'après le nom (la regex de sauvegarder.sh), jamais un autre nom.
+@test "deployer_purge_ses_instantanes_de_plus_de_30_jours" {
+  preparer_secrets_de_test staging JETON=jeton-staging-7 HC_SONDE=https://hc.example/ping/sonde-staging
+  en_service staging "$ANCIENNE" main
+  local pre="${{ prefixe }}RACINE_DONNEES/staging/sauvegardes/pre-deploiement" vieux recent nom
+  vieux="$(date -u -d '31 days ago' +%Y%m%dT%H%M%SZ)"
+  recent="$(date -u -d '1 hour ago' +%Y%m%dT%H%M%SZ)"
+  for nom in "$vieux" "$vieux.partiel" "$recent" "$vieux.copie" garder; do
+    mkdir -p "$pre/$nom/sous"
+    echo "$nom" >"$pre/$nom/sous/donnees.txt"
+  done
+  deployer staging "$NOUVELLE" main
+  [ "$status" -eq 0 ]
+  # plus de 30 jours, par le nom : partent en entier, .partiel compris
+  [ ! -e "$pre/$vieux" ]
+  [ ! -e "$pre/$vieux.partiel" ]
+  # le récent, les noms d'une autre forme et l'instantané du jour restent
+  [ -f "$pre/$recent/sous/donnees.txt" ]
+  [ -f "$pre/$vieux.copie/sous/donnees.txt" ]
+  [ -f "$pre/garder/sous/donnees.txt" ]
+  [ "$(find "$pre" -mindepth 1 -maxdepth 1 | wc -l)" -eq 4 ]
+  [ "$(cat "${{ prefixe }}RACINE_ETAT/staging/deploye")" = "$NOUVELLE main" ]
+}
+
+# Une purge en échec est journalisée, et le déploiement continue : elle ne change rien à la version.
+@test "deployer_continue_si_la_purge_echoue" {
+  deja_en_service "$ANCIENNE" 0.1.0
+  local pre="${{ prefixe }}RACINE_SAUVEGARDES/pre-deploiement" vieux
+  vieux="$(date -u -d '31 days ago' +%Y%m%dT%H%M%SZ)"
+  mkdir -p "$pre/$vieux/verrouille"
+  echo "reste" >"$pre/$vieux/verrouille/donnees.txt"
+  # un sous-dossier sans droit d'écriture : rm -rf ne peut pas le vider
+  chmod 500 "$pre/$vieux/verrouille"
+  deployer prod "$NOUVELLE" 0.2.0
+  chmod 700 "$pre/$vieux/verrouille"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"purge de $pre en échec"* ]]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+  [ "$(signaux)" = "$(signal 'déployé 0.2.0') $HC" ]
+}
+
 # Un instantané en échec annule le déploiement avant tout changement : rien n'est arrêté ni lancé,
 # l'application en service y reste, et rien n'est marqué en échec. La sonde réessaiera au prochain
 # passage. Les cas :
