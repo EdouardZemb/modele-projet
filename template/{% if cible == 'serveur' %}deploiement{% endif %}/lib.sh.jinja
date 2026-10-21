@@ -24,6 +24,9 @@
 #   dc <args…>                         docker compose du projet (compose.yml, compose.projet.yml), avec compose.env
 #   valeur_de <clé> <fichier>          la valeur d'une clé d'un fichier CLE=valeur (lu, jamais sourcé)
 #   lire_projet_env <clé>              PROJET_MOTS : les mots de cette clé dans deploiement/projet.env
+{%- if sauvegardes %}
+#   lire_projet_env_facultatif <clé>   la même chose pour une clé facultative : absente, PROJET_MOTS vide
+{%- endif %}
 #   jq_vaut <attendu> <doc> <filtre>   le filtre jq, appliqué au document, imprime exactement <attendu>
 #   revision_de <image>                le label de révision (SHA du commit) de l'image
 #   sante_sur <port> <filtre> [opts]   un essai sur http://127.0.0.1:<port>{{ chemin_sante }}
@@ -39,6 +42,7 @@
 #   verifier_copie <image> <dossier>   contrôle d'un dossier qui a la forme de /donnees, par la commande VERIFIER
 #   purger_par_nom <dossier> <regex> <limite>  retire les dossiers dont le nom date d'avant <limite>
 #   retirer_partiels <dossier> <regex> retire les instantanés en échec (.partiel) avant un nouvel essai
+#   retirer_restes_de_restauration     retire, sous le verrou, ce qu'une restauration tuée a laissé
 # Variables posées : {{ prefixe }}CLONE (racine du clone qui lance le script) et {{ prefixe }}OPTIONS_JETABLES
 # (options des conteneurs jetables).
 {%- else %}
@@ -210,6 +214,26 @@ lire_projet_env() {
     return 1
   fi
 }
+{%- if sauvegardes %}
+
+# lire_projet_env_facultatif <CLÉ> : comme lire_projet_env, pour une clé que le projet peut ne pas
+# déclarer. Si aucune ligne de deploiement/projet.env ne commence par « CLÉ= » (ou si le fichier
+# manque), succès, PROJET_MOTS vide, et rien n'est lu ni journalisé : le script qui l'appelle se
+# comporte comme avant la clé, à l'octet près. Sinon, c'est lire_projet_env, avec le contrôle du
+# fichier entier.
+lire_projet_env_facultatif() {
+  local cle="${1:-}" fichier="${{ prefixe }}CLONE/deploiement/projet.env" ligne
+  PROJET_MOTS=()
+  [[ "$cle" =~ ^[A-Z][A-Z0-9_]*$ ]] || arreter 64 "lire_projet_env_facultatif : clé invalide"
+  [ -f "$fichier" ] || return 0
+  while IFS= read -r ligne || [ -n "$ligne" ]; do
+    if [[ "$ligne" == "$cle="* ]]; then
+      lire_projet_env "$cle"
+      return
+    fi
+  done <"$fichier"
+}
+{%- endif %}
 
 # jq_vaut <attendu> <document> <filtre> [options jq…] : le filtre, appliqué au document, imprime
 # exactement <attendu>. Pas de `jq -e` : jq 1.6 rend 0 sur une entrée vide, et un corps vide
@@ -388,6 +412,38 @@ retirer_partiels() {
     { [ -d "$chemin" ] || [ -f "$chemin" ]; } || continue
     [[ "${chemin##*/}" =~ $motif ]] || continue
     rm -rf -- "$chemin" || code=1
+  done
+  return "$code"
+}
+
+# retirer_restes_de_restauration : retire ce qu'une restauration tuée de force (SIGKILL, plantage de
+# l'hôte) laisse hors de portée de son trap : les copies jetables de son report,
+# ${{ prefixe }}SAUVEGARDES/report-<AAAAMMJJTHHMMSSZ> (des copies en clair des données en service, sans
+# autre rétention), et sa copie de travail, ${{ prefixe }}DONNEES.nouvelle. À n'appeler que sous le
+# verrou de l'état, que la restauration tient de bout en bout : ce qui reste alors n'est à aucune
+# restauration en cours. Rien que des dossiers, jamais un lien (ni suivi, ni retiré), ni un nom
+# d'une autre forme. Les droits sont rendus d'abord : la commande du report a pu laisser des
+# sous-dossiers en lecture seule. Chaque retrait est journalisé, chaque échec aussi, et l'entrée
+# suivante est tentée ; échec si l'une n'a pas pu partir. Utilisée par sauvegarder.sh et
+# restaurer.sh.
+retirer_restes_de_restauration() {
+  local chemin code=0
+  local -a restes=()
+  for chemin in "${{ prefixe }}SAUVEGARDES"/report-*; do
+    if [[ "${chemin##*/}" =~ ^report-[0-9]{8}T[0-9]{6}Z$ ]]; then
+      restes+=("$chemin")
+    fi
+  done
+  restes+=("${{ prefixe }}DONNEES.nouvelle")
+  for chemin in "${restes[@]}"; do
+    { [ -d "$chemin" ] && [ ! -L "$chemin" ]; } || continue
+    chmod -R u+rwX -- "$chemin" 2>/dev/null || true
+    if rm -rf -- "$chemin"; then
+      journal "reste d'une restauration interrompue retiré : $chemin"
+    else
+      journal "reste d'une restauration interrompue non retiré : $chemin (une copie des données en clair, à retirer à la main)"
+      code=1
+    fi
   done
   return "$code"
 }

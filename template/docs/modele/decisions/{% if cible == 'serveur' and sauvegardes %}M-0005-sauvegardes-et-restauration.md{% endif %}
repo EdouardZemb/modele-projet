@@ -9,7 +9,8 @@
 Une sauvegarde qu'on n'a jamais relue ne prouve rien, et une sauvegarde qui échoue sans alerte peut
 rester en échec des semaines. Le serveur peut être perdu ; s'il est compromis, ses copies distantes
 ne doivent pas l'être avec lui. La mécanique doit tout faire sans rien savoir de la base de l'app :
-elle ne connaît que les deux commandes du contrat, `SAUVEGARDER` et `VERIFIER` (M-0003).
+elle ne connaît que les commandes du contrat, `SAUVEGARDER`, `VERIFIER` et, facultative,
+`REPORTER` (M-0003).
 
 ## Décision
 
@@ -60,13 +61,44 @@ Le dernier `quotidiennes/<nom>-<horodatage>` (jamais un `.partiel`) est copié, 
 `bloc_ports + 9` : sa santé doit dire `ok`. Le test ne touche ni aux données de la prod ni à ses
 sauvegardes. Signal `HC_TEST_RESTAURATION`.
 
-### 6. Restaurer, à la main : `restaurer.sh prod <dossier|archive .tar.age> [--oui] [--cle <identité age>]`
+### 6. Restaurer, à la main : `restaurer.sh prod <dossier|archive .tar.age> [--oui] [--cle <identité age>] [--sans-report]`
 
-- Sans `--oui`, le script dit ce qu'il ferait et ne touche à rien.
+- Sans `--oui`, le script dit ce qu'il ferait, report compris, et ne touche à rien.
 - Avec `--oui` : le verrou ; `VERIFIER` sur une copie de l'instantané avant tout changement ;
-  l'arrêt de l'app ; l'ancien contenu de `/donnees` déplacé dans `avant-restauration-<horodatage>/`,
-  jamais supprimé ; l'instantané à sa place ; le redémarrage et la santé. Si quelque chose échoue
-  en chemin, l'ancien contenu revient, ou le message dit où est chaque chose.
+  l'arrêt de l'app ; le report, si le projet en déclare un ; l'ancien contenu de `/donnees` déplacé
+  dans `avant-restauration-<horodatage>/`, jamais supprimé ; l'instantané à sa place ; le
+  redémarrage et la santé. Si quelque chose échoue en chemin, l'ancien contenu revient, ou le
+  message dit où est chaque chose.
+- **Le report.** Restaurer une sauvegarde défait tout ce qui a changé depuis, y compris ce qui ne
+  devait pas l'être : un compte supprimé avant la restauration reviendrait. Un projet qui garde un
+  tel état (un registre de suppressions, par exemple) déclare `REPORTER` dans
+  `deploiement/projet.env` (M-0003), et `REPORTER_SECTION`, la section de son
+  `docs/exploitation.md` qui dit comment le reporter à la main. Sans `REPORTER`, rien ne change.
+  - Application arrêtée, données encore en place, après `VERIFIER` (le report change l'instantané) :
+    les données en service sont copiées dans `~/backups/<nom>/report-<horodatage>/`, en 700, puis
+    `<REPORTER…> /actuel /donnees` tourne dans un conteneur jetable de l'image déployée, cette copie
+    sur `/actuel` et la copie de l'instantané sur `/donnees`. Les données en service ne sont jamais
+    montées.
+  - **La copie jetable contient des données personnelles.** Elle n'est jamais dans `/tmp`, ni à un
+    endroit qu'une sauvegarde ou un envoi ramasserait, et elle est retirée sur toutes les sorties ;
+    celle qu'un arrêt brutal laisse, la sauvegarde de la nuit la retire, sous le même verrou, avec
+    la copie de travail des données. Il faut, le temps du report, la place d'une copie de plus des
+    données.
+  - **Le contrat des sorties** : sur un code 0, la sortie standard est un document JSON, le rapport,
+    journalisé sur une ligne ; sur un échec, les deux sorties vont au journal. Le projet garantit
+    qu'elles ne portent aucune donnée personnelle.
+  - **Tout échec abandonne la restauration, rien n'a changé** : un code 64 (l'image déployée ne
+    connaît pas la commande, après un retour par exemple), tout autre code, une sortie qui n'est
+    pas du JSON, ou une copie de l'instantané qui n'a plus, après le report, la forme exigée de
+    l'instantané (non vide, rien que des fichiers et des dossiers). `VERIFIER` ne tourne pas une
+    seconde fois : le report change légitimement le contenu. L'app repart sur les données en
+    service, et le message propose `--sans-report`, puis la section du runbook. C'est le côté sûr :
+    un report impossible ne se saute jamais en silence. Sans `jq`, qui contrôle le rapport, une
+    restauration où le report doit jouer est refusée avant tout effet.
+  - **`--sans-report`** est le choix explicite de l'opérateur. Comme des données en service vides
+    (un serveur reconstruit), il ne reporte rien, et la fin de la restauration le rappelle, avec la
+    raison et la section, qu'elle réussisse ou échoue après la mise en place de l'instantané.
+  - `tester-restauration.sh` ne le lance pas : il n'a pas de données en service à reporter.
 - **Une archive vient d'un stockage tiers**, et n'importe qui peut en chiffrer une pour la clé
   publique : ses membres sont contrôlés avant toute extraction (un seul dossier, ni chemin absolu,
   ni `..`, rien que des fichiers et des dossiers).
@@ -88,7 +120,7 @@ commun s'écrira au deuxième.
 - Un `/donnees` vide, même légitimement, fait alerter la sauvegarde chaque nuit (M-0003).
 - Une donnée supprimée survit jusqu'à 90 jours dans les archives distantes. Un projet qui a des
   données personnelles le dit dans sa notice, et décide si ses suppressions doivent être rejouées
-  après une restauration.
+  après une restauration : c'est à quoi sert `REPORTER` (§6).
 - Le coût : deux minuteries, 30 jours d'instantanés sur le disque du serveur, un exercice par
   trimestre.
 - **Difficile à changer** : la clé hors ligne, pour laquelle toutes les archives distantes sont

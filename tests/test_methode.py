@@ -174,6 +174,47 @@ def test_m0003_dit_ce_que_la_ci_ne_prouve_pas(rendre):
 
 
 @pytest.mark.parametrize("sauvegardes", [True, False])
+def test_m0003_et_m0005_disent_le_report(rendre, sauvegardes):
+    """C0 : la commande facultative `REPORTER`, son contrat, et la restauration qui la lance."""
+    m3 = adr_rendu(rendre, "M-0003-contrat-de-l-image.md", sauvegardes=sauvegardes)
+    assert ("REPORTER" in m3) is sauvegardes
+    if not sauvegardes:
+        return
+    for fragment in (
+        "une troisième, facultative (`REPORTER=…`)",
+        "**`REPORTER /actuel /donnees`, facultative**",
+        "`/actuel` est une copie jetable des données en service, montée en écriture",
+        "sa sortie standard étant alors un document JSON",
+        "64 en cas d'erreur d'usage, ce que rend une image qui ne connaît pas la commande",
+        "aucune donnée personnelle",
+        # revue C0, mineur 3 : sur un code 0, seul le rapport va au journal
+        "seule sa sortie standard, le rapport, va au journal ; sur un échec, ses deux sorties y vont",
+        "`REPORTER_SECTION`",
+        "**Rien ne lance `REPORTER` avant une vraie restauration**",
+    ):
+        assert fragment in m3, fragment
+    m5 = adr_rendu(rendre, "M-0005-sauvegardes-et-restauration.md")
+    for fragment in (
+        "[--cle <identité age>] [--sans-report]`",
+        "**Le report.**",
+        "`~/backups/<nom>/report-<horodatage>/`, en 700",
+        "Les données en service ne sont jamais montées",
+        "**La copie jetable contient des données personnelles.**",
+        "Le projet garantit qu'elles ne portent aucune donnée personnelle",
+        "**Tout échec abandonne la restauration, rien n'a changé**",
+        # R63 : la copie recontrôlée après le report, sans second VERIFIER ; jq exigé
+        "la forme exigée de l'instantané (non vide, rien que des fichiers et des dossiers)",
+        "`VERIFIER` ne tourne pas une seconde fois",
+        "une restauration où le report doit jouer est refusée avant tout effet",
+        # R67 : le reste d'une restauration tuée de force a sa rétention
+        "celle qu'un arrêt brutal laisse, la sauvegarde de la nuit la retire, sous le même verrou",
+        "**`--sans-report`** est le choix explicite de l'opérateur",
+        "`tester-restauration.sh` ne le lance pas",
+    ):
+        assert fragment in m5, fragment
+
+
+@pytest.mark.parametrize("sauvegardes", [True, False])
 def test_m0004_ne_renvoie_a_m0005_qu_avec_sauvegardes(rendre, sauvegardes):
     """R24 : sans sauvegardes, M-0005 n'est pas rendu, et M-0004 n'y renvoie pas."""
     texte = adr_rendu(rendre, "M-0004-chaine-de-livraison.md", sauvegardes=sauvegardes)

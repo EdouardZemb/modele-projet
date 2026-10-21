@@ -5,7 +5,7 @@
 # le dossier de l'instantané, chiffré pour la clé hors ligne). Opération manuelle, réservée à la
 # prod (code 64) :
 #
-#   bash deploiement/restaurer.sh prod <dossier|archive .tar.age> [--oui] [--cle <identité age>]
+#   bash deploiement/restaurer.sh prod <dossier|archive .tar.age> [--oui] [--cle <identité age>] [--sans-report]
 #
 # Toujours par `bash`, depuis le clone de prod : un projet né sous Windows enregistre les scripts
 # sans bit d'exécution.
@@ -46,12 +46,44 @@
 #      peut échouer sans toucher à l'application échoue ici. Retirer plutôt que refuser : ce nom
 #      n'est celui d'aucune donnée en service, et un refus bloquerait une reprise d'activité sur un
 #      reste que l'opérateur ne peut pas évaluer. Si on ne peut pas le retirer, en revanche, on
-#      refuse ;
+#      refuse. Les copies jetables ${{ prefixe }}SAUVEGARDES/report-<horodatage>/ qu'un report tué
+#      a laissées (étape 6 bis) sont retirées aussi ; une copie qui ne part pas est signalée, sans
+#      arrêter la restauration : elle n'entre jamais dans les données. La sauvegarde de la nuit,
+#      sous le même verrou, retire ces deux restes aussi (retirer_restes_de_restauration, lib.sh) ;
 #   6. `dc stop app` ;
+#   6 bis. le report, si deploiement/projet.env déclare REPORTER (« Le report », plus bas) ;
 #   7. tout le contenu de ${{ prefixe }}DONNEES, fichiers cachés compris, est déplacé dans ce dossier,
 #      jamais supprimé ; le dossier lui-même reste : c'est lui que le conteneur monte ;
 #   8. le contenu de l'instantané prend sa place (des déplacements, sans copie) ; `dc start app` ;
 #      santé sur 127.0.0.1:${{ prefixe }}PORT : statut ok, la version et la révision déployées.
+#
+# Le report. Un projet qui garde dans ses données un état qu'une restauration ne doit pas défaire
+# (M-0005, §6) déclare dans deploiement/projet.env la commande REPORTER de son image et, s'il le
+# veut, REPORTER_SECTION : le titre de la section de docs/exploitation.md qui dit comment reporter
+# à la main. Deux clés facultatives : sans REPORTER, la restauration est celle d'avant le crochet,
+# à l'octet près ; déclarées mais illisibles, refus (code 1) avant tout effet. Avec REPORTER, à
+# l'étape 6 bis, application arrêtée, données encore en place, et après le contrôle de l'étape 4,
+# puisque le report change le contenu de l'instantané :
+#   - les données en service sont copiées dans ${{ prefixe }}SAUVEGARDES/report-<AAAAMMJJTHHMMSSZ>/, en
+#     0700 : des données personnelles, jamais dans le dossier temporaire. `<REPORTER…> /actuel
+#     /donnees` tourne dans un conteneur jetable de l'image déployée, cette copie montée en
+#     écriture sur /actuel (ce que la commande y écrit est jeté), ${{ prefixe }}DONNEES.nouvelle sur
+#     /donnees (ce qu'elle y écrit est mis en place). ${{ prefixe }}DONNEES n'est jamais monté. La
+#     copie jetable est retirée sur toutes les sorties, trap compris ;
+#   - code 0 et un document JSON sur la sortie standard, le rapport : il va au journal, sur une
+#     ligne. jq le contrôle : sans jq, la restauration est refusée avant tout effet. Puis la copie
+#     de l'instantané doit garder la forme que l'étape 3 exige (non vide, rien que des fichiers et
+#     des dossiers), sans second VERIFIER : le report change légitimement son contenu. Tout autre
+#     résultat, un code 64 (l'image ne connaît pas la commande), un autre code, une sortie qui
+#     n'est pas du JSON ou une copie qui n'a plus cette forme, abandonne la restauration : les deux
+#     sorties de la commande vont au journal, aplaties, le trap retire la copie de l'instantané et
+#     relance l'application sur les données en service, code 1. Rien n'a changé, et le message
+#     propose --sans-report, puis la section ;
+#   - avec --sans-report, ou si les données en service sont vides, pas de report. La fin de la
+#     restauration le rappelle, avec la raison et la section : en cas de succès, comme en cas
+#     d'échec après la mise en place (le redémarrage, la santé).
+# Rien de la commande ne va sur la sortie standard du script. Sans REPORTER, --sans-report est
+# ignorée.
 #
 # Si quelque chose échoue entre l'arrêt et la fin de la mise en place, un trap retire ce qui était
 # entré de l'instantané, remet l'ancien contenu en place (s'il avait été déplacé) et relance
@@ -91,6 +123,11 @@ PHASE=rien # rien, arretee, deplacee (l'ancien contenu sort, puis l'instantané 
 INSTALLATION=0 # 1 dès que le contenu de l'instantané a commencé d'entrer dans les données
 NOUVELLE=""
 ECHEC_RETABLIR="" # ce que retablir n'a pas pu faire : instantane (le ressortir) ou ancien (le remettre)
+SANS_REPORT=0 # 1 avec --sans-report : l'opérateur renonce au report
+REPORTER_MOTS=() # la commande REPORTER de deploiement/projet.env ; vide si le projet n'en déclare pas
+REPORTER_SECTION="" # le titre de la section du runbook qui dit comment reporter à la main
+REPORT="" # la copie jetable des données en service, tant qu'elle existe
+REPORT_ABSENT="" # pourquoi le report, déclaré, n'a pas eu lieu : --sans-report, aucune donnée en service
 
 USAGE="usage : bash deploiement/restaurer.sh prod <dossier|archive .tar.age> [--oui] [--cle <identité age>]
 exemple, la clé hors ligne sur l'entrée standard, jamais écrite sur un disque ; sur le poste, dans
@@ -182,14 +219,144 @@ conseil_de_retour() {
     "${{ prefixe }}DONNEES" "$AVANT"
 }
 
+# lire_reporter : REPORTER_MOTS et REPORTER_SECTION, depuis deploiement/projet.env (lu, jamais
+# sourcé). Deux clés facultatives : absentes, rien n'est lu ni journalisé. Déclarées, le fichier
+# entier est contrôlé, et un fichier illisible est refusé (code 1) avant tout effet.
+lire_reporter() {
+  lire_projet_env_facultatif REPORTER \
+    || arreter 1 "REPORTER est déclaré, mais deploiement/projet.env est illisible : rien n'a changé"
+  REPORTER_MOTS=("${PROJET_MOTS[@]}")
+  if [ "{% raw %}${#REPORTER_MOTS[@]}{% endraw %}" -eq 0 ]; then
+    [ "$SANS_REPORT" -eq 0 ] || journal "--sans-report ignorée : deploiement/projet.env ne déclare pas REPORTER"
+    return 0
+  fi
+  lire_projet_env_facultatif REPORTER_SECTION \
+    || arreter 1 "REPORTER est déclaré, mais deploiement/projet.env est illisible : rien n'a changé"
+  REPORTER_SECTION="${PROJET_MOTS[*]}"
+}
+
+# renvoi_report : où est la procédure du report à la main, dans le runbook du projet.
+renvoi_report() {
+  if [ -n "$REPORTER_SECTION" ]; then
+    printf '« %s » (docs/exploitation.md)' "$REPORTER_SECTION"
+  else
+    printf 'docs/exploitation.md'
+  fi
+}
+
+# conseil_report : l'issue quand le report ne peut pas avoir lieu.
+conseil_report() {
+  if [ -n "$REPORTER_SECTION" ]; then
+    printf 'relancer avec --sans-report, puis « %s » (docs/exploitation.md)' "$REPORTER_SECTION"
+  else
+    printf 'relancer avec --sans-report, puis reporter à la main (docs/exploitation.md)'
+  fi
+}
+
+# rappel_report : REPORTER déclaré, le report n'a pas eu lieu (--sans-report, ou aucune donnée en
+# service) : ce qu'il aurait repris des données en service manque aux données restaurées, et on le
+# dit. Appelée à la fin de la restauration, et par sortie quand elle échoue après la mise en place
+# de l'instantané (le redémarrage, la santé) : l'erreur est alors au journal, et le rappel la suit.
+rappel_report() {
+  [ -n "$REPORT_ABSENT" ] || return 0
+  journal "attention : le report n'a pas eu lieu ($REPORT_ABSENT) : ce que REPORTER reprend des données en service n'est pas dans les données restaurées ; voir $(renvoi_report)"
+}
+
+# lancer_reporter <image> <actuel> <donnees> : la commande REPORTER dans un conteneur jetable (--rm)
+# de l'image, avec les options de ${{ prefixe }}OPTIONS_JETABLES : <actuel>, la copie jetable des
+# données en service, monté en écriture sur /actuel ; <donnees>, la copie de l'instantané, sur
+# /donnees : `<REPORTER…> /actuel /donnees`. Le contrat de l'image : 0 reporté, la sortie standard
+# étant alors un document JSON, le rapport ; 64 usage ; tout autre code est un échec. Rien de la
+# commande ne va sur la sortie standard du script : le rapport va au journal, sur une ligne ; en
+# échec, ses deux sorties aussi, aplaties (le projet garantit qu'elles ne portent aucune donnée
+# personnelle, M-0005). Sa sortie d'erreur passe par un fichier du dossier temporaire du script.
+# Rend 0 si le report est fait, 64 si l'image ne connaît pas la commande, 1 sinon, y compris sur
+# un code 0 dont la sortie n'est pas du JSON.
+lancer_reporter() {
+  local image="$1" actuel="$2" donnees="$3" fichier="$TMP/report-erreurs" sortie="" erreurs="" sorties code=0
+  sortie="$(docker run --rm "${ {{- prefixe }}OPTIONS_JETABLES[@]}" -v "$actuel:/actuel" -v "$donnees:/donnees" \
+    "$image" "${REPORTER_MOTS[@]}" /actuel /donnees 2>"$fichier")" || code=$?
+  erreurs="$(cat -- "$fichier" 2>/dev/null)" || true
+  rm -f -- "$fichier"
+  erreurs="${erreurs//$'\n'/ }"
+  sorties="${sortie//$'\n'/ }"
+  sorties="sortie standard : ${sorties:-(vide)} ; sortie d'erreur : ${erreurs:-(vide)}"
+  case "$code" in
+    0)
+      # Pas de `jq -e` seul : jq 1.6 rend 0 sur une entrée vide (voir jq_vaut).
+      if [ -n "${sortie//[[:space:]]/}" ] && printf '%s\n' "$sortie" | jq -e . >/dev/null 2>&1; then
+        journal "report fait (reporter : code 0) : ${sortie//$'\n'/ }"
+        return 0
+      fi
+      journal "report en échec (reporter : code 0, mais la sortie n'est pas un rapport) ; $sorties"
+      return 1
+      ;;
+    64)
+      journal "report impossible (reporter : code 64) : usage refusé, l'image déployée ne connaît pas la commande REPORTER de projet.env ; $sorties"
+      return 64
+      ;;
+    *)
+      journal "report en échec (reporter : code $code) ; $sorties"
+      return 1
+      ;;
+  esac
+}
+
+# faire_le_report <horodatage> : l'étape 6 bis, application arrêtée, données encore en place. Sans
+# --sans-report, et si les données en service ne sont pas vides : leur copie jetable, puis
+# lancer_reporter. Un échec reste en phase « arretee » : rien n'a été déplacé, et le trap retire la
+# copie jetable et celle de l'instantané, puis relance l'application sur les données en service.
+faire_le_report() {
+  local copie="${{ prefixe }}SAUVEGARDES/report-$1" code=0
+  if [ "$SANS_REPORT" -eq 1 ]; then
+    REPORT_ABSENT="--sans-report"
+    journal "--sans-report : pas de report ; voir $(renvoi_report)"
+    return 0
+  fi
+  if [ -z "$(find "${{ prefixe }}DONNEES" -mindepth 1 -print -quit)" ]; then
+    REPORT_ABSENT="aucune donnée en service"
+    journal "aucune donnée en service : pas de report"
+    return 0
+  fi
+  # REPORT n'est posé qu'une fois le dossier créé : un dossier qui existait déjà n'est pas le nôtre.
+  mkdir -m 700 "$copie" \
+    || arreter 1 "copie jetable $copie impossible à créer : la restauration est abandonnée, rien n'a changé. Si le report ne peut pas avoir lieu, $(conseil_report)"
+  REPORT="$copie"
+  cp -R -- "${{ prefixe }}DONNEES/." "$REPORT/" \
+    || arreter 1 "copie des données en service vers $REPORT impossible : la restauration est abandonnée, rien n'a changé. Si le report ne peut pas avoir lieu, $(conseil_report)"
+  journal "report : ${REPORTER_MOTS[*]} /actuel /donnees, sur une copie jetable des données en service ($REPORT)"
+  lancer_reporter "$DEPLOYE_IMAGE" "$REPORT" "$NOUVELLE" || code=$?
+  case "$code" in
+    0) ;;
+    64) arreter 1 "report impossible : l'image déployée ne connaît pas la commande REPORTER (${REPORTER_MOTS[*]}) : la restauration est abandonnée, rien n'a changé : $(conseil_report)" ;;
+    *) arreter 1 "report en échec : la restauration est abandonnée, rien n'a changé (le détail est dans le journal). Si le report ne peut pas avoir lieu, $(conseil_report)" ;;
+  esac
+  # La copie de l'instantané, après le report : la forme que l'étape 3 exige de l'instantané. Pas de
+  # second VERIFIER : le report change légitimement son contenu.
+  [ -n "$(find "$NOUVELLE" -mindepth 1 -print -quit)" ] \
+    || arreter 1 "report : la copie de l'instantané est vide après le report : la restauration est abandonnée, rien n'a changé. Si le report ne peut pas avoir lieu, $(conseil_report)"
+  [ -z "$(find "$NOUVELLE" -mindepth 1 ! -type f ! -type d -print -quit)" ] \
+    || arreter 1 "report : la copie de l'instantané contient autre chose que des fichiers et des dossiers après le report (liens…) : la restauration est abandonnée, rien n'a changé. Si le report ne peut pas avoir lieu, $(conseil_report)"
+  # Retirée dès qu'elle a servi ; sinon, sortie réessaie.
+  if retirer "$REPORT"; then
+    REPORT=""
+  fi
+}
+
 # sortie : trap EXIT. Sur une sortie en erreur après l'arrêt de l'application, l'ancien contenu est
 # remis en place s'il avait été déplacé, et l'application relancée. S'il n'a pas pu être remis en
 # place, l'application reste arrêtée : relancée, elle démarrerait sur des données vides ou
-# incomplètes, sous une santé que la sonde jugerait verte.
+# incomplètes, sous une santé que la sonde jugerait verte. Sur toutes les sorties, la copie jetable
+# du report est retirée d'abord.
 # shellcheck disable=SC2317,SC2329  # appelée par trap EXIT
 sortie() {
   local code=$? relancer=1
   trap - EXIT INT TERM HUP
+  # La copie jetable des données en service : des données personnelles. Un rm qui échoue ne doit
+  # pas empêcher la suite (set -e).
+  if [ -n "$REPORT" ]; then
+    retirer "$REPORT" || journal "copie jetable $REPORT non retirée : une copie des données en clair, à retirer à la main"
+  fi
   if [ "$code" -ne 0 ]; then
     if [ "$PHASE" = deplacee ] && ! retablir; then
       relancer=0
@@ -216,6 +383,10 @@ sortie() {
     if [ -n "$NOUVELLE" ] && { [ -e "$NOUVELLE" ] || [ -L "$NOUVELLE" ]; }; then
       retirer "$NOUVELLE" || journal "$NOUVELLE non retiré : à retirer avant la prochaine restauration"
     fi
+    # L'instantané est en place : si le report n'a pas eu lieu, on le rappelle.
+    case "$PHASE" in
+      installee | demarree) rappel_report ;;
+    esac
   fi
   # Un dossier vide ne reste pas (la copie échoue avant le déplacement, ou il n'y avait pas
   # d'ancien contenu) ; un dossier qui garde des entrées reste.
@@ -224,10 +395,23 @@ sortie() {
   exit "$code"
 }
 
-# afficher_plan : ce que --oui ferait, sur stdout. Aucun effet.
+# afficher_plan : ce que --oui ferait, sur stdout. Aucun effet. Avec REPORTER, une étape de plus
+# dit si le report jouera, et avec quelle commande ; sans, le plan est celui d'avant le crochet.
 afficher_plan() {
-  local forme="dossier d'instantané, copié dans un dossier temporaire détruit à la fin"
+  local forme="dossier d'instantané, copié dans un dossier temporaire détruit à la fin" report="" n=4
   [ "$FORME" != archive ] || forme="archive chiffrée, déchiffrée avec $CLE dans un dossier temporaire détruit à la fin"
+  if [ "{% raw %}${#REPORTER_MOTS[@]}{% endraw %}" -gt 0 ] && [ "$SANS_REPORT" -eq 1 ]; then
+    report="  4. --sans-report : pas de report (REPORTER : ${REPORTER_MOTS[*]}) ; ce qu'il reprendrait des
+     données en service manquera aux données restaurées : voir $(renvoi_report)
+"
+    n=5
+  elif [ "{% raw %}${#REPORTER_MOTS[@]}{% endraw %}" -gt 0 ]; then
+    report="  4. report : ${REPORTER_MOTS[*]} /actuel /donnees, dans un conteneur jetable de l'image déployée ;
+     /actuel est une copie jetable des données en service, /donnees la copie de l'instantané. Sans
+     données en service, pas de report ; un échec abandonne la restauration, sauf avec --sans-report
+"
+    n=5
+  fi
   cat <<PLAN
 Restauration des données de prod (rien n'est fait sans --oui).
 
@@ -240,8 +424,8 @@ Restauration des données de prod (rien n'est fait sans --oui).
   1. verrou partagé avec la sonde et le déploiement (600 s d'attente au plus)
   2. contrôle de l'instantané par la commande VERIFIER de l'image déployée ; rien n'est touché s'il n'est pas conforme
   3. arrêt de l'application
-  4. contenu courant des données mis de côté, contenu de l'instantané mis à sa place
-  5. redémarrage, puis contrôle de la santé sur 127.0.0.1:${{ prefixe }}PORT
+${report}  $n. contenu courant des données mis de côté, contenu de l'instantané mis à sa place
+  $((n + 1)). redémarrage, puis contrôle de la santé sur 127.0.0.1:${{ prefixe }}PORT
 
 Pour l'exécuter, relancer la même commande avec --oui.
 PLAN
@@ -337,6 +521,10 @@ main() {
         CLE="$2"
         shift 2
         ;;
+      --sans-report)
+        SANS_REPORT=1
+        shift
+        ;;
       -*) arreter 64 "option inconnue : $1. $USAGE" ;;
       *)
         [ -z "$SOURCE" ] || arreter 64 "une seule source attendue. $USAGE"
@@ -369,6 +557,7 @@ main() {
   fi
 
   charger_env prod
+  lire_reporter
   if [ "$OUI" -ne 1 ]; then
     afficher_plan
     return 64
@@ -380,8 +569,12 @@ main() {
   trap 'exit 143' TERM
   trap 'exit 129' HUP
   refuser_image_heritee
+  # Le rapport du report se contrôle par jq : sans lui, refus avant tout effet.
+  if [ "{% raw %}${#REPORTER_MOTS[@]}{% endraw %}" -gt 0 ] && [ "$SANS_REPORT" -eq 0 ] && ! command -v jq >/dev/null 2>&1; then
+    arreter 1 "jq introuvable : le rapport du crochet ne peut pas être contrôlé. Rien n'a changé : installer jq, qui vient avec les outils du serveur (outils/installer-outils.sh du dépôt serveur), puis relancer"
+  fi
 
-  local etat="${{ prefixe }}ETAT" donnees="${{ prefixe }}DONNEES" revision nombre fichiers code=0
+  local etat="${{ prefixe }}ETAT" donnees="${{ prefixe }}DONNEES" revision nombre fichiers horodatage code=0
 
   # 1. Verrou, gardé jusqu'à la fin du script.
   prendre_verrou \
@@ -419,13 +612,19 @@ main() {
   esac
   journal "instantané conforme : $SOURCE ($fichiers)"
 
-  # 5. Tout ce qui peut échouer sans toucher à l'application.
-  AVANT="${{ prefixe }}SAUVEGARDES/avant-restauration-$(date -u +%Y%m%dT%H%M%SZ)"
+  # 5. Tout ce qui peut échouer sans toucher à l'application. L'horodatage est aussi celui de la
+  # copie jetable du report (6 bis).
+  horodatage="$(date -u +%Y%m%dT%H%M%SZ)"
+  AVANT="${{ prefixe }}SAUVEGARDES/avant-restauration-$horodatage"
   mkdir -m 700 "$AVANT" || arreter 1 "dossier $AVANT impossible à créer : rien n'a changé"
   NOUVELLE="$donnees.nouvelle"
   # Le reste d'une restauration interrompue (un déplacement tué par SIGKILL ou un plantage de
   # l'hôte, hors de portée du trap) : rien de lui ne doit entrer dans les données. On le retire ici,
-  # application encore en service.
+  # application encore en service, avant la copie de l'instantané : la copie de travail et les
+  # copies jetables du report, par lib.sh, puis ce qu'il en resterait (un lien, ou une copie de
+  # travail qui n'a pas pu partir), qui est refusé. Une copie jetable qui ne part pas n'entre jamais
+  # dans les données : elle est journalisée, sans arrêter la restauration.
+  retirer_restes_de_restauration || true
   if [ -e "$NOUVELLE" ] || [ -L "$NOUVELLE" ]; then
     retirer "$NOUVELLE" \
       || arreter 1 "reste d'une restauration interrompue ($NOUVELLE) impossible à retirer : rien n'a changé, l'application n'a pas été arrêtée"
@@ -438,6 +637,11 @@ main() {
   PHASE=arretee
   journal "arrêt de l'application"
   dc stop app || arreter 1 "arrêt de l'application impossible (docker compose stop : code $?)"
+
+  # 6 bis. Le report, si le projet en déclare un, avant que rien ne soit déplacé.
+  if [ "{% raw %}${#REPORTER_MOTS[@]}{% endraw %}" -gt 0 ]; then
+    faire_le_report "$horodatage"
+  fi
 
   # 7. L'ancien contenu, entier, est gardé.
   if [ -n "$(find "$donnees" -mindepth 1 -print -quit)" ]; then
@@ -473,6 +677,7 @@ main() {
     || arreter 1 "santé non conforme après la restauration : l'instantané est en place, $(ancien_contenu)$(conseil_de_retour)"
 
   journal "restauration terminée : $SOURCE ; $(ancien_contenu)"
+  rappel_report
   return 0
 }
 

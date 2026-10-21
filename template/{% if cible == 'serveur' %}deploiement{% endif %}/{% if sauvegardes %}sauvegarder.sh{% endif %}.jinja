@@ -18,8 +18,12 @@
 #      d'attente au plus) : pendant un déploiement ou une restauration, les données bougent ;
 #   2. nom {{ nom }}-<AAAAMMJJTHHMMSSZ> (UTC) ; un dossier déjà présent à ce nom, ou à ce nom suivi
 #      de .partiel, est une erreur : rien n'est écrasé. Puis les .partiel des sauvegardes en échec
-#      sont retirés de quotidiennes/ : il n'en reste que celui de la dernière (R31). Un retrait
-#      impossible est journalisé et n'arrête rien ;
+#      sont retirés de quotidiennes/ : il n'en reste que celui de la dernière (R31). Puis les restes
+#      d'une restauration tuée de force (SIGKILL, plantage de l'hôte), hors de portée de son trap :
+#      ses copies jetables ${{ prefixe }}SAUVEGARDES/report-<AAAAMMJJTHHMMSSZ>, des copies en clair des
+#      données en service, et sa copie de travail ${{ prefixe }}DONNEES.nouvelle. La restauration tient
+#      ce verrou de bout en bout : ce qui reste n'est à aucune restauration en cours. Ni un lien, ni
+#      un nom d'une autre forme. Un retrait impossible est journalisé et n'arrête rien ;
 #   3. instantané dans le conteneur : `<SAUVEGARDER…> /sauvegardes/quotidiennes/<nom>.partiel`, qui
 #      crée ce dossier, à la forme de /donnees (le contrat de l'image, M-0003). Le code de sortie
 #      d'abord (0, sinon échec), puis le dossier lui-même : un dossier, non vide, fait de fichiers et
@@ -180,6 +184,11 @@ main() {
   if ! retirer_partiels "$quotidiennes" '^{{ nom }}-[0-9]{8}T[0-9]{6}Z\.partiel$'; then
     journal "sauvegardes en échec de $quotidiennes : retrait impossible, plus d'un .partiel y reste ; la sauvegarde se fait quand même"
   fi
+  # R67 : les restes d'une restauration tuée de force (SIGKILL, plantage de l'hôte), que son trap
+  # n'a pas retirés. La restauration tient ce verrou de bout en bout : ils ne sont à aucune
+  # restauration en cours. La copie jetable du report n'a pas d'autre rétention. Un retrait
+  # impossible est journalisé, et la sauvegarde se fait quand même.
+  retirer_restes_de_restauration || true
   journal "sauvegarde $nom"
 
   # 3. Instantané. Le code de sortie d'abord (une commande écrit aussi ses erreurs sur stdout), puis

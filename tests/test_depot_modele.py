@@ -189,6 +189,8 @@ def test_liste_d_alignement():
         "`HC_TEST_RESTAURATION`",
         "`TEST_RESTAURATION` à `projets/<nom>.env`",
         "Le premier déploiement ne prend pas d'instantané",
+        # C0 : un état qu'une restauration ne doit pas défaire
+        "déclare `REPORTER` et `REPORTER_SECTION` dans `deploiement/projet.env`",
     ):
         assert fragment in texte, fragment
     # avant le commit, --diff compare <base>...HEAD et n'examine rien (LE-15)

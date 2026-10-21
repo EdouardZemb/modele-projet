@@ -178,6 +178,29 @@ case "$source" in '"$motifs"') echo "mv: cannot move: Input/output error" >&2; e
 exec '"$vrai"' "$@"'
 }
 
+# reporter_declare [section] : deploiement/projet.env déclare la commande REPORTER du test, en deux
+# mots, et, si elle est donnée, la section du runbook qui dit comment reporter à la main.
+reporter_declare() {
+  printf '%s\n' 'REPORTER=outil reporter' >>"$CLONE/deploiement/projet.env"
+  [ -z "${1:-}" ] || printf 'REPORTER_SECTION=%s\n' "$1" >>"$CLONE/deploiement/projet.env"
+}
+
+# sans_horodatage : la sortie du dernier `run`, sans l'heure du journal en tête de ligne, et les
+# horodatages des dossiers datés de la restauration remplacés par <horodatage>.
+sans_horodatage() {
+  printf '%s\n' "$output" | sed -E -e 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z //' \
+    -e 's/(avant-restauration|report)-[0-9]{8}T[0-9]{6}Z/\1-<horodatage>/g'
+}
+
+# aucune_copie_jetable : aucune copie jetable des données en service (report-*) ne reste dans le
+# dossier des sauvegardes.
+aucune_copie_jetable() {
+  if compgen -G "$SAUVEGARDES/report-*" >/dev/null; then
+    echo "copie jetable restante : $(ls -d "$SAUVEGARDES"/report-*)" >&2
+    return 1
+  fi
+}
+
 # ==============================================================================================
 # Les trois scripts : prod seulement
 # ==============================================================================================
@@ -351,6 +374,51 @@ exec '"$vrai"' "$@"'
   [ "$(nombre_d_entrees "$q")" -eq 7 ]
   [ -z "$(appels_de rclone)" ]
   [ "$(envois_echec "$HC_SAUVEGARDE" | wc -l)" -eq 2 ]
+}
+
+# R67 : une restauration tuée de force (SIGKILL, plantage de l'hôte) laisse, hors de portée de son
+# piège, la copie jetable du report (les données en service, en clair, sans rétention) et la copie
+# de travail des données. La sauvegarde tient le verrou de la restauration : ce qu'elle trouve n'est
+# à aucune restauration en cours, et elle le retire avant l'instantané. Rien d'autre : ni un nom
+# d'une autre forme, ni un lien, ni ce qu'il désigne.
+@test "sauvegarde_retire_les_restes_d_une_restauration_interrompue" {
+  local reste="$SAUVEGARDES/report-20261001T000000Z" ailleurs="$BATS_TEST_TMPDIR/ailleurs" nom
+  local autres=(report-20261001 report-20261001T000000Z.garde mon-report-20261001T000000Z)
+  # la copie jetable, avec un sous-dossier que la commande du report a laissé en lecture seule
+  mkdir -p "$reste/sous" "$DONNEES.nouvelle/sous"
+  echo "copie oubliée" >"$reste/courant.txt"
+  echo "profond" >"$reste/sous/profond.txt"
+  chmod 500 "$reste/sous"
+  echo "copie de travail" >"$DONNEES.nouvelle/donnees.txt"
+  for nom in "${autres[@]}"; do
+    mkdir -p "$SAUVEGARDES/$nom"
+    echo "$nom" >"$SAUVEGARDES/$nom/donnees.txt"
+  done
+  mkdir -p "$ailleurs"
+  echo "à garder" >"$ailleurs/donnees.txt"
+  ln -s "$ailleurs" "$SAUVEGARDES/report-20261002T000000Z"
+  horloge_qui_avance
+  sauvegarder prod
+  [ "$status" -eq 0 ]
+  [ ! -e "$reste" ]
+  [ ! -e "$DONNEES.nouvelle" ]
+  [[ "$output" == *"reste d'une restauration interrompue retiré : $reste"* ]]
+  [[ "$output" == *"reste d'une restauration interrompue retiré : $DONNEES.nouvelle"* ]]
+  # avant l'instantané, donc sous le verrou
+  [[ "$output" == *"reste d'une restauration interrompue retiré"*"instantané : "* ]]
+  # les autres noms, le lien et ce qu'il désigne restent
+  for nom in "${autres[@]}"; do
+    [ "$(cat "$SAUVEGARDES/$nom/donnees.txt")" = "$nom" ]
+  done
+  [ -L "$SAUVEGARDES/report-20261002T000000Z" ]
+  [ "$(cat "$ailleurs/donnees.txt")" = "à garder" ]
+  # une copie de travail qui est un lien n'est pas suivie, et reste ; sans reste, rien n'est dit
+  ln -s "$ailleurs" "$DONNEES.nouvelle"
+  sauvegarder prod
+  [ "$status" -eq 0 ]
+  [ -L "$DONNEES.nouvelle" ]
+  [ "$(cat "$ailleurs/donnees.txt")" = "à garder" ]
+  [[ "$output" != *"reste d'une restauration interrompue"* ]]
 }
 
 # Un .partiel qui ne peut pas être retiré est journalisé, et la sauvegarde se fait quand même.
@@ -1260,6 +1328,48 @@ exec '"$vrai"' "$@"'
   aucun_temporaire
 }
 
+# Une base qui tient un journal à côté d'elle (un -wal) le rejouerait au démarrage : si la mise en
+# place échoue au milieu, le piège ne doit jamais laisser l'ancienne base à côté d'un journal venu
+# de l'instantané. Deux échecs : juste après l'entrée de la base de l'instantané, puis après celle
+# de son journal. Après le piège, les données sont l'ancien contenu, à l'octet, et rien d'autre.
+@test "restaurer_trap_ne_melange_jamais_ancien_et_instantane" {
+  instantane "$SNAPSHOT" 1
+  donnees_courantes
+  echo "ancienne base" >"$DONNEES/base"
+  echo "base de l'instantané" >"$SAUVEGARDES/quotidiennes/$SNAPSHOT/base"
+  echo "journal de l'instantané" >"$SAUVEGARDES/quotidiennes/$SNAPSHOT/base-wal"
+  cp -R "$DONNEES" "$BATS_TEST_TMPDIR/donnees-avant"
+  local echec entre nom
+  # dans l'ordre des noms, base précède base-wal, qui précède donnees.txt
+  for echec in base-wal donnees.txt; do
+    : >"$APPELS"
+    # le double du tour précédent part d'abord : le nouveau appellerait sinon l'ancien, et non mv
+    rm -f "$DOUBLES/mv"
+    double_mv_en_echec "*/donnees.nouvelle/$echec"
+    restaurer prod "$SAUVEGARDES/quotidiennes/$SNAPSHOT" --oui
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"mise en place de l'instantané impossible"*"ancien contenu remis en place"* ]]
+    # la mise en place avait commencé : la base de l'instantané (et son journal, au second échec)
+    # était entrée dans les données
+    entre=(base)
+    [ "$echec" = base-wal ] || entre+=(base-wal)
+    for nom in "${entre[@]}"; do
+      appels_de mv | grep -Fx -- "mv -T -- $DONNEES.nouvelle/$nom $DONNEES/$nom"
+      appels_de mv | grep -Fx -- "mv -T -- $DONNEES/$nom $DONNEES.nouvelle/$nom"
+    done
+    # l'ancien contenu, à l'octet, et rien de l'instantané : ni sa base, ni son journal
+    diff -r "$BATS_TEST_TMPDIR/donnees-avant" "$DONNEES"
+    [ "$(cat "$DONNEES/base")" = "ancienne base" ]
+    [ ! -e "$DONNEES/base-wal" ]
+    [ ! -e "$DONNEES/donnees.txt" ]
+    # rien ne reste à côté, ni dans un dossier de restauration ; l'application est relancée
+    [ ! -e "$DONNEES.nouvelle" ]
+    aucun_dossier_avant_restauration
+    [ -f "$EN_SERVICE" ]
+    aucun_temporaire
+  done
+}
+
 # Un déplacement interrompu (SIGKILL, plantage de l'hôte) laisse la copie de travail à côté des
 # données, hors de portée du piège. Elle est retirée avant tout, application encore en service : rien
 # d'une tentative précédente n'entre dans les données.
@@ -1842,4 +1952,488 @@ cle_non_repetee() {
   [[ "$output" == *"santé non conforme"* ]]
   [[ "$output" == *"aucun ancien contenu"* ]]
   [[ "$output" != *"avant-restauration-"* ]]
+}
+
+# ==============================================================================================
+# restaurer.sh : le report (REPORTER)
+# ==============================================================================================
+
+# Un projet qui garde dans ses données un état qu'une restauration ne doit pas défaire (M-0005)
+# déclare REPORTER dans deploiement/projet.env. Application arrêtée, la commande lit une copie
+# jetable des données en service (/actuel) et écrit dans la copie de l'instantané (/donnees) ce
+# qui doit survivre, avant que celle-ci ne soit mise en place.
+
+SECTION="Reporter à la main"
+OPTIONS_JETABLES="--user 1000:1000 --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true --memory 384m"
+
+# Sans REPORTER, la restauration est celle d'avant le crochet, à l'octet près : le plan, le journal
+# et les appels de Docker. Le projet.env du setup ne le déclare pas.
+@test "restaurer_sans_reporter_ne_change_rien" {
+  instantane "$SNAPSHOT" 1
+  donnees_courantes
+  restaurer prod "$SAUVEGARDES/quotidiennes/$SNAPSHOT"
+  [ "$status" -eq 64 ]
+  diff - <(printf '%s\n' "$output") <<PLAN
+Restauration des données de prod (rien n'est fait sans --oui).
+
+  source        : $SAUVEGARDES/quotidiennes/$SNAPSHOT
+  forme         : dossier d'instantané, copié dans un dossier temporaire détruit à la fin
+  données       : $DONNEES (tout son contenu)
+  gardées dans  : $SAUVEGARDES/avant-restauration-<horodatage UTC>/
+
+Étapes :
+  1. verrou partagé avec la sonde et le déploiement (600 s d'attente au plus)
+  2. contrôle de l'instantané par la commande VERIFIER de l'image déployée ; rien n'est touché s'il n'est pas conforme
+  3. arrêt de l'application
+  4. contenu courant des données mis de côté, contenu de l'instantané mis à sa place
+  5. redémarrage, puis contrôle de la santé sur 127.0.0.1:{{ bloc_ports }}
+
+Pour l'exécuter, relancer la même commande avec --oui.
+PLAN
+
+  : >"$APPELS"
+  restaurer prod "$SAUVEGARDES/quotidiennes/$SNAPSHOT" --oui
+  [ "$status" -eq 0 ]
+  local revision="${IMAGE##*:}" ancien="$SAUVEGARDES/avant-restauration-<horodatage>"
+  revision="${revision:0:40}"
+  diff - <(sans_horodatage) <<JOURNAL
+restauration de prod depuis $SAUVEGARDES/quotidiennes/$SNAPSHOT (image $IMAGE, version 0.1.0)
+copie conforme (verifier : code 0)
+instantané conforme : $SAUVEGARDES/quotidiennes/$SNAPSHOT (3 fichiers)
+arrêt de l'application
+ancien contenu gardé dans $ancien
+démarrage de l'application
+santé conforme sur le port {{ bloc_ports }} (essai 1) : {"statut":"ok","environnement":"prod","version":"0.1.0","revision":"$revision"}
+restauration terminée : $SAUVEGARDES/quotidiennes/$SNAPSHOT ; l'ancien contenu est dans $ancien
+JOURNAL
+  # Docker : la vérification, l'arrêt, le redémarrage, la révision ; aucun autre conteneur
+  diff - <(appels_de docker | sed -E 's/-restauration\.[A-Za-z0-9]+\//-restauration.<tmp>\//') <<APPELS_DOCKER
+docker run --rm $OPTIONS_JETABLES -v $TMPDIR/{{ nom }}-restauration.<tmp>/donnees:/donnees $IMAGE outil verifier /donnees
+$(dc_prod) stop app
+$(dc_prod) start app
+docker image inspect -f {% raw %}{{index .Config.Labels "org.opencontainers.image.revision"}}{% endraw %} $IMAGE
+APPELS_DOCKER
+  aucune_copie_jetable
+}
+
+@test "restaurer_reporte_apres_l_arret_et_avant_la_mise_de_cote" {
+  instantane "$SNAPSHOT" 1
+  donnees_courantes
+  cp -R "$DONNEES" "$BATS_TEST_TMPDIR/donnees-avant"
+  reporter_declare "$SECTION"
+  restaurer prod "$SAUVEGARDES/quotidiennes/$SNAPSHOT" --oui
+  [ "$status" -eq 0 ]
+
+  # un seul report : la commande de projet.env, dans un conteneur jetable de l'image déployée, sur
+  # une copie des données en service (/actuel) et sur la copie de l'instantané (/donnees), jamais
+  # sur les données elles-mêmes
+  [ "$(appels_de docker | grep -cF ' /actuel /donnees')" -eq 1 ]
+  local report
+  report="$(appels_de docker | grep -F ' /actuel /donnees')"
+  [[ "$report" == "docker run --rm $OPTIONS_JETABLES -v $SAUVEGARDES/report-"*":/actuel -v $DONNEES.nouvelle:/donnees $IMAGE outil reporter /actuel /donnees" ]]
+  [[ "$report" != *" -v $DONNEES:"* ]]
+  [ "$(cat "$BATS_TEST_TMPDIR/report-mots")" = "$(printf '%s\n' outil reporter /actuel /donnees)" ]
+  # dans l'ordre : la vérification, l'arrêt, le report, puis le redémarrage
+  [ "$(ligne_de ' outil verifier /donnees')" -lt "$(ligne_de ' stop app')" ]
+  [ "$(ligne_de ' stop app')" -lt "$(ligne_de ' /actuel /donnees')" ]
+  [ "$(ligne_de ' /actuel /donnees')" -lt "$(ligne_de ' start app')" ]
+  # avant la mise de côté : les données en service étaient encore en place, et /actuel en était
+  # la copie
+  diff -r "$BATS_TEST_TMPDIR/donnees-avant" "$BATS_TEST_TMPDIR/report-en-service"
+  diff -r "$BATS_TEST_TMPDIR/donnees-avant" "$BATS_TEST_TMPDIR/report-actuel"
+  # ce que la commande a écrit dans /donnees est dans les données mises en place, avec l'instantané
+  [ "$(cat "$DONNEES/reporte.txt")" = "reporté depuis /actuel : contenu courant" ]
+  diff -r -x reporte.txt "$SAUVEGARDES/quotidiennes/$SNAPSHOT" "$DONNEES"
+  # l'ancien contenu est gardé, entier ; le journal dit le report, et ne rappelle rien
+  local avant=("$SAUVEGARDES"/avant-restauration-*)
+  diff -r "$BATS_TEST_TMPDIR/donnees-avant" "${avant[0]}"
+  [[ "$output" == *"report fait (reporter : code 0) : {\"reportes\":1}"*"restauration terminée"* ]]
+  [[ "$output" != *"attention"* ]]
+  [ ! -e "$DONNEES.nouvelle" ]
+  aucune_copie_jetable
+  aucun_temporaire
+}
+
+@test "restaurer_report_n_ecrit_jamais_les_donnees_en_service" {
+  instantane "$SNAPSHOT" 1
+  donnees_courantes
+  cp -R "$DONNEES" "$BATS_TEST_TMPDIR/donnees-avant"
+  reporter_declare "$SECTION"
+  restaurer prod "$SAUVEGARDES/quotidiennes/$SNAPSHOT" --oui
+  [ "$status" -eq 0 ]
+  # la commande a écrit dans /actuel...
+  [ "$(cat "$BATS_TEST_TMPDIR/report-actuel-apres/trace-du-report")" = "écrit par le report" ]
+  [ "$(tail -n 1 "$BATS_TEST_TMPDIR/report-actuel-apres/courant.txt")" = "écrit par le report" ]
+  # ...qui n'était qu'une copie : ni l'ancien contenu gardé, ni les données mises en place, ni rien
+  # dans les sauvegardes n'en porte la trace
+  local avant=("$SAUVEGARDES"/avant-restauration-*)
+  diff -r "$BATS_TEST_TMPDIR/donnees-avant" "${avant[0]}"
+  [ ! -e "$DONNEES/trace-du-report" ]
+  [ -z "$(grep -rl 'écrit par le report' "$DONNEES" "$SAUVEGARDES" || true)" ]
+}
+
+# R57 : tout échec du report abandonne la restauration, rien n'a changé. Le message dit la cause,
+# puis l'issue : --sans-report, et la section du runbook.
+@test "restaurer_report_en_echec_abandonne_sans_rien_changer" {
+  instantane "$SNAPSHOT" 1
+  donnees_courantes
+  reporter_declare "$SECTION"
+  local code
+  for code in 1 64; do
+    : >"$APPELS"
+    DOUBLE_DOCKER_REPORT_CODE="$code" restaurer prod "$SAUVEGARDES/quotidiennes/$SNAPSHOT" --oui
+    [ "$status" -eq 1 ]
+    # le message d'erreur lui-même : la cause, l'abandon, puis --sans-report et la section
+    echo "$output" | grep -F "la restauration est abandonnée, rien n'a changé" \
+      | grep -F -- "relancer avec --sans-report, puis « $SECTION » (docs/exploitation.md)"
+    if [ "$code" -eq 64 ]; then
+      echo "$output" | grep -F "la restauration est abandonnée" | grep -F "l'image déployée ne connaît pas la commande REPORTER (outil reporter)"
+    else
+      [[ "$output" == *"report en échec (reporter : code 1)"* ]]
+      [[ "$output" != *"ne connaît pas"* ]]
+    fi
+    # arrêtée pour le report, puis relancée sur les données en service, intactes
+    [ "$(ligne_de ' stop app')" -lt "$(ligne_de ' /actuel /donnees')" ]
+    [ "$(ligne_de ' /actuel /donnees')" -lt "$(ligne_de ' start app')" ]
+    [ -f "$EN_SERVICE" ]
+    contenu_courant_intact
+    # la copie de l'instantané, et ce que la commande y avait écrit, sont retirées
+    [ ! -e "$DONNEES.nouvelle" ]
+    aucun_dossier_avant_restauration
+    aucune_copie_jetable
+    aucun_temporaire
+    # rien n'a été restauré : rien à rappeler
+    [[ "$output" != *"attention"* ]]
+  done
+  # sans section déclarée, le message renvoie au runbook
+  sed -i '/^REPORTER_SECTION=/d' "$CLONE/deploiement/projet.env"
+  DOUBLE_DOCKER_REPORT_CODE=1 restaurer prod "$SAUVEGARDES/quotidiennes/$SNAPSHOT" --oui
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -F -- "relancer avec --sans-report, puis reporter à la main (docs/exploitation.md)"
+  contenu_courant_intact
+}
+
+@test "restaurer_sans_report_rappelle_la_section" {
+  instantane "$SNAPSHOT" 1
+  donnees_courantes
+  reporter_declare "$SECTION"
+  horloge_qui_avance
+  restaurer prod "$SAUVEGARDES/quotidiennes/$SNAPSHOT" --sans-report --oui
+  [ "$status" -eq 0 ]
+  # pas de report : ni conteneur, ni copie jetable ; la restauration est faite
+  [ -z "$(appels_de docker | grep -F '/actuel' || true)" ]
+  diff -r "$SAUVEGARDES/quotidiennes/$SNAPSHOT" "$DONNEES"
+  aucune_copie_jetable
+  # le journal le dit à l'étape, et le rappel, avec la raison et la section, est la dernière ligne
+  [[ "$output" == *"--sans-report : pas de report"*"restauration terminée"* ]]
+  [[ "$(sans_horodatage | tail -n 1)" == "attention : le report n'a pas eu lieu (--sans-report) : "*" ; voir « $SECTION » (docs/exploitation.md)" ]]
+  # sans section déclarée, le rappel renvoie au runbook
+  sed -i '/^REPORTER_SECTION=/d' "$CLONE/deploiement/projet.env"
+  restaurer prod "$SAUVEGARDES/quotidiennes/$SNAPSHOT" --sans-report --oui
+  [ "$status" -eq 0 ]
+  [[ "$(sans_horodatage | tail -n 1)" == "attention : le report n'a pas eu lieu (--sans-report) : "*" ; voir docs/exploitation.md" ]]
+}
+
+# Un serveur reconstruit, un dossier de données vide : rien à reporter, et ce n'est pas une erreur.
+@test "restaurer_sans_donnees_en_service_ne_reporte_pas" {
+  instantane "$SNAPSHOT" 1
+  reporter_declare "$SECTION"
+  restaurer prod "$SAUVEGARDES/quotidiennes/$SNAPSHOT" --oui
+  [ "$status" -eq 0 ]
+  [ -z "$(appels_de docker | grep -F '/actuel' || true)" ]
+  diff -r "$SAUVEGARDES/quotidiennes/$SNAPSHOT" "$DONNEES"
+  [[ "$output" == *"aucune donnée en service : pas de report"* ]]
+  [[ "$(sans_horodatage | tail -n 1)" == "attention : le report n'a pas eu lieu (aucune donnée en service) : "*" ; voir « $SECTION » (docs/exploitation.md)" ]]
+  aucune_copie_jetable
+}
+
+# Le rappel suit aussi l'échec d'une restauration dont l'instantané est en place : le redémarrage
+# ou la santé. Avant la mise en place, rien n'est restauré, et il n'y a rien à rappeler.
+@test "restaurer_rappel_aussi_sur_echec_apres_mise_en_place" {
+  instantane "$SNAPSHOT" 1
+  donnees_courantes
+  reporter_declare "$SECTION"
+  horloge_qui_avance
+  DOUBLE_CURL_SANTE_KO="$IMAGE" restaurer prod "$SAUVEGARDES/quotidiennes/$SNAPSHOT" --sans-report --oui
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"santé non conforme"*"attention : le report n'a pas eu lieu (--sans-report)"*"« $SECTION » (docs/exploitation.md)"* ]]
+  [[ "$(sans_horodatage | tail -n 1)" == "attention : le report n'a pas eu lieu (--sans-report) : "* ]]
+  DOUBLE_DOCKER_START_ECHEC=1 restaurer prod "$SAUVEGARDES/quotidiennes/$SNAPSHOT" --sans-report --oui
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"redémarrage de l'application impossible"*"attention : le report n'a pas eu lieu (--sans-report)"* ]]
+  # avant la mise en place : pas de rappel
+  DOUBLE_DOCKER_VERIFIER_CODE=2 restaurer prod "$SAUVEGARDES/quotidiennes/$SNAPSHOT" --sans-report --oui
+  [ "$status" -eq 1 ]
+  [[ "$output" != *"attention"* ]]
+  # un report fait ne se rappelle pas, même quand la santé échoue ensuite
+  DOUBLE_CURL_SANTE_KO="$IMAGE" restaurer prod "$SAUVEGARDES/quotidiennes/$SNAPSHOT" --oui
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"report fait"*"santé non conforme"* ]]
+  [[ "$output" != *"attention"* ]]
+}
+
+# R58 : sur un code 0, la sortie standard est le rapport, un document JSON, journalisé sur une
+# ligne. Une sortie qui n'en est pas un est un échec : le côté sûr.
+@test "restaurer_sortie_du_report_journalisee_si_json" {
+  instantane "$SNAPSHOT" 1
+  donnees_courantes
+  reporter_declare "$SECTION"
+  horloge_qui_avance
+  export DOUBLE_DOCKER_REPORT_SORTIE=$'{\n  "reportes": 2,\n  "detail": "deux entrées"\n}'
+  run --separate-stderr bash "$CLONE/deploiement/restaurer.sh" prod "$SAUVEGARDES/quotidiennes/$SNAPSHOT" --oui
+  [ "$status" -eq 0 ]
+  # rien de la commande sur la sortie standard du script ; au journal, le rapport sur une ligne
+  [ -z "$output" ]
+  # shellcheck disable=SC2154  # $stderr est posé par run --separate-stderr
+  output="$stderr"
+  sans_horodatage | grep -Fx 'report fait (reporter : code 0) : {   "reportes": 2,   "detail": "deux entrées" }'
+  # code 0, mais pas un rapport : un mot, rien du tout, un document coupé, et null ou false, du
+  # JSON valide qui ne rapporte rien (jq -e les refuse ; jq seul les accepterait)
+  local sortie
+  for sortie in fait '' '{"reportes": 2' null false; do
+    rm -rf "$BATS_TEST_TMPDIR/donnees-avant"
+    cp -R "$DONNEES" "$BATS_TEST_TMPDIR/donnees-avant"
+    DOUBLE_DOCKER_REPORT_SORTIE="$sortie" restaurer prod "$SAUVEGARDES/quotidiennes/$SNAPSHOT" --oui
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"report en échec (reporter : code 0, mais la sortie n'est pas un rapport)"* ]]
+    echo "$output" | grep -F "la restauration est abandonnée, rien n'a changé" | grep -F -- "--sans-report"
+    diff -r "$BATS_TEST_TMPDIR/donnees-avant" "$DONNEES"
+    [ -f "$EN_SERVICE" ]
+    [ ! -e "$DONNEES.nouvelle" ]
+    aucune_copie_jetable
+  done
+}
+
+@test "restaurer_report_en_echec_journalise_sa_sortie" {
+  instantane "$SNAPSHOT" 1
+  donnees_courantes
+  reporter_declare "$SECTION"
+  export DOUBLE_DOCKER_REPORT_CODE=3
+  export DOUBLE_DOCKER_REPORT_SORTIE=$'sortie une\nsortie deux'
+  export DOUBLE_DOCKER_REPORT_ERREUR=$'erreur une\nerreur deux'
+  run --separate-stderr bash "$CLONE/deploiement/restaurer.sh" prod "$SAUVEGARDES/quotidiennes/$SNAPSHOT" --oui
+  [ "$status" -eq 1 ]
+  # rien de la commande sur la sortie standard du script
+  [ -z "$output" ]
+  # shellcheck disable=SC2154  # $stderr est posé par run --separate-stderr
+  output="$stderr"
+  # au journal, sur une ligne : le code, puis les deux sorties, aplaties
+  sans_horodatage | grep -Fx "report en échec (reporter : code 3) ; sortie standard : sortie une sortie deux ; sortie d'erreur : erreur une erreur deux"
+  contenu_courant_intact
+}
+
+# La copie jetable des données en service contient des données personnelles : sous le dossier des
+# sauvegardes, en 0700, jamais dans le dossier temporaire, et retirée sur tous les chemins de
+# sortie (R58). Celle qu'un report tué (SIGKILL) a laissée part à la restauration suivante.
+@test "restaurer_copie_jetable_retiree_partout" {
+  instantane "$SNAPSHOT" 1
+  donnees_courantes
+  reporter_declare "$SECTION"
+  # après un échec du report
+  DOUBLE_DOCKER_REPORT_CODE=1 restaurer prod "$SAUVEGARDES/quotidiennes/$SNAPSHOT" --oui
+  [ "$status" -eq 1 ]
+  [ "$(cat "$BATS_TEST_TMPDIR/report-mode")" = 700 ]
+  aucune_copie_jetable
+  # après un échec de la mise en place, que le piège défait
+  double_mv_en_echec '*/donnees.nouvelle/sous'
+  restaurer prod "$SAUVEGARDES/quotidiennes/$SNAPSHOT" --oui
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"report fait"*"mise en place de l'instantané impossible"* ]]
+  rm -f "$DOUBLES/mv"
+  aucune_copie_jetable
+  contenu_courant_intact
+  # après une interruption pendant le report : le piège la retire, et relance l'application
+  rm -f "$BATS_TEST_TMPDIR/report-mots"
+  export DOUBLE_DOCKER_REPORT_ATTENTE=30
+  setsid bash "$CLONE/deploiement/restaurer.sh" prod "$SAUVEGARDES/quotidiennes/$SNAPSHOT" --oui \
+    >"$BATS_TEST_TMPDIR/sortie" 2>&1 3>&- &
+  local pid=$!
+  for _ in {1..100}; do
+    [ ! -e "$BATS_TEST_TMPDIR/report-mots" ] || break
+    sleep 0.1
+  done
+  [ -e "$BATS_TEST_TMPDIR/report-mots" ]
+  compgen -G "$SAUVEGARDES/report-*" >/dev/null
+  kill -TERM -- "-$pid"
+  wait "$pid" || true
+  unset DOUBLE_DOCKER_REPORT_ATTENTE
+  aucune_copie_jetable
+  contenu_courant_intact
+  [ -f "$EN_SERVICE" ]
+  [ ! -e "$DONNEES.nouvelle" ]
+  # le reste d'un report tué de force part au départ de la restauration suivante, qui réussit
+  mkdir -m 700 "$SAUVEGARDES/report-20261001T000000Z"
+  echo "copie oubliée" >"$SAUVEGARDES/report-20261001T000000Z/courant.txt"
+  : >"$APPELS"
+  restaurer prod "$SAUVEGARDES/quotidiennes/$SNAPSHOT" --oui
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"reste d'une restauration interrompue retiré : $SAUVEGARDES/report-20261001T000000Z"*"arrêt de l'application"* ]]
+  # la copie jetable de ce report : sous le dossier des sauvegardes, en 0700, hors du dossier
+  # temporaire ; puis retirée
+  local actuel
+  actuel="$(appels_de docker | sed -nE 's/.* -v ([^ ]+):\/actuel .*/\1/p')"
+  [[ "$actuel" =~ ^"$SAUVEGARDES"/report-[0-9]{8}T[0-9]{6}Z$ ]]
+  [[ "$actuel" != "$TMPDIR"/* ]]
+  [ "$(cat "$BATS_TEST_TMPDIR/report-mode")" = 700 ]
+  aucune_copie_jetable
+  aucun_temporaire
+}
+
+@test "restaurer_plan_dit_si_le_report_jouera" {
+  instantane "$SNAPSHOT" 1
+  donnees_courantes
+  reporter_declare "$SECTION"
+  restaurer prod "$SAUVEGARDES/quotidiennes/$SNAPSHOT"
+  [ "$status" -eq 64 ]
+  # le report jouera, avec cette commande, entre l'arrêt et la mise de côté
+  [[ "$output" == *"  3. arrêt de l'application"$'\n'"  4. report : outil reporter /actuel /donnees, "*$'\n'"  5. contenu courant des données mis de côté"*$'\n'"  6. redémarrage"* ]]
+  [[ "$output" == *"un échec abandonne la restauration, sauf avec --sans-report"* ]]
+  # avec --sans-report, il ne jouera pas, et le plan dit où est la procédure
+  restaurer prod "$SAUVEGARDES/quotidiennes/$SNAPSHOT" --sans-report
+  [ "$status" -eq 64 ]
+  [[ "$output" == *"  4. --sans-report : pas de report (REPORTER : outil reporter)"*"« $SECTION » (docs/exploitation.md)"$'\n'"  5. contenu courant"* ]]
+  [[ "$output" != *"4. report :"* ]]
+  # sans REPORTER, --sans-report est ignorée, et le plan est celui d'avant le crochet
+  printf '%s\n' 'SAUVEGARDER=outil sauvegarder --forme dossier' 'VERIFIER=outil verifier' \
+    >"$CLONE/deploiement/projet.env"
+  restaurer prod "$SAUVEGARDES/quotidiennes/$SNAPSHOT" --sans-report
+  [ "$status" -eq 64 ]
+  [[ "$output" == *"--sans-report ignorée : deploiement/projet.env ne déclare pas REPORTER"* ]]
+  [[ "$output" == *"  4. contenu courant des données mis de côté"* ]]
+  [[ "$output" != *"report :"* ]]
+  # aucun effet
+  [ -z "$(appels_de docker)" ]
+  [ ! -e "$ETAT/verrou" ]
+  contenu_courant_intact
+  aucune_copie_jetable
+  aucun_temporaire
+}
+
+# Un REPORTER déclaré mais illisible (un caractère du shell, une apostrophe dans la section) est
+# refusé avant tout effet, plan compris.
+@test "restaurer_refuse_un_reporter_illisible_sans_rien_toucher" {
+  instantane "$SNAPSHOT" 1
+  donnees_courantes
+  local cas oui
+  for cas in "REPORTER_SECTION=$SECTION|REPORTER=outil;reporter" \
+    "REPORTER=outil reporter|REPORTER_SECTION=Reporter l'état à la main"; do
+    printf '%s\n' 'SAUVEGARDER=outil sauvegarder --forme dossier' 'VERIFIER=outil verifier' \
+      "${cas%%|*}" "${cas#*|}" >"$CLONE/deploiement/projet.env"
+    for oui in --oui ""; do
+      # shellcheck disable=SC2086  # sans --oui, l'option disparaît : c'est le plan qui est demandé
+      restaurer prod "$SAUVEGARDES/quotidiennes/$SNAPSHOT" $oui
+      [ "$status" -eq 1 ]
+      [[ "$output" == *"ligne 4 invalide"*"REPORTER est déclaré, mais deploiement/projet.env est illisible : rien n'a changé"* ]]
+    done
+  done
+  [ -z "$(appels_de docker)" ]
+  [ ! -e "$ETAT/verrou" ]
+  contenu_courant_intact
+  aucun_temporaire
+}
+
+# R63 : après le report, la copie de l'instantané garde la forme que l'étape 3 exige de
+# l'instantané : non vide, rien que des fichiers et des dossiers. Sinon, comme un report en échec,
+# rien n'a changé. VERIFIER ne tourne pas une seconde fois : le report change légitimement le
+# contenu.
+@test "restaurer_recontrole_la_copie_apres_le_report" {
+  instantane "$SNAPSHOT" 1
+  donnees_courantes
+  reporter_declare "$SECTION"
+  local forme
+  for forme in vide lien; do
+    : >"$APPELS"
+    DOUBLE_DOCKER_REPORT_FORME="$forme" restaurer prod "$SAUVEGARDES/quotidiennes/$SNAPSHOT" --oui
+    [ "$status" -eq 1 ]
+    # la commande a répondu 0 et un rapport : c'est la copie qu'elle laisse qui est refusée
+    [[ "$output" == *"report fait (reporter : code 0)"* ]]
+    if [ "$forme" = vide ]; then
+      [[ "$output" == *"la copie de l'instantané est vide après le report"* ]]
+    else
+      [[ "$output" == *"la copie de l'instantané contient autre chose que des fichiers et des dossiers après le report"* ]]
+    fi
+    echo "$output" | grep -F "la restauration est abandonnée, rien n'a changé" \
+      | grep -F -- "relancer avec --sans-report, puis « $SECTION » (docs/exploitation.md)"
+    # une seule vérification, avant l'arrêt ; puis l'application repart sur ses données, intactes
+    [ "$(appels_de docker | grep -cF ' outil verifier /donnees')" -eq 1 ]
+    [ "$(ligne_de ' /actuel /donnees')" -lt "$(ligne_de ' start app')" ]
+    [ -f "$EN_SERVICE" ]
+    contenu_courant_intact
+    [ ! -e "$DONNEES.nouvelle" ]
+    aucun_dossier_avant_restauration
+    aucune_copie_jetable
+    aucun_temporaire
+    [[ "$output" != *"attention"* ]]
+  done
+}
+
+# Revue C0, M9 : la copie jetable qui ne peut être ni créée ni remplie abandonne la restauration
+# avant le report, rien n'a changé : sans elle, la commande lirait des données incomplètes.
+@test "restaurer_copie_jetable_impossible_abandonne" {
+  instantane "$SNAPSHOT" 1
+  donnees_courantes
+  reporter_declare "$SECTION"
+  local vrai
+  vrai="$(command -v cp)"
+  # cp échoue vers la copie jetable, comme sur un disque plein
+  # shellcheck disable=SC2016  # le corps du double se développe quand il s'exécute, pas ici
+  creer_double cp 'case "$*" in *"/report-2"*) echo "cp: No space left on device" >&2; exit 1 ;; esac
+exec '"$vrai"' "$@"'
+  restaurer prod "$SAUVEGARDES/quotidiennes/$SNAPSHOT" --oui
+  rm -f "$DOUBLES/cp"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -F "copie des données en service vers $SAUVEGARDES/report-" \
+    | grep -F "impossible : la restauration est abandonnée, rien n'a changé" \
+    | grep -F -- "relancer avec --sans-report, puis « $SECTION » (docs/exploitation.md)"
+  [ -z "$(appels_de docker | grep -F '/actuel' || true)" ]
+  [ -f "$EN_SERVICE" ]
+  contenu_courant_intact
+  [ ! -e "$DONNEES.nouvelle" ]
+  aucun_dossier_avant_restauration
+  aucune_copie_jetable
+  aucun_temporaire
+  # mkdir échoue : un lien occupe déjà le nom de la copie ; il n'est pas à elle, et reste
+  horloge_qui_avance
+  ln -s /nulle-part "$SAUVEGARDES/report-20261015T000001Z"
+  : >"$APPELS"
+  restaurer prod "$SAUVEGARDES/quotidiennes/$SNAPSHOT" --oui
+  [ "$status" -eq 1 ]
+  echo "$output" \
+    | grep -F "copie jetable $SAUVEGARDES/report-20261015T000001Z impossible à créer : la restauration est abandonnée, rien n'a changé" \
+    | grep -F -- "relancer avec --sans-report, puis « $SECTION » (docs/exploitation.md)"
+  [ -z "$(appels_de docker | grep -F '/actuel' || true)" ]
+  [ -L "$SAUVEGARDES/report-20261015T000001Z" ]
+  [ -f "$EN_SERVICE" ]
+  contenu_courant_intact
+  [ ! -e "$DONNEES.nouvelle" ]
+  aucun_dossier_avant_restauration
+  aucun_temporaire
+}
+
+# R63 : le rapport du crochet se contrôle par jq. Sans jq, refus avant l'arrêt, et rien ne change.
+@test "restaurer_sans_jq_refuse_le_report_avant_l_arret" {
+  instantane "$SNAPSHOT" 1
+  donnees_courantes
+  reporter_declare "$SECTION"
+  # un PATH qui a tout ce qu'a l'image du banc, sauf jq
+  local sans_jq="$BATS_TEST_TMPDIR/sans-jq" outil chemin
+  mkdir -p "$sans_jq"
+  for outil in /usr/bin/* /bin/*; do
+    [ "${outil##*/}" = jq ] || ln -sf "$outil" "$sans_jq/${outil##*/}"
+  done
+  chemin="$DOUBLES:$sans_jq:/usr/local/bin"
+  run ! env PATH="$chemin" sh -c 'command -v jq'
+  run env PATH="$chemin" bash "$CLONE/deploiement/restaurer.sh" prod "$SAUVEGARDES/quotidiennes/$SNAPSHOT" --oui
+  [ "$status" -eq 1 ]
+  # la cause, puis ce qu'il faut faire
+  [ "$(sans_horodatage | tail -n 1)" = "jq introuvable : le rapport du crochet ne peut pas être contrôlé. Rien n'a changé : installer jq, qui vient avec les outils du serveur (outils/installer-outils.sh du dépôt serveur), puis relancer" ]
+  # ni verrou, ni conteneur, ni copie : l'application n'a pas été arrêtée
+  [ -z "$(appels_de docker)" ]
+  [ ! -e "$ETAT/verrou" ]
+  [ -f "$EN_SERVICE" ]
+  contenu_courant_intact
+  [ ! -e "$DONNEES.nouvelle" ]
+  aucun_dossier_avant_restauration
+  aucune_copie_jetable
+  aucun_temporaire
 }

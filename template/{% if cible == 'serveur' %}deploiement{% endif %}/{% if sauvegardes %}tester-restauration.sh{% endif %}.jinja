@@ -32,7 +32,9 @@
 # instantané fermé, et n'écrit que dans sa copie), le port {{ bloc_ports }}, le projet compose. C'est pourquoi il
 # n'a pas besoin du verrou partagé avec la sonde, le déploiement, la sauvegarde et la restauration.
 # La copie chiffrée du distant n'est pas testée ici : la clé hors ligne ne vient jamais sur le
-# serveur (M-0005) ; elle l'est sur le poste, à la main, chaque trimestre.
+# serveur (M-0005) ; elle l'est sur le poste, à la main, chaque trimestre. Le report de
+# restaurer.sh (REPORTER) n'y joue pas non plus : le test restaure dans un conteneur jetable, où il
+# n'y a pas de données en service à reporter.
 #
 # Un trap détruit le conteneur et le dossier temporaire sur toutes les sorties : succès, erreur,
 # INT, TERM, HUP. Un conteneur laissé par une exécution tuée de force est retiré au démarrage.

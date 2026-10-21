@@ -298,6 +298,48 @@ projet_env() {
     [ "$status" -eq 0 ]
   done
 }
+
+# Une clé facultative (REPORTER, REPORTER_SECTION de la restauration) : absente, rien n'est lu ni
+# journalisé, pas même une ligne invalide qu'un lire_projet_env signalerait ; déclarée, elle se lit
+# comme les autres, le fichier entier contrôlé.
+@test "projet_env_cle_facultative" {
+  local compte='lire_projet_env_facultatif REPORTER; echo "mots : {% raw %}${#PROJET_MOTS[@]}{% endraw %}"'
+  # le projet.env semé ne la donne qu'en commentaire
+  avec_lib "$compte"
+  [ "$status" -eq 0 ]
+  [ "$output" = "mots : 0" ]
+  # absente : ni une ligne invalide, ni la clé voisine qui commence comme elle, ni l'absence du
+  # fichier n'est une erreur, et rien n'est journalisé
+  projet_env "VERIFIER=verifier" "AUTRE=a;b" "REPORTER_SECTION=Reporter à la main"
+  avec_lib "$compte"
+  [ "$status" -eq 0 ]
+  [ "$output" = "mots : 0" ]
+  rm "$CLONE/deploiement/projet.env"
+  avec_lib "$compte"
+  [ "$status" -eq 0 ]
+  [ "$output" = "mots : 0" ]
+  # déclarée : ses mots, comme lire_projet_env
+  projet_env "VERIFIER=verifier" "REPORTER=outil  reporter --tout" "REPORTER_SECTION=Reporter à la main"
+  avec_lib 'lire_projet_env_facultatif REPORTER; printf "%s\n" "${PROJET_MOTS[@]}"'
+  [ "$status" -eq 0 ]
+  [ "$output" = $'outil\nreporter\n--tout' ]
+  avec_lib 'lire_projet_env_facultatif REPORTER_SECTION; printf "%s|" "${PROJET_MOTS[*]}"'
+  [ "$status" -eq 0 ]
+  [ "$output" = "Reporter à la main|" ]
+  # déclarée, avec une valeur invalide, une autre ligne invalide ou en double : refus, sans mots
+  local cas lignes
+  for cas in "ligne 1 invalide|REPORTER=outil;reporter" "ligne 1 invalide|REPORTER=" \
+    "ligne 2 invalide|REPORTER=outil|VERIFIER=\$(touch x)" "déclarée deux fois|REPORTER=a|REPORTER=b"; do
+    IFS='|' read -r -a lignes <<<"${cas#*|}"
+    projet_env "${lignes[@]}"
+    avec_lib 'lire_projet_env_facultatif REPORTER || echo "refus, mots : {% raw %}${#PROJET_MOTS[@]}{% endraw %}"'
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"${cas%%|*}"*"refus, mots : 0" ]]
+  done
+  # une clé demandée qui n'en est pas une est une faute d'usage
+  avec_lib 'lire_projet_env_facultatif reporter'
+  [ "$status" -eq 64 ]
+}
 {%- else %}
 
 # Sans sauvegardes, le projet.env semé par le modèle ne déclare aucune commande.
