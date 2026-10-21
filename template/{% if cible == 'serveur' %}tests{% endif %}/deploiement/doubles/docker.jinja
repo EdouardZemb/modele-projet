@@ -48,6 +48,10 @@
 {%- if sauvegardes %}
 #   DOUBLE_DOCKER_VERIFIER_CODE      code de `run --rm … <verifier> /donnees` (défaut 0 ; 2 = non conforme)
 #   DOUBLE_DOCKER_VERIFIER_SORTIE    sa sortie (défaut : rien)
+#   DOUBLE_DOCKER_REPORT_CODE        code de `run --rm … <reporter…> /actuel /donnees` (défaut 0)
+#   DOUBLE_DOCKER_REPORT_SORTIE      sa sortie standard (défaut : {"reportes":1})
+#   DOUBLE_DOCKER_REPORT_ERREUR      sa sortie d'erreur (défaut : rien)
+#   DOUBLE_DOCKER_REPORT_ATTENTE     le report dure autant de secondes avant de répondre
 #   DOUBLE_DOCKER_RUN_ECHEC          `run -d` échoue avec ce message (« port is already allocated »…)
 #   DOUBLE_DOCKER_RM_ECHEC           `rm` échoue
 #
@@ -65,6 +69,17 @@
 # commence par « CORROMPU ». Il écrit les mots de la commande (ce qui suit l'image) un par ligne
 # dans run-mots, et copie le dossier monté dans verifie/, à côté de $APPELS : ce que la
 # vérification a vu.
+#
+# Report : `run --rm … <reporter…> /actuel /donnees`, la commande REPORTER de la restauration. Elle
+# monte exactement deux dossiers : sur /actuel, la copie jetable des données en service, un
+# dossier report-<AAAAMMJJTHHMMSSZ> du dossier des sauvegardes ; sur /donnees, la copie de
+# l'instantané, <données>.nouvelle. Jamais les données elles-mêmes. L'application doit être
+# arrêtée. Le double écrit, à côté de $APPELS : report-mots (les mots de la commande, un par
+# ligne), report-mode (les droits de /actuel), report-actuel (ce que /actuel contenait) et
+# report-en-service (ce que les données contenaient à ce moment). Puis il écrit dans /actuel (il
+# ajoute « écrit par le report » à courant.txt, et crée trace-du-report), ce que garde
+# report-actuel-apres, et dans /donnees, le fichier reporte.txt (« reporté depuis /actuel : »
+# suivi de courant.txt). Il écrit même s'il échoue : une commande en échec a pu commencer.
 {%- endif %}
 #
 # Invariants vérifiés à chaque appel (code 125 sinon) : DOCKER_CONFIG est posé, `--config` n'est
@@ -73,7 +88,7 @@
 # Pour `run` : l'image est celle de `deploye`, un conteneur détaché a un nom et un autre est
 # jetable (--rm), le seul port publié est 127.0.0.1:<port>:{{ port_app }} hors du port de la prod, et le seul
 # volume est un dossier existant monté sur /donnees, jamais les données ni les sauvegardes de la
-# prod.
+# prod. Le report seul monte deux dossiers, ceux que dit son paragraphe, et jamais les données.
 {%- endif %}
 { printf '%s' docker; for argument in "$@"; do printf ' %s' "$argument"; done; printf '\n'; } >>"${APPELS:?APPELS non défini}"
 
@@ -260,6 +275,45 @@ case "${1:-}" in
     deployee=""
     { read -r deployee _ || true; } <"${ {{- prefixe }}ETAT:?}/deploye"
     [ "$image" = "$deployee" ] || refuser "run : l'image $image n'est pas celle de deploye ($deployee)"
+    if [ "$#" -ge 3 ] && [ "${*: -2}" = "/actuel /donnees" ]; then
+      # <reporter…> /actuel /donnees : le report de la restauration.
+      { [ "$detache" -eq 0 ] && [ "$jetable" -eq 1 ]; } || refuser "run : le report est un conteneur à usage unique (--rm)"
+      [ "{% raw %}${#ports[@]}{% endraw %}" -eq 0 ] || refuser "run : le report ne publie aucun port"
+      [ "{% raw %}${#volumes[@]}{% endraw %}" -eq 2 ] || refuser "run : le report monte deux dossiers, /actuel et /donnees"
+      actuel="" nouvelle=""
+      for volume in "${volumes[@]}"; do
+        case "$volume" in
+          *:/actuel) actuel="${volume%:/actuel}" ;;
+          *:/donnees) nouvelle="${volume%:/donnees}" ;;
+          *) refuser "run : volume inattendu pour le report : $volume" ;;
+        esac
+      done
+      { [ "$(dirname "$actuel")" = "${ {{- prefixe }}SAUVEGARDES:?}" ] && [[ "$(basename "$actuel")" =~ ^report-[0-9]{8}T[0-9]{6}Z$ ]]; } \
+        || refuser "run : /actuel n'est pas une copie report-<horodatage> du dossier des sauvegardes : $actuel"
+      { [ -d "$actuel" ] && [ ! -L "$actuel" ]; } || refuser "run : /actuel absent : $actuel"
+      [ "$nouvelle" = "${ {{- prefixe }}DONNEES:?}.nouvelle" ] \
+        || refuser "run : /donnees du report n'est pas la copie de l'instantané (${ {{- prefixe }}DONNEES}.nouvelle) : $nouvelle"
+      [ -d "$nouvelle" ] || refuser "run : copie de l'instantané absente : $nouvelle"
+      [ ! -f "$EN_SERVICE" ] || refuser "run : le report exige l'application arrêtée"
+      printf '%s\n' "$@" >"$DOSSIER/report-mots"
+      stat -c %a "$actuel" >"$DOSSIER/report-mode"
+      rm -rf "$DOSSIER/report-actuel" "$DOSSIER/report-en-service"
+      cp -R "$actuel" "$DOSSIER/report-actuel"
+      cp -R "${ {{- prefixe }}DONNEES}" "$DOSSIER/report-en-service"
+      [ -z "${DOUBLE_DOCKER_REPORT_ATTENTE:-}" ] || sleep "$DOUBLE_DOCKER_REPORT_ATTENTE"
+      printf 'reporté depuis /actuel : %s\n' "$(cat "$actuel/courant.txt" 2>/dev/null)" >"$nouvelle/reporte.txt"
+      [ ! -f "$actuel/courant.txt" ] || echo "écrit par le report" >>"$actuel/courant.txt"
+      echo "écrit par le report" >"$actuel/trace-du-report"
+      rm -rf "$DOSSIER/report-actuel-apres"
+      cp -R "$actuel" "$DOSSIER/report-actuel-apres"
+      [ -z "${DOUBLE_DOCKER_REPORT_ERREUR+x}" ] || echo "$DOUBLE_DOCKER_REPORT_ERREUR" >&2
+      if [ -n "${DOUBLE_DOCKER_REPORT_SORTIE+x}" ]; then
+        echo "$DOUBLE_DOCKER_REPORT_SORTIE"
+      else
+        echo '{"reportes":1}'
+      fi
+      exit "${DOUBLE_DOCKER_REPORT_CODE:-0}"
+    fi
     if [ "$detache" -eq 1 ]; then
       [ -n "$nom" ] || refuser "run -d : un conteneur détaché porte un nom"
     else

@@ -61,8 +61,9 @@ lecture seule et `/tmp` est en mémoire.
 ### 4. Le contrat de l'instantané
 
 Deux commandes de l'image, déclarées dans `deploiement/projet.env` (`SAUVEGARDER=…`,
-`VERIFIER=…`). Ce fichier est au projet ; il est lu par un analyseur strict et **jamais sourcé** :
-une ligne `CLE=mots`, des mots séparés par des espaces, sans caractère que le shell interpréterait.
+`VERIFIER=…`), et une troisième, facultative (`REPORTER=…`). Ce fichier est au projet ; il est lu
+par un analyseur strict et **jamais sourcé** : une ligne `CLE=mots`, des mots séparés par des
+espaces, sans caractère que le shell interpréterait.
 
 - **`SAUVEGARDER <dossier>`** crée ce dossier, qui n'existe pas encore, avec **la forme de
   `/donnees`** : ce que `/donnees` doit contenir pour que l'app reparte. Son parent existe : la
@@ -83,6 +84,24 @@ une ligne `CLE=mots`, des mots séparés par des espaces, sans caractère que le
   ensuite en service.
 - **Restaurer, c'est remettre le contenu de l'instantané dans `/donnees`.** C'est ce qui rend
   `restaurer.sh` et `tester-restauration.sh` génériques : la mécanique ne sait rien de la base.
+- **`REPORTER /actuel /donnees`, facultative**, pour un projet qui garde dans ses données un état
+  qu'une restauration ne doit pas défaire (un registre de suppressions, par exemple). Déclarée,
+  elle tourne à chaque restauration, application arrêtée, avant la mise en place, dans un
+  conteneur jetable de l'image déployée :
+  - `/actuel` est une copie jetable des données en service, montée en écriture : une base qui tient
+    un journal à côté d'elle ne s'ouvre pas en lecture seule. La commande la lit ; ce qu'elle y
+    écrit est jeté ;
+  - `/donnees` est la copie de l'instantané qui sera mise en place : la commande y écrit ce qui doit
+    survivre ;
+  - elle rend 0 quand le report est fait, sa sortie standard étant alors un document JSON, le
+    rapport, que la mécanique journalise ; 64 en cas d'erreur d'usage, ce que rend une image qui ne
+    connaît pas la commande ; tout autre code est un échec, et une sortie qui n'est pas du JSON
+    aussi ;
+  - ses deux sorties vont au journal : elles ne portent aucune donnée personnelle, des nombres
+    plutôt que des noms.
+
+  `REPORTER_SECTION`, facultative aussi, est le titre de la section de `docs/exploitation.md` qui
+  dit comment reporter à la main, quand le report n'a pas pu avoir lieu (M-0005).
 - **Un instantané vide est refusé.** Un `/donnees` vide, même légitimement, fait donc alerter la
   sauvegarde chaque nuit. Une app qui peut n'avoir aucune donnée y garde au moins un fichier (une
   marque, la version de son schéma).
@@ -94,7 +113,9 @@ une ligne `CLE=mots`, des mots séparés par des espaces, sans caractère que le
   une version plus tard, le `projet.env` qui l'utilise. Dans l'autre sens, une image garde la
   commande de la précédente : un retour par étiquette prend son instantané avec la commande de la
   version visée, dans l'image qu'il quitte (invariant 4). `VERIFIER` suit la même règle : elle
-  tourne dans l'image déployée, avec le `projet.env` du clone.
+  tourne dans l'image déployée, avec le `projet.env` du clone. `REPORTER` aussi : une image qui ne
+  la connaît pas, après un retour à une version plus ancienne par exemple, rend 64, et la
+  restauration s'arrête sans rien changer.
 
 La mécanique fait le reste : l'archive, le chiffrement, l'envoi, la rétention, le test de
 restauration et la restauration (M-0005).
@@ -129,6 +150,9 @@ ajoute deux commandes à ce contrat, `SAUVEGARDER` et `VERIFIER`, et l'ADR M-000
   `modele-projet`.
 - Les deux commandes sont du code de l'app, que le projet teste. Leur compatibilité d'une version à
   l'autre s'ajoute à l'invariant 4.
+- **Rien ne lance `REPORTER` avant une vraie restauration** : ni la CI, ni le test de restauration
+  du dimanche, qui n'a pas de données en service à reporter. Le projet la teste dans ses propres
+  tests, contre son image.
 - **Difficile à changer** : la forme de l'instantané. Les archives gardées 90 jours la portent.
 {%- else %}
 - **Difficile à changer** : peu de chose. Le contrat ne porte que sur l'image.

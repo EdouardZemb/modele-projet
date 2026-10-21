@@ -85,9 +85,31 @@ def test_projet_env(rendre):
     avec = lire(rendre(**REPONSES_SERVEUR), "deploiement/projet.env")
     assert "SAUVEGARDER=sauvegarder\n" in avec
     assert "VERIFIER=verifier\n" in avec
+    # C0 : les deux clés du report sont facultatives : en commentaire, avec un exemple
+    assert "#REPORTER=reporter\n" in avec
+    assert "#REPORTER_SECTION=Reporter à la main\n" in avec
+    assert not re.search(r"^REPORTER", avec, flags=re.MULTILINE)
     sans = lire(rendre(**{**REPONSES_SERVEUR, "sauvegardes": False}), "deploiement/projet.env")
     assert "SAUVEGARDER" not in sans
     assert "VERIFIER" not in sans
+    assert "REPORTER" not in sans
+
+
+# C0 : le crochet de restauration reste générique. Ni la base d'un projet, ni un projet, ni son
+# registre dans la mécanique : seuls les exemples des docs parlent d'un registre de suppressions.
+def test_crochet_reporter_generique(rendre):
+    rendu = rendre(**REPONSES_SERVEUR)
+    for chemin in (
+        "deploiement/restaurer.sh",
+        "deploiement/tester-restauration.sh",
+        "deploiement/lib.sh",
+        "deploiement/projet.env",
+        "tests/deploiement/sauvegarde.bats",
+        "tests/deploiement/doubles/docker",
+    ):
+        texte = lire(rendu, chemin)
+        assert "REPORTER" in texte or chemin == "deploiement/lib.sh", chemin
+        assert not re.search(r"sqlite|\bregistre\b|ancrage", texte, flags=re.IGNORECASE), chemin
 
 
 def test_compose_projet(rendre):
@@ -395,3 +417,23 @@ def test_exploitation_avant_restauration(rendre):
     assert "avant-restauration-<horodatage>/" in restaurer
     assert "30 jours" in restaurer
     assert "seule copie" in restaurer
+
+
+# C0 : le runbook dit le report, sa copie jetable, l'option qui s'en passe et le rappel. Sans
+# sauvegardes, il n'y a pas de section « Restaurer », ni de report.
+@pytest.mark.parametrize("sauvegardes", [True, False])
+def test_exploitation_le_report(rendre, sauvegardes):
+    texte = lire(rendre(**{**REPONSES_SERVEUR, "sauvegardes": sauvegardes}), "docs/exploitation.md")
+    assert ("REPORTER" in texte) is sauvegardes
+    if not sauvegardes:
+        return
+    restaurer = a_plat(section(texte, "Restaurer"))
+    for fragment in (
+        "si `deploiement/projet.env` déclare `REPORTER`",
+        "~/backups/essai/report-<horodatage>/",
+        "S'il échoue, rien n'a changé",
+        "relancer avec `--sans-report`",
+        "`REPORTER_SECTION`",
+        "« attention : le report n'a pas eu lieu »",
+    ):
+        assert fragment in restaurer, fragment

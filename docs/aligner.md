@@ -178,6 +178,9 @@ qu'au §1, dans un worktree `<dépôt>.worktrees\modele-serveur`.
 - [ ] **Les fichiers semés de la cible**, à remplir : `deploiement/projet.env` (les commandes
       `SAUVEGARDER` et `VERIFIER`) ; `deploiement/compose.projet.yml` ; les secrets de l'app dans
       `deploiement/secrets/<env>.cles` ; `docs/exploitation.md`, avec ce qui est propre à l'app.
+- [ ] **Un état qu'une restauration ne doit pas défaire** (un registre de suppressions, par
+      exemple) : le projet déclare `REPORTER` et `REPORTER_SECTION` dans `deploiement/projet.env`,
+      et écrit cette section dans `docs/exploitation.md` (M-0003, M-0005).
 - [ ] **Un projet qui avait déjà ses scripts de déploiement** : ils cèdent la place à ceux de
       `deploiement/`. Chaque déploiement prend son instantané avec la commande de la version qui
       arrive, dans l'image de celle qui part (M-0003). La version qui précède l'alignement connaît
