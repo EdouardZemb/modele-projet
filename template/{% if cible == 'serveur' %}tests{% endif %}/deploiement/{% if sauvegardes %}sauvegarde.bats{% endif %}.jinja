@@ -376,6 +376,51 @@ aucune_copie_jetable() {
   [ "$(envois_echec "$HC_SAUVEGARDE" | wc -l)" -eq 2 ]
 }
 
+# R67 : une restauration tuée de force (SIGKILL, plantage de l'hôte) laisse, hors de portée de son
+# piège, la copie jetable du report (les données en service, en clair, sans rétention) et la copie
+# de travail des données. La sauvegarde tient le verrou de la restauration : ce qu'elle trouve n'est
+# à aucune restauration en cours, et elle le retire avant l'instantané. Rien d'autre : ni un nom
+# d'une autre forme, ni un lien, ni ce qu'il désigne.
+@test "sauvegarde_retire_les_restes_d_une_restauration_interrompue" {
+  local reste="$SAUVEGARDES/report-20261001T000000Z" ailleurs="$BATS_TEST_TMPDIR/ailleurs" nom
+  local autres=(report-20261001 report-20261001T000000Z.garde mon-report-20261001T000000Z)
+  # la copie jetable, avec un sous-dossier que la commande du report a laissé en lecture seule
+  mkdir -p "$reste/sous" "$DONNEES.nouvelle/sous"
+  echo "copie oubliée" >"$reste/courant.txt"
+  echo "profond" >"$reste/sous/profond.txt"
+  chmod 500 "$reste/sous"
+  echo "copie de travail" >"$DONNEES.nouvelle/donnees.txt"
+  for nom in "${autres[@]}"; do
+    mkdir -p "$SAUVEGARDES/$nom"
+    echo "$nom" >"$SAUVEGARDES/$nom/donnees.txt"
+  done
+  mkdir -p "$ailleurs"
+  echo "à garder" >"$ailleurs/donnees.txt"
+  ln -s "$ailleurs" "$SAUVEGARDES/report-20261002T000000Z"
+  horloge_qui_avance
+  sauvegarder prod
+  [ "$status" -eq 0 ]
+  [ ! -e "$reste" ]
+  [ ! -e "$DONNEES.nouvelle" ]
+  [[ "$output" == *"reste d'une restauration interrompue retiré : $reste"* ]]
+  [[ "$output" == *"reste d'une restauration interrompue retiré : $DONNEES.nouvelle"* ]]
+  # avant l'instantané, donc sous le verrou
+  [[ "$output" == *"reste d'une restauration interrompue retiré"*"instantané : "* ]]
+  # les autres noms, le lien et ce qu'il désigne restent
+  for nom in "${autres[@]}"; do
+    [ "$(cat "$SAUVEGARDES/$nom/donnees.txt")" = "$nom" ]
+  done
+  [ -L "$SAUVEGARDES/report-20261002T000000Z" ]
+  [ "$(cat "$ailleurs/donnees.txt")" = "à garder" ]
+  # une copie de travail qui est un lien n'est pas suivie, et reste ; sans reste, rien n'est dit
+  ln -s "$ailleurs" "$DONNEES.nouvelle"
+  sauvegarder prod
+  [ "$status" -eq 0 ]
+  [ -L "$DONNEES.nouvelle" ]
+  [ "$(cat "$ailleurs/donnees.txt")" = "à garder" ]
+  [[ "$output" != *"reste d'une restauration interrompue"* ]]
+}
+
 # Un .partiel qui ne peut pas être retiré est journalisé, et la sauvegarde se fait quand même.
 @test "sauvegarde_se_fait_meme_si_un_ancien_partiel_ne_part_pas" {
   local q="$SAUVEGARDES/quotidiennes" ancien
@@ -2142,9 +2187,10 @@ APPELS_DOCKER
   # shellcheck disable=SC2154  # $stderr est posé par run --separate-stderr
   output="$stderr"
   sans_horodatage | grep -Fx 'report fait (reporter : code 0) : {   "reportes": 2,   "detail": "deux entrées" }'
-  # code 0, mais pas un rapport : un mot, rien du tout, un document coupé
+  # code 0, mais pas un rapport : un mot, rien du tout, un document coupé, et null ou false, du
+  # JSON valide qui ne rapporte rien (jq -e les refuse ; jq seul les accepterait)
   local sortie
-  for sortie in fait '' '{"reportes": 2'; do
+  for sortie in fait '' '{"reportes": 2' null false; do
     rm -rf "$BATS_TEST_TMPDIR/donnees-avant"
     cp -R "$DONNEES" "$BATS_TEST_TMPDIR/donnees-avant"
     DOUBLE_DOCKER_REPORT_SORTIE="$sortie" restaurer prod "$SAUVEGARDES/quotidiennes/$SNAPSHOT" --oui
@@ -2321,6 +2367,49 @@ APPELS_DOCKER
   done
 }
 
+# Revue C0, M9 : la copie jetable qui ne peut être ni créée ni remplie abandonne la restauration
+# avant le report, rien n'a changé : sans elle, la commande lirait des données incomplètes.
+@test "restaurer_copie_jetable_impossible_abandonne" {
+  instantane "$SNAPSHOT" 1
+  donnees_courantes
+  reporter_declare "$SECTION"
+  local vrai
+  vrai="$(command -v cp)"
+  # cp échoue vers la copie jetable, comme sur un disque plein
+  # shellcheck disable=SC2016  # le corps du double se développe quand il s'exécute, pas ici
+  creer_double cp 'case "$*" in *"/report-2"*) echo "cp: No space left on device" >&2; exit 1 ;; esac
+exec '"$vrai"' "$@"'
+  restaurer prod "$SAUVEGARDES/quotidiennes/$SNAPSHOT" --oui
+  rm -f "$DOUBLES/cp"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -F "copie des données en service vers $SAUVEGARDES/report-" \
+    | grep -F "impossible : la restauration est abandonnée, rien n'a changé" \
+    | grep -F -- "relancer avec --sans-report, puis « $SECTION » (docs/exploitation.md)"
+  [ -z "$(appels_de docker | grep -F '/actuel' || true)" ]
+  [ -f "$EN_SERVICE" ]
+  contenu_courant_intact
+  [ ! -e "$DONNEES.nouvelle" ]
+  aucun_dossier_avant_restauration
+  aucune_copie_jetable
+  aucun_temporaire
+  # mkdir échoue : un lien occupe déjà le nom de la copie ; il n'est pas à elle, et reste
+  horloge_qui_avance
+  ln -s /nulle-part "$SAUVEGARDES/report-20261015T000001Z"
+  : >"$APPELS"
+  restaurer prod "$SAUVEGARDES/quotidiennes/$SNAPSHOT" --oui
+  [ "$status" -eq 1 ]
+  echo "$output" \
+    | grep -F "copie jetable $SAUVEGARDES/report-20261015T000001Z impossible à créer : la restauration est abandonnée, rien n'a changé" \
+    | grep -F -- "relancer avec --sans-report, puis « $SECTION » (docs/exploitation.md)"
+  [ -z "$(appels_de docker | grep -F '/actuel' || true)" ]
+  [ -L "$SAUVEGARDES/report-20261015T000001Z" ]
+  [ -f "$EN_SERVICE" ]
+  contenu_courant_intact
+  [ ! -e "$DONNEES.nouvelle" ]
+  aucun_dossier_avant_restauration
+  aucun_temporaire
+}
+
 # R63 : le rapport du crochet se contrôle par jq. Sans jq, refus avant l'arrêt, et rien ne change.
 @test "restaurer_sans_jq_refuse_le_report_avant_l_arret" {
   instantane "$SNAPSHOT" 1
@@ -2336,7 +2425,8 @@ APPELS_DOCKER
   run ! env PATH="$chemin" sh -c 'command -v jq'
   run env PATH="$chemin" bash "$CLONE/deploiement/restaurer.sh" prod "$SAUVEGARDES/quotidiennes/$SNAPSHOT" --oui
   [ "$status" -eq 1 ]
-  [ "$(sans_horodatage | tail -n 1)" = "jq introuvable : le rapport du crochet ne peut pas être contrôlé" ]
+  # la cause, puis ce qu'il faut faire
+  [ "$(sans_horodatage | tail -n 1)" = "jq introuvable : le rapport du crochet ne peut pas être contrôlé. Rien n'a changé : installer jq, qui vient avec les outils du serveur (outils/installer-outils.sh du dépôt serveur), puis relancer" ]
   # ni verrou, ni conteneur, ni copie : l'application n'a pas été arrêtée
   [ -z "$(appels_de docker)" ]
   [ ! -e "$ETAT/verrou" ]

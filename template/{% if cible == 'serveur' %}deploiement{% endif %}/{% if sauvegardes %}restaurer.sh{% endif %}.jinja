@@ -48,7 +48,8 @@
 #      reste que l'opérateur ne peut pas évaluer. Si on ne peut pas le retirer, en revanche, on
 #      refuse. Les copies jetables ${{ prefixe }}SAUVEGARDES/report-<horodatage>/ qu'un report tué
 #      a laissées (étape 6 bis) sont retirées aussi ; une copie qui ne part pas est signalée, sans
-#      arrêter la restauration : elle n'entre jamais dans les données ;
+#      arrêter la restauration : elle n'entre jamais dans les données. La sauvegarde de la nuit,
+#      sous le même verrou, retire ces deux restes aussi (retirer_restes_de_restauration, lib.sh) ;
 #   6. `dc stop app` ;
 #   6 bis. le report, si deploiement/projet.env déclare REPORTER (« Le report », plus bas) ;
 #   7. tout le contenu de ${{ prefixe }}DONNEES, fichiers cachés compris, est déplacé dans ce dossier,
@@ -259,23 +260,6 @@ conseil_report() {
 rappel_report() {
   [ -n "$REPORT_ABSENT" ] || return 0
   journal "attention : le report n'a pas eu lieu ($REPORT_ABSENT) : ce que REPORTER reprend des données en service n'est pas dans les données restaurées ; voir $(renvoi_report)"
-}
-
-# retirer_restes_de_report : les copies jetables ${{ prefixe }}SAUVEGARDES/report-<horodatage> qu'un
-# report tué (SIGKILL, plantage de l'hôte) a laissées, hors de portée du trap : des données
-# personnelles que rien d'autre ne retire. Ni un lien, ni un nom d'une autre forme. Une copie qui
-# ne part pas est journalisée, sans arrêter la restauration : elle n'entre jamais dans les données.
-retirer_restes_de_report() {
-  local chemin
-  for chemin in "${{ prefixe }}SAUVEGARDES"/report-*; do
-    { [ -d "$chemin" ] && [ ! -L "$chemin" ]; } || continue
-    [[ "${chemin##*/}" =~ ^report-[0-9]{8}T[0-9]{6}Z$ ]] || continue
-    if retirer "$chemin"; then
-      journal "reste d'une restauration interrompue retiré : $chemin"
-    else
-      journal "reste d'une restauration interrompue non retiré : $chemin (une copie des données en clair, à retirer à la main)"
-    fi
-  done
 }
 
 # lancer_reporter <image> <actuel> <donnees> : la commande REPORTER dans un conteneur jetable (--rm)
@@ -587,7 +571,7 @@ main() {
   refuser_image_heritee
   # Le rapport du report se contrôle par jq : sans lui, refus avant tout effet.
   if [ "{% raw %}${#REPORTER_MOTS[@]}{% endraw %}" -gt 0 ] && [ "$SANS_REPORT" -eq 0 ] && ! command -v jq >/dev/null 2>&1; then
-    arreter 1 "jq introuvable : le rapport du crochet ne peut pas être contrôlé"
+    arreter 1 "jq introuvable : le rapport du crochet ne peut pas être contrôlé. Rien n'a changé : installer jq, qui vient avec les outils du serveur (outils/installer-outils.sh du dépôt serveur), puis relancer"
   fi
 
   local etat="${{ prefixe }}ETAT" donnees="${{ prefixe }}DONNEES" revision nombre fichiers horodatage code=0
@@ -636,13 +620,16 @@ main() {
   NOUVELLE="$donnees.nouvelle"
   # Le reste d'une restauration interrompue (un déplacement tué par SIGKILL ou un plantage de
   # l'hôte, hors de portée du trap) : rien de lui ne doit entrer dans les données. On le retire ici,
-  # application encore en service.
+  # application encore en service, avant la copie de l'instantané : la copie de travail et les
+  # copies jetables du report, par lib.sh, puis ce qu'il en resterait (un lien, ou une copie de
+  # travail qui n'a pas pu partir), qui est refusé. Une copie jetable qui ne part pas n'entre jamais
+  # dans les données : elle est journalisée, sans arrêter la restauration.
+  retirer_restes_de_restauration || true
   if [ -e "$NOUVELLE" ] || [ -L "$NOUVELLE" ]; then
     retirer "$NOUVELLE" \
       || arreter 1 "reste d'une restauration interrompue ($NOUVELLE) impossible à retirer : rien n'a changé, l'application n'a pas été arrêtée"
     journal "reste d'une restauration interrompue retiré : $NOUVELLE"
   fi
-  retirer_restes_de_report
   cp -R -- "$TMP/donnees" "$NOUVELLE" \
     || arreter 1 "copie vers $NOUVELLE impossible : rien n'a changé, l'application n'a pas été arrêtée"
 

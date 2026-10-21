@@ -97,8 +97,9 @@ espaces, sans caractère que le shell interpréterait.
     rapport, que la mécanique journalise ; 64 en cas d'erreur d'usage, ce que rend une image qui ne
     connaît pas la commande ; tout autre code est un échec, et une sortie qui n'est pas du JSON
     aussi ;
-  - ses deux sorties vont au journal : elles ne portent aucune donnée personnelle, des nombres
-    plutôt que des noms.
+  - sur un code 0, seule sa sortie standard, le rapport, va au journal ; sur un échec, ses deux
+    sorties y vont, aplaties. Elles ne portent aucune donnée personnelle : des nombres plutôt que
+    des noms.
 
   `REPORTER_SECTION`, facultative aussi, est le titre de la section de `docs/exploitation.md` qui
   dit comment reporter à la main, quand le report n'a pas pu avoir lieu (M-0005).

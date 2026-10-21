@@ -187,6 +187,8 @@ def test_m0003_et_m0005_disent_le_report(rendre, sauvegardes):
         "sa sortie standard étant alors un document JSON",
         "64 en cas d'erreur d'usage, ce que rend une image qui ne connaît pas la commande",
         "aucune donnée personnelle",
+        # revue C0, mineur 3 : sur un code 0, seul le rapport va au journal
+        "seule sa sortie standard, le rapport, va au journal ; sur un échec, ses deux sorties y vont",
         "`REPORTER_SECTION`",
         "**Rien ne lance `REPORTER` avant une vraie restauration**",
     ):
@@ -203,7 +205,9 @@ def test_m0003_et_m0005_disent_le_report(rendre, sauvegardes):
         # R63 : la copie recontrôlée après le report, sans second VERIFIER ; jq exigé
         "la forme exigée de l'instantané (non vide, rien que des fichiers et des dossiers)",
         "`VERIFIER` ne tourne pas une seconde fois",
-        "Sans `jq`, qui contrôle le rapport, la restauration est refusée avant tout effet",
+        "une restauration où le report doit jouer est refusée avant tout effet",
+        # R67 : le reste d'une restauration tuée de force a sa rétention
+        "celle qu'un arrêt brutal laisse, la sauvegarde de la nuit la retire, sous le même verrou",
         "**`--sans-report`** est le choix explicite de l'opérateur",
         "`tester-restauration.sh` ne le lance pas",
     ):

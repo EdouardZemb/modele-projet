@@ -458,5 +458,7 @@ def test_exploitation_le_report(rendre, sauvegardes):
         "relancer avec `--sans-report`",
         "`REPORTER_SECTION`",
         "« attention : le report n'a pas eu lieu »",
+        # R67 : la sauvegarde de la nuit retire ce qu'une restauration tuée a laissé
+        "restauration**, la sauvegarde de la nuit retire ce qu'elle a laissé",
     ):
         assert fragment in restaurer, fragment

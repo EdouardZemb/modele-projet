@@ -81,8 +81,9 @@ sauvegardes. Signal `HC_TEST_RESTAURATION`.
     montées.
   - **La copie jetable contient des données personnelles.** Elle n'est jamais dans `/tmp`, ni à un
     endroit qu'une sauvegarde ou un envoi ramasserait, et elle est retirée sur toutes les sorties ;
-    celle qu'un arrêt brutal laisse, la restauration suivante la retire. Il faut, le temps du
-    report, la place d'une copie de plus des données.
+    celle qu'un arrêt brutal laisse, la sauvegarde de la nuit la retire, sous le même verrou, avec
+    la copie de travail des données. Il faut, le temps du report, la place d'une copie de plus des
+    données.
   - **Le contrat des sorties** : sur un code 0, la sortie standard est un document JSON, le rapport,
     journalisé sur une ligne ; sur un échec, les deux sorties vont au journal. Le projet garantit
     qu'elles ne portent aucune donnée personnelle.
@@ -92,8 +93,8 @@ sauvegardes. Signal `HC_TEST_RESTAURATION`.
     l'instantané (non vide, rien que des fichiers et des dossiers). `VERIFIER` ne tourne pas une
     seconde fois : le report change légitimement le contenu. L'app repart sur les données en
     service, et le message propose `--sans-report`, puis la section du runbook. C'est le côté sûr :
-    un report impossible ne se saute jamais en silence. Sans `jq`, qui contrôle le rapport, la
-    restauration est refusée avant tout effet.
+    un report impossible ne se saute jamais en silence. Sans `jq`, qui contrôle le rapport, une
+    restauration où le report doit jouer est refusée avant tout effet.
   - **`--sans-report`** est le choix explicite de l'opérateur. Comme des données en service vides
     (un serveur reconstruit), il ne reporte rien, et la fin de la restauration le rappelle, avec la
     raison et la section, qu'elle réussisse ou échoue après la mise en place de l'instantané.

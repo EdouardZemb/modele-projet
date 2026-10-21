@@ -42,6 +42,7 @@
 #   verifier_copie <image> <dossier>   contrôle d'un dossier qui a la forme de /donnees, par la commande VERIFIER
 #   purger_par_nom <dossier> <regex> <limite>  retire les dossiers dont le nom date d'avant <limite>
 #   retirer_partiels <dossier> <regex> retire les instantanés en échec (.partiel) avant un nouvel essai
+#   retirer_restes_de_restauration     retire, sous le verrou, ce qu'une restauration tuée a laissé
 # Variables posées : {{ prefixe }}CLONE (racine du clone qui lance le script) et {{ prefixe }}OPTIONS_JETABLES
 # (options des conteneurs jetables).
 {%- else %}
@@ -411,6 +412,38 @@ retirer_partiels() {
     { [ -d "$chemin" ] || [ -f "$chemin" ]; } || continue
     [[ "${chemin##*/}" =~ $motif ]] || continue
     rm -rf -- "$chemin" || code=1
+  done
+  return "$code"
+}
+
+# retirer_restes_de_restauration : retire ce qu'une restauration tuée de force (SIGKILL, plantage de
+# l'hôte) laisse hors de portée de son trap : les copies jetables de son report,
+# ${{ prefixe }}SAUVEGARDES/report-<AAAAMMJJTHHMMSSZ> (des copies en clair des données en service, sans
+# autre rétention), et sa copie de travail, ${{ prefixe }}DONNEES.nouvelle. À n'appeler que sous le
+# verrou de l'état, que la restauration tient de bout en bout : ce qui reste alors n'est à aucune
+# restauration en cours. Rien que des dossiers, jamais un lien (ni suivi, ni retiré), ni un nom
+# d'une autre forme. Les droits sont rendus d'abord : la commande du report a pu laisser des
+# sous-dossiers en lecture seule. Chaque retrait est journalisé, chaque échec aussi, et l'entrée
+# suivante est tentée ; échec si l'une n'a pas pu partir. Utilisée par sauvegarder.sh et
+# restaurer.sh.
+retirer_restes_de_restauration() {
+  local chemin code=0
+  local -a restes=()
+  for chemin in "${{ prefixe }}SAUVEGARDES"/report-*; do
+    if [[ "${chemin##*/}" =~ ^report-[0-9]{8}T[0-9]{6}Z$ ]]; then
+      restes+=("$chemin")
+    fi
+  done
+  restes+=("${{ prefixe }}DONNEES.nouvelle")
+  for chemin in "${restes[@]}"; do
+    { [ -d "$chemin" ] && [ ! -L "$chemin" ]; } || continue
+    chmod -R u+rwX -- "$chemin" 2>/dev/null || true
+    if rm -rf -- "$chemin"; then
+      journal "reste d'une restauration interrompue retiré : $chemin"
+    else
+      journal "reste d'une restauration interrompue non retiré : $chemin (une copie des données en clair, à retirer à la main)"
+      code=1
+    fi
   done
   return "$code"
 }
