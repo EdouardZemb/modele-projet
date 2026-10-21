@@ -52,6 +52,8 @@
 #   DOUBLE_DOCKER_REPORT_SORTIE      sa sortie standard (défaut : {"reportes":1})
 #   DOUBLE_DOCKER_REPORT_ERREUR      sa sortie d'erreur (défaut : rien)
 #   DOUBLE_DOCKER_REPORT_ATTENTE     le report dure autant de secondes avant de répondre
+#   DOUBLE_DOCKER_REPORT_FORME       ce que le report laisse dans /donnees, avant de répondre : vide
+#                                    (il le vide), lien (il y ajoute un lien symbolique)
 #   DOUBLE_DOCKER_RUN_ECHEC          `run -d` échoue avec ce message (« port is already allocated »…)
 #   DOUBLE_DOCKER_RM_ECHEC           `rm` échoue
 #
@@ -306,6 +308,12 @@ case "${1:-}" in
       echo "écrit par le report" >"$actuel/trace-du-report"
       rm -rf "$DOSSIER/report-actuel-apres"
       cp -R "$actuel" "$DOSSIER/report-actuel-apres"
+      case "${DOUBLE_DOCKER_REPORT_FORME:-}" in
+        '') ;;
+        vide) find "$nouvelle" -mindepth 1 -delete ;;
+        lien) ln -s /etc/hostname "$nouvelle/lien" ;;
+        *) refuser "run : forme de report inconnue : $DOUBLE_DOCKER_REPORT_FORME" ;;
+      esac
       [ -z "${DOUBLE_DOCKER_REPORT_ERREUR+x}" ] || echo "$DOUBLE_DOCKER_REPORT_ERREUR" >&2
       if [ -n "${DOUBLE_DOCKER_REPORT_SORTIE+x}" ]; then
         echo "$DOUBLE_DOCKER_REPORT_SORTIE"

@@ -2285,3 +2285,65 @@ APPELS_DOCKER
   contenu_courant_intact
   aucun_temporaire
 }
+
+# R63 : après le report, la copie de l'instantané garde la forme que l'étape 3 exige de
+# l'instantané : non vide, rien que des fichiers et des dossiers. Sinon, comme un report en échec,
+# rien n'a changé. VERIFIER ne tourne pas une seconde fois : le report change légitimement le
+# contenu.
+@test "restaurer_recontrole_la_copie_apres_le_report" {
+  instantane "$SNAPSHOT" 1
+  donnees_courantes
+  reporter_declare "$SECTION"
+  local forme
+  for forme in vide lien; do
+    : >"$APPELS"
+    DOUBLE_DOCKER_REPORT_FORME="$forme" restaurer prod "$SAUVEGARDES/quotidiennes/$SNAPSHOT" --oui
+    [ "$status" -eq 1 ]
+    # la commande a répondu 0 et un rapport : c'est la copie qu'elle laisse qui est refusée
+    [[ "$output" == *"report fait (reporter : code 0)"* ]]
+    if [ "$forme" = vide ]; then
+      [[ "$output" == *"la copie de l'instantané est vide après le report"* ]]
+    else
+      [[ "$output" == *"la copie de l'instantané contient autre chose que des fichiers et des dossiers après le report"* ]]
+    fi
+    echo "$output" | grep -F "la restauration est abandonnée, rien n'a changé" \
+      | grep -F -- "relancer avec --sans-report, puis « $SECTION » (docs/exploitation.md)"
+    # une seule vérification, avant l'arrêt ; puis l'application repart sur ses données, intactes
+    [ "$(appels_de docker | grep -cF ' outil verifier /donnees')" -eq 1 ]
+    [ "$(ligne_de ' /actuel /donnees')" -lt "$(ligne_de ' start app')" ]
+    [ -f "$EN_SERVICE" ]
+    contenu_courant_intact
+    [ ! -e "$DONNEES.nouvelle" ]
+    aucun_dossier_avant_restauration
+    aucune_copie_jetable
+    aucun_temporaire
+    [[ "$output" != *"attention"* ]]
+  done
+}
+
+# R63 : le rapport du crochet se contrôle par jq. Sans jq, refus avant l'arrêt, et rien ne change.
+@test "restaurer_sans_jq_refuse_le_report_avant_l_arret" {
+  instantane "$SNAPSHOT" 1
+  donnees_courantes
+  reporter_declare "$SECTION"
+  # un PATH qui a tout ce qu'a l'image du banc, sauf jq
+  local sans_jq="$BATS_TEST_TMPDIR/sans-jq" outil chemin
+  mkdir -p "$sans_jq"
+  for outil in /usr/bin/* /bin/*; do
+    [ "${outil##*/}" = jq ] || ln -sf "$outil" "$sans_jq/${outil##*/}"
+  done
+  chemin="$DOUBLES:$sans_jq:/usr/local/bin"
+  run ! env PATH="$chemin" sh -c 'command -v jq'
+  run env PATH="$chemin" bash "$CLONE/deploiement/restaurer.sh" prod "$SAUVEGARDES/quotidiennes/$SNAPSHOT" --oui
+  [ "$status" -eq 1 ]
+  [ "$(sans_horodatage | tail -n 1)" = "jq introuvable : le rapport du crochet ne peut pas être contrôlé" ]
+  # ni verrou, ni conteneur, ni copie : l'application n'a pas été arrêtée
+  [ -z "$(appels_de docker)" ]
+  [ ! -e "$ETAT/verrou" ]
+  [ -f "$EN_SERVICE" ]
+  contenu_courant_intact
+  [ ! -e "$DONNEES.nouvelle" ]
+  aucun_dossier_avant_restauration
+  aucune_copie_jetable
+  aucun_temporaire
+}

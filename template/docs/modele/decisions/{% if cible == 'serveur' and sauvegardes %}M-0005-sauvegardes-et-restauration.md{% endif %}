@@ -87,10 +87,13 @@ sauvegardes. Signal `HC_TEST_RESTAURATION`.
     journalisé sur une ligne ; sur un échec, les deux sorties vont au journal. Le projet garantit
     qu'elles ne portent aucune donnée personnelle.
   - **Tout échec abandonne la restauration, rien n'a changé** : un code 64 (l'image déployée ne
-    connaît pas la commande, après un retour par exemple), tout autre code, ou une sortie qui n'est
-    pas du JSON. L'app repart sur les données en service, et le message propose `--sans-report`,
-    puis la section du runbook. C'est le côté sûr : un report impossible ne se saute jamais en
-    silence.
+    connaît pas la commande, après un retour par exemple), tout autre code, une sortie qui n'est
+    pas du JSON, ou une copie de l'instantané qui n'a plus, après le report, la forme exigée de
+    l'instantané (non vide, rien que des fichiers et des dossiers). `VERIFIER` ne tourne pas une
+    seconde fois : le report change légitimement le contenu. L'app repart sur les données en
+    service, et le message propose `--sans-report`, puis la section du runbook. C'est le côté sûr :
+    un report impossible ne se saute jamais en silence. Sans `jq`, qui contrôle le rapport, la
+    restauration est refusée avant tout effet.
   - **`--sans-report`** est le choix explicite de l'opérateur. Comme des données en service vides
     (un serveur reconstruit), il ne reporte rien, et la fin de la restauration le rappelle, avec la
     raison et la section, qu'elle réussisse ou échoue après la mise en place de l'instantané.

@@ -70,11 +70,14 @@
 #     /donnees (ce qu'elle y écrit est mis en place). ${{ prefixe }}DONNEES n'est jamais monté. La
 #     copie jetable est retirée sur toutes les sorties, trap compris ;
 #   - code 0 et un document JSON sur la sortie standard, le rapport : il va au journal, sur une
-#     ligne. Tout autre résultat, un code 64 (l'image ne connaît pas la commande), un autre code ou
-#     une sortie qui n'est pas du JSON, abandonne la restauration : ses deux sorties vont au
-#     journal, aplaties, le trap retire la copie de l'instantané et relance l'application sur les
-#     données en service, code 1. Rien n'a changé, et le message propose --sans-report, puis la
-#     section ;
+#     ligne. jq le contrôle : sans jq, la restauration est refusée avant tout effet. Puis la copie
+#     de l'instantané doit garder la forme que l'étape 3 exige (non vide, rien que des fichiers et
+#     des dossiers), sans second VERIFIER : le report change légitimement son contenu. Tout autre
+#     résultat, un code 64 (l'image ne connaît pas la commande), un autre code, une sortie qui
+#     n'est pas du JSON ou une copie qui n'a plus cette forme, abandonne la restauration : les deux
+#     sorties de la commande vont au journal, aplaties, le trap retire la copie de l'instantané et
+#     relance l'application sur les données en service, code 1. Rien n'a changé, et le message
+#     propose --sans-report, puis la section ;
 #   - avec --sans-report, ou si les données en service sont vides, pas de report. La fin de la
 #     restauration le rappelle, avec la raison et la section : en cas de succès, comme en cas
 #     d'échec après la mise en place (le redémarrage, la santé).
@@ -344,6 +347,12 @@ faire_le_report() {
     64) arreter 1 "report impossible : l'image déployée ne connaît pas la commande REPORTER (${REPORTER_MOTS[*]}) : la restauration est abandonnée, rien n'a changé : $(conseil_report)" ;;
     *) arreter 1 "report en échec : la restauration est abandonnée, rien n'a changé (le détail est dans le journal). Si le report ne peut pas avoir lieu, $(conseil_report)" ;;
   esac
+  # La copie de l'instantané, après le report : la forme que l'étape 3 exige de l'instantané. Pas de
+  # second VERIFIER : le report change légitimement son contenu.
+  [ -n "$(find "$NOUVELLE" -mindepth 1 -print -quit)" ] \
+    || arreter 1 "report : la copie de l'instantané est vide après le report : la restauration est abandonnée, rien n'a changé. Si le report ne peut pas avoir lieu, $(conseil_report)"
+  [ -z "$(find "$NOUVELLE" -mindepth 1 ! -type f ! -type d -print -quit)" ] \
+    || arreter 1 "report : la copie de l'instantané contient autre chose que des fichiers et des dossiers après le report (liens…) : la restauration est abandonnée, rien n'a changé. Si le report ne peut pas avoir lieu, $(conseil_report)"
   # Retirée dès qu'elle a servi ; sinon, sortie réessaie.
   if retirer "$REPORT"; then
     REPORT=""
@@ -576,6 +585,10 @@ main() {
   trap 'exit 143' TERM
   trap 'exit 129' HUP
   refuser_image_heritee
+  # Le rapport du report se contrôle par jq : sans lui, refus avant tout effet.
+  if [ "{% raw %}${#REPORTER_MOTS[@]}{% endraw %}" -gt 0 ] && [ "$SANS_REPORT" -eq 0 ] && ! command -v jq >/dev/null 2>&1; then
+    arreter 1 "jq introuvable : le rapport du crochet ne peut pas être contrôlé"
+  fi
 
   local etat="${{ prefixe }}ETAT" donnees="${{ prefixe }}DONNEES" revision nombre fichiers horodatage code=0
 

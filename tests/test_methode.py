@@ -200,6 +200,10 @@ def test_m0003_et_m0005_disent_le_report(rendre, sauvegardes):
         "**La copie jetable contient des données personnelles.**",
         "Le projet garantit qu'elles ne portent aucune donnée personnelle",
         "**Tout échec abandonne la restauration, rien n'a changé**",
+        # R63 : la copie recontrôlée après le report, sans second VERIFIER ; jq exigé
+        "la forme exigée de l'instantané (non vide, rien que des fichiers et des dossiers)",
+        "`VERIFIER` ne tourne pas une seconde fois",
+        "Sans `jq`, qui contrôle le rapport, la restauration est refusée avant tout effet",
         "**`--sans-report`** est le choix explicite de l'opérateur",
         "`tester-restauration.sh` ne le lance pas",
     ):
