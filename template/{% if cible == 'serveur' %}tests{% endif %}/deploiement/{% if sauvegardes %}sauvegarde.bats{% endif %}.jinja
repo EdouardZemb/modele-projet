@@ -1260,6 +1260,48 @@ exec '"$vrai"' "$@"'
   aucun_temporaire
 }
 
+# Une base qui tient un journal à côté d'elle (un -wal) le rejouerait au démarrage : si la mise en
+# place échoue au milieu, le piège ne doit jamais laisser l'ancienne base à côté d'un journal venu
+# de l'instantané. Deux échecs : juste après l'entrée de la base de l'instantané, puis après celle
+# de son journal. Après le piège, les données sont l'ancien contenu, à l'octet, et rien d'autre.
+@test "restaurer_trap_ne_melange_jamais_ancien_et_instantane" {
+  instantane "$SNAPSHOT" 1
+  donnees_courantes
+  echo "ancienne base" >"$DONNEES/base"
+  echo "base de l'instantané" >"$SAUVEGARDES/quotidiennes/$SNAPSHOT/base"
+  echo "journal de l'instantané" >"$SAUVEGARDES/quotidiennes/$SNAPSHOT/base-wal"
+  cp -R "$DONNEES" "$BATS_TEST_TMPDIR/donnees-avant"
+  local echec entre nom
+  # dans l'ordre des noms, base précède base-wal, qui précède donnees.txt
+  for echec in base-wal donnees.txt; do
+    : >"$APPELS"
+    # le double du tour précédent part d'abord : le nouveau appellerait sinon l'ancien, et non mv
+    rm -f "$DOUBLES/mv"
+    double_mv_en_echec "*/donnees.nouvelle/$echec"
+    restaurer prod "$SAUVEGARDES/quotidiennes/$SNAPSHOT" --oui
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"mise en place de l'instantané impossible"*"ancien contenu remis en place"* ]]
+    # la mise en place avait commencé : la base de l'instantané (et son journal, au second échec)
+    # était entrée dans les données
+    entre=(base)
+    [ "$echec" = base-wal ] || entre+=(base-wal)
+    for nom in "${entre[@]}"; do
+      appels_de mv | grep -Fx -- "mv -T -- $DONNEES.nouvelle/$nom $DONNEES/$nom"
+      appels_de mv | grep -Fx -- "mv -T -- $DONNEES/$nom $DONNEES.nouvelle/$nom"
+    done
+    # l'ancien contenu, à l'octet, et rien de l'instantané : ni sa base, ni son journal
+    diff -r "$BATS_TEST_TMPDIR/donnees-avant" "$DONNEES"
+    [ "$(cat "$DONNEES/base")" = "ancienne base" ]
+    [ ! -e "$DONNEES/base-wal" ]
+    [ ! -e "$DONNEES/donnees.txt" ]
+    # rien ne reste à côté, ni dans un dossier de restauration ; l'application est relancée
+    [ ! -e "$DONNEES.nouvelle" ]
+    aucun_dossier_avant_restauration
+    [ -f "$EN_SERVICE" ]
+    aucun_temporaire
+  done
+}
+
 # Un déplacement interrompu (SIGKILL, plantage de l'hôte) laisse la copie de travail à côté des
 # données, hors de portée du piège. Elle est retirée avant tout, application encore en service : rien
 # d'une tentative précédente n'entre dans les données.
