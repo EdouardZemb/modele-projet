@@ -419,6 +419,29 @@ def test_exploitation_avant_restauration(rendre):
     assert "seule copie" in restaurer
 
 
+# R61 (I1 de la revue de la partie B) : la sonde de `serveur` ne réinstalle que des unités absentes
+# ou différentes de leur rendu ; une surcharge ou une unité masquée est une anomalie, et elle ne
+# supprime jamais rien. La sonde de prod, elle, alerte sur tout écart, et la version suivante
+# réinstalle.
+@pytest.mark.parametrize("sauvegardes", [True, False])
+def test_exploitation_unites_et_sonde_de_serveur(rendre, sauvegardes):
+    texte = lire(rendre(**{**REPONSES_SERVEUR, "sauvegardes": sauvegardes}), "docs/exploitation.md")
+    unites = a_plat(section(texte, "Unités"))
+    for fragment in (
+        "alerte au moindre écart (« unités divergentes »)",
+        "ne réinstalle que des unités absentes ou différentes de leur rendu",
+        "des heures changées dans `projets/essai.env`",
+        "**Une surcharge `systemctl --user edit`** (un dossier `essai-<unité>.d`) ou une unité masquée",
+        "elle la signale en anomalie à chaque passage, sans rien réinstaller",
+        "La version suivante du projet, elle, la défait",
+        "relance toutes les minuteries du projet (`enable --now`)",
+    ):
+        assert fragment in unites, fragment
+    arreter = a_plat(section(texte, "Tout arrêter"))
+    assert "La sonde de `serveur` ne supprime jamais rien" in arreter
+    assert "comme sur une surcharge d'unité (« Unités »)" in arreter
+
+
 # C0 : le runbook dit le report, sa copie jetable, l'option qui s'en passe et le rappel. Sans
 # sauvegardes, il n'y a pas de section « Restaurer », ni de report.
 @pytest.mark.parametrize("sauvegardes", [True, False])
