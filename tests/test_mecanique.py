@@ -72,3 +72,46 @@ def test_bats_de_la_mecanique(rendre, sauvegardes):
     assert re.search(rf"^1\.\.{attendus}$", r.stdout, flags=re.MULTILINE), sortie[-8000:]
     assert not re.search(r"^not ok ", r.stdout, flags=re.MULTILINE), sortie[-8000:]
     assert not re.search(r"^ok .* # skip", r.stdout, flags=re.MULTILINE), sortie[-8000:]
+
+
+def test_banc_gere_ne_lit_pas_les_valeurs_du_projet_env_seme(rendre):
+    """C1 : un projet met ses propres commandes (et REPORTER, v0.2.1) dans son projet.env semé.
+
+    Le banc géré (lib.bats) ne doit pas en dépendre : ses tests écrivent le projet.env dont ils ont
+    besoin. Ici, le projet.env rendu est remplacé par un fichier qui déclare toutes les clés, avec
+    d'autres mots que les valeurs semées, et lib.bats doit rester vert en entier.
+    """
+    rendu = rendre(**REPONSES_SERVEUR)
+    exiger_docker_linux()
+    if SH is None:
+        manque("sh", "sh absent")
+    (rendu / "deploiement/projet.env").write_text(
+        "SAUVEGARDER=node dist/cli.js sauvegarder\n"
+        "VERIFIER=node dist/cli.js verifier\n"
+        "REPORTER=outil reporter\n"
+        "REPORTER_SECTION=Reporter à la main\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    attendus = len(
+        re.findall(
+            r"^@test ",
+            (rendu / "tests/deploiement/lib.bats").read_text(encoding="utf-8"),
+            flags=re.MULTILINE,
+        )
+    )
+    r = subprocess.run(
+        [SH, "tests/deploiement/lancer.sh", "tests/deploiement/lib.bats"],
+        cwd=rendu,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+        timeout=1800,
+    )
+    sortie = r.stdout + r.stderr
+    echecs = re.findall(r"^not ok .*$", r.stdout, flags=re.MULTILINE)
+    assert not echecs, "\n".join(echecs)
+    assert r.returncode == 0, sortie[-8000:]
+    assert re.search(rf"^1\.\.{attendus}$", r.stdout, flags=re.MULTILINE), sortie[-8000:]
