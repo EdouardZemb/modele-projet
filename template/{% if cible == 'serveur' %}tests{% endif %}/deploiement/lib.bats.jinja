@@ -304,7 +304,9 @@ projet_env() {
 # comme les autres, le fichier entier contrôlé.
 @test "projet_env_cle_facultative" {
   local compte='lire_projet_env_facultatif REPORTER; echo "mots : {% raw %}${#PROJET_MOTS[@]}{% endraw %}"'
-  # le projet.env semé ne la donne qu'en commentaire
+  # en commentaire seulement, comme dans le projet.env que le modèle sème : le test écrit son
+  # fichier, car celui du projet déclare peut-être REPORTER (la valeur semée est contrôlée côté modèle)
+  projet_env "VERIFIER=verifier" "#REPORTER=reporter" "#REPORTER_SECTION=Reporter à la main"
   avec_lib "$compte"
   [ "$status" -eq 0 ]
   [ "$output" = "mots : 0" ]
