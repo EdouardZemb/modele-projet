@@ -121,6 +121,15 @@ def test_dependabot_du_depot_modele():
     groupes = actions[0]["groups"]
     assert [g["group-by"] for g in groupes.values()] == ["dependency-name"]
     assert list((RACINE / "template/.github/workflows").glob("*.yml"))
+    # L'image de la fausse app, épinglée par empreinte, suit aussi ses versions (V8), sans majeure.
+    (docker,) = [u for u in doc["updates"] if u["package-ecosystem"] == "docker"]
+    assert docker["directory"] == "/tests/modele/fausse-app"
+    assert (RACINE / "tests/modele/fausse-app/Dockerfile").is_file()
+    for cle in ("schedule", "cooldown", "commit-message"):
+        assert docker[cle] == actions[0][cle]
+    assert docker["ignore"] == [
+        {"dependency-name": "*", "update-types": ["version-update:semver-major"]}
+    ]
 
 
 def test_historique_du_depot_modele():

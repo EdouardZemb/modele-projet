@@ -19,3 +19,19 @@ updates:
     groups:
       actions:
         group-by: dependency-name
+  # L'image de la fausse app (job fausse-app de la CI), épinglée par empreinte.
+  - package-ecosystem: docker
+    directory: /tests/modele/fausse-app
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:00"
+      timezone: Europe/Zurich
+    cooldown:
+      default-days: 3
+    commit-message:
+      prefix: chore
+    # Une majeure d'image de base est une décision, pas une mise à jour de routine.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
