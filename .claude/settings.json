@@ -11,6 +11,18 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"$CLAUDE_PROJECT_DIR/template/scripts/modele/lancer.sh\" \"$CLAUDE_PROJECT_DIR/template/scripts/modele/signaux.py\" --branche main",
+            "timeout": 20
+          }
+        ]
+      }
     ]
   }
 }

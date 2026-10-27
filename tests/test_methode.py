@@ -282,3 +282,12 @@ def test_lecture_du_mode_de_fusion_exacte(chemin):
     assert "`ref=`" in texte
     assert "`--fusion" in texte
     assert "dans un `settings.json` de la copie" in texte
+
+
+def test_methode_ligne_signaux():
+    texte = lire(METHODE)
+    assert "| hook Claude `SessionStart`" in texte
+    assert "le garde de Claude **et les signaux** toujours branchés" in texte
+    texte = lire(DECISIONS / "M-0002-garde-fous-et-confidentialite.md")
+    assert "`SessionStart`" in texte
+    assert "signaux.py" in texte

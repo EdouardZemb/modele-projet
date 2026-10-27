@@ -132,3 +132,64 @@ def exiger(*dependances):
     for dependance in dependances:
         if not shutil.which(dependance):
             manque(dependance, f"{dependance} absent")
+
+
+def faux_gh(dossier, sorties):
+    """Un faux « gh » dans `dossier`. `sorties` : {"pr checks": (code, texte), "api": (code, texte)}.
+
+    Il choisit sa réponse d'après ses deux premiers arguments (`run list`, `pr list`,
+    `workflow list`, `pr checks`), ou d'après le seul mot `api`, et note chaque appel dans `appels` et, pour les appels simultanés, dans un fichier `appel-…`.
+    Une chaîne vaut (0, chaîne) pour « pr checks »."""
+    if isinstance(sorties, str):
+        sorties = {"pr checks": (0, sorties)}
+    for cle, (code, texte) in sorties.items():
+        k = cle.replace(" ", "-")
+        (dossier / f"sortie-{k}").write_text(texte, encoding="utf-8", newline="")
+        (dossier / f"code-{k}").write_text(str(code), encoding="utf-8")
+    if sys.platform == "win32":
+        f = dossier / "gh.cmd"
+        f.write_text(
+            "@echo off\r\n"
+            'echo %* >> "%~dp0appels"\r\n'
+            'echo %* > "%~dp0appel-%1-%2"\r\n'
+            "set K=%1-%2\r\n"
+            'if "%1"=="api" set K=api\r\n'
+            'if not exist "%~dp0sortie-%K%" exit /b 1\r\n'
+            'type "%~dp0sortie-%K%"\r\n'
+            'set /p C=<"%~dp0code-%K%"\r\n'
+            "exit /b %C%\r\n",
+            encoding="utf-8",
+            newline="",
+        )
+    else:
+        f = dossier / "gh"
+        f.write_text(
+            "#!/bin/sh\n"
+            'd=$(dirname "$0")\n'
+            'echo "$*" >> "$d/appels"\n'
+            'echo "$*" > "$d/appel-$1-$2"\n'
+            'if [ "$1" = api ]; then k=api; else k="$1-$2"; fi\n'
+            '[ -f "$d/sortie-$k" ] || exit 1\n'
+            'cat "$d/sortie-$k"\n'
+            'exit "$(cat "$d/code-$k")"\n',
+            encoding="utf-8",
+        )
+        f.chmod(0o755)
+    return f
+
+
+def faux_gh_lent(dossier, texte="[]"):
+    """Un « gh » qui attend cinq secondes avant d'imprimer `texte`."""
+    if sys.platform == "win32":
+        f = dossier / "gh.cmd"
+        f.write_text(f"@echo off\r\nping -n 6 127.0.0.1 >nul\r\necho {texte}\r\n", encoding="utf-8")
+    else:
+        f = dossier / "gh"
+        f.write_text(f"#!/bin/sh\nsleep 5\necho '{texte}'\n", encoding="utf-8")
+        f.chmod(0o755)
+
+
+
+def appels_de(dossier):
+    """Les appels notés par `faux_gh`, même simultanés : un fichier `appel-<arg1>-<arg2>` par type d'appel."""
+    return "".join(f.read_text(encoding="utf-8") for f in sorted(dossier.glob("appel-*")))

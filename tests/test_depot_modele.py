@@ -108,6 +108,12 @@ def test_settings_du_depot_modele():
     assert crochet["matcher"] == "Bash|PowerShell|Monitor|mcp__.*"
     assert "template/scripts/modele/garde_claude.py" in crochet["hooks"][0]["command"]
     assert "--branche main --fusion session" in crochet["hooks"][0]["command"]
+    (groupe,) = reglage["hooks"]["SessionStart"]
+    assert groupe["matcher"] == "startup|resume"
+    (signaux,) = groupe["hooks"]
+    assert signaux["timeout"] == 20
+    assert "template/scripts/modele/signaux.py" in signaux["command"]
+    assert signaux["command"].endswith("--branche main")
 
 
 def test_dependabot_du_depot_modele():

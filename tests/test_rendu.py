@@ -1,5 +1,6 @@
 """Le rendu du modèle : réponses, validation, gabarits résiduels, fins de ligne."""
 
+import json
 import re
 
 import garde_claude
@@ -52,6 +53,21 @@ def test_regex_reste_de_jinja():
     assert not RESTE_DE_JINJA.search("{{index .RepoDigests 0}}")
     assert not RESTE_DE_JINJA.search("{{ json .State.Health }}")
     assert not RESTE_DE_JINJA.search("${{ secrets.X }}")
+
+
+@pytest.mark.parametrize("cible", ["aucune", "serveur"])
+def test_settings_porte_garde_et_signaux(rendre, cible):
+    reponses = REPONSES_SERVEUR if cible == "serveur" else {}
+    doc = json.loads((rendre(**reponses) / ".claude/settings.json").read_text(encoding="utf-8"))
+    (groupe,) = doc["hooks"]["SessionStart"]
+    assert groupe["matcher"] == "startup|resume"
+    (crochet,) = groupe["hooks"]
+    assert crochet["type"] == "command" and crochet["timeout"] == 20
+    assert (
+        crochet["command"]
+        == 'sh "$CLAUDE_PROJECT_DIR/scripts/modele/lancer.sh" "$CLAUDE_PROJECT_DIR/scripts/modele/signaux.py"'
+    )
+    assert "garde_claude.py" in doc["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
 
 
 @pytest.mark.parametrize("reponses", [{}, REPONSES_SERVEUR], ids=["aucune", "serveur"])

@@ -85,6 +85,13 @@ pas de la discipline de celui qui travaille ?
   (`!<chemin>`) au `.gitignore`. Le hook est le bon endroit : c'est le seul moment où le fichier
   manquant se voit encore, avant le commit, et il vaut pour une session comme pour Edouard. La
   vérification à la main de `docs/aligner.md` reste, la porte refuse si on l'oublie.
+- **Un hook `SessionStart` affiche ce qui est rouge sur GitHub** (amendement du 2026-10-27). Au
+  démarrage et à la reprise, `signaux.py` lit les exécutions de la branche principale, les PR
+  ouvertes et les workflows désactivés, et les montre à la session. Il ne bloque jamais : il sort
+  toujours 0, et un `gh` absent ou illisible ne dit rien de faux. Il ignore les exécutions
+  `pull_request` et `pull_request_target`. Une PR d'un fork y paraît sans titre ni nom de contrôle,
+  que n'importe qui peut écrire sur un dépôt public. La CI du socle exige ce hook comme elle exige
+  le garde : sans lui, un rouge passerait inaperçu jusqu'à la prochaine PR.
 - **Le modèle lui-même est public.** Rien de ce qu'il contient ne nomme le serveur, son utilisateur
   ou son réseau.
 - **Un refus se corrige, il ne se contourne jamais.**
