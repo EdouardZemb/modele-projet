@@ -84,12 +84,12 @@ sauvegardes. Signal `HC_TEST_RESTAURATION`.
     celle qu'un arrêt brutal laisse, la sauvegarde de la nuit la retire, sous le même verrou, avec
     la copie de travail des données. Il faut, le temps du report, la place d'une copie de plus des
     données.
-  - **Le contrat des sorties** : sur un code 0, la sortie standard est un document JSON, le rapport,
-    journalisé sur une ligne ; sur un échec, les deux sorties vont au journal. Le projet garantit
-    qu'elles ne portent aucune donnée personnelle.
+  - **Le contrat des sorties** : sur un code 0, la sortie standard est un seul objet JSON, le
+    rapport, journalisé sur une ligne ; sur un échec, les deux sorties vont au journal. Le projet
+    garantit qu'elles ne portent aucune donnée personnelle.
   - **Tout échec abandonne la restauration, rien n'a changé** : un code 64 (l'image déployée ne
     connaît pas la commande, après un retour par exemple), tout autre code, une sortie qui n'est
-    pas du JSON, ou une copie de l'instantané qui n'a plus, après le report, la forme exigée de
+    pas un seul objet JSON, ou une copie de l'instantané qui n'a plus, après le report, la forme exigée de
     l'instantané (non vide, rien que des fichiers et des dossiers). `VERIFIER` ne tourne pas une
     seconde fois : le report change légitimement le contenu. L'app repart sur les données en
     service, et le message propose `--sans-report`, puis la section du runbook. C'est le côté sûr :

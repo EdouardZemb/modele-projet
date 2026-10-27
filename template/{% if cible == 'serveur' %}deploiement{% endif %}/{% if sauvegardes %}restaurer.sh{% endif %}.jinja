@@ -271,7 +271,7 @@ rappel_report() {
 # échec, ses deux sorties aussi, aplaties (le projet garantit qu'elles ne portent aucune donnée
 # personnelle, M-0005). Sa sortie d'erreur passe par un fichier du dossier temporaire du script.
 # Rend 0 si le report est fait, 64 si l'image ne connaît pas la commande, 1 sinon, y compris sur
-# un code 0 dont la sortie n'est pas du JSON.
+# un code 0 dont la sortie n'est pas un seul objet JSON.
 lancer_reporter() {
   local image="$1" actuel="$2" donnees="$3" fichier="$TMP/report-erreurs" sortie="" erreurs="" sorties code=0
   sortie="$(docker run --rm "${ {{- prefixe }}OPTIONS_JETABLES[@]}" -v "$actuel:/actuel" -v "$donnees:/donnees" \
@@ -283,8 +283,11 @@ lancer_reporter() {
   sorties="sortie standard : ${sorties:-(vide)} ; sortie d'erreur : ${erreurs:-(vide)}"
   case "$code" in
     0)
-      # Pas de `jq -e` seul : jq 1.6 rend 0 sur une entrée vide (voir jq_vaut).
-      if [ -n "${sortie//[[:space:]]/}" ] && printf '%s\n' "$sortie" | jq -e . >/dev/null 2>&1; then
+      # Pas de `jq -e .` : jq 1.6 rend 0 sur une entrée vide (voir jq_vaut), et `.` admet un
+      # nombre, une chaîne ou deux documents à la suite. `-s` les réunit en un tableau : le
+      # rapport est un seul document, et c'est un objet.
+      if [ -n "${sortie//[[:space:]]/}" ] \
+        && printf '%s\n' "$sortie" | jq -e -s 'length == 1 and (.[0] | type == "object")' >/dev/null 2>&1; then
         journal "report fait (reporter : code 0) : ${sortie//$'\n'/ }"
         return 0
       fi

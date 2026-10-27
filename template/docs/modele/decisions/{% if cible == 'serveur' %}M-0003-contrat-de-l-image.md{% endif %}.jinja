@@ -93,10 +93,10 @@ espaces, sans caractère que le shell interpréterait.
     écrit est jeté ;
   - `/donnees` est la copie de l'instantané qui sera mise en place : la commande y écrit ce qui doit
     survivre ;
-  - elle rend 0 quand le report est fait, sa sortie standard étant alors un document JSON, le
+  - elle rend 0 quand le report est fait, sa sortie standard étant alors un seul objet JSON, le
     rapport, que la mécanique journalise ; 64 en cas d'erreur d'usage, ce que rend une image qui ne
-    connaît pas la commande ; tout autre code est un échec, et une sortie qui n'est pas du JSON
-    aussi ;
+    connaît pas la commande ; tout autre code est un échec, et une sortie qui n'est pas un seul
+    objet JSON aussi ;
   - sur un code 0, seule sa sortie standard, le rapport, va au journal ; sur un échec, ses deux
     sorties y vont, aplaties. Elles ne portent aucune donnée personnelle : des nombres plutôt que
     des noms.

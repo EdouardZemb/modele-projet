@@ -197,7 +197,9 @@ def test_m0003_et_m0005_disent_le_report(rendre, sauvegardes):
         "une troisième, facultative (`REPORTER=…`)",
         "**`REPORTER /actuel /donnees`, facultative**",
         "`/actuel` est une copie jetable des données en service, montée en écriture",
-        "sa sortie standard étant alors un document JSON",
+        # V9 : le rapport est un seul objet JSON, comme le contrôle de restaurer.sh l'exige
+        "sa sortie standard étant alors un seul objet JSON",
+        "une sortie qui n'est pas un seul objet JSON aussi",
         "64 en cas d'erreur d'usage, ce que rend une image qui ne connaît pas la commande",
         "aucune donnée personnelle",
         # revue C0, mineur 3 : sur un code 0, seul le rapport va au journal
@@ -215,6 +217,8 @@ def test_m0003_et_m0005_disent_le_report(rendre, sauvegardes):
         "**La copie jetable contient des données personnelles.**",
         "Le projet garantit qu'elles ne portent aucune donnée personnelle",
         "**Tout échec abandonne la restauration, rien n'a changé**",
+        "sur un code 0, la sortie standard est un seul objet JSON, le rapport",
+        "une sortie qui n'est pas un seul objet JSON",
         # R63 : la copie recontrôlée après le report, sans second VERIFIER ; jq exigé
         "la forme exigée de l'instantané (non vide, rien que des fichiers et des dossiers)",
         "`VERIFIER` ne tourne pas une seconde fois",

@@ -2204,6 +2204,35 @@ APPELS_DOCKER
   done
 }
 
+# Le rapport est un seul objet JSON. Un nombre, une chaîne, true, un tableau ou deux objets à la
+# suite sont du JSON que `jq -e .` accepte, mais pas un rapport : le même refus qu'une sortie
+# qui n'est pas du JSON.
+@test "restaurer_report_exige_un_seul_objet_json" {
+  instantane "$SNAPSHOT" 1
+  donnees_courantes
+  reporter_declare "$SECTION"
+  horloge_qui_avance
+  local sortie
+  for sortie in 42 '"x"' true '[]' '[{"reportes": 2}]' '{"reportes": 1} {"reportes": 2}' \
+    $'{"reportes": 1}\n{"reportes": 2}'; do
+    rm -rf "$BATS_TEST_TMPDIR/donnees-avant"
+    cp -R "$DONNEES" "$BATS_TEST_TMPDIR/donnees-avant"
+    DOUBLE_DOCKER_REPORT_SORTIE="$sortie" restaurer prod "$SAUVEGARDES/quotidiennes/$SNAPSHOT" --oui
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"report en échec (reporter : code 0, mais la sortie n'est pas un rapport)"* ]]
+    [[ "$output" != *"report fait"* ]]
+    echo "$output" | grep -F "la restauration est abandonnée, rien n'a changé" | grep -F -- "--sans-report"
+    diff -r "$BATS_TEST_TMPDIR/donnees-avant" "$DONNEES"
+    [ -f "$EN_SERVICE" ]
+    [ ! -e "$DONNEES.nouvelle" ]
+    aucune_copie_jetable
+  done
+  # un objet seul passe, sur une ligne
+  DOUBLE_DOCKER_REPORT_SORTIE='{"reportes": 0}' restaurer prod "$SAUVEGARDES/quotidiennes/$SNAPSHOT" --oui
+  [ "$status" -eq 0 ]
+  sans_horodatage | grep -Fx 'report fait (reporter : code 0) : {"reportes": 0}'
+}
+
 @test "restaurer_report_en_echec_journalise_sa_sortie" {
   instantane "$SNAPSHOT" 1
   donnees_courantes
