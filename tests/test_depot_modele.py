@@ -96,6 +96,9 @@ def test_hooks_du_depot_modele():
     assert {h.name for h in hooks} == {"pre-commit", "commit-msg", "pre-push"}
     for hook in hooks:
         assert "template/scripts/modele/" in hook.read_text(encoding="utf-8"), hook.name
+    pre_commit = (RACINE / ".githooks/pre-commit").read_text(encoding="utf-8")
+    assert "template/scripts/modele/masques.py" in pre_commit
+    assert pre_commit.index("masques.py") < pre_commit.index("confidentialite.py")
     assert "--branche main" in (RACINE / ".githooks/pre-push").read_text(encoding="utf-8")
 
 

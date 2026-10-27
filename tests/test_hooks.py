@@ -237,3 +237,10 @@ def test_gitignore_des_scripts_gere(rendre):
     copier_yml = yaml.safe_load((RACINE / "copier.yml").read_text(encoding="utf-8"))
     assert "scripts/modele/.gitignore" not in copier_yml["_skip_if_exists"]
     assert (rendre() / "scripts/modele/.gitignore").read_bytes() == b"__pycache__/\n"
+
+
+def test_pre_commit_lance_les_masques(rendre):
+    """Le pre-commit lance la porte des fichiers masqués avant la confidentialité (LE-23)."""
+    hook = (rendre() / ".githooks/pre-commit").read_text(encoding="utf-8")
+    assert "scripts/modele/masques.py" in hook
+    assert hook.index("masques.py") < hook.index("confidentialite.py")

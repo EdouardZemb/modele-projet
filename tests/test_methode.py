@@ -174,6 +174,14 @@ def test_garde_fous_a_jour():
     assert "gitleaks sur tout l'historique ;" not in section
 
 
+def test_garde_fous_dit_la_porte_des_masques():
+    """La ligne `pre-commit` cite la porte des fichiers masqués (LE-23)."""
+    section = " ".join(lire(METHODE).split("## Les garde-fous", 1)[1].split("\n## ", 1)[0].split())
+    ligne = section.split("| hook git `pre-commit` |", 1)[1].split("| hook git `commit-msg`", 1)[0]
+    assert "`.copier-answers.yml`" in ligne
+    assert "refus d'un fichier du modèle que le `.gitignore` du projet masque" in ligne
+
+
 def adr_rendu(rendre, nom, **reponses):
     rendu = rendre(**{**REPONSES_SERVEUR, **reponses})
     return " ".join(lire(rendu / "docs/modele/decisions" / nom).split())

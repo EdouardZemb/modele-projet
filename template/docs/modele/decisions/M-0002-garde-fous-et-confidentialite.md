@@ -3,6 +3,8 @@
 - **Statut** : accepté le 2026-10-16
 - **Amendé** le 2026-10-17, après la revue finale du lot 1 : dans un dépôt privé, la porte de
   confidentialité avertit sur ce qui identifie et refuse toujours les secrets (décision d'Edouard)
+- **Amendé** le 2026-10-27, avec le lot 8 : le `pre-commit` refuse un fichier du modèle que le
+  `.gitignore` du projet masque (LE-23)
 - **Amendé** le 2026-10-18, avec la cible `serveur` : qui fusionne se choisit par la réponse
   `fusion`, et les étiquettes et les publications sont à Edouard (décision d'Edouard)
 - **Contexte amont** : M-0001 (les garde-fous de qualité comme condition d'entrée)
@@ -74,6 +76,15 @@ pas de la discipline de celui qui travaille ?
   2026-10-18) : une étiquette `vX.Y.Z` met un projet `serveur` en production. Le garde refuse
   l'envoi d'une étiquette et toute écriture de publication (`gh release` en écriture, l'API
   `…/releases`) ; une session peut préparer l'étiquette en local.
+- **Un fichier du modèle que le `.gitignore` du projet masque fait refuser le commit** (amendement
+  du 2026-10-27). Copier écrit sur le disque un fichier géré que le `.gitignore` ignore, sans rien
+  en dire : il n'entre alors dans aucun commit, et le projet n'a pas ce que le modèle lui a donné
+  (LE-23). La porte `masques.py` tourne dans le `pre-commit`, avant la confidentialité, et ne
+  s'applique qu'au commit qui modifie `.copier-answers.yml` : celui d'un alignement ou d'une mise à
+  jour. Elle nomme chaque fichier et la règle qui le masque ; le remède est une exception nommée
+  (`!<chemin>`) au `.gitignore`. Le hook est le bon endroit : c'est le seul moment où le fichier
+  manquant se voit encore, avant le commit, et il vaut pour une session comme pour Edouard. La
+  vérification à la main de `docs/aligner.md` reste, la porte refuse si on l'oublie.
 - **Le modèle lui-même est public.** Rien de ce qu'il contient ne nomme le serveur, son utilisateur
   ou son réseau.
 - **Un refus se corrige, il ne se contourne jamais.**

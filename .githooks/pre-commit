@@ -1,4 +1,5 @@
 #!/bin/sh
 # Géré par le modèle (template/docs/modele/methode.md) — ne pas modifier ici.
 racine=$(git rev-parse --show-toplevel) || exit 1
+sh "$racine/template/scripts/modele/lancer.sh" "$racine/template/scripts/modele/masques.py" || exit 1
 exec sh "$racine/template/scripts/modele/lancer.sh" "$racine/template/scripts/modele/confidentialite.py" --index
