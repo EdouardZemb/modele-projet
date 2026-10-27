@@ -180,6 +180,9 @@ def test_garde_fous_dit_la_porte_des_masques():
     ligne = section.split("| hook git `pre-commit` |", 1)[1].split("| hook git `commit-msg`", 1)[0]
     assert "`.copier-answers.yml`" in ligne
     assert "refus d'un fichier du modèle que le `.gitignore` du projet masque" in ligne
+    # La phrase des masqués vient après celle de la confidentialité : placée avant, elle se lirait
+    # comme si la porte des masqués n'avertissait que dans un dépôt privé et tournait en CI.
+    assert ligne.index("au hook comme en CI") < ligne.index("Au commit d'un alignement")
 
 
 def adr_rendu(rendre, nom, **reponses):
@@ -267,6 +270,13 @@ def test_m0002_amende():
     assert "- **Amendé** le 2026-10-18" in texte
     assert "`fusion`" in texte
     assert "étiquette" in texte
+    # les amendements, dans l'ordre chronologique
+    dates = re.findall(r"^- \*\*Amendé\*\* le (\S+),", texte, flags=re.MULTILINE)
+    assert dates == ["2026-10-17", "2026-10-18", "2026-10-27"]
+    # le remède des masqués, tel que masques.py le prescrit
+    texte = " ".join(texte.split())
+    assert "ou `!<dossier>/` quand un dossier parent est exclu" in texte
+    assert "le masque d'un fichier de secrets ne se lève jamais" in texte
 
 
 # m3 : ce qui est garanti, exactement. Le mode lui-même se lit par l'API de GitHub ; la branche de
@@ -291,3 +301,20 @@ def test_methode_ligne_signaux():
     texte = lire(DECISIONS / "M-0002-garde-fous-et-confidentialite.md")
     assert "`SessionStart`" in texte
     assert "signaux.py" in texte
+
+
+@pytest.mark.parametrize("chemin", [METHODE, DECISIONS / "M-0002-garde-fous-et-confidentialite.md"])
+def test_signaux_n_affichent_pas_ce_qu_un_fork_ecrit(chemin):
+    """Revue finale du lot 8 : les exécutions de PR écartées, et rien du texte d'un fork."""
+    texte = " ".join(lire(chemin).split())
+    assert "les exécutions de PR (`pull_request…`) sont écartées" in texte
+    assert (
+        "une PR ou un workflow venus d'ailleurs que le dépôt s'affichent sans le texte qu'ils portent"
+        in texte
+    )
+    assert (
+        "Une PR d'un fork paraît ainsi sans titre ni nom de contrôle, un workflow absent de la "
+        "copie, sans son nom" in texte
+    )
+    assert "que tout le monde peut écrire" not in texte
+    assert "que n'importe qui peut écrire sur un dépôt public" not in texte

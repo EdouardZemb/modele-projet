@@ -3,10 +3,11 @@
 - **Statut** : accepté le 2026-10-16
 - **Amendé** le 2026-10-17, après la revue finale du lot 1 : dans un dépôt privé, la porte de
   confidentialité avertit sur ce qui identifie et refuse toujours les secrets (décision d'Edouard)
-- **Amendé** le 2026-10-27, avec le lot 8 : le `pre-commit` refuse un fichier du modèle que le
-  `.gitignore` du projet masque (LE-23)
 - **Amendé** le 2026-10-18, avec la cible `serveur` : qui fusionne se choisit par la réponse
   `fusion`, et les étiquettes et les publications sont à Edouard (décision d'Edouard)
+- **Amendé** le 2026-10-27, avec le lot 8 : le `pre-commit` refuse un fichier du modèle que le
+  `.gitignore` du projet masque (LE-23), et un hook `SessionStart` affiche ce qui est rouge sur
+  GitHub
 - **Contexte amont** : M-0001 (les garde-fous de qualité comme condition d'entrée)
 
 ## Contexte
@@ -82,16 +83,21 @@ pas de la discipline de celui qui travaille ?
   (LE-23). La porte `masques.py` tourne dans le `pre-commit`, avant la confidentialité, et ne
   s'applique qu'au commit qui modifie `.copier-answers.yml` : celui d'un alignement ou d'une mise à
   jour. Elle nomme chaque fichier et la règle qui le masque ; le remède est une exception nommée
-  (`!<chemin>`) au `.gitignore`. Le hook est le bon endroit : c'est le seul moment où le fichier
-  manquant se voit encore, avant le commit, et il vaut pour une session comme pour Edouard. La
-  vérification à la main de `docs/aligner.md` reste, la porte refuse si on l'oublie.
+  au `.gitignore`, `!<chemin>`, ou `!<dossier>/` quand un dossier parent est exclu, car git ne
+  regarde pas dans un dossier exclu. Un fichier local se sort du dossier, et le masque d'un
+  fichier de secrets ne se lève jamais. Le hook est le bon endroit : c'est le seul moment où le
+  fichier manquant se voit encore, avant le commit, et il vaut pour une session comme pour
+  Edouard. La vérification à la main de `docs/aligner.md` reste, la porte refuse si on l'oublie.
 - **Un hook `SessionStart` affiche ce qui est rouge sur GitHub** (amendement du 2026-10-27). Au
   démarrage et à la reprise, `signaux.py` lit les exécutions de la branche principale, les PR
   ouvertes et les workflows désactivés, et les montre à la session. Il ne bloque jamais : il sort
-  toujours 0, et un `gh` absent ou illisible ne dit rien de faux. Il ignore les exécutions
-  `pull_request` et `pull_request_target`. Une PR d'un fork y paraît sans titre ni nom de contrôle,
-  que n'importe qui peut écrire sur un dépôt public. La CI du socle exige ce hook comme elle exige
-  le garde : sans lui, un rouge passerait inaperçu jusqu'à la prochaine PR.
+  toujours 0, et un `gh` absent ou illisible ne dit rien de faux. Sur un dépôt public, n'importe
+  qui écrit depuis un fork, et ce texte entrerait dans le contexte de Claude : les exécutions de PR
+  (`pull_request…`) sont écartées, car elles prennent le fichier de workflow du fork, et une
+  PR ou un workflow venus d'ailleurs que le dépôt s'affichent sans le texte qu'ils portent. Une PR
+  d'un fork paraît ainsi sans titre ni nom de contrôle, un workflow absent de la copie, sans son
+  nom. La CI du socle exige ce hook comme elle exige le garde : sans lui, un rouge passerait
+  inaperçu jusqu'à la prochaine PR.
 - **Le modèle lui-même est public.** Rien de ce qu'il contient ne nomme le serveur, son utilisateur
   ou son réseau.
 - **Un refus se corrige, il ne se contourne jamais.**
