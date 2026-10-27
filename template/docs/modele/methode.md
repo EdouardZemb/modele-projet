@@ -101,11 +101,12 @@ entrées restent locales :
   commande du hook dans un `settings.json` de la copie. C'est ce que passe le dépôt modèle, qui n'a
   pas de `.copier-answers.yml`.
 
-**Le garde ne fusionne que dans le dépôt de la session.** Il ne lit le mode et les contrôles que de
-ce dépôt : la fusion d'une PR d'un autre dépôt (`gh pr merge <n> -R <autre dépôt>`) est refusée
-dans les deux modes, avec « fusion dans un autre dépôt : contrôles invérifiables ici ». Un plan qui
-touche plusieurs dépôts dit, pour chaque PR, qui la fusionne : une session ouverte dans son dépôt,
-ou Edouard.
+**Le garde ne fusionne que dans le dépôt de la session.** Il ne lit le mode et les contrôles que du
+dépôt du dossier courant. Il refuse donc toute fusion qui nomme un dépôt (`-R`, `--repo`,
+`GH_REPO`, une adresse de PR), même celui de la session, dans les deux modes, avec « fusion dans un
+autre dépôt : contrôles invérifiables ici ». On fusionne par `gh pr merge <n>`, depuis le clone. Un
+plan qui touche plusieurs dépôts dit, pour chaque PR, qui la fusionne : une session ouverte dans
+son dépôt, ou Edouard.
 
 **Les étiquettes et les publications sont à Edouard**, dans les deux modes : une étiquette peut
 mettre un projet en production. La session les prépare (`git tag` en local est permis), mais ne les
