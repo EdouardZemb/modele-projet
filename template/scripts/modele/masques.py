@@ -135,15 +135,16 @@ def dossiers_exclus(racine: Path, chemins: list[str]) -> dict[str, str]:
     """Pour chaque chemin sous un dossier que git exclut, le plus haut de ces dossiers (`a/b/`).
 
     Une exception `!<chemin>` ne lève pas un tel masque : git ne regarde pas dans un dossier exclu.
-    Un seul appel à `git check-ignore`, pour tous les dossiers."""
+    Un seul appel à `git check-ignore`, pour tous les dossiers. Il passe `--no-index` : sans lui,
+    un dossier qui contient déjà un fichier suivi compte comme suivi, et git ne le dit pas exclu."""
     dossiers = list(dict.fromkeys(d for chemin in chemins for d in _parents(chemin)))
     if not dossiers:
         return {}
     entree = b"".join(d.encode("utf-8") + b"\0" for d in dossiers)
-    r = _git(racine, "check-ignore", "-z", "--stdin", entree=entree)
+    r = _git(racine, "check-ignore", "--no-index", "-z", "--stdin", entree=entree)
     if r.returncode not in (0, 1):  # 1 : aucun dossier exclu
         erreur = r.stderr.decode("utf-8", errors="replace").strip()
-        raise ErreurGit(f"git check-ignore -z --stdin : {erreur}")
+        raise ErreurGit(f"git check-ignore --no-index -z --stdin : {erreur}")
     exclus = set(r.stdout.decode("utf-8", errors="replace").split("\0"))
     resultat = {}
     for chemin in chemins:

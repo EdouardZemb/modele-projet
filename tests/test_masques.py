@@ -87,6 +87,25 @@ def test_dossier_parent_exclu(depot_masque, env, capsys):
     assert masques.main(["--racine", str(depot_masque)]) == 0
 
 
+def test_dossier_parent_exclu_avec_un_fichier_suivi(depot_masque, env, capsys):
+    """Un dossier exclu qui contient déjà un fichier suivi reste exclu pour un fichier neuf. Sans
+    `--no-index`, git le tiendrait pour suivi et ne le dirait pas exclu : le remède retomberait sur
+    `!<fichier>`, qui ne vaut rien, et le refus reviendrait en boucle."""
+    ecrire(depot_masque, ".gitignore", "env/\n")
+    ecrire(depot_masque, "deploiement/env/staging.env")
+    git(depot_masque, env, "add", "-f", "deploiement/env/staging.env")
+    git(depot_masque, env, "commit", "-q", "-m", "chore: staging suivi")
+    ecrire(depot_masque, "deploiement/env/prod.env")
+    modifier_reponses(depot_masque, env, cible="serveur")
+    assert masques.main(["--racine", str(depot_masque)]) == 1
+    err = capsys.readouterr().err
+    assert "deploiement/env/prod.env (règle .gitignore:1:env/)" in err
+    assert "Ajouter `!deploiement/env/` à ce fichier, puis indexer le fichier." in err
+    assert "!deploiement/env/prod.env" not in err
+    ecrire(depot_masque, ".gitignore", "env/\n!deploiement/env/\n")
+    assert masques.main(["--racine", str(depot_masque)]) == 0
+
+
 def test_exception_nommee_acceptee(depot_masque, env):
     ecrire(depot_masque, ".gitignore", f"*secret*\n*.env\n!{GERE}\n")
     modifier_reponses(depot_masque, env)
