@@ -50,6 +50,20 @@
 >   abandonnée (voir §8) ; `secrets.ps1` passe les valeurs à `sops` par l'entrée standard, sous
 >   Windows ; la sonde de `serveur` crée réseaux et conteneurs par le groupe `docker`, sans
 >   `sudo`.
+>
+> **Amendé le 2026-10-27, à la clôture du lot 8, de la même façon.** Le lot 8 n'était pas au §11 :
+> il est né de deux motifs du registre arrivés à leur 3e constat (LE-17, LE-23). Il ajoute deux
+> garde-fous au §5.5, décrits dans `methode.md` et M-0002 :
+>
+> - **hook git `pre-commit`** : au commit d'un alignement ou d'une mise à jour, celui qui ajoute ou
+>   modifie `.copier-answers.yml`, `scripts/modele/masques.py` refuse un fichier du modèle que le
+>   `.gitignore` du projet masque, et nomme la règle et le remède ;
+> - **hook Claude `SessionStart`** : au démarrage et à la reprise d'une session,
+>   `scripts/modele/signaux.py` affiche ce qui est rouge sur GitHub (exécutions de la branche
+>   principale, PR ouvertes, workflows désactivés), sans jamais bloquer. La CI du socle l'exige
+>   comme le garde. Rien de ce qu'écrit un fork n'y entre : les exécutions de PR sont écartées, une
+>   PR de fork s'affiche sans son texte, un workflow désactivé n'est nommé que si son fichier est
+>   dans la copie (LE-26). C'est un écart à la spec du lot, décidé pendant ses revues.
 
 Ce cadrage est la partie publique de la spec de conception du modèle, issue d'une séance de questions avec Edouard : 12 questions, puis 5 parties de design validées une à une. La partie qui nomme le serveur est privée et n'est pas reproduite ici.
 
