@@ -52,6 +52,25 @@ def test_hooks_lf_et_executables(rendre):
             assert os.access(racine / ".githooks" / h, os.X_OK), h
 
 
+@pytest.mark.skipif(not (RACINE / ".git").exists(), reason="pas de dépôt git autour du modèle")
+def test_hooks_du_modele_executables_dans_l_index():
+    # Sous Windows, `git add` d'un fichier recréé enregistre 100644, et Linux n'exécuterait plus
+    # le hook. L'index fait foi, quel que soit le système de fichiers.
+    r = subprocess.run(
+        ["git", "ls-files", "-s", "--", ".githooks", "template/.githooks"],
+        check=True,
+        cwd=RACINE,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    modes = {ligne.split("\t", 1)[1]: ligne.split(" ", 1)[0] for ligne in r.stdout.splitlines()}
+    attendus = {f"{d}/{h}" for d in (".githooks", "template/.githooks") for h in HOOKS}
+    assert attendus <= set(modes), "hook absent de l'index : le test passerait à vide"
+    for chemin, mode in sorted(modes.items()):
+        assert mode == "100755", chemin
+
+
 @pytest.mark.skipif(SH is None, reason="aucun sh trouvé")
 def test_lancer_trouve_un_python(rendre):
     racine = rendre()
