@@ -37,6 +37,7 @@ CONCLUSIONS_ROUGES = {"failure", "cancelled", "timed_out", "startup_failure", "a
 STATUTS_EN_ATTENTE = {"queued", "waiting", "pending", "requested"}
 ETATS_DESACTIVES = {"disabled_inactivity": "inactivité", "disabled_manually": "à la main"}
 MAX_NOMS = 3
+EVENEMENTS_DE_PR = {"pull_request", "pull_request_target"}
 
 CHAMPS_RUNS = "workflowName,event,status,conclusion,createdAt,url"
 
@@ -64,6 +65,8 @@ def executions_rouges(runs: list[dict], maintenant: datetime) -> tuple[list[str]
         quand = _date(r["createdAt"])
         if maintenant - quand > FENETRE:
             continue
+        if r.get("event") in EVENEMENTS_DE_PR:
+            continue  # une exécution de PR (même venue d'un fork nommé « main ») a sa propre lecture
         nom = r["workflowName"]
         if nom not in derniers or quand > derniers[nom][0]:
             derniers[nom] = (quand, r)
@@ -90,6 +93,11 @@ def prs_rouges(prs: list[dict]) -> list[str]:
     for p in prs:
         noms = [n for n in map(_controle_rouge, p.get("statusCheckRollup") or []) if n]
         if not noms:
+            continue
+        if p.get("isCrossRepository"):
+            # Le titre et les noms viennent d'un fork : n'importe qui les écrit, et ils entreraient
+            # dans le contexte de Claude. On ne les recopie pas.
+            lignes.append(_borner(f"- PR #{p['number']} (fork) : contrôle rouge {p.get('url', '')}"))
             continue
         liste = ", ".join(noms[:MAX_NOMS]) + (", …" if len(noms) > MAX_NOMS else "")
         lignes.append(
@@ -240,6 +248,11 @@ def _racine_du_depot(echeance: float) -> str:
     return "."
 
 
+class _Analyseur(argparse.ArgumentParser):
+    def error(self, message: str):
+        raise ValueError(message)  # jamais de sortie ni de SystemExit : main rend toujours son JSON
+
+
 def main(argv: list[str] | None = None) -> int:
     for flux in (sys.stdout, sys.stderr):
         try:
@@ -248,7 +261,7 @@ def main(argv: list[str] | None = None) -> int:
             pass
     try:
         echeance = time.monotonic() + BUDGET
-        p = argparse.ArgumentParser(description=__doc__)
+        p = _Analyseur(description=__doc__, add_help=False)
         p.add_argument("--branche", help="branche principale (défaut : reglages.BRANCHE_PRINCIPALE)")
         args, _ = p.parse_known_args(argv)
         branche = args.branche
@@ -260,7 +273,7 @@ def main(argv: list[str] | None = None) -> int:
         lectures = [
             ["run", "list", "--branch", branche, "--limit", "100", "--json", CHAMPS_RUNS],
             ["pr", "list", "--state", "open", "--limit", "50", "--json",
-             "number,title,url,statusCheckRollup"],
+             "number,title,url,statusCheckRollup,isCrossRepository"],
             ["workflow", "list", "--all", "--json", "name,state"],
         ]  # fmt: skip
         with ThreadPoolExecutor(max_workers=3) as pool:
