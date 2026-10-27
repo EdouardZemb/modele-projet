@@ -63,7 +63,7 @@
 >   principale, PR ouvertes, workflows désactivés), sans jamais bloquer. La CI du socle l'exige
 >   comme le garde. Rien de ce qu'écrit un fork n'y entre : les exécutions de PR sont écartées, une
 >   PR de fork s'affiche sans son texte, un workflow désactivé n'est nommé que si son fichier est
->   dans la copie (LE-24). C'est un écart à la spec du lot, décidé pendant ses revues.
+>   dans la copie (LE-26). C'est un écart à la spec du lot, décidé pendant ses revues.
 
 Ce cadrage est la partie publique de la spec de conception du modèle, issue d'une séance de questions avec Edouard : 12 questions, puis 5 parties de design validées une à une. La partie qui nomme le serveur est privée et n'est pas reproduite ici.
 
