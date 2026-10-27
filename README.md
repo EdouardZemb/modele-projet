@@ -1,7 +1,8 @@
 # modele-projet
 
 Le modèle d'où naît chaque projet d'Edouard : la méthode, les garde-fous (hooks git, garde de Claude,
-CI, protection de branche) et, plus tard, le déploiement. C'est un modèle [Copier](https://copier.readthedocs.io/) :
+CI, protection de branche) et, pour la cible `serveur`, le déploiement par étiquette, la sonde et les
+sauvegardes chiffrées. C'est un modèle [Copier](https://copier.readthedocs.io/) :
 un projet né du modèle peut ensuite recevoir ses corrections par `copier update`.
 
 Le cadrage est dans [`docs/cadrage.md`](docs/cadrage.md). Les pistes non engagées sont dans

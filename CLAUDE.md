@@ -8,14 +8,25 @@ garde-fous qu'il distribue : hooks git, garde de Claude, CI, règle de protectio
 ## État
 
 Lot 1 fait le 17/10/2026 : le socle (cible `aucune`), étiqueté `v0.1.1`. Lot 6 fait le même jour :
-`veille-emploi`, premier projet dont la branche principale n'est pas `main`. `ancrage` et
-`veille-emploi` sont alignés et à jour en `v0.1.1`. Prochain : au choix d'Edouard, le lot 2 (la
-cible `serveur`) ou un autre lot d'alignement. Le cadrage est dans `docs/cadrage.md` ; ce que les
-lots ont appris, dans `docs/registre.md`.
+`veille-emploi`, premier projet dont la branche principale n'est pas `main`.
+
+Lot 2 fait le 27/10/2026 : la cible `serveur` (image publiée par étiquette, sonde, sauvegardes
+chiffrées, tunnel commun), l'option `fusion` et les secrets refaits sur le poste, étiquetés
+`v0.2.3` après la revue finale. Le dépôt privé `serveur` est né du modèle en cible `aucune` : il
+porte la sonde de la machine. `ancrage` est passé en cible `serveur`, puis a retiré son ancien
+tunnel en trois versions ; il lui reste un geste daté, noté dans son propre `CLAUDE.md`.
+
+Versions des projets : `ancrage` en `v0.2.2`, `serveur` en `v0.2.0`, `veille-emploi` en `v0.1.1`.
+Chacun monte par `copier update`, au choix d'Edouard. Prochain : la porte de l'issue #27 (les
+exécutions rouges affichées au démarrage d'une session), puis, au choix d'Edouard, le lot 3 (la
+cible `statique`) ou un autre lot. Le cadrage est dans `docs/cadrage.md` ; ce que les lots ont
+appris, dans `docs/registre.md`.
 
 ## Commandes
 
-- `python -m pytest -q` : les tests (environ 5 minutes sous Windows).
+- `python -m pytest -q` : les tests (environ 5 minutes sous Windows). `tests/test_mecanique.py`
+  lance les tests bats d'un projet rendu dans une image Docker : il lui faut Docker avec un serveur
+  Linux, et il saute sans lui.
 - `ruff check .` : le style.
 - `copier copy --vcs-ref <étiquette> gh:EdouardZemb/modele-projet <dossier>` : créer un projet.
 - `copier update` : mettre à jour un projet né du modèle (à lancer dans ce projet, pas ici).
