@@ -209,6 +209,12 @@ def test_liste_d_alignement():
         "Le premier déploiement ne prend pas d'instantané",
         # C0 : un état qu'une restauration ne doit pas défaire
         "déclare `REPORTER` et `REPORTER_SECTION` dans `deploiement/projet.env`",
+        # revue finale du lot 2 (M6) : le tunnel d'un projet, ses instantanés d'avant l'alignement
+        "**Un projet qui a déjà son propre tunnel**",
+        "`--remove-orphans`",
+        "« Faire passer une route d'un tunnel à un autre »",
+        "**Les instantanés d'avant l'alignement**",
+        "deploiement/restaurer.sh` dans un fichier temporaire",
     ):
         assert fragment in texte, fragment
     # avant le commit, --diff compare <base>...HEAD et n'examine rien (LE-15)

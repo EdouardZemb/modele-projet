@@ -193,6 +193,20 @@ qu'au §1, dans un worktree `<dépôt>.worktrees\modele-serveur`.
       donc déjà la commande `SAUVEGARDER` du modèle, et la version alignée garde l'ancienne forme
       une version au moins : sans cela, ni l'alignement ni le retour à la version d'avant ne
       passent (invariant 4).
+- [ ] **Un projet qui a déjà son propre tunnel** (un `cloudflared` dans son compose) : au premier
+      déploiement, le `--remove-orphans` de `deployer.sh` retire tout service que les fichiers
+      compose ne déclarent plus, et l'adresse publique tomberait. À la version alignée, garder
+      l'ancien `cloudflared` dans `deploiement/compose.projet.yml`, sans profil, avec son jeton dans
+      les secrets : l'app rejoint aussi le tunnel commun, et les deux chemins servent. 👤 Passer
+      ensuite les routes, staging puis prod, par la procédure du dépôt `serveur`,
+      « Faire passer une route d'un tunnel à un autre » : Cloudflare impose une à deux minutes de
+      coupure par route (registre, LE-18). À la version suivante, retirer le service et son jeton (LE-19), puis 👤 les
+      anciens tunnels dans Cloudflare.
+- [ ] **Les instantanés d'avant l'alignement** gardent leur ancienne forme, que le `restaurer.sh`
+      du modèle ne lit pas. `docs/exploitation.md` du projet dit comment les restaurer par l'ancien
+      script, lu à l'étiquette d'avant l'alignement sans toucher au clone (`git -C <clone> show
+      <étiquette>:deploiement/restaurer.sh` dans un fichier temporaire), et jusqu'à quand : leur
+      rétention.
 - [ ] **Les secrets avant `serveur`.** 👤 `secrets.ps1 refaire` pour chaque environnement, puis 🤖
       la PR des deux `.enc`, fusionnée **avant** la PR de `serveur` qui déclare le projet : la
       sonde d'un projet sans ses secrets alerte (code 3). L'ordre complet est celui de
