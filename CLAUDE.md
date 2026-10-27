@@ -16,9 +16,14 @@ chiffrées, tunnel commun), l'option `fusion` et les secrets refaits sur le post
 porte la sonde de la machine. `ancrage` est passé en cible `serveur`, puis a retiré son ancien
 tunnel en trois versions ; il lui reste un geste daté, noté dans son propre `CLAUDE.md`.
 
+Lot 8 fait le 27/10/2026 : deux portes, étiquetées `v0.3.0`. Les signaux (#27) : au démarrage et
+à la reprise d'une session, un hook `SessionStart` affiche ce qui est rouge sur GitHub, sans rien
+de ce qu'écrit un fork ; la CI du socle l'exige. Les masqués (#36) : le `pre-commit` d'un
+alignement ou d'une mise à jour refuse un fichier du modèle que le `.gitignore` du projet masque.
+
 Versions des projets : `ancrage`, `serveur` et `veille-emploi` en `v0.2.3` depuis le 27/10
-(`veille-emploi` avec `fusion=session`). Chacun monte par `copier update`, au choix d'Edouard. Prochain : la porte de l'issue #27 (les
-exécutions rouges affichées au démarrage d'une session), puis, au choix d'Edouard, le lot 3 (la
+(`veille-emploi` avec `fusion=session`). Chacun monte par `copier update`, au choix d'Edouard.
+Prochain, au choix d'Edouard : le ménage des images (#19, jugé important le 27/10), le lot 3 (la
 cible `statique`) ou un autre lot. Le cadrage est dans `docs/cadrage.md` ; ce que les lots ont
 appris, dans `docs/registre.md`.
 
