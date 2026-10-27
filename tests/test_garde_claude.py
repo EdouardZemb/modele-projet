@@ -7,7 +7,7 @@ import sys
 
 import garde_claude
 import pytest
-from conftest import SCRIPTS, depot, git
+from conftest import SCRIPTS, depot, faux_gh, faux_gh_lent, git
 
 BRANCHE = "main"
 
@@ -420,49 +420,6 @@ def test_cli_sans_reglages_ni_branche():
     assert lancer(entree).returncode == 64
 
 
-def faux_gh(dossier, sorties):
-    """Un faux « gh » dans `dossier`. `sorties` : {"pr checks": (code, texte), "api": (code, texte)}.
-
-    Il choisit sa réponse d'après ses premiers arguments et note chaque appel dans `appels`.
-    Une chaîne vaut (0, chaîne) pour « pr checks »."""
-    if isinstance(sorties, str):
-        sorties = {"pr checks": (0, sorties)}
-    for cle, (code, texte) in sorties.items():
-        k = cle.replace(" ", "-")
-        (dossier / f"sortie-{k}").write_text(texte, encoding="utf-8", newline="")
-        (dossier / f"code-{k}").write_text(str(code), encoding="utf-8")
-    if sys.platform == "win32":
-        f = dossier / "gh.cmd"
-        f.write_text(
-            "@echo off\r\n"
-            'echo %* >> "%~dp0appels"\r\n'
-            'if "%1"=="api" set K=api\r\n'
-            'if "%1 %2"=="pr checks" set K=pr-checks\r\n'
-            'if not defined K exit /b 1\r\n'
-            'if not exist "%~dp0sortie-%K%" exit /b 1\r\n'
-            'type "%~dp0sortie-%K%"\r\n'
-            'set /p C=<"%~dp0code-%K%"\r\n'
-            "exit /b %C%\r\n",
-            encoding="utf-8",
-            newline="",
-        )
-    else:
-        f = dossier / "gh"
-        f.write_text(
-            "#!/bin/sh\n"
-            'd=$(dirname "$0")\n'
-            'echo "$*" >> "$d/appels"\n'
-            'if [ "$1" = api ]; then k=api; elif [ "$1 $2" = "pr checks" ]; then k=pr-checks; '
-            "else exit 1; fi\n"
-            '[ -f "$d/sortie-$k" ] || exit 1\n'
-            'cat "$d/sortie-$k"\n'
-            'exit "$(cat "$d/code-$k")"\n',
-            encoding="utf-8",
-        )
-        f.chmod(0o755)
-    return f
-
-
 def gh_en_tete(monkeypatch, dossier):
     monkeypatch.setenv("PATH", str(dossier) + os.pathsep + os.environ["PATH"])
 
@@ -644,17 +601,6 @@ def test_option_de_depot_sans_admin_refusee():
 
 def test_gh_api_apres_option_de_depot():
     assert "l'API" in refus("gh -R o/r api -X PUT repos/o/x/pulls/12/merge")
-
-
-def faux_gh_lent(dossier, texte="[]"):
-    """Un « gh » qui attend cinq secondes avant d'imprimer `texte`."""
-    if sys.platform == "win32":
-        f = dossier / "gh.cmd"
-        f.write_text(f"@echo off\r\nping -n 6 127.0.0.1 >nul\r\necho {texte}\r\n", encoding="utf-8")
-    else:
-        f = dossier / "gh"
-        f.write_text(f"#!/bin/sh\nsleep 5\necho '{texte}'\n", encoding="utf-8")
-        f.chmod(0o755)
 
 
 def test_checks_verts_gh_budget_epuise(tmp_path, monkeypatch):
