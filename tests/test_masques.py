@@ -1,14 +1,20 @@
 """masques.py : un fichier que le modèle écrit ne doit pas être masqué par le .gitignore du projet."""
 
+import fnmatch
 import re
 from pathlib import Path
 
 import masques
 import pytest
-from conftest import RACINE, git
+import yaml
+from conftest import RACINE, REPONSES_SERVEUR, git
 
 METHODE = RACINE / "template/docs/modele/methode.md"
 GERE = "scripts/modele/verifier_secrets.py"
+AUTRE_REMEDE = (
+    "Si ce fichier n'est pas du modèle (un fichier local), le sortir de ce dossier ; "
+    "ne jamais lever le masque d'un fichier de secrets."
+)
 
 
 def lire(chemin: Path) -> str:
@@ -52,12 +58,33 @@ def test_sans_declencheur_rien_a_faire(depot_masque):
 
 
 def test_fichier_gere_masque_refuse(depot_masque, env, capsys):
+    ecrire(depot_masque, "scripts/modele/secrets.ps1")
     modifier_reponses(depot_masque, env)
     assert masques.main(["--racine", str(depot_masque)]) == 1
     err = capsys.readouterr().err
     assert "scripts/modele/verifier_secrets.py" in err
     assert ".gitignore:1:*secret*" in err
     assert "!scripts/modele/verifier_secrets.py" in err
+    assert "!scripts/modele/secrets.ps1" in err
+    # L'autre remède, une seule fois pour deux fichiers, juste avant le renvoi à methode.md.
+    lignes = err.splitlines()
+    assert lignes.count(AUTRE_REMEDE) == 1
+    assert lignes[-2:] == [AUTRE_REMEDE, masques.RENVOI]
+
+
+def test_dossier_parent_exclu(depot_masque, env, capsys):
+    """Sous un dossier exclu, `!<fichier>` ne vaut rien : git n'y regarde pas. Le remède lève le
+    dossier."""
+    ecrire(depot_masque, ".gitignore", "env/\n")
+    ecrire(depot_masque, "deploiement/env/prod.env")
+    modifier_reponses(depot_masque, env, cible="serveur")
+    assert masques.main(["--racine", str(depot_masque)]) == 1
+    err = capsys.readouterr().err
+    assert "deploiement/env/prod.env (règle .gitignore:1:env/)" in err
+    assert "Ajouter `!deploiement/env/` à ce fichier, puis indexer le fichier." in err
+    assert "!deploiement/env/prod.env" not in err
+    ecrire(depot_masque, ".gitignore", "env/\n!deploiement/env/\n")
+    assert masques.main(["--racine", str(depot_masque)]) == 0
 
 
 def test_exception_nommee_acceptee(depot_masque, env):
@@ -145,3 +172,30 @@ def test_chemins_couvrent_methode():
     assert chemins
     for chemin in chemins:
         assert chemin in masques.CHEMINS_COMMUNS, chemin
+
+
+def couvert(fichier: str, chemins) -> bool:
+    """Vrai si un chemin de la liste couvre `fichier` : un dossier (`…/`) couvre ce qu'il contient,
+    un motif `*` se compare par fnmatch, tout autre chemin se compare tel quel."""
+    for chemin in chemins:
+        if chemin.endswith("/"):
+            if fichier.startswith(chemin):
+                return True
+        elif "*" in chemin:
+            if fnmatch.fnmatchcase(fichier, chemin):
+                return True
+        elif fichier == chemin:
+            return True
+    return False
+
+
+@pytest.mark.parametrize("reponses", [{}, REPONSES_SERVEUR], ids=["aucune", "serveur"])
+def test_chemins_couvrent_le_rendu(rendre, reponses):
+    """Chaque fichier géré du rendu (tout ce que `_skip_if_exists` ne sème pas) est examiné."""
+    semes = set(yaml.safe_load(lire(RACINE / "copier.yml"))["_skip_if_exists"])
+    chemins = masques.CHEMINS_COMMUNS + (masques.CHEMINS_SERVEUR if reponses else ())
+    rendu = rendre(**reponses)
+    geres = [p.relative_to(rendu).as_posix() for p in sorted(rendu.rglob("*")) if p.is_file()]
+    geres = [g for g in geres if g not in semes]
+    assert geres
+    assert [g for g in geres if not couvert(g, chemins)] == []

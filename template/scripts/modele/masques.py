@@ -7,6 +7,9 @@ touche `.copier-answers.yml` (indexé, ou présent sans être suivi). Elle exami
 communs, et ceux de la cible `serveur` sauf si la cible déclarée est une autre ; une cible
 illisible vaut `serveur`. Un cache Python (`__pycache__`, `.pyc`) est ignoré.
 
+Le remède est une exception nommée au .gitignore : `!<fichier>`, ou `!<dossier>/` quand un dossier
+parent est exclu, car git ne regarde pas ce que contient un dossier exclu.
+
 Bibliothèque standard seule, Python 3.10 ou plus.
 
 Usage : masques.py [--racine DOSSIER]  (--racine sert aux tests ; sinon la racine du dépôt courant)
@@ -30,12 +33,24 @@ CHEMINS_COMMUNS: tuple[str, ...] = (
     "docs/modele/",
     ".github/modele/",
     ".github/workflows/modele-*.yml",
+    ".github/ISSUE_TEMPLATE/lot.yml",
+    ".github/pull_request_template.md",
     ".claude/skills/consigner/",
     ".claude/settings.json",
     ".copier-answers.yml",
 )
-CHEMINS_SERVEUR: tuple[str, ...] = ("deploiement/", "tests/deploiement/", ".sops.yaml")
+CHEMINS_SERVEUR: tuple[str, ...] = (
+    "deploiement/",
+    "tests/deploiement/",
+    ".sops.yaml",
+    ".github/actions/modele-image-construire/",
+    ".github/actions/modele-image-publier/",
+)
 LIGNE_CIBLE = re.compile(r"^cible:[ \t]*(\S+)[ \t]*$", re.MULTILINE)
+AUTRE_REMEDE = (
+    "Si ce fichier n'est pas du modèle (un fichier local), le sortir de ce dossier ; "
+    "ne jamais lever le masque d'un fichier de secrets."
+)
 RENVOI = "Voir docs/modele/methode.md, « Les garde-fous »."
 
 
@@ -110,6 +125,41 @@ def regle(racine: Path, chemin: str) -> str:
     return ":".join(champs[:3])
 
 
+def _parents(chemin: str) -> list[str]:
+    """Les dossiers qui contiennent `chemin`, de la racine vers lui : `a/`, `a/b/`."""
+    parties = chemin.split("/")[:-1]
+    return ["/".join(parties[: i + 1]) + "/" for i in range(len(parties))]
+
+
+def dossiers_exclus(racine: Path, chemins: list[str]) -> dict[str, str]:
+    """Pour chaque chemin sous un dossier que git exclut, le plus haut de ces dossiers (`a/b/`).
+
+    Une exception `!<chemin>` ne lève pas un tel masque : git ne regarde pas dans un dossier exclu.
+    Un seul appel à `git check-ignore`, pour tous les dossiers."""
+    dossiers = list(dict.fromkeys(d for chemin in chemins for d in _parents(chemin)))
+    if not dossiers:
+        return {}
+    entree = b"".join(d.encode("utf-8") + b"\0" for d in dossiers)
+    r = _git(racine, "check-ignore", "-z", "--stdin", entree=entree)
+    if r.returncode not in (0, 1):  # 1 : aucun dossier exclu
+        erreur = r.stderr.decode("utf-8", errors="replace").strip()
+        raise ErreurGit(f"git check-ignore -z --stdin : {erreur}")
+    exclus = set(r.stdout.decode("utf-8", errors="replace").split("\0"))
+    resultat = {}
+    for chemin in chemins:
+        haut = next((d for d in _parents(chemin) if d in exclus), None)
+        if haut is not None:
+            resultat[chemin] = haut
+    return resultat
+
+
+def remede(chemin: str, dossier: str | None) -> str:
+    """L'exception à poser : sur le dossier exclu s'il y en a un, sinon sur le fichier."""
+    if dossier is None:
+        return f"Ajouter `!{chemin}` à ce fichier, puis l'indexer."
+    return f"Ajouter `!{dossier}` à ce fichier, puis indexer le fichier."
+
+
 class _Analyseur(argparse.ArgumentParser):
     def error(self, message: str):
         self.exit(EXIT_USAGE, "masques : usage invalide (voir --help)\n")
@@ -134,9 +184,10 @@ def main(argv: list[str] | None = None) -> int:
         if not declenche(racine):
             return 0
         masques = fichiers_masques(racine, cible_serveur(racine))
+        dossiers = dossiers_exclus(racine, masques)
         lignes = [
             f"modele-projet : refusé — fichier du modèle masqué par le .gitignore : {chemin} "
-            f"(règle {regle(racine, chemin)}). Ajouter `!{chemin}` à ce fichier, puis l'indexer."
+            f"(règle {regle(racine, chemin)}). {remede(chemin, dossiers.get(chemin))}"
             for chemin in masques
         ]
     except ErreurGit as e:
@@ -146,7 +197,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
     if lignes:
-        print("\n".join(lignes), RENVOI, sep="\n", file=sys.stderr)
+        print("\n".join(lignes), AUTRE_REMEDE, RENVOI, sep="\n", file=sys.stderr)
         return 1
     return 0
 
