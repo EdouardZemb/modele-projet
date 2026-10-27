@@ -1,13 +1,18 @@
 """Signaux de la CI (hook SessionStart) : ce qui est rouge sur GitHub au démarrage d'une session.
 
 Trois lectures par `gh`, lancées ensemble, dans un budget total de BUDGET secondes :
-- les exécutions de la branche principale : la plus récente de chaque workflow, sur 7 jours ;
+- les exécutions de la branche principale : la plus récente de chaque workflow, sur 7 jours, hors
+  événements de PR (`pull_request…`) ;
 - les PR ouvertes dont un contrôle est rouge ;
 - les workflows désactivés.
 
+Ce qu'un fork peut écrire (le titre d'une PR, le nom d'un workflow absent de la copie) n'est pas
+recopié : il entrerait dans le contexte de Claude.
+
 Le script écrit sur la sortie standard un seul objet JSON (`systemMessage` pour l'utilisateur,
 `additionalContext` pour Claude) et rend toujours 0 : il ne bloque jamais une session, exception
-comprise. Une lecture impossible est dite, jamais passée sous silence.
+comprise. Le texte tient en PLAFOND caractères. Une lecture impossible est dite, jamais passée
+sous silence.
 
 Bibliothèque standard seule, Python 3.10 ou plus.
 
@@ -32,12 +37,14 @@ UTC = timezone(timedelta(0))
 FENETRE = timedelta(days=7)
 ATTENTE = timedelta(hours=1)
 MAX_ELEMENTS = 20
-MAX_LIGNE = 300  # caractères : le texte entier reste sous la limite de 10 000 des hooks
+MAX_LIGNE = 300  # caractères par ligne
+PLAFOND = 10_000  # caractères pour le texte entier : la limite documentée des hooks
 CONCLUSIONS_ROUGES = {"failure", "cancelled", "timed_out", "startup_failure", "action_required"}
 STATUTS_EN_ATTENTE = {"queued", "waiting", "pending", "requested"}
 ETATS_DESACTIVES = {"disabled_inactivity": "inactivité", "disabled_manually": "à la main"}
 MAX_NOMS = 3
-EVENEMENTS_DE_PR = {"pull_request", "pull_request_target"}
+PREFIXE_PR = "pull_request"  # pull_request, pull_request_target, pull_request_review…
+PREFIXE_DYNAMIQUE = "dynamic/"  # les workflows de GitHub, comme « Dependabot Updates »
 
 CHAMPS_RUNS = "workflowName,event,status,conclusion,createdAt,url"
 
@@ -65,8 +72,11 @@ def executions_rouges(runs: list[dict], maintenant: datetime) -> tuple[list[str]
         quand = _date(r["createdAt"])
         if maintenant - quand > FENETRE:
             continue
-        if r.get("event") in EVENEMENTS_DE_PR:
-            continue  # une exécution de PR (même venue d'un fork nommé « main ») a sa propre lecture
+        if str(r.get("event") or "").startswith(PREFIXE_PR):
+            # Une exécution de PR a sa propre lecture. Pour un fork, elle prend le fichier de
+            # workflow du fork : son nom, que n'importe qui écrit, entrerait dans le contexte de
+            # Claude.
+            continue
         nom = r["workflowName"]
         if nom not in derniers or quand > derniers[nom][0]:
             derniers[nom] = (quand, r)
@@ -94,9 +104,9 @@ def prs_rouges(prs: list[dict]) -> list[str]:
         noms = [n for n in map(_controle_rouge, p.get("statusCheckRollup") or []) if n]
         if not noms:
             continue
-        if p.get("isCrossRepository"):
+        if p.get("isCrossRepository") is not False:
             # Le titre et les noms viennent d'un fork : n'importe qui les écrit, et ils entreraient
-            # dans le contexte de Claude. On ne les recopie pas.
+            # dans le contexte de Claude. On ne les recopie pas. Absent ou nul, le champ vaut fork.
             lignes.append(_borner(f"- PR #{p['number']} (fork) : contrôle rouge {p.get('url', '')}"))
             continue
         liste = ", ".join(noms[:MAX_NOMS]) + (", …" if len(noms) > MAX_NOMS else "")
@@ -108,12 +118,34 @@ def prs_rouges(prs: list[dict]) -> list[str]:
     return lignes
 
 
-def workflows_desactives(workflows: list[dict]) -> list[str]:
-    return [
-        f"- désactivé : {w['name']} ({ETATS_DESACTIVES[w['state']]})"
-        for w in workflows
-        if w.get("state") in ETATS_DESACTIVES
-    ]
+def _workflow_du_depot(racine: str, chemin: str) -> bool:
+    """Vrai si `chemin` est un workflow de GitHub (`dynamic/…`) ou un fichier de la copie.
+
+    Un chemin absolu, ou qui sort de la racine, ne compte pas."""
+    if chemin.startswith(PREFIXE_DYNAMIQUE):
+        return True
+    base = os.path.realpath(racine)
+    cible = os.path.realpath(os.path.join(base, chemin))
+    try:
+        dedans = os.path.commonpath([base, cible]) == base
+    except ValueError:  # deux lecteurs différents, sous Windows
+        return False
+    return dedans and os.path.isfile(cible)
+
+
+def workflows_desactives(workflows: list[dict], racine: str) -> list[str]:
+    """Les workflows désactivés. Seul un workflow du dépôt est nommé : un autre (celui d'un fork)
+    a un nom que n'importe qui écrit."""
+    lignes = []
+    for w in workflows:
+        etat = ETATS_DESACTIVES.get(w.get("state"))
+        if etat is None:
+            continue
+        if _workflow_du_depot(racine, str(w.get("path") or "")):
+            lignes.append(_borner(f"- désactivé : {w['name']} ({etat})"))
+        else:
+            lignes.append(_borner(f"- désactivé : un workflow absent de cette copie ({etat})"))
+    return lignes
 
 
 def _tuer(proc: subprocess.Popen) -> None:
@@ -179,18 +211,28 @@ def lire(args: list[str], cwd: str, echeance: float) -> tuple[list | None, str]:
     return donnees, ""
 
 
-def composer(branche: str, runs, prs, workflows, maintenant: datetime) -> str:
-    """Le texte du message ; chaque lecture est le couple (liste ou None, motif) de `lire`."""
+def _compte(n: int, singulier: str, pluriel: str) -> str:
+    """`0 PR ouverte`, `1 PR ouverte`, `2 PR ouvertes` : le pluriel à partir de deux."""
+    return f"{n} {singulier if n < 2 else pluriel}"
+
+
+def composer(branche: str, runs, prs, workflows, maintenant: datetime, racine: str = ".") -> str:
+    """Le texte du message ; chaque lecture est le couple (liste ou None, motif) de `lire`.
+
+    Les chemins des workflows se lisent dans `racine`. Le texte ne dépasse pas PLAFOND."""
     lignes: list[str] = []
-    nb_workflows = nb_prs = 0
+    comptes: list[str] = []  # ceux des lectures faites seulement
     if runs[0] is not None:
         rouges, nb_workflows = executions_rouges(runs[0], maintenant)
         lignes += rouges
+        comptes.append(
+            _compte(nb_workflows, "workflow exécuté en 7 jours", "workflows exécutés en 7 jours")
+        )
     if prs[0] is not None:
         lignes += prs_rouges(prs[0])
-        nb_prs = len(prs[0])
+        comptes.append(_compte(len(prs[0]), "PR ouverte", "PR ouvertes"))
     if workflows[0] is not None:
-        lignes += workflows_desactives(workflows[0])
+        lignes += workflows_desactives(workflows[0], racine)
 
     manquantes: dict[str, list[str]] = {}
     for nom, (donnees, motif) in (
@@ -200,22 +242,28 @@ def composer(branche: str, runs, prs, workflows, maintenant: datetime) -> str:
     ):
         if donnees is None:
             manquantes.setdefault(motif, []).append(nom)
+    rien_de_lu = sum(map(len, manquantes.values())) == 3
 
-    if len(manquantes) == 1 and sum(map(len, manquantes.values())) == 3:
+    if rien_de_lu and len(manquantes) == 1:
         (motif,) = manquantes
-        return f"signaux de la CI : non lus ({motif})"
-    if not lignes and not manquantes:
-        return (
-            f"signaux de la CI : rien de rouge ({nb_workflows} workflows exécutés en 7 jours, "
-            f"{nb_prs} PR ouvertes)"
-        )
-    sortie = [f"signaux de la CI (branche {branche}) :", *lignes[:MAX_ELEMENTS]]
-    if len(lignes) > MAX_ELEMENTS:
-        sortie.append(f"… et {len(lignes) - MAX_ELEMENTS} de plus")
-    if manquantes:
-        groupes = "; ".join(f"{', '.join(noms)} ({motif})" for motif, noms in manquantes.items())
-        sortie.append(f"- non lues : {groupes}")
-    return "\n".join(sortie)
+        texte = f"signaux de la CI : non lus ({motif})"
+    elif not lignes and not manquantes:
+        texte = f"signaux de la CI : rien de rouge ({', '.join(comptes)})"
+    elif not lignes and not rien_de_lu:
+        lus = f" ({', '.join(comptes)})" if comptes else ""
+        groupes = ", ".join(f"{', '.join(noms)} ({motif})" for motif, noms in manquantes.items())
+        texte = f"signaux de la CI : rien de rouge dans ce qui a été lu{lus} ; non lues : {groupes}"
+    else:
+        sortie = [f"signaux de la CI (branche {branche}) :", *lignes[:MAX_ELEMENTS]]
+        if len(lignes) > MAX_ELEMENTS:
+            sortie.append(f"… et {len(lignes) - MAX_ELEMENTS} de plus")
+        if manquantes:
+            groupes = "; ".join(
+                f"{', '.join(noms)} ({motif})" for motif, noms in manquantes.items()
+            )
+            sortie.append(f"- non lues : {groupes}")
+        texte = "\n".join(sortie)
+    return texte if len(texte) <= PLAFOND else texte[: PLAFOND - 1] + "…"
 
 
 def sortie_hook(texte: str) -> str:
@@ -274,12 +322,12 @@ def main(argv: list[str] | None = None) -> int:
             ["run", "list", "--branch", branche, "--limit", "100", "--json", CHAMPS_RUNS],
             ["pr", "list", "--state", "open", "--limit", "50", "--json",
              "number,title,url,statusCheckRollup,isCrossRepository"],
-            ["workflow", "list", "--all", "--json", "name,state"],
+            ["workflow", "list", "--all", "--json", "name,state,path"],
         ]  # fmt: skip
         with ThreadPoolExecutor(max_workers=3) as pool:
             futurs = [pool.submit(lire, a, cwd, echeance) for a in lectures]
             runs, prs, workflows = (f.result() for f in futurs)
-        texte = composer(branche, runs, prs, workflows, datetime.now(UTC))
+        texte = composer(branche, runs, prs, workflows, datetime.now(UTC), racine=cwd)
     except Exception:  # noqa: BLE001 - jamais d'exception vers la session
         texte = "signaux de la CI : non lus (erreur interne)"
     print(sortie_hook(texte))
