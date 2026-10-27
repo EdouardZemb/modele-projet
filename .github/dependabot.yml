@@ -1,7 +1,12 @@
 version: 2
 updates:
+  # Un seul bloc pour le dépôt et les workflows gérés : `group-by: dependency-name` ouvre une PR
+  # par action, qui la monte dans les deux dossiers à la fois. Une PR par dossier échouerait, car
+  # la CI du dépôt modèle doit suivre le socle étape pour étape.
   - package-ecosystem: github-actions
-    directory: /
+    directories:
+      - /
+      - /template/.github/workflows
     schedule:
       interval: weekly
       day: monday
@@ -13,18 +18,4 @@ updates:
       prefix: chore
     groups:
       actions:
-        patterns: ["*"]
-  - package-ecosystem: github-actions
-    directory: /template/.github/workflows
-    schedule:
-      interval: weekly
-      day: monday
-      time: "04:00"
-      timezone: Europe/Zurich
-    cooldown:
-      default-days: 3
-    commit-message:
-      prefix: chore
-    groups:
-      actions:
-        patterns: ["*"]
+        group-by: dependency-name

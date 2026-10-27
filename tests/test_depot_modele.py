@@ -108,12 +108,18 @@ def test_settings_du_depot_modele():
 
 
 def test_dependabot_du_depot_modele():
-    """Le second bloc tient à jour les épinglages des workflows gérés (revue finale, I6)."""
+    """Les épinglages du dépôt et des workflows gérés (revue finale, I6) montent dans la même PR.
+
+    Une PR par dossier ne peut pas passer : test_ci_du_depot_modele_suit_le_socle exige les mêmes
+    étapes des deux côtés.
+    """
     doc = yaml.safe_load((RACINE / ".github/dependabot.yml").read_text(encoding="utf-8"))
-    dossiers = [
-        u["directory"] for u in doc["updates"] if u["package-ecosystem"] == "github-actions"
-    ]
-    assert dossiers == ["/", "/template/.github/workflows"]
+    actions = [u for u in doc["updates"] if u["package-ecosystem"] == "github-actions"]
+    assert len(actions) == 1
+    assert actions[0]["directories"] == ["/", "/template/.github/workflows"]
+    assert "directory" not in actions[0]
+    groupes = actions[0]["groups"]
+    assert [g["group-by"] for g in groupes.values()] == ["dependency-name"]
     assert list((RACINE / "template/.github/workflows").glob("*.yml"))
 
 
