@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 
+import pytest
 import verifier_secrets
 from conftest import SCRIPTS, exiger
 
@@ -164,6 +165,36 @@ def test_bom_dans_cles_et_enc(tmp_path):
     chiffre.write_text(BOM + chiffre.read_text(encoding="utf-8"), encoding="utf-8")
     r = lancer(d)
     assert r.returncode == 0, sortie(r)
+
+
+@pytest.mark.parametrize(
+    ("fichier", "nom"),
+    [
+        ("deploiement/secrets/prod.cles", "deploiement/secrets/prod.cles:2"),
+        ("deploiement/secrets/prod.env.enc", "deploiement/secrets/prod.env.enc:2"),
+        (".sops.yaml", ".sops.yaml:2"),
+    ],
+)
+def test_fichier_non_utf8_refuse(tmp_path, fichier, nom):
+    # Un octet qui n'est pas de l'UTF-8 (ici, un BOM UTF-16 en ligne 2) : un refus qui nomme le
+    # fichier et la ligne, pas une trace Python.
+    d = monter(tmp_path)
+    chemin = d / fichier
+    chemin.write_bytes(b"# ligne 1\n\xff\xfe\n" + chemin.read_bytes())
+    r = lancer(d)
+    assert r.returncode == 1, sortie(r)
+    assert f"refus : {nom} : fichier non UTF-8" in sortie(r)
+    assert "Traceback" not in sortie(r)
+
+
+def test_fichier_non_utf8_apres_bom(tmp_path):
+    # Le numéro de ligne compte depuis le début du fichier, BOM UTF-8 compris.
+    d = monter(tmp_path)
+    cles = d / "deploiement/secrets/prod.cles"
+    cles.write_bytes(b"\xef\xbb\xbfHC_SONDE\nTOKEN\n\xff\n")
+    r = lancer(d)
+    assert r.returncode == 1, sortie(r)
+    assert "refus : deploiement/secrets/prod.cles:3 : fichier non UTF-8" in sortie(r)
 
 
 def test_usage():
