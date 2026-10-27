@@ -33,7 +33,9 @@ copier update --vcs-ref <étiquette>
 ```
 
 Les fichiers gérés par le modèle sont réécrits, les fichiers semés ne sont pas touchés. Un conflit
-dans un fichier géré se résout en faveur du modèle.
+dans un fichier géré se résout en faveur du modèle. Ensuite, sous les chemins gérés,
+`git status --short --ignored` ne doit montrer en `!!` que des caches (`__pycache__/`) : un fichier
+géré que le `.gitignore` du projet masque manquerait au commit (LE-23).
 
 ## Aligner un projet existant
 

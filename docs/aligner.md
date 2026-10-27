@@ -31,6 +31,13 @@ Chaque case se coche dans la PR d'alignement. Une case qui ne s'applique pas au 
       montre que des fichiers nouveaux (`??`). Copier ignore les fichiers semés déjà présents
       (`README.md`, `CLAUDE.md`, `.gitignore`…) : il les signale en conflit, sans les toucher. Si un
       fichier existant a changé, s'arrêter.
+- [ ] **Aucun fichier géré n'est masqué** : sous un chemin géré (`.githooks/`, `scripts/modele/`,
+      `docs/modele/`, `.github/modele/`, `.github/workflows/modele-*.yml`,
+      `.claude/skills/consigner/`), `git status --short --ignored` ne montre en `!!` que des caches
+      (`__pycache__/`). Copier écrit un fichier
+      que le `.gitignore` du projet ignore sans rien en dire : la règle `*secret*` de
+      `veille-emploi` masquait `scripts/modele/verifier_secrets.py` (LE-23). `git check-ignore -v
+      <chemin>` nomme la règle ; ajouter au `.gitignore` une exception nommée (`!<chemin>`).
 
 ## 3. Les reports à la main
 
