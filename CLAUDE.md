@@ -16,8 +16,8 @@ chiffrées, tunnel commun), l'option `fusion` et les secrets refaits sur le post
 porte la sonde de la machine. `ancrage` est passé en cible `serveur`, puis a retiré son ancien
 tunnel en trois versions ; il lui reste un geste daté, noté dans son propre `CLAUDE.md`.
 
-Versions des projets : `ancrage` en `v0.2.2`, `serveur` en `v0.2.0`, `veille-emploi` en `v0.1.1`.
-Chacun monte par `copier update`, au choix d'Edouard. Prochain : la porte de l'issue #27 (les
+Versions des projets : `ancrage`, `serveur` et `veille-emploi` en `v0.2.3` depuis le 27/10
+(`veille-emploi` avec `fusion=session`). Chacun monte par `copier update`, au choix d'Edouard. Prochain : la porte de l'issue #27 (les
 exécutions rouges affichées au démarrage d'une session), puis, au choix d'Edouard, le lot 3 (la
 cible `statique`) ou un autre lot. Le cadrage est dans `docs/cadrage.md` ; ce que les lots ont
 appris, dans `docs/registre.md`.
