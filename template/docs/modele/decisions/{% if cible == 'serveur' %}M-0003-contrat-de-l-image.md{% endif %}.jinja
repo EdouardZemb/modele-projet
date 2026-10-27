@@ -32,6 +32,12 @@ Un `Dockerfile` à la racine du dépôt. L'image :
 - lit dans son environnement `{{ prefixe }}ENV`, `{{ prefixe }}VERSION` et `{{ prefixe }}URL_PUBLIQUE`, que `compose.yml`
   lui passe. En CI, la mécanique ne pose que `{{ prefixe }}ENV=ci` et `{{ prefixe }}URL_PUBLIQUE` ; le projet
   peut y ajouter les siennes, par l'entrée `variables` de `modele-image-construire` ;
+{%- if sauvegardes %}
+- **démarre aussi sans son environnement** : le test de restauration la lance nue
+  (`tester-restauration.sh`, `docker run` sans `-e`), sans `{{ prefixe }}ENV`, `{{ prefixe }}VERSION` ni
+  `{{ prefixe }}URL_PUBLIQUE`, et sans les secrets ni les variables de `compose.projet.yml`. Sa route de
+  santé doit alors répondre `statut` `ok` ;
+{%- endif %}
 - démarre par sa commande par défaut. Un `HEALTHCHECK` est conseillé : `docker compose up --wait`
   attend alors que l'app soit saine.
 

@@ -497,3 +497,30 @@ def test_exploitation_le_report(rendre, sauvegardes):
         "restauration**, la sauvegarde de la nuit retire ce qu'elle a laissé",
     ):
         assert fragment in restaurer, fragment
+
+
+# V10 : la mise en service dit l'uid de l'utilisateur de déploiement, et ce que fait la première
+# sauvegarde lancée à la main : un vrai envoi, un signal, le verrou.
+@pytest.mark.parametrize("sauvegardes", [True, False])
+def test_exploitation_mise_en_service_uid_et_premiere_sauvegarde(rendre, sauvegardes):
+    texte = lire(rendre(**{**REPONSES_SERVEUR, "sauvegardes": sauvegardes}), "docs/exploitation.md")
+    mise_en_service = a_plat(section(texte, "La mise en service"))
+    assert "Un préalable : l'utilisateur de déploiement du serveur a l'uid 1000, celui du conteneur" in mise_en_service
+    premiere = (
+        "C'est une vraie sauvegarde, comme celle de la nuit : elle prend le verrou du projet"
+        " (600 s d'attente au plus), envoie l'archive chiffrée au distant et signale `essai-sauvegarde`"
+    )
+    assert (premiere in mise_en_service) is sauvegardes
+
+
+# V10 : le test de restauration lance l'image nue ; le contrat le dit.
+@pytest.mark.parametrize("sauvegardes", [True, False])
+def test_m0003_l_image_demarre_sans_son_environnement(rendre, sauvegardes):
+    rendu = rendre(**{**REPONSES_SERVEUR, "sauvegardes": sauvegardes})
+    m3 = a_plat(lire(rendu, "docs/modele/decisions/M-0003-contrat-de-l-image.md"))
+    temoin = (
+        "**démarre aussi sans son environnement** : le test de restauration la lance nue"
+        " (`tester-restauration.sh`, `docker run` sans `-e`), sans `ESSAI_ENV`, `ESSAI_VERSION` ni"
+        " `ESSAI_URL_PUBLIQUE`, et sans les secrets ni les variables de `compose.projet.yml`"
+    )
+    assert (temoin in m3) is sauvegardes

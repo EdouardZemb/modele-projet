@@ -170,6 +170,12 @@ qu'au §1, dans un worktree `<dépôt>.worktrees\modele-serveur`.
   - le job `image` (`needs: [socle, verifier, deploiement]`, `packages: write`) : l'action
     `modele-image-construire`, puis les tests de bout en bout du projet contre l'image, puis
     `modele-image-publier`, au push sur la branche principale seulement, et ses deux étapes de fin.
+- [ ] **Les reports à la main des autres fichiers semés**, que `copier update` ne touche pas non
+      plus quand le projet les a déjà. Depuis le même rendu à côté, reporter :
+  - les deux blocs `package-ecosystem: docker` de `.github/dependabot.yml` (`/` et
+    `/tests/deploiement`) ;
+  - si le projet a déjà un `docs/exploitation.md`, les sections du modèle qui lui manquent. Les
+    fusionner avec les siennes, sans rien retirer de ce qui est propre à l'app.
 - [ ] **Retirer l'ancien workflow de version**, s'il existe (un `version.yml` qui publie l'image à
       l'étiquette), et toute publication d'image de l'ancien `ci.yml`, dans la même PR. Avec
       `modele-version.yml`, deux workflows tourneraient sur la même étiquette.

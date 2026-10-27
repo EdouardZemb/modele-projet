@@ -188,6 +188,9 @@ def test_liste_d_alignement():
         "se fusionne à la main",
         "--data fusion=<session|edouard>",
         "que le modèle ne sème pas",
+        # V10 : les fichiers semés que le projet a déjà ne reçoivent rien de copier update
+        "les deux blocs `package-ecosystem: docker` de `.github/dependabot.yml`",
+        "a déjà un `docs/exploitation.md`",
         # I3 : activer les sauvegardes sur un projet en service
         "### Activer les sauvegardes sur un projet en service",
         "--data sauvegardes=true",
