@@ -2,6 +2,7 @@
 
 import re
 
+import garde_claude
 import pytest
 import yaml
 from conftest import REPONSES_SERVEUR, fichiers_texte
@@ -24,6 +25,15 @@ def test_fusion_edouard_enregistree(rendre):
     rendu = rendre(fusion="edouard")
     reponses = yaml.safe_load((rendu / ".copier-answers.yml").read_text(encoding="utf-8"))
     assert reponses["fusion"] == "edouard"
+
+
+@pytest.mark.parametrize(("fusion", "attendu"), [("session", True), ("edouard", False)])
+def test_fusion_rendue_lue_par_le_garde(rendre, fusion, attendu):
+    # Le garde lit `.copier-answers.yml` tel qu'écrit, octet pour octet : si Copier y mettait un
+    # jour des guillemets, tous les projets passeraient en `edouard` sans bruit.
+    rendu = rendre(fusion=fusion)
+    texte = (rendu / ".copier-answers.yml").read_bytes().decode("utf-8", errors="replace")
+    assert bool(garde_claude.REPONSE_SESSION.search(texte)) is attendu, texte
 
 
 @pytest.mark.parametrize("nom", ["Ancrage", "1projet", "mon_projet", "a b"])

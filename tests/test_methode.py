@@ -45,11 +45,28 @@ def test_invariants_communs():
     texte = lire(METHODE)
     section = texte.split("## Les invariants communs", 1)[1].split("\n## ", 1)[0]
     assert len(re.findall(r"^\d+\. ", section, flags=re.MULTILINE)) == 5
-    # L'invariant 3, au mot près de la spec (§5.2) : il vaut pour tous, Edouard compris.
+    # L'invariant 3, au mot près de la spec (§5.2) : il vaut pour tous, Edouard compris, sauf ses
+    # gestes 👤 écrits à l'avance (clôture du lot 2).
     assert (
         "3. Personne n'écrit sur le serveur après son amorçage : tout y arrive par git. "
         "Une session y lit, elle n'y écrit jamais." in " ".join(section.split())
     )
+    assert (
+        "Seule exception : les gestes 👤 écrits à l'avance, qu'Edouard lance lui-même"
+        in " ".join(section.split())
+    )
+
+
+def test_fusion_dans_un_autre_depot():
+    """Le garde ne lit le mode et les contrôles que du dépôt de la session (LE-22)."""
+    texte = " ".join(lire(METHODE).split())
+    assert "Le garde ne fusionne que dans le dépôt de la session." in texte
+    assert "fusion dans un autre dépôt : contrôles invérifiables ici" in texte
+    assert "Un plan qui touche plusieurs dépôts dit, pour chaque PR, qui la fusionne" in texte
+    # Tout dépôt nommé est refusé, même celui de la session : on fusionne depuis le clone.
+    assert "toute fusion qui nomme un dépôt (`-R`, `--repo`, `GH_REPO`, une adresse de PR)" in texte
+    assert "`gh pr merge <n>`, depuis le clone" in texte
+    assert "en mode `edouard`, toute fusion est refusée de toute façon" in texte
 
 
 # Les ADR hérités selon la cible : M-0003 et M-0004 pour `serveur`, M-0005 avec les sauvegardes.
@@ -184,7 +201,9 @@ def test_m0003_et_m0005_disent_le_report(rendre, sauvegardes):
         "une troisième, facultative (`REPORTER=…`)",
         "**`REPORTER /actuel /donnees`, facultative**",
         "`/actuel` est une copie jetable des données en service, montée en écriture",
-        "sa sortie standard étant alors un document JSON",
+        # V9 : le rapport est un seul objet JSON, comme le contrôle de restaurer.sh l'exige
+        "sa sortie standard étant alors un seul objet JSON",
+        "une sortie qui n'est pas un seul objet JSON aussi",
         "64 en cas d'erreur d'usage, ce que rend une image qui ne connaît pas la commande",
         "aucune donnée personnelle",
         # revue C0, mineur 3 : sur un code 0, seul le rapport va au journal
@@ -202,6 +221,8 @@ def test_m0003_et_m0005_disent_le_report(rendre, sauvegardes):
         "**La copie jetable contient des données personnelles.**",
         "Le projet garantit qu'elles ne portent aucune donnée personnelle",
         "**Tout échec abandonne la restauration, rien n'a changé**",
+        "sur un code 0, la sortie standard est un seul objet JSON, le rapport",
+        "une sortie qui n'est pas un seul objet JSON",
         # R63 : la copie recontrôlée après le report, sans second VERIFIER ; jq exigé
         "la forme exigée de l'instantané (non vide, rien que des fichiers et des dossiers)",
         "`VERIFIER` ne tourne pas une seconde fois",

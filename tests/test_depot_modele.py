@@ -121,6 +121,15 @@ def test_dependabot_du_depot_modele():
     groupes = actions[0]["groups"]
     assert [g["group-by"] for g in groupes.values()] == ["dependency-name"]
     assert list((RACINE / "template/.github/workflows").glob("*.yml"))
+    # L'image de la fausse app, épinglée par empreinte, suit aussi ses versions (V8), sans majeure.
+    (docker,) = [u for u in doc["updates"] if u["package-ecosystem"] == "docker"]
+    assert docker["directory"] == "/tests/modele/fausse-app"
+    assert (RACINE / "tests/modele/fausse-app/Dockerfile").is_file()
+    for cle in ("schedule", "cooldown", "commit-message"):
+        assert docker[cle] == actions[0][cle]
+    assert docker["ignore"] == [
+        {"dependency-name": "*", "update-types": ["version-update:semver-major"]}
+    ]
 
 
 def test_historique_du_depot_modele():
@@ -188,6 +197,9 @@ def test_liste_d_alignement():
         "se fusionne à la main",
         "--data fusion=<session|edouard>",
         "que le modèle ne sème pas",
+        # V10 : les fichiers semés que le projet a déjà ne reçoivent rien de copier update
+        "les deux blocs `package-ecosystem: docker` de `.github/dependabot.yml`",
+        "a déjà un `docs/exploitation.md`",
         # I3 : activer les sauvegardes sur un projet en service
         "### Activer les sauvegardes sur un projet en service",
         "--data sauvegardes=true",
@@ -197,8 +209,17 @@ def test_liste_d_alignement():
         "Le premier déploiement ne prend pas d'instantané",
         # C0 : un état qu'une restauration ne doit pas défaire
         "déclare `REPORTER` et `REPORTER_SECTION` dans `deploiement/projet.env`",
+        # revue finale du lot 2 (M6) : le tunnel d'un projet, ses instantanés d'avant l'alignement
+        "**Un projet qui a déjà son propre tunnel**",
+        "`--remove-orphans`",
+        "« Faire passer une route d'un tunnel à un autre »",
+        "**Les instantanés d'avant l'alignement**",
+        # tout l'ancien deploiement/ : l'ancien restaurer.sh charge sa lib.sh à côté de lui
+        "archive <commit> deploiement | tar -x -C <dossier temporaire>",
     ):
         assert fragment in texte, fragment
+    # le seul script ne suffit pas, il lui faut son arbre (revue des corrections du lot 2, I2)
+    assert ":deploiement/restaurer.sh` dans un fichier temporaire" not in texte
     # avant le commit, --diff compare <base>...HEAD et n'examine rien (LE-15)
     assert "--exiger-prives --diff" not in texte
     # la liste suit la méthode, qui n'indexe que par chemins explicites

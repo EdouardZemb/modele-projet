@@ -71,7 +71,7 @@ chemin_sante:
   help: Chemin HTTP de la sonde de santé de l'application
   default: /api/sante
   when: "{{ cible == 'serveur' }}"
-  validator: "{% if not (chemin_sante | regex_search('^/[^ ]*$')) %}le chemin commence par / et ne contient pas d'espace{% endif %}"
+  validator: "{% if not (chemin_sante | regex_search('^/[A-Za-z0-9/_.-]*$')) %}le chemin commence par / et ne contient que lettres, chiffres, /, _, . et -{% endif %}"
 bloc_ports:
   type: int
   help: Premier port du bloc de dix réservé au projet sur le serveur (multiple de 10, de 4310 à 4990)

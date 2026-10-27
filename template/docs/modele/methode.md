@@ -59,7 +59,9 @@ Ils s'ajoutent à ceux du projet.
 2. Aucune donnée personnelle réelle dans le dépôt, les tests ou le staging. Le jeu de données
    factice est **écrit**, pas dérivé de données réelles (M-0001).
 3. Personne n'écrit sur le serveur après son amorçage : tout y arrive par git. Une session y lit,
-   elle n'y écrit jamais.
+   elle n'y écrit jamais. Seule exception : les gestes 👤 écrits à l'avance, qu'Edouard lance
+   lui-même. Ce sont les gestes 👤 de `docs/exploitation.md` (la mise en service, et les secours :
+   restaurer, revenir en arrière, arrêter), et ceux qu'un plan de lot écrit pour une migration.
 4. Cible `serveur` : une migration, `compose.yml` et les `env/*.env` doivent laisser fonctionner
    l'image précédente. On ajoute avant d'enlever, et une variable nouvelle ne devient obligatoire
    qu'une version plus tard.
@@ -98,6 +100,13 @@ entrées restent locales :
 - l'option `--fusion session|edouard` du garde l'emporte sur la lecture, y compris posée sur la
   commande du hook dans un `settings.json` de la copie. C'est ce que passe le dépôt modèle, qui n'a
   pas de `.copier-answers.yml`.
+
+**Le garde ne fusionne que dans le dépôt de la session.** Il ne lit le mode et les contrôles que du
+dépôt du dossier courant. Il refuse donc toute fusion qui nomme un dépôt (`-R`, `--repo`,
+`GH_REPO`, une adresse de PR), même celui de la session. En mode `session`, le refus dit « fusion
+dans un autre dépôt : contrôles invérifiables ici » ; en mode `edouard`, toute fusion est refusée de
+toute façon. On fusionne par `gh pr merge <n>`, depuis le clone. Un plan qui touche plusieurs
+dépôts dit, pour chaque PR, qui la fusionne : une session ouverte dans son dépôt, ou Edouard.
 
 **Les étiquettes et les publications sont à Edouard**, dans les deux modes : une étiquette peut
 mettre un projet en production. La session les prépare (`git tag` en local est permis), mais ne les

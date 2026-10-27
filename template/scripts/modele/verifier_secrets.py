@@ -32,6 +32,7 @@ REGEX_NOM = re.compile(r"([^=\s]+)=")
 REGEX_DESTINATAIRE = re.compile(r"sops_age__list_\d+__map_recipient")
 REGEX_AGE = re.compile(r"age1[0-9a-z]{58}")
 
+BOM_UTF8 = b"\xef\xbb\xbf"
 SUFFIXE_ENC = ".env.enc"
 SUFFIXE_CLES = ".cles"
 
@@ -52,10 +53,20 @@ class Constat:
     message: str
 
 
+def lire_texte(chemin: Path) -> str:
+    """Le texte UTF-8 du fichier, sans son BOM ; un octet qui n'est pas de l'UTF-8 est Illisible."""
+    brut = chemin.read_bytes().removeprefix(BOM_UTF8)
+    try:
+        return brut.decode("utf-8")
+    except UnicodeDecodeError as e:
+        # Le numéro de la ligne fautive, jamais l'octet ni son voisinage.
+        raise Illisible(brut[: e.start].count(b"\n") + 1, "fichier non UTF-8") from None
+
+
 def lire_cles(chemin: Path) -> list[str]:
     """Une clé par ligne ; lignes vides et « # » ignorées ; un doublon est une erreur."""
     cles: list[str] = []
-    for numero, brut in enumerate(chemin.read_text(encoding="utf-8-sig").splitlines(), start=1):
+    for numero, brut in enumerate(lire_texte(chemin).splitlines(), start=1):
         ligne = brut.strip()
         if not ligne or ligne.startswith("#"):
             continue
@@ -71,7 +82,7 @@ def lire_chiffre(chemin: Path) -> tuple[set[str], set[str]]:
     """(clés, destinataires) d'un dotenv chiffré par sops. Aucune valeur n'est conservée."""
     cles: set[str] = set()
     destinataires: set[str] = set()
-    for numero, brut in enumerate(chemin.read_text(encoding="utf-8-sig").splitlines(), start=1):
+    for numero, brut in enumerate(lire_texte(chemin).splitlines(), start=1):
         # Un commentaire sops ressort chiffré (#ENC[…, type:comment]) : ni clé, ni citable.
         if not brut.strip() or brut.lstrip().startswith("#"):
             continue
@@ -90,8 +101,7 @@ def lire_chiffre(chemin: Path) -> tuple[set[str], set[str]]:
 
 
 def destinataires_sops_yaml(racine: Path) -> set[str]:
-    texte = (racine / ".sops.yaml").read_text(encoding="utf-8-sig")
-    return set(REGEX_AGE.findall(texte))
+    return set(REGEX_AGE.findall(lire_texte(racine / ".sops.yaml")))
 
 
 def _fichiers(racine: Path, motif: str) -> list[Path]:
@@ -122,10 +132,14 @@ def verifier(racine: Path, exiges: dict[str, list[str]]) -> list[Constat]:
         if not sops_yaml.is_file():
             constats.append(Constat("refus", ".sops.yaml", "absent : les destinataires ne peuvent pas être contrôlés"))
         else:
-            attendus = destinataires_sops_yaml(racine)
-            if not attendus:
-                constats.append(Constat("refus", ".sops.yaml", "aucun destinataire age"))
-                attendus = None
+            try:
+                attendus = destinataires_sops_yaml(racine)
+            except Illisible as e:
+                constats.append(Constat("refus", f".sops.yaml:{e.ligne}", e.raison))
+            else:
+                if not attendus:
+                    constats.append(Constat("refus", ".sops.yaml", "aucun destinataire age"))
+                    attendus = None
 
     for chemin in enc:
         rel = _relatif(racine, chemin)

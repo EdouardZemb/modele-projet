@@ -1,8 +1,11 @@
 {%- macro v(nom_variable, modificateur='') -%}
 {{ '${' ~ prefixe ~ nom_variable ~ modificateur ~ '}' }}
 {%- endmacro -%}
-# Toujours lancé avec un projet et un fichier d'environnement explicites :
-#   docker compose -p <projet> -f deploiement/compose.yml --env-file deploiement/env/<env>.env …
+# Lancé par `dc` (lib.sh), ou à la main avec les mêmes arguments : le projet, les deux fichiers et
+# le compose.env que le déploiement écrit :
+#   docker compose -p <projet> -f <clone>/deploiement/compose.yml \
+#     -f <clone>/deploiement/compose.projet.yml --env-file <état>/compose.env …
+# <état> vaut ~/.local/state/{{ nom }}/<env>, sauf si {{ prefixe }}RACINE_ETAT le déplace.
 # Pas de `name:` ici : le projet (`{{ nom }}`, `{{ nom }}-staging`, `{{ nom }}-local`…) vient de `-p`.
 # Les variables `${…:?}` sans valeur font échouer la commande : mieux vaut un arrêt net qu'un
 # conteneur lancé avec la mauvaise image ou les mauvais dossiers.

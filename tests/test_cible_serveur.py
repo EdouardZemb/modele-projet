@@ -41,6 +41,25 @@ def test_bloc_ports_invalide_refuse(rendre, bloc):
         rendre(**{**REPONSES_SERVEUR, "bloc_ports": bloc})
 
 
+# chemin_sante est interpolé entre guillemets dans lib.sh et dans les motifs de `case` du faux
+# curl : un `$`, un `"`, un accent grave ou un `;` y serait du shell.
+@pytest.mark.parametrize("chemin", ["/a$b", '/a"b', "/a`b", "/a;b", "/a b", "sante", ""])
+def test_chemin_sante_invalide_refuse(rendre, chemin):
+    with pytest.raises(Exception, match="chemin"):
+        rendre(**{**REPONSES_SERVEUR, "chemin_sante": chemin})
+
+
+@pytest.mark.parametrize("chemin", ["/api/sante", "/sante-1.2", "/a_b/C9"])
+def test_chemin_sante_admis(rendre, chemin):
+    rendu = rendre(**{**REPONSES_SERVEUR, "chemin_sante": chemin})
+    assert yaml.safe_load(lire(rendu, ".copier-answers.yml"))["chemin_sante"] == chemin
+
+
+def test_sous_domaine_vide_refuse(rendre):
+    with pytest.raises(Exception, match="sous-domaine"):
+        rendre(**{**REPONSES_SERVEUR, "sous_domaine": ""})
+
+
 @pytest.mark.parametrize("sauvegardes", [True, False])
 def test_arborescence(rendre, sauvegardes):
     rendu = rendre(**{**REPONSES_SERVEUR, "sauvegardes": sauvegardes})
@@ -159,6 +178,22 @@ def test_compose_app(rendre, sauvegardes):
     assert app["ports"] == ["127.0.0.1:${ESSAI_PORT:?}:8080"]
     assert ("${ESSAI_SAUVEGARDES:?}:/sauvegardes" in app["volumes"]) is sauvegardes
     assert "${ESSAI_DONNEES:?}:/donnees" in app["volumes"]
+
+
+def test_en_tete_du_compose_decrit_l_appel_de_dc(rendre):
+    # L'en-tête donne l'appel que fait `dc` (lib.sh) : les deux fichiers, et le compose.env écrit
+    # par le déploiement, pas un fichier de deploiement/env/.
+    texte = lire(rendre(**REPONSES_SERVEUR), "deploiement/compose.yml")
+    commentaires = itertools.takewhile(lambda ligne: ligne.startswith("#"), texte.splitlines())
+    # Sans les « # » ni les « \ » de fin de ligne : l'appel peut tenir sur plusieurs lignes.
+    entete = a_plat(" ".join(ligne.lstrip("#").rstrip("\\ ") for ligne in commentaires))
+    appel = (
+        "docker compose -p <projet> -f <clone>/deploiement/compose.yml"
+        " -f <clone>/deploiement/compose.projet.yml --env-file <état>/compose.env"
+    )
+    assert appel in entete, entete
+    assert "~/.local/state/essai/<env>" in entete
+    assert "--env-file deploiement/env/" not in entete
 
 
 def test_sonde_suit_la_branche_principale(rendre):
@@ -462,3 +497,42 @@ def test_exploitation_le_report(rendre, sauvegardes):
         "restauration**, la sauvegarde de la nuit retire ce qu'elle a laissé",
     ):
         assert fragment in restaurer, fragment
+
+
+# V10 : la mise en service dit l'uid de l'utilisateur de déploiement, et ce que fait la première
+# sauvegarde lancée à la main : un vrai envoi, un signal, le verrou.
+@pytest.mark.parametrize("sauvegardes", [True, False])
+def test_exploitation_mise_en_service_uid_et_premiere_sauvegarde(rendre, sauvegardes):
+    texte = lire(rendre(**{**REPONSES_SERVEUR, "sauvegardes": sauvegardes}), "docs/exploitation.md")
+    mise_en_service = a_plat(section(texte, "La mise en service"))
+    assert "Un préalable : l'utilisateur de déploiement du serveur a l'uid 1000, celui du conteneur" in mise_en_service
+    premiere = (
+        "C'est une vraie sauvegarde, comme celle de la nuit : elle prend le verrou du projet"
+        " (600 s d'attente au plus), envoie l'archive chiffrée au distant et signale `essai-sauvegarde`"
+    )
+    assert (premiere in mise_en_service) is sauvegardes
+
+
+# V10 : le test de restauration lance l'image nue ; le contrat le dit.
+@pytest.mark.parametrize("sauvegardes", [True, False])
+def test_m0003_l_image_demarre_sans_son_environnement(rendre, sauvegardes):
+    rendu = rendre(**{**REPONSES_SERVEUR, "sauvegardes": sauvegardes})
+    m3 = a_plat(lire(rendu, "docs/modele/decisions/M-0003-contrat-de-l-image.md"))
+    temoin = (
+        "**démarre aussi sans son environnement** : le test de restauration la lance nue"
+        " (`tester-restauration.sh`, `docker run` sans `-e`), sans `ESSAI_ENV`, `ESSAI_VERSION` ni"
+        " `ESSAI_URL_PUBLIQUE`, et sans les secrets ni les variables de `compose.projet.yml`"
+    )
+    assert (temoin in m3) is sauvegardes
+
+
+# Revue des corrections du lot 2 : les en-têtes disent ce que fait le code (m1, m6).
+def test_en_tetes_du_report_et_du_compose(rendre):
+    rendu = rendre(**REPONSES_SERVEUR)
+    for chemin in ("deploiement/restaurer.sh", "tests/deploiement/sauvegarde.bats"):
+        texte = lire(rendu, chemin)
+        assert "document JSON" not in texte, chemin
+        assert "un seul objet JSON" in texte, chemin
+    compose = lire(rendu, "deploiement/compose.yml")
+    assert "Toujours lancé par" not in compose
+    assert "ou à la main avec les mêmes arguments" in compose
