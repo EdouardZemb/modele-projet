@@ -180,6 +180,22 @@ def test_compose_app(rendre, sauvegardes):
     assert "${ESSAI_DONNEES:?}:/donnees" in app["volumes"]
 
 
+def test_en_tete_du_compose_decrit_l_appel_de_dc(rendre):
+    # L'en-tête donne l'appel que fait `dc` (lib.sh) : les deux fichiers, et le compose.env écrit
+    # par le déploiement, pas un fichier de deploiement/env/.
+    texte = lire(rendre(**REPONSES_SERVEUR), "deploiement/compose.yml")
+    commentaires = itertools.takewhile(lambda ligne: ligne.startswith("#"), texte.splitlines())
+    # Sans les « # » ni les « \ » de fin de ligne : l'appel peut tenir sur plusieurs lignes.
+    entete = a_plat(" ".join(ligne.lstrip("#").rstrip("\\ ") for ligne in commentaires))
+    appel = (
+        "docker compose -p <projet> -f <clone>/deploiement/compose.yml"
+        " -f <clone>/deploiement/compose.projet.yml --env-file <état>/compose.env"
+    )
+    assert appel in entete, entete
+    assert "~/.local/state/essai/<env>" in entete
+    assert "--env-file deploiement/env/" not in entete
+
+
 def test_sonde_suit_la_branche_principale(rendre):
     """R22 : le canal `main` du staging suit la branche principale ; l'image reste `:main`."""
     rendu = rendre(**{**REPONSES_SERVEUR, "branche_principale": "principal"})
