@@ -91,8 +91,10 @@ jobs:
             exit 0
           fi
           # Échec de lecture : « absente » est le cas normal ; toute autre cause (réseau, droits)
-          # arrête le workflow plutôt que de risquer d'écraser une version existante.
-          if ! grep -qiE 'not found|unknown|404' "$tmp/erreur"; then
+          # arrête le workflow plutôt que de risquer d'écraser une version existante. « absente »
+          # seulement si le registre le dit : un « unknown » ou un « 404 » seul (hôte inconnu,
+          # mandataire) n'en est pas la preuve.
+          if ! grep -qiE 'MANIFEST_UNKNOWN|manifest unknown|not found' "$tmp/erreur"; then
             cat "$tmp/erreur"
             echo "::error::Impossible de savoir si $IMAGE:$VERSION existe déjà : lecture du registre en échec."
             exit 1

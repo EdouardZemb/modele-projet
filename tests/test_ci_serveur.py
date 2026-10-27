@@ -77,10 +77,10 @@ case "$1" in
           exit 0
         fi
         if [ -n "${FAUX_REGISTRE_PANNE:-}" ]; then
-          echo "ERROR: failed to do request: connection refused" >&2
+          echo "ERROR: $FAUX_REGISTRE_PANNE" >&2
           exit 1
         fi
-        echo "ERROR: $ref: not found" >&2
+        echo "ERROR: ${FAUX_REGISTRE_ABSENT:-$ref: not found}" >&2
         exit 1
         ;;
       create)
@@ -427,13 +427,22 @@ def test_version_controle_l_ancetre_et_ne_reecrit_pas(rendre, env_isole, tmp_pat
     assert "une version publiée ne se réécrit pas" in r.stdout
     assert creations() == []
     assert (banc.registre / "1.0.0").read_bytes() == (banc.registre / f"sha-{SHA}").read_bytes()
-    # registre illisible : refus plutôt que le risque d'écraser
+    # registre illisible : refus plutôt que le risque d'écraser ; une panne qui dit « unknown » ou
+    # « 404 » sans dire que le manifeste manque n'est pas une version absente
+    for panne in ("failed to do request: connection refused", "unknown host registry (404 from proxy)"):
+        banc.journal.write_text("", encoding="utf-8")
+        r = banc.lancer(etiqueter, rendu, FAUX_REGISTRE_PANNE=panne, **{**env_etape, "VERSION": "2.0.0"})
+        assert r.returncode == 1, panne
+        assert "lecture du registre en échec" in r.stdout, panne
+        assert creations() == [], panne
+        assert not (banc.registre / "2.0.0").exists(), panne
+    # absente, dite par le code d'erreur du registre plutôt que par « not found » : posée
     banc.journal.write_text("", encoding="utf-8")
-    r = banc.lancer(etiqueter, rendu, FAUX_REGISTRE_PANNE="1", **{**env_etape, "VERSION": "2.0.0"})
-    assert r.returncode == 1
-    assert "lecture du registre en échec" in r.stdout
-    assert creations() == []
-    assert not (banc.registre / "2.0.0").exists()
+    absente = "ghcr.io/edouardzemb/essai:3.0.0: MANIFEST_UNKNOWN: manifest unknown"
+    r = banc.lancer(etiqueter, rendu, FAUX_REGISTRE_ABSENT=absente, **{**env_etape, "VERSION": "3.0.0"})
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert len(creations()) == 1
+    assert (banc.registre / "3.0.0").read_bytes() == (banc.registre / f"sha-{SHA}").read_bytes()
 
 
 def test_aucune_cible_sans_fichiers_serveur(rendre):
