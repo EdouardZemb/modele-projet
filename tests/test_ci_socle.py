@@ -92,6 +92,10 @@ def test_dependabot(rendre, cible):
         assert u["schedule"] == maj["schedule"]
         assert u["cooldown"] == maj["cooldown"]
         assert u["commit-message"] == maj["commit-message"]
+        # Une majeure d'image de base est une décision, pas une mise à jour de routine (R93).
+        assert u["ignore"] == [
+            {"dependency-name": "*", "update-types": ["version-update:semver-major"]}
+        ]
 
 
 # --- revue finale du lot 1 : messages de commit (I4), $RUNNER_TEMP (L.35), garde branché (m4),

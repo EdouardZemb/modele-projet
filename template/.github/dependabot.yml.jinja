@@ -31,6 +31,10 @@ updates:
     groups:
       images:
         patterns: ["*"]
+    # Une majeure d'image de base est une décision, pas une mise à jour de routine.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: docker
     directory: /tests/deploiement
     schedule:
@@ -45,4 +49,8 @@ updates:
     groups:
       images:
         patterns: ["*"]
+    # Une majeure d'image de base est une décision, pas une mise à jour de routine.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 {%- endif %}
