@@ -1019,6 +1019,16 @@ def test_fusion_dans_un_autre_depot_refusee(commande):
     assert "autre dépôt" in motif
 
 
+@pytest.mark.parametrize(
+    ("mode", "attendu"), [("session", "autre dépôt"), ("edouard", "mode fusion : edouard")]
+)
+def test_fusion_qui_nomme_le_depot_meme_le_sien_refusee(mode, attendu):
+    """Ce que dit methode.md (« Qui fusionne ») : tout -R est refusé, même vers ce dépôt-ci."""
+    motif = refus("gh pr merge 26 -R EdouardZemb/modele-projet --squash", fusion=lambda d: mode)
+    assert motif is not None
+    assert attendu in motif
+
+
 GRAPHQL_OPAQUES = [
     "gh api graphql -F query=@q.graphql",
     "gh api graphql --input q.json",

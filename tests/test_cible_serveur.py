@@ -524,3 +524,15 @@ def test_m0003_l_image_demarre_sans_son_environnement(rendre, sauvegardes):
         " `ESSAI_URL_PUBLIQUE`, et sans les secrets ni les variables de `compose.projet.yml`"
     )
     assert (temoin in m3) is sauvegardes
+
+
+# Revue des corrections du lot 2 : les en-têtes disent ce que fait le code (m1, m6).
+def test_en_tetes_du_report_et_du_compose(rendre):
+    rendu = rendre(**REPONSES_SERVEUR)
+    for chemin in ("deploiement/restaurer.sh", "tests/deploiement/sauvegarde.bats"):
+        texte = lire(rendu, chemin)
+        assert "document JSON" not in texte, chemin
+        assert "un seul objet JSON" in texte, chemin
+    compose = lire(rendu, "deploiement/compose.yml")
+    assert "Toujours lancé par" not in compose
+    assert "ou à la main avec les mêmes arguments" in compose

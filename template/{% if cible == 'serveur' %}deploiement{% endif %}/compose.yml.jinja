@@ -1,8 +1,8 @@
 {%- macro v(nom_variable, modificateur='') -%}
 {{ '${' ~ prefixe ~ nom_variable ~ modificateur ~ '}' }}
 {%- endmacro -%}
-# Toujours lancé par `dc` (lib.sh), avec le projet, les deux fichiers et le compose.env que le
-# déploiement écrit :
+# Lancé par `dc` (lib.sh), ou à la main avec les mêmes arguments : le projet, les deux fichiers et
+# le compose.env que le déploiement écrit :
 #   docker compose -p <projet> -f <clone>/deploiement/compose.yml \
 #     -f <clone>/deploiement/compose.projet.yml --env-file <état>/compose.env …
 # <état> vaut ~/.local/state/{{ nom }}/<env>, sauf si {{ prefixe }}RACINE_ETAT le déplace.

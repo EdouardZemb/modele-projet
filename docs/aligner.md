@@ -200,13 +200,15 @@ qu'au §1, dans un worktree `<dépôt>.worktrees\modele-serveur`.
       les secrets : l'app rejoint aussi le tunnel commun, et les deux chemins servent. 👤 Passer
       ensuite les routes, staging puis prod, par la procédure du dépôt `serveur`,
       « Faire passer une route d'un tunnel à un autre » : Cloudflare impose une à deux minutes de
-      coupure par route (registre, LE-18). À la version suivante, retirer le service et son jeton (LE-19), puis 👤 les
-      anciens tunnels dans Cloudflare.
+      coupure par route (`docs/registre.md`, LE-18). À la version suivante, retirer le service et
+      son jeton (LE-19), puis 👤 les anciens tunnels dans Cloudflare.
 - [ ] **Les instantanés d'avant l'alignement** gardent leur ancienne forme, que le `restaurer.sh`
       du modèle ne lit pas. `docs/exploitation.md` du projet dit comment les restaurer par l'ancien
-      script, lu à l'étiquette d'avant l'alignement sans toucher au clone (`git -C <clone> show
-      <étiquette>:deploiement/restaurer.sh` dans un fichier temporaire), et jusqu'à quand : leur
-      rétention.
+      script, et jusqu'à quand : leur rétention. On tire **tout** l'ancien `deploiement/`, par le
+      commit d'avant l'alignement, dans un dossier temporaire et sans toucher au clone
+      (`git -C <clone> archive <commit> deploiement | tar -x -C <dossier temporaire>`) : l'ancien
+      script charge sa `lib.sh` à côté de lui, et lit les secrets, `env/` et le compose de son
+      propre arbre. D'abord le plan, sans `--oui`.
 - [ ] **Les secrets avant `serveur`.** 👤 `secrets.ps1 refaire` pour chaque environnement, puis 🤖
       la PR des deux `.enc`, fusionnée **avant** la PR de `serveur` qui déclare le projet : la
       sonde d'un projet sans ses secrets alerte (code 3). L'ordre complet est celui de

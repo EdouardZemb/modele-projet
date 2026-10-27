@@ -214,9 +214,12 @@ def test_liste_d_alignement():
         "`--remove-orphans`",
         "« Faire passer une route d'un tunnel à un autre »",
         "**Les instantanés d'avant l'alignement**",
-        "deploiement/restaurer.sh` dans un fichier temporaire",
+        # tout l'ancien deploiement/ : l'ancien restaurer.sh charge sa lib.sh à côté de lui
+        "archive <commit> deploiement | tar -x -C <dossier temporaire>",
     ):
         assert fragment in texte, fragment
+    # le seul script ne suffit pas, il lui faut son arbre (revue des corrections du lot 2, I2)
+    assert ":deploiement/restaurer.sh` dans un fichier temporaire" not in texte
     # avant le commit, --diff compare <base>...HEAD et n'examine rien (LE-15)
     assert "--exiger-prives --diff" not in texte
     # la liste suit la méthode, qui n'indexe que par chemins explicites

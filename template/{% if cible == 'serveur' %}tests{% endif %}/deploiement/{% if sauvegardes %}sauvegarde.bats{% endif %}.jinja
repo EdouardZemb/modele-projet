@@ -2172,7 +2172,7 @@ APPELS_DOCKER
   [[ "$output" != *"attention"* ]]
 }
 
-# R58 : sur un code 0, la sortie standard est le rapport, un document JSON, journalisé sur une
+# R58 : sur un code 0, la sortie standard est le rapport, un seul objet JSON, journalisé sur une
 # ligne. Une sortie qui n'en est pas un est un échec : le côté sûr.
 @test "restaurer_sortie_du_report_journalisee_si_json" {
   instantane "$SNAPSHOT" 1

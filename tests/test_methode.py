@@ -66,6 +66,7 @@ def test_fusion_dans_un_autre_depot():
     # Tout dépôt nommé est refusé, même celui de la session : on fusionne depuis le clone.
     assert "toute fusion qui nomme un dépôt (`-R`, `--repo`, `GH_REPO`, une adresse de PR)" in texte
     assert "`gh pr merge <n>`, depuis le clone" in texte
+    assert "en mode `edouard`, toute fusion est refusée de toute façon" in texte
 
 
 # Les ADR hérités selon la cible : M-0003 et M-0004 pour `serveur`, M-0005 avec les sauvegardes.
