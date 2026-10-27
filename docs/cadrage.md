@@ -20,6 +20,36 @@
 >   `secrets.sh definir` ni rapatriement (§6.4) ; la mise en service ne demande plus aucune étape
 >   sur la machine : la sonde du dépôt `serveur` crée les clones, les dossiers et les réseaux,
 >   d'après `projets/<nom>.env`, qui porte aussi les heures des sauvegardes (§6.2, §6.5, §6.8).
+>
+> **Amendé le 2026-10-27, à la clôture du lot 2, de la même façon.** Edouard a validé les écarts
+> que le plan du lot 2 a pris sur ce cadrage :
+>
+> - **§4** : l'image se construit et se publie par deux actions composites gérées,
+>   `modele-image-construire` et `modele-image-publier`, entre lesquelles le projet place ses
+>   propres tests de bout en bout ; `modele-version.yml` est un workflow complet, déclenché par
+>   l'étiquette ;
+> - **§6.1** (M-0003) : l'instantané a la forme de `/donnees` ; les archives d'avant l'alignement
+>   d'un projet se restaurent par son ancien `restaurer.sh`, procédure écrite dans son
+>   `docs/exploitation.md` ;
+> - **§6.6** : l'exercice trimestriel commun au parc n'est pas outillé ; chaque projet suit la
+>   procédure de son `docs/exploitation.md`. L'outil commun est une piste (`docs/pistes.md`) ;
+> - **§6.7** : un changement d'heure des sauvegardes dans `serveur` fait réinstaller les unités du
+>   projet par la sonde de `serveur` ; `bloc_ports` reste une réponse Copier du projet, réservée
+>   dans `projets/<nom>.env`, et la sonde alerte si les deux diffèrent ;
+> - **§8** : au retour en cible `aucune`, Copier retire tout `deploiement/`, **fichiers semés
+>   compris**, sans conflit ; git garde ce qui est commité (registre, LE-20 ; `docs/aligner.md`) ;
+> - **§9** : `serveur` porte un troisième fichier de secrets, pour l'adresse du contrôle de sa propre
+>   sonde ;
+> - **§11** : le critère 5, « la sonde n'y crée rien », s'entend pour le projet (ni clone, ni
+>   dossier, ni unité) ; le premier passage pose ce que les migrations exigent au niveau de la
+>   machine. La migration du tunnel a pris trois versions du projet, N, N+1 et N+2 ; deux
+>   suffisaient, puisqu'aucun chemin de retour n'avait besoin du jeton gardé jusqu'à N+2 (LE-19).
+>   La bascule d'une route coupe une à deux minutes (LE-18). Les issues héritées sont recréées dans
+>   `modele-projet` avec un texte générique, et non transférées ;
+> - **§15**, faits établis pendant le lot 2 : `copier update` retire les fichiers d'une cible
+>   abandonnée (voir §8) ; `secrets.ps1` passe les valeurs à `sops` par l'entrée standard, sous
+>   Windows ; la sonde de `serveur` crée réseaux et conteneurs par le groupe `docker`, sans
+>   `sudo`.
 
 Ce cadrage est la partie publique de la spec de conception du modèle, issue d'une séance de questions avec Edouard : 12 questions, puis 5 parties de design validées une à une. La partie qui nomme le serveur est privée et n'est pas reproduite ici.
 
