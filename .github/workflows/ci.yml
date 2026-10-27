@@ -228,13 +228,23 @@ jobs:
                   )
                   for groupe in reglages["hooks"]["PreToolUse"]
               )
+              signaux = branche and any(
+                  couvre(groupe.get("matcher"), "startup")
+                  and couvre(groupe.get("matcher"), "resume")
+                  and any(
+                      "signaux.py" in crochet.get("command", "")
+                      for crochet in groupe.get("hooks", [])
+                  )
+                  for groupe in reglages["hooks"]["SessionStart"]
+              )
           except (OSError, ValueError, KeyError, TypeError, AttributeError):
-              branche = False
-          if not branche:
+              branche = signaux = False
+          if not (branche and signaux):
               print(
                   "garde : .claude/settings.json est illisible (conflit de copier update ?), "
                   "coupe les hooks (disableAllHooks), ou n'a plus de hook PreToolUse qui "
-                  "appelle garde_claude.py pour Bash, PowerShell et Monitor",
+                  "appelle garde_claude.py pour Bash, PowerShell et Monitor, ou n'a plus de hook "
+                  "SessionStart (startup et resume) qui appelle signaux.py",
                   file=sys.stderr,
               )
               sys.exit(1)

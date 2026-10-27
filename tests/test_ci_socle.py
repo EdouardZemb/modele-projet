@@ -185,6 +185,21 @@ def _avec_matcher(original, matcher):
     return json.dumps(doc)
 
 
+def _signaux(original, matcher="startup|resume", commande=None, retirer=False):
+    doc = json.loads(original)
+    (groupe,) = doc["hooks"]["SessionStart"]
+    if retirer:
+        del doc["hooks"]["SessionStart"]
+    else:
+        if matcher is None:
+            groupe.pop("matcher", None)
+        else:
+            groupe["matcher"] = matcher
+        if commande is not None:
+            groupe["hooks"][0]["command"] = commande
+    return json.dumps(doc)
+
+
 def _desactive(original):
     doc = json.loads(original)
     doc["disableAllHooks"] = True
@@ -198,7 +213,18 @@ def test_etape_du_garde_branche(rendre):
     cas = [
         ("intact", original, 0),
         ("conflit", "<<<<<<< avant\n" + original + "=======\n{}\n>>>>>>> après\n", 1),
-        ("sans garde", '{"hooks": {"PreToolUse": []}}', 1),
+        (
+            "sans garde",
+            json.dumps(
+                {"hooks": {"PreToolUse": [], "SessionStart": json.loads(original)["hooks"]["SessionStart"]}}
+            ),
+            1,
+        ),
+        ("sans signaux", _signaux(original, retirer=True), 1),
+        ("signaux sans resume", _signaux(original, "startup"), 1),
+        ("signaux universels", _signaux(original, "*"), 0),
+        ("signaux sans matcher", _signaux(original, None), 0),
+        ("signaux sans script", _signaux(original, commande="sh lancer.sh garde_claude.py"), 1),
         ("absent", None, 1),
         # relecture de la vague, n5 : l'ancien matcher, ou les hooks coupés, ne passent plus
         ("ancien matcher", _avec_matcher(original, "Bash|PowerShell"), 1),
