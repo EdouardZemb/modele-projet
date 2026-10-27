@@ -45,11 +45,24 @@ def test_invariants_communs():
     texte = lire(METHODE)
     section = texte.split("## Les invariants communs", 1)[1].split("\n## ", 1)[0]
     assert len(re.findall(r"^\d+\. ", section, flags=re.MULTILINE)) == 5
-    # L'invariant 3, au mot près de la spec (§5.2) : il vaut pour tous, Edouard compris.
+    # L'invariant 3, au mot près de la spec (§5.2) : il vaut pour tous, Edouard compris, sauf ses
+    # gestes 👤 écrits à l'avance (clôture du lot 2).
     assert (
         "3. Personne n'écrit sur le serveur après son amorçage : tout y arrive par git. "
         "Une session y lit, elle n'y écrit jamais." in " ".join(section.split())
     )
+    assert (
+        "Seule exception : les gestes 👤 écrits à l'avance, qu'Edouard lance lui-même"
+        in " ".join(section.split())
+    )
+
+
+def test_fusion_dans_un_autre_depot():
+    """Le garde ne lit le mode et les contrôles que du dépôt de la session (LE-22)."""
+    texte = " ".join(lire(METHODE).split())
+    assert "Le garde ne fusionne que dans le dépôt de la session." in texte
+    assert "fusion dans un autre dépôt : contrôles invérifiables ici" in texte
+    assert "Un plan qui touche plusieurs dépôts dit, pour chaque PR, qui la fusionne" in texte
 
 
 # Les ADR hérités selon la cible : M-0003 et M-0004 pour `serveur`, M-0005 avec les sauvegardes.
