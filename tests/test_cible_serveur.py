@@ -41,6 +41,25 @@ def test_bloc_ports_invalide_refuse(rendre, bloc):
         rendre(**{**REPONSES_SERVEUR, "bloc_ports": bloc})
 
 
+# chemin_sante est interpolé entre guillemets dans lib.sh et dans les motifs de `case` du faux
+# curl : un `$`, un `"`, un accent grave ou un `;` y serait du shell.
+@pytest.mark.parametrize("chemin", ["/a$b", '/a"b', "/a`b", "/a;b", "/a b", "sante", ""])
+def test_chemin_sante_invalide_refuse(rendre, chemin):
+    with pytest.raises(Exception, match="chemin"):
+        rendre(**{**REPONSES_SERVEUR, "chemin_sante": chemin})
+
+
+@pytest.mark.parametrize("chemin", ["/api/sante", "/sante-1.2", "/a_b/C9"])
+def test_chemin_sante_admis(rendre, chemin):
+    rendu = rendre(**{**REPONSES_SERVEUR, "chemin_sante": chemin})
+    assert yaml.safe_load(lire(rendu, ".copier-answers.yml"))["chemin_sante"] == chemin
+
+
+def test_sous_domaine_vide_refuse(rendre):
+    with pytest.raises(Exception, match="sous-domaine"):
+        rendre(**{**REPONSES_SERVEUR, "sous_domaine": ""})
+
+
 @pytest.mark.parametrize("sauvegardes", [True, False])
 def test_arborescence(rendre, sauvegardes):
     rendu = rendre(**{**REPONSES_SERVEUR, "sauvegardes": sauvegardes})
