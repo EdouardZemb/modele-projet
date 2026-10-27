@@ -1,10 +1,17 @@
 """La mise à jour par Copier propage le géré et préserve le semé (spec §8, critère 3)."""
 
 import shutil
+import subprocess
+from pathlib import Path
 
 import copier
+import pytest
 import yaml
 from conftest import RACINE, REPONSES_PAR_DEFAUT, REPONSES_SERVEUR, git
+
+SH = shutil.which("sh") or (
+    r"C:\Program Files\Git\bin\sh.exe" if Path(r"C:\Program Files\Git\bin\sh.exe").exists() else None
+)
 
 IGNORES = shutil.ignore_patterns(
     ".git", ".superpowers", "__pycache__", ".pytest_cache", ".ruff_cache", ".venv"
@@ -199,3 +206,56 @@ def test_retour_en_cible_aucune(tmp_path, env_isole):
     _sans_conflit(projet)
     reponses = yaml.safe_load((projet / ".copier-answers.yml").read_text(encoding="utf-8"))
     assert reponses["cible"] == "aucune"
+
+
+@pytest.mark.skipif(SH is None, reason="aucun sh trouvé")
+def test_mise_a_jour_refuse_un_fichier_masque(tmp_path, env_isole):
+    """Le critère de sortie de LE-8 : la vérification dans le test de mise à jour (LE-23)."""
+    env = {**env_isole(), "MOTIFS_INTERDITS": "motif-interdit-essai"}
+    modele = _modele_v1(tmp_path, env)
+    projet = _projet_v1(tmp_path, env, modele)
+    git(projet, env, "config", "core.hooksPath", ".githooks")
+
+    with (projet / ".gitignore").open("a", encoding="utf-8", newline="\n") as f:
+        f.write("\n*secret*\n")
+    git(projet, env, "add", ".gitignore")
+    git(projet, env, "commit", "-q", "-m", "chore: ignorer les secrets")
+
+    nouveau = modele / "template/scripts/modele/outil_secret.py"
+    nouveau.write_text('"""Un outil du modèle que le .gitignore du projet masque."""\n', encoding="utf-8")
+    git(modele, env, "add", "-A")
+    git(modele, env, "commit", "-q", "-m", "v0.0.2")
+    git(modele, env, "tag", "v0.0.2")
+
+    copier.run_update(str(projet), defaults=True, overwrite=True, vcs_ref="v0.0.2", quiet=True)
+    assert (projet / "scripts/modele/outil_secret.py").is_file()
+
+    def valider():
+        git(projet, env, "add", "-A")
+        return subprocess.run(
+            ["git", "commit", "-q", "-m", "chore: mise à jour du modèle"],
+            check=False,
+            cwd=projet,
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+
+    r = valider()
+    assert r.returncode != 0
+    assert "scripts/modele/outil_secret.py" in r.stderr
+
+    with (projet / ".gitignore").open("a", encoding="utf-8", newline="\n") as f:
+        f.write("!scripts/modele/outil_secret.py\n")
+    r = valider()
+    assert r.returncode == 0, r.stderr
+    suivis = subprocess.run(
+        ["git", "ls-files", "scripts/modele/outil_secret.py"],
+        check=True,
+        cwd=projet,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert "outil_secret.py" in suivis.stdout

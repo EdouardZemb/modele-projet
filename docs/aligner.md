@@ -37,7 +37,9 @@ Chaque case se coche dans la PR d'alignement. Une case qui ne s'applique pas au 
       (`__pycache__/`). Copier écrit un fichier
       que le `.gitignore` du projet ignore sans rien en dire : la règle `*secret*` de
       `veille-emploi` masquait `scripts/modele/verifier_secrets.py` (LE-23). `git check-ignore -v
-      <chemin>` nomme la règle ; ajouter au `.gitignore` une exception nommée (`!<chemin>`).
+      <chemin>` nomme la règle ; ajouter au `.gitignore` une exception nommée (`!<chemin>`). Cette
+      vérification reste à faire à la main : si on l'oublie, le `pre-commit` refuse le commit qui
+      modifie `.copier-answers.yml` et nomme le fichier masqué.
 
 ## 3. Les reports à la main
 
