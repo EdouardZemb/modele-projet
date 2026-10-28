@@ -29,11 +29,19 @@ réussi. Le script retire les images du projet que ni l'état des deux environne
 conteneur, ni la marge des 3 plus récentes ne gardent, sans jamais `-f` ; une surprise annule
 tout. Une épreuve sur un vrai Docker, dans la CI, le prouve. Le hook `SessionStart` a 30 s (#45).
 
+Lot 10 fait le 28/10/2026 : la garde du dossier de données (#49), étiquetée `v0.5.0`. En cible
+`serveur` avec sauvegardes, `deployer.sh` refuse un déploiement ou un retour arrière quand une
+version est déployée et que le dossier de données est vide, ou n'est plus celui du dernier succès.
+Ce chemin, sous sa forme canonique, est dans le fichier d'état `donnees` ; pour un état d'avant la
+`v0.5.0`, celui de `compose.env` en tient lieu. Le refus alerte sans rien changer ; le geste 👤
+`--donnees-neuves` lève la garde pour un déploiement.
+
 Versions des projets au 28/10 : `ancrage`, `serveur` et `veille-emploi` en `v0.3.0`
 (`veille-emploi` en cible `serveur`, avec `fusion=session`), `pupitre` en `v0.2.3`. Chacun monte
-par `copier update`, au choix d'Edouard ; `ancrage` passe en `v0.4.0` avec l'essai du ménage
-(lot 9), une fois le quota d'Actions remis à zéro. Prochain, au choix d'Edouard : le lot 3 (la
-cible `statique`) ou un autre lot. Le cadrage est dans `docs/cadrage.md` ; ce que les lots ont
+par `copier update`, au choix d'Edouard ; `ancrage` passe directement en `v0.5.0`, avec l'essai
+du ménage (lot 9), une fois le quota d'Actions remis à zéro. Avant, une lecture sur le serveur
+vérifie que son dossier de données n'est vide dans aucun des deux environnements. Prochain, au
+choix d'Edouard : le lot 3 (la cible `statique`) ou un autre lot. Le cadrage est dans `docs/cadrage.md` ; ce que les lots ont
 appris, dans `docs/registre.md`.
 
 ## Commandes
