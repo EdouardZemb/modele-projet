@@ -557,7 +557,7 @@ est celui du lot 1.**
 | 1 | Le socle (cible `aucune`), `Nouveau-Projet.ps1`, le détecteur de dérive | **`ancrage` aligné en cible `aucune`** : la méthode seule, sans toucher à sa mécanique |
 | 2 | La cible `serveur` et le dépôt `serveur` | **`ancrage` passe en `serveur`** : test d'acceptation (critère 1) |
 | 3 | La cible `statique` | **Le site perso naît**, par `Nouveau-Projet.ps1` |
-| 4 | — | `pupitre`, cible `aucune` |
+| 4 | — | `pupitre`, cible `aucune` : **fait le 27/10/2026** (pupitre#7, sur la `v0.2.3`) |
 | 5 | — | `partition`, cible `aucune` |
 | 6 | — | `veille-emploi`, cible `aucune` |
 | 7 | — | `creche-planner`, cible `aucune` |
@@ -630,7 +630,7 @@ est celui du lot 1.**
 
 | Projet | Ce que l'alignement contient | Préalable |
 |---|---|---|
-| `pupitre` | Ses 9 documents numérotés de la racine passent dans `docs/` (`git mv`, pour garder l'historique), et il reçoit son `CLAUDE.md`. `CONVENTIONS.md` y est intégré ou reste, au choix du lot | — |
+| `pupitre` | **Fait le 27/10/2026 (pupitre#7, sur la `v0.2.3`).** Le plan de départ était périmé : ses documents étaient déjà dans `docs/` depuis le 11/10, rien à déplacer. L'alignement apporte le `CLAUDE.md` et ramène les commits au format du modèle. Ses deux portes propres, `contenu` et `documentation`, sont gardées à côté du socle ; ses ADR restent dans `docs/adr/`. Le piège de LE-23 est revenu une seconde fois : son `.gitignore` masquait `.claude/` et `secrets.*`, d'où des exceptions nommées (LE-24). Son gabarit de PR, un fichier géré qui différait de celui du modèle, a arrêté `copier copy` et demandé `--skip` ; le modèle sera rétabli à la clôture de son lot B (LE-25) | — |
 | `partition` | La méthode. `DECISIONS.md` et `QUESTIONS.md` sont rapprochés de `docs/decisions/` et `pistes.md`. Sa CI propre, qui refuse l'audio et le MIDI, reste | — |
 | `veille-emploi` | La méthode. Son dépôt de travail devient un clone dans `C:\src\github.com\EdouardZemb\veille-emploi`. **Sa branche par défaut est `principal`, pas `main`** : la règle de protection, le hook `pre-push` et le hook Claude doivent prendre la branche par défaut comme paramètre, ce que le lot 1 prévoit | 👤 Committer et pousser le correctif du 15/10, toujours dans l'arbre de travail du serveur |
 | `creche-planner` | La méthode et les ressources partagées. Ses hooks husky et sa porte de confidentialité en Node doublonnent ceux du modèle : le lot décide lesquels il garde. Son ADR-0010 renvoie à M-0001. Il garde `docs/adr/` et son registre doc 34 | Une décision à part sur ses clés, qui sera l'occasion de le rattacher aux clés du parc |
