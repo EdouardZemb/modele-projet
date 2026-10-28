@@ -13,7 +13,8 @@ jobs:
   tests:
     name: tests
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    # 25 min : sous Windows, la suite a dépassé 15 min au lot 9 (LE-29).
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -122,9 +123,14 @@ jobs:
       - uses: ./rendu/.github/actions/modele-image-construire
         with:
           dossier: rendu
+      - name: Épreuve du ménage des images (vrai Docker, registre local)
+        run: bash tests/modele/epreuve-menage.sh rendu
       - name: Journal du conteneur
         if: failure()
         run: docker logs fausse-app || true
+      - name: Retirer le registre et les conteneurs de l'épreuve
+        if: always()
+        run: docker rm -f -v epreuve-registre epreuve-conteneur || true
       - name: Supprimer le conteneur
         if: always()
         run: docker rm -f -v fausse-app

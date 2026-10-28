@@ -3,6 +3,7 @@
 import importlib.util
 import itertools
 import re
+import subprocess
 
 import pytest
 import yaml
@@ -217,6 +218,71 @@ def test_sonde_suit_la_branche_principale(rendre):
     assert '"git -C $CLONE merge --ff-only origin/principal"' in bats
 
 
+# Lot 9 : le dépôt GHCR du projet est défini une seule fois, dans lib.sh, et la sonde comme le
+# ménage des images s'en servent. Seule une ligne qui commence par `DEPOT_IMAGE=` le définit :
+# l'usage et les commentaires citent la variable de test, `ESSAI_DEPOT_IMAGE=…`.
+def test_depot_image_defini_une_seule_fois(rendre):
+    rendu = rendre(**REPONSES_SERVEUR)
+    definition = re.compile(r"^DEPOT_IMAGE=.*$", re.MULTILINE)
+    assert definition.findall(lire(rendu, "deploiement/lib.sh")) == ["DEPOT_IMAGE=ghcr.io/edouardzemb/essai"]
+    for chemin in ("deploiement/sonder.sh", "deploiement/nettoyer-images.sh"):
+        texte = lire(rendu, chemin)
+        assert not definition.search(texte), chemin
+        assert "$DEPOT_IMAGE" in texte, chemin
+    for chemin in sorted((rendu / "deploiement").rglob("*.sh")):
+        if chemin.name != "lib.sh":
+            assert not definition.search(chemin.read_text(encoding="utf-8")), chemin
+
+
+# Lot 9 (R13) : la forme de l'état et sa lecture sont définies une seule fois, dans lib.sh.
+# deployer.sh, qui écrit l'état, nettoyer-images.sh et lire_deploye, qui le relisent, s'en
+# servent : une forme nouvelle que deployer.sh accepterait vaudrait aussi pour le ménage, qui ne
+# s'annulerait pas, en silence, à chaque passage. Ni copie des motifs, ni motif en ligne.
+@pytest.mark.parametrize("sauvegardes", [True, False])
+def test_motifs_de_l_etat_definis_une_seule_fois(rendre, sauvegardes):
+    rendu = rendre(**{**REPONSES_SERVEUR, "sauvegardes": sauvegardes})
+    definitions = {
+        "MOTIF_REFERENCE": re.compile(r"^MOTIF_REFERENCE=", re.MULTILINE),
+        "MOTIF_VERSION": re.compile(r"^MOTIF_VERSION=", re.MULTILINE),
+        "lire_version": re.compile(r"^\s*(?:function\s+)?lire_version\s*\(\)", re.MULTILINE),
+        # le motif de la référence en toutes lettres, en ligne comme dans une définition
+        "motif en ligne": re.compile(re.escape("[a-z0-9][a-z0-9._/:-]*@sha256:[0-9a-f]{64}")),
+    }
+    trouvees = {nom: [] for nom in definitions}
+    for chemin in sorted((rendu / "deploiement").rglob("*.sh")):
+        texte = chemin.read_text(encoding="utf-8")
+        for nom, motif in definitions.items():
+            trouvees[nom] += [chemin.name] * len(motif.findall(texte))
+    assert trouvees == {nom: ["lib.sh"] for nom in definitions}
+    lib = lire(rendu, "deploiement/lib.sh")
+    assert '[[ "$DEPLOYE_IMAGE" =~ $MOTIF_REFERENCE ]]' in lib
+    for chemin in ("deploiement/deployer.sh", "deploiement/nettoyer-images.sh"):
+        texte = lire(rendu, chemin)
+        assert "$MOTIF_REFERENCE" in texte, chemin
+        assert re.search(r"^\s*(?:if )?lire_version ", texte, re.MULTILINE), chemin
+    assert "$MOTIF_VERSION" in lire(rendu, "deploiement/deployer.sh")
+
+
+# Les scripts de deploiement/ sont enregistrés exécutables (100755), comme deployer.sh : un projet
+# né du modèle les reçoit ainsi, quel que soit le poste qui l'a créé.
+def test_scripts_de_deploiement_executables_dans_l_index():
+    dossier = "template/{% if cible == 'serveur' %}deploiement{% endif %}"
+    sortie = subprocess.run(
+        ["git", "ls-files", "-s", "-z", "--", dossier],
+        cwd=RACINE,
+        capture_output=True,
+        check=True,
+    ).stdout.decode("utf-8")
+    modes = {}
+    for entree in filter(None, sortie.split("\0")):
+        infos, chemin = entree.split("\t", 1)
+        nom = re.sub(r"\{%.*?%\}", "", chemin.rsplit("/", 1)[-1])
+        if nom.endswith(".sh.jinja"):
+            modes[nom] = infos.split()[0]
+    assert {"deployer.sh.jinja", "lib.sh.jinja", "nettoyer-images.sh.jinja"} <= set(modes), modes
+    assert {nom: mode for nom, mode in modes.items() if mode != "100755"} == {}
+
+
 def test_pas_de_cloudflared(rendre):
     rendu = rendre(**REPONSES_SERVEUR)
     for chemin in fichiers_texte(rendu):
@@ -267,6 +333,7 @@ SECTIONS_EXPLOITATION = [
     "La mise en service",
     "Mettre en ligne",
     "Revenir en arrière",
+    "Les images",
     "Débloquer un déploiement",
     "Restaurer",
     "Exercice trimestriel",
@@ -280,6 +347,32 @@ SECTIONS_DES_SAUVEGARDES = ("Débloquer un déploiement", "Restaurer", "Exercice
 
 def section(texte, titre):
     return texte.split(f"\n## {titre}\n", 1)[1].split("\n## ", 1)[0]
+
+
+@pytest.mark.parametrize("sauvegardes", [True, False])
+def test_exploitation_dit_le_menage(rendre, sauvegardes):
+    rendu = rendre(**{**REPONSES_SERVEUR, "sauvegardes": sauvegardes})
+    images = section(lire(rendu, "docs/exploitation.md"), "Les images")
+    assert "bash ~/essai/deploiement/nettoyer-images.sh prod" in images
+    assert "les 3 plus récentes" in images
+    # R5 : le retrait des images à plusieurs étiquettes, sans jamais -f
+    assert "docker image rm <dépôt>:<étiquette>" in images
+    assert "jamais `-f`" in images
+    m0004 = lire(rendu, "docs/modele/decisions/M-0004-chaine-de-livraison.md")
+    assert "nettoyer-images.sh" in m0004
+    # Sauté dès que l'autre environnement tient son verrou : sa sonde à chaque passage, et la
+    # sauvegarde ou la restauration de la prod, dans le seul rendu qui en a.
+    plat = a_plat(images)
+    assert "un passage de sa sonde" in plat
+    assert ("une sauvegarde ou une restauration" in plat) is sauvegardes
+    # Où lire un ménage sauté, annulé ou en échec : le journal de l'unité de la sonde, et le bilan.
+    assert "journalctl --user -u essai-sonde-prod" in plat
+    assert "`essai-sonde-staging`" in plat
+    assert "`ménage des images : <n> retirées, <n> gardées (…)`" in plat
+    assert "`ménage des images sauté : …`" in plat
+    # R15 : le ménage suppose le magasin d'images classique ; containerd n'est pas vérifié.
+    assert "magasin classique" in plat
+    assert "Son comportement avec le magasin containerd n'est pas vérifié." in plat
 
 
 @pytest.mark.parametrize("visibilite", ["public", "prive"])

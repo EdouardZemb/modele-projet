@@ -133,7 +133,8 @@ nombre_de_lancements() {
   # aucun compose.env : `dc` échouerait, on ne demande même pas si l'application tourne
   deployer prod "$NOUVELLE" 0.2.0
   [ "$status" -eq 0 ]
-  [ "$(appels_de docker | grep -c ' ps ')" -eq 0 ]
+  # le `ps` de compose (l'application tourne-t-elle ?), pas le `docker ps --all` du ménage des images
+  [ "$(appels_de docker | grep -c ' compose .* ps ')" -eq 0 ]
   [ "$(appels_de docker | grep -c ' exec ')" -eq 0 ]
   [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
   [ ! -e "$ETAT/precedent" ]
@@ -472,7 +473,8 @@ exec '$DOUBLES/docker-double' \"\$@\""
   deployer prod "$NOUVELLE" 0.2.0
   [ "$status" -eq 0 ]
   [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
-  [ "$(appels_de docker | grep -cE ' (ps|exec) ')" -eq 0 ]
+  # ni `compose ps` ni `exec` ; le `docker ps --all` du ménage des images n'est pas la question posée
+  [ "$(appels_de docker | grep -cE ' compose .* (ps|exec) ')" -eq 0 ]
   [ "$(cat "$ETAT/compose.env")" = "$(contenu_compose_env prod "$NOUVELLE" 0.2.0)" ]
   aucune_ligne 'SAUVEGARDES' "$ETAT/compose.env" "$EN_SERVICE"
   # le retour arrière non plus
@@ -480,7 +482,8 @@ exec '$DOUBLES/docker-double' \"\$@\""
   deployer prod --retour
   [ "$status" -eq 0 ]
   [ "$(cat "$ETAT/deploye")" = "$ANCIENNE 0.1.0" ]
-  [ "$(appels_de docker | grep -cE ' (ps|exec) ')" -eq 0 ]
+  # ni `compose ps` ni `exec` ; le `docker ps --all` du ménage des images n'est pas la question posée
+  [ "$(appels_de docker | grep -cE ' compose .* (ps|exec) ')" -eq 0 ]
   [ ! -e "$HOME/backups" ]
 }
 {%- endif %}
@@ -1049,6 +1052,90 @@ attendre_le_verrou() {
   exec 8>&-
   [ "$status" -eq 0 ]
   [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+}
+
+# --- ménage des images -----------------------------------------------------------------------
+#
+# Après un succès (déploiement ou retour arrière), deployer.sh lance nettoyer-images.sh sous son
+# verrou. Le double de docker tient un stock (poser_image) : le ménage y retire ce que ni l'état, ni
+# un conteneur, ni la marge des 3 plus récentes ne gardent.
+
+# stock_a_nettoyer : une image du dépôt, la plus ancienne et sans protection (9), et trois plus
+# récentes (6, 7 et 8) qui remplissent la marge.
+stock_a_nettoyer() {
+  poser_image 9 2026-01-01T10:00:00Z "" "$(empreinte_de 9)"
+  poser_image 6 2026-10-06T10:00:00Z "" "$(empreinte_de 6)"
+  poser_image 7 2026-10-07T10:00:00Z "" "$(empreinte_de 7)"
+  poser_image 8 2026-10-08T10:00:00Z "" "$(empreinte_de 8)"
+}
+
+@test "deploiement_reussi_lance_le_menage" {
+  deja_en_service "$ANCIENNE" 0.1.0
+  stock_a_nettoyer
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 0 ]
+  appels_de docker | grep -Fx 'docker image ls --no-trunc --quiet'
+  aucune_ligne "^$(image_de 9)\|" "$BATS_TEST_TMPDIR/images"
+  grep -q "^$(image_de 8)|" "$BATS_TEST_TMPDIR/images"
+}
+
+@test "retour_reussi_lance_le_menage" {
+  deux_versions
+  stock_a_nettoyer
+  deployer prod --retour
+  [ "$status" -eq 0 ]
+  appels_de docker | grep -Fx 'docker image ls --no-trunc --quiet'
+  aucune_ligne "^$(image_de 9)\|" "$BATS_TEST_TMPDIR/images"
+  grep -q "^$(image_de 8)|" "$BATS_TEST_TMPDIR/images"
+}
+
+@test "deploiement_en_echec_ne_lance_pas_le_menage" {
+  deja_en_service "$ANCIENNE" 0.1.0
+  stock_a_nettoyer
+  export DOUBLE_DOCKER_UP_ECHEC="$NOUVELLE"
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 1 ]
+  [ "$(nombre_d_appels docker)" -gt 0 ]
+  aucune_ligne ' image ls' "$APPELS"
+  grep -q "^$(image_de 9)|" "$BATS_TEST_TMPDIR/images"
+}
+
+@test "menage_en_echec_le_deploiement_reste_reussi" {
+  deja_en_service "$ANCIENNE" 0.1.0
+  stock_a_nettoyer
+  export DOUBLE_DOCKER_IMAGE_LS_ECHEC=1
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 0 ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+  [[ "$output" == *"ménage des images en échec (code 1) : le déploiement reste réussi"* ]]
+  [ "$(signaux)" = "$(signal 'déployé 0.2.0') $HC" ]
+  aucune_ligne '/fail' "$APPELS.urls"
+}
+
+@test "le_menage_passe_apres_le_signal_ok" {
+  deja_en_service "$ANCIENNE" 0.1.0
+  stock_a_nettoyer
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 0 ]
+  [ -n "$(ligne_de ' -K -')" ]
+  [ "$(ligne_de ' -K -')" -lt "$(ligne_de ' image ls')" ]
+}
+
+# De bout en bout : ce que deployer.sh vient d'écrire dans l'état (deploye, precedent, compose.env,
+# compose.env.precedent), le ménage le lit. Les images de la version déployée (d) et de la
+# précédente (c) sont plus anciennes que les trois de la marge : seul l'état les garde, et sans
+# lui elles partiraient avec la quatrième image, plus ancienne encore (9).
+@test "le_menage_garde_ce_que_le_deploiement_vient_d_ecrire" {
+  deja_en_service "$ANCIENNE" 0.1.0
+  poser_image c 2026-01-02T10:00:00Z "" "$ANCIENNE"
+  poser_image d 2026-01-03T10:00:00Z "" "$NOUVELLE"
+  stock_a_nettoyer
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 0 ]
+  grep -q "^$(image_de c)|" "$BATS_TEST_TMPDIR/images"
+  grep -q "^$(image_de d)|" "$BATS_TEST_TMPDIR/images"
+  aucune_ligne "^$(image_de 9)\|" "$BATS_TEST_TMPDIR/images"
+  [[ "$output" == *"ménage des images : 1 retirée, 5 gardées (2 par l'état, 0 par un conteneur, 3 en marge)"* ]]
 }
 
 # --- divers ----------------------------------------------------------------------------------

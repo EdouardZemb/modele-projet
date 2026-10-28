@@ -52,6 +52,9 @@ def test_regex_reste_de_jinja():
     assert RESTE_DE_JINJA.search("{{nom}}")
     assert not RESTE_DE_JINJA.search("{{index .RepoDigests 0}}")
     assert not RESTE_DE_JINJA.search("{{ json .State.Health }}")
+    # le format de `docker image inspect` du ménage des images (lot 9)
+    assert not RESTE_DE_JINJA.search('{{range .RepoTags}}{{.}} {{end}}')
+    assert RESTE_DE_JINJA.search("{{ joindre }}")
     assert not RESTE_DE_JINJA.search("${{ secrets.X }}")
 
 
@@ -62,7 +65,7 @@ def test_settings_porte_garde_et_signaux(rendre, cible):
     (groupe,) = doc["hooks"]["SessionStart"]
     assert groupe["matcher"] == "startup|resume"
     (crochet,) = groupe["hooks"]
-    assert crochet["type"] == "command" and crochet["timeout"] == 20
+    assert crochet["type"] == "command" and crochet["timeout"] == 30
     assert (
         crochet["command"]
         == 'sh "$CLAUDE_PROJECT_DIR/scripts/modele/lancer.sh" "$CLAUDE_PROJECT_DIR/scripts/modele/signaux.py"'

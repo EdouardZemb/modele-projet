@@ -36,6 +36,12 @@ def test_ruleset_du_depot_modele():
     assert contextes <= produits
 
 
+def test_le_job_des_tests_a_25_minutes():
+    """LE-29 : sous Windows, la suite a dépassé 15 min ; GitHub coupait le job sans test en échec."""
+    jobs = yaml.safe_load(CI.read_text(encoding="utf-8"))["jobs"]
+    assert jobs["tests"]["timeout-minutes"] == 25
+
+
 def test_mecanique_et_fausse_app_dans_la_ci_du_depot_modele():
     """R17 : seul le job mecanique lance les bats ; fausse-app passe l'action d'image d'un rendu."""
     jobs = yaml.safe_load(CI.read_text(encoding="utf-8"))["jobs"]
@@ -82,8 +88,19 @@ def test_mecanique_et_fausse_app_dans_la_ci_du_depot_modele():
         i for i, e in enumerate(fausse_app["steps"]) if "copier copy" in e.get("run", "")
     ]
     assert rendu_avant and rendu_avant[0] < fausse_app["steps"].index(construire)
+    # L'épreuve du ménage des images (#19), sur le vrai Docker du job, après la construction.
+    (epreuve,) = [e for e in fausse_app["steps"] if "epreuve-menage" in e.get("run", "")]
+    assert epreuve["run"] == "bash tests/modele/epreuve-menage.sh rendu"
+    assert fausse_app["steps"].index(construire) < fausse_app["steps"].index(epreuve)
+    # Le registre et les conteneurs de l'épreuve sont retirés quoi qu'il arrive, puis la fausse app :
+    # ce dernier retrait ferme le job.
+    (menage,) = [e for e in fausse_app["steps"] if "epreuve-registre" in e.get("run", "")]
+    assert menage["if"] == "always()"
+    assert "docker rm -f -v epreuve-registre epreuve-conteneur" in menage["run"]
+    assert fausse_app["steps"].index(epreuve) < fausse_app["steps"].index(menage)
     assert fausse_app["steps"][-1]["if"] == "always()"
     assert fausse_app["steps"][-1]["run"] == "docker rm -f -v fausse-app"
+    assert fausse_app["steps"].index(menage) < len(fausse_app["steps"]) - 1
 
 
 def test_claude_md_du_depot_modele():
@@ -111,7 +128,7 @@ def test_settings_du_depot_modele():
     (groupe,) = reglage["hooks"]["SessionStart"]
     assert groupe["matcher"] == "startup|resume"
     (signaux,) = groupe["hooks"]
-    assert signaux["timeout"] == 20
+    assert signaux["timeout"] == 30
     assert "template/scripts/modele/signaux.py" in signaux["command"]
     assert signaux["command"].endswith("--branche main")
 

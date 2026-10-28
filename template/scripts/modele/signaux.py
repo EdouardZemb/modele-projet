@@ -31,7 +31,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
-BUDGET = 10.0  # secondes, pour tous les sous-processus d'une invocation (délai du hook : 20)
+BUDGET = 10.0  # secondes, pour tous les sous-processus d'une invocation (délai du hook : 30)
 # `datetime.UTC` n'existe qu'à partir de Python 3.11.
 UTC = timezone(timedelta(0))
 FENETRE = timedelta(days=7)

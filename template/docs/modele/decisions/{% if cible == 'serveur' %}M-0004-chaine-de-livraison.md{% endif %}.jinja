@@ -1,6 +1,8 @@
 # M-0004 — Chaîne de livraison : la CI publie l'image, le serveur va la chercher, une étiquette la met en production
 
 - **Statut** : accepté le 2026-10-18
+- **Amendé** le 2026-10-27, avec le lot 9 : après chaque déploiement ou retour arrière réussi, le
+  déploiement retire du serveur les images du projet qui ne servent plus (§ 3)
 - **Contexte amont** : la chaîne de livraison d'`ancrage` (son ADR-0006), généralisée par le
   modèle ; M-0002 (les étiquettes sont à Edouard) ; M-0003 (le contrat de l'image)
 
@@ -61,6 +63,15 @@ l'étiquette quittée.
   défaut** : à la mise en service d'un dépôt public, 👤 Edouard le passe en public
   (`docs/exploitation.md`). Le serveur tire avec un seul jeton `read:packages` pour tout le parc,
   rangé dans `~/.config/serveur/docker` par la sonde de `serveur`.
+- **Le serveur ne garde que les images utiles.** Après chaque déploiement ou retour arrière réussi,
+  `deployer.sh` lance `deploiement/nettoyer-images.sh`, qui retire les images du projet que ni
+  l'état des deux environnements, ni un conteneur, ni la marge des 3 plus récentes ne gardent. Son
+  échec ne change pas le résultat du déploiement. GHCR garde tout : une image retirée revient par
+  un `docker pull`, et un retour arrière par une étiquette n'en dépend pas. La sonde de `serveur`,
+  elle, ne supprime toujours rien. Une image qui porte au plus une étiquette se retire par son
+  identifiant ; une image qui en porte deux ou plus, par ses étiquettes, un appel chacune, car
+  Docker refuse sans `-f` le retrait par identifiant d'une telle image. Le script ne passe jamais
+  `-f`.
 
 ### 4. Les secrets : refaits sur le poste
 
@@ -126,4 +137,6 @@ Cet ADR doit être rouvert si :
 - le parc passe à un second serveur ;
 - un projet doit être mis en production sans GitHub, ou plus vite que la sonde ;
 - un projet ne peut plus tenir l'invariant 4, et son retour arrière demande davantage qu'une
-  étiquette.
+  étiquette ;
+- un retour arrière a besoin d'une image que le ménage des images (amendement du 2026-10-27, § 3) a
+  retirée du serveur, et que GHCR ne rend pas.
