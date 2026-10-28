@@ -21,13 +21,18 @@
 #      plus), sauf si {{ prefixe }}VERROU_TENU=1 ;
 #   1 bis. la garde du dossier de données, si une version est déployée (${{ prefixe }}ETAT/deploye) : un
 #      déploiement ou un retour arrière est refusé, code 1 signalé et rien de changé, quand
-#      ${{ prefixe }}DONNEES est vide (fichiers cachés compris), ou n'est plus le dossier de la version
-#      déployée. Ce dossier de référence est la valeur de {{ prefixe }}DONNEES dans le compose.env de
-#      cette version (celui dont {{ prefixe }}IMAGE est l'image de deploye) : même chaîne, ou même
-#      chemin réel (`realpath`) quand les deux dossiers existent ; un ancien dossier disparu compte
-#      comme changé. Sans compose.env qui décrive la version déployée, seul le vide est contrôlé, et
-#      le journal le dit. `--donnees-neuves` (déploiement seulement, à la main) lève les deux
-#      contrôles pour ce déploiement, et le journal le dit ;
+#      ${{ prefixe }}DONNEES n'est plus le dossier de la version déployée (« changé »), sinon quand
+#      il est vide (fichiers cachés compris ; un dossier de données qui est un lien est suivi, comme
+#      Docker le suit au montage). « Changé » passe d'abord : une autre racine, que charger_env
+#      vient de créer vide, est dite changée, et le journal donne les deux chemins. La référence est
+#      le chemin canonique que le dernier succès a écrit dans ${{ prefixe }}ETAT/donnees : même
+#      dossier si `realpath` donne aujourd'hui exactement ce chemin, qui n'est jamais résolu de
+#      nouveau (un lien repointé est vu). Sans ce fichier (un état d'avant la v0.5.0 du modèle),
+#      c'est la valeur de {{ prefixe }}DONNEES dans le compose.env de la version déployée (celui dont
+#      {{ prefixe }}IMAGE est l'image de deploye) : même chaîne, ou même chemin réel quand les deux
+#      dossiers existent ; un ancien dossier disparu compte comme changé. Sans l'un ni l'autre, seul
+#      le vide est contrôlé, et le journal le dit. `--donnees-neuves` (déploiement seulement, à la
+#      main) lève les deux contrôles pour ce déploiement, et le journal le dit, même au premier ;
 #   2. si l'application tourne, et si la version en service monte /sauvegardes (son compose.env
 #      déclare {{ prefixe }}SAUVEGARDES ; sinon, les sauvegardes viennent d'être activées : pas
 #      d'instantané, et le journal le dit), instantané de ses données dans le dossier
@@ -52,7 +57,12 @@
 #   4. `docker compose up -d --wait --remove-orphans` (un conteneur dont aucun des deux fichiers
 #      compose ne déclare plus le service est retiré), puis santé sur 127.0.0.1 : statut ok, la
 #      version attendue, et la révision du label org.opencontainers.image.revision de l'image ;
+{%- if sauvegardes %}
+#   5. succès : deploye ← "<image> <version>" (l'ancien dans precedent), donnees ← le chemin
+#      canonique du dossier de données, echec effacé, signal ok ;
+{%- else %}
 #   5. succès : deploye ← "<image> <version>" (l'ancien dans precedent), echec effacé, signal ok ;
+{%- endif %}
 #   6. échec : echec ← <image> d'abord (la sonde ne la retentera pas, même si la suite est
 #      coupée), puis retour à compose.env.precedent et contrôle de sa santé ; sans version
 #      précédente (premier déploiement), la version en échec est arrêtée. Signal /fail ;
@@ -95,6 +105,11 @@
 #   deploye                 "<image@sha256:…> <version>" de la version en service
 #   precedent               le contenu précédent de deploye
 #   echec                   l'image du dernier déploiement en échec
+{%- if sauvegardes %}
+#   donnees                 le chemin canonique (`realpath`) du dossier de données, écrit à chaque
+#                           succès, déploiement ou retour arrière, jamais par un refus ni un
+#                           échec : la référence de la garde (étape 1 bis)
+{%- endif %}
 #
 # Codes de sortie : 0 déployé ; 1 échec (signalé{% if sauvegardes %}, y compris le refus de la garde du dossier de
 # données ; non signalé{% else %}, sauf{% endif %} avant toute action : {{ prefixe }}IMAGE ou
@@ -251,40 +266,64 @@ purger_pre_deploiement() {
   fi
 }
 
-# controler_donnees <image> : la garde du dossier de données, sous le verrou et avant tout changement.
-# <image> est celle de deploye (vide si deploye l'est). Rend 0 si le déploiement peut continuer ; sinon
-# journalise le refus, le signale et rend 1, sans rien écrire dans ${{ prefixe }}ETAT. Sans deploye
-# (premier déploiement), ou avec --donnees-neuves, il n'y a rien à comparer à une version déployée.
+# controler_donnees <image> <quoi> <avant> : la garde du dossier de données, sous le verrou et avant
+# tout changement. <image> est celle de deploye (vide si deploye l'est) ; <quoi> et <avant> sont
+# ceux des messages de main. Rend 0 si le déploiement peut continuer ; sinon journalise le refus, le
+# signale et rend 1, sans rien écrire dans ${{ prefixe }}ETAT. Avec --donnees-neuves, le journal le
+# dit et rien n'est contrôlé ; sans deploye (premier déploiement), il n'y a rien à comparer.
 # Un dossier vide, ou qui n'est plus celui de la version déployée, ressemble à un disque ou à une
 # racine mal montés : l'application repartirait de zéro et le prochain instantané copierait du vide.
-# Le dossier de référence est celui du compose.env, s'il décrit la version déployée.
-# Le signal ne porte aucun chemin ; le journal les porte.
+# La référence est le chemin canonique que le dernier succès a écrit dans
+# ${{ prefixe }}ETAT/donnees, jamais résolu de nouveau : un lien repointé sur place la ferait suivre
+# sa nouvelle cible. Sans lui (un état d'avant la v0.5.0 du modèle), le compose.env, s'il décrit la
+# version déployée.
+# « Changé » passe avant « vide » : une autre racine, que charger_env vient de créer vide, est dite
+# changée, avec les deux chemins au journal. Le signal ne porte aucun chemin ; le journal les porte.
 controler_donnees() {
-  # quoi et avant sont des locales de main, vues d'ici par la portée dynamique de bash.
-  # shellcheck disable=SC2154
-  local deployee="$1" etat="${{ prefixe }}ETAT" donnees="${{ prefixe }}DONNEES" quoi="$quoi" avant="$avant" reference image_ref
-  [ -f "$etat/deploye" ] || return 0
+  local deployee="$1" quoi="$2" avant="$3" reference canonique image_ref change=0 fin
+  local etat="${{ prefixe }}ETAT" donnees="${{ prefixe }}DONNEES"
   if [ "$DONNEES_NEUVES" -eq 1 ]; then
-    journal "données neuves voulues : $donnees (contrôles du dossier de données levés pour ce déploiement)"
+    journal "données neuves voulues : $donnees" \
+      "(contrôles du dossier de données levés pour ce déploiement)"
     return 0
   fi
-  # Vide : aucune entrée, fichiers cachés compris. Un dossier illisible compte comme vide.
-  if [ -z "$(find "$donnees" -mindepth 1 -print -quit 2>/dev/null)" ]; then
-    journal "dossier de données vide : $donnees, alors qu'une version est déployée : $quoi refusé, rien n'a changé. Corriger la racine des données, ou, si c'est voulu, relancer à la main avec --donnees-neuves"
-    signaler_sonde echec "dossier de données vide avant $avant, rien n'a changé (voir le journal)"
+  [ -f "$etat/deploye" ] || return 0
+  fin="$quoi refusé, rien n'a changé. Corriger la racine des données, ou, si c'est voulu,"
+  fin="$fin relancer à la main avec --donnees-neuves"
+  reference="$(cat -- "$etat/donnees" 2>/dev/null)" || reference=""
+  if [ -n "$reference" ]; then
+    # Le même dossier si et seulement si son chemin canonique est aujourd'hui cette chaîne.
+    canonique="$(realpath -- "$donnees" 2>/dev/null)" || canonique=""
+    [ "$canonique" = "$reference" ] || change=1
+  else
+    # Le repli : le compose.env ne sert de référence que s'il décrit la version déployée.
+    image_ref="$(valeur_de {{ prefixe }}IMAGE "$etat/compose.env")" || image_ref=""
+    if [ -n "$deployee" ] && [ "$image_ref" = "$deployee" ] \
+      && reference="$(valeur_de {{ prefixe }}DONNEES "$etat/compose.env")" \
+      && [ -n "$reference" ]; then
+      # Même chaîne, ou même dossier sous deux noms (lien symbolique) ; un ancien dossier disparu
+      # est un changement.
+      if [ "$reference" != "$donnees" ] && ! { [ -d "$reference" ] && [ -d "$donnees" ] \
+        && [ "$(realpath -- "$reference")" = "$(realpath -- "$donnees")" ]; }; then
+        change=1
+      fi
+    else
+      journal "ni l'état ni compose.env ne disent le dossier de la version déployée :" \
+        "le chemin des données n'est pas comparé, seul le vide est contrôlé"
+    fi
+  fi
+  if [ "$change" -eq 1 ]; then
+    journal "dossier de données changé : $donnees au lieu de $reference," \
+      "celui de la version déployée : $fin"
+    signaler_sonde echec "dossier de données changé avant $avant, rien n'a changé (voir le journal)"
     return 1
   fi
-  # Changé : le compose.env ne sert de référence que s'il décrit la version déployée.
-  image_ref="$(valeur_de {{ prefixe }}IMAGE "$etat/compose.env")" || image_ref=""
-  if [ -n "$deployee" ] && [ "$image_ref" = "$deployee" ]     && reference="$(valeur_de {{ prefixe }}DONNEES "$etat/compose.env")" && [ -n "$reference" ]; then
-    # Même chaîne, ou même dossier sous deux noms (lien symbolique) ; un ancien dossier disparu est un changement.
-    if [ "$reference" != "$donnees" ]       && ! { [ -d "$reference" ] && [ -d "$donnees" ] && [ "$(realpath -- "$reference")" = "$(realpath -- "$donnees")" ]; }; then
-      journal "dossier de données changé : $donnees au lieu de $reference, celui de la version déployée : $quoi refusé, rien n'a changé. Corriger la racine des données, ou, si c'est voulu, relancer à la main avec --donnees-neuves"
-      signaler_sonde echec "dossier de données changé avant $avant, rien n'a changé (voir le journal)"
-      return 1
-    fi
-  else
-    journal "compose.env ne décrit pas la version déployée : le chemin des données n'est pas comparé, seul le vide est contrôlé"
+  # Vide : aucune entrée, fichiers cachés compris. -H suit un dossier de données qui est lui-même un
+  # lien, comme Docker au montage. Un dossier illisible compte comme vide.
+  if [ -z "$(find -H "$donnees" -mindepth 1 -print -quit 2>/dev/null)" ]; then
+    journal "dossier de données vide : $donnees, alors qu'une version est déployée : $fin"
+    signaler_sonde echec "dossier de données vide avant $avant, rien n'a changé (voir le journal)"
+    return 1
   fi
   return 0
 }
@@ -457,7 +496,7 @@ main() {
   fi
 {%- if sauvegardes %}
   # 1 bis. La garde du dossier de données, avant toute lecture de l'application et tout changement.
-  controler_donnees "$deployee" || return 1
+  controler_donnees "$deployee" "$quoi" "$avant" || return 1
   if [ -f "$etat/compose.env" ]; then
     if ! conteneurs="$(dc ps -q app)"; then
       journal "état de l'application illisible (docker compose ps) : $quoi annulé, rien n'a changé"
@@ -514,8 +553,15 @@ main() {
   fi
 
   # 5. Succès. Un retour arrière garde `echec` (la version quittée) et consomme `precedent`.
+{%- if sauvegardes %}
+  # Juste après deploye, donnees : le chemin canonique du dossier de données, la référence de la
+  # garde au déploiement suivant. Seul un succès l'écrit.
+{%- endif %}
   if [ "$RETOUR" -eq 1 ]; then
     ecrire_atomique "$etat/deploye" "$REFERENCE $VERSION"
+{%- if sauvegardes %}
+    ecrire_atomique "$etat/donnees" "$(realpath -- "${{ prefixe }}DONNEES")"
+{%- endif %}
     rm -f -- "$etat/precedent"
     journal "retour effectué : $VERSION ($REFERENCE) ; $VERSION_QUITTEE reste marquée en échec"
     signaler_sonde ok "retour à $VERSION effectué (depuis $VERSION_QUITTEE)"
@@ -526,6 +572,9 @@ main() {
     copier_atomique "$etat/deploye" "$etat/precedent"
   fi
   ecrire_atomique "$etat/deploye" "$REFERENCE $VERSION"
+{%- if sauvegardes %}
+  ecrire_atomique "$etat/donnees" "$(realpath -- "${{ prefixe }}DONNEES")"
+{%- endif %}
   rm -f -- "$etat/echec"
   journal "déployé : $VERSION ($REFERENCE)"
   signaler_sonde ok "déployé $VERSION"

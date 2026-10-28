@@ -208,8 +208,8 @@ en_service() {
 }
 
 # poser_donnees <env> : un fichier dans le dossier de données de cet environnement, comme celui d'une
-# application qui a déjà servi. deployer.sh refuse un dossier vide quand une version est déployée :
-# un test qui part de en_service, sans déploiement réel, doit donc le poser.
+# application qui a déjà servi. Avec les sauvegardes, deployer.sh refuse un dossier vide quand une
+# version est déployée : un test qui part de en_service, sans déploiement réel, doit donc le poser.
 poser_donnees() {
   local dossier="${{ prefixe }}RACINE_DONNEES/$1/donnees"
   mkdir -p "$dossier"

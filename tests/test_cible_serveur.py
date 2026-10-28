@@ -380,19 +380,30 @@ def test_exploitation_dit_la_garde_des_donnees(rendre, sauvegardes):
     rendu = rendre(**{**REPONSES_SERVEUR, "sauvegardes": sauvegardes})
     runbook = lire(rendu, "docs/exploitation.md")
     geste = "bash ~/essai/deploiement/deployer.sh prod <image@sha256:…> <X.Y.Z> --donnees-neuves"
+    geste_staging = (
+        "bash ~/essai-staging/deploiement/deployer.sh staging <image@sha256:…> main"
+        " --donnees-neuves"
+    )
+    # Aucun gabarit de préfixe : le rendu nomme la variable du projet.
+    assert "<PREFIXE>" not in runbook
     if not sauvegardes:
         assert "--donnees-neuves" not in runbook
         return
     plat = a_plat(section(runbook, "Débloquer un déploiement"))
     assert geste in plat
+    assert geste_staging in plat
     assert "dossier de données vide" in plat
     assert "dossier de données changé" in plat
     # La limite du § 2.6 : une racine de l'état déplacée passe pour un premier déploiement.
     assert "racine de l'état" in plat
     assert "journalctl --user -u essai-sonde-<env>" in plat
+    # Des données vraiment perdues se restaurent : la restauration ne passe pas par la garde.
+    assert "« Restaurer »" in plat
     m0005 = a_plat(lire(rendu, "docs/modele/decisions/M-0005-sauvegardes-et-restauration.md"))
     assert "--donnees-neuves" in m0005
     assert "racine de l'état" in m0005
+    # La référence est le chemin canonique du dernier succès : un lien repointé est vu.
+    assert "canonique" in m0005
 
 
 @pytest.mark.parametrize("visibilite", ["public", "prive"])
