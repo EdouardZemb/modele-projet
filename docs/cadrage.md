@@ -64,6 +64,22 @@
 >   comme le garde. Rien de ce qu'écrit un fork n'y entre : les exécutions de PR sont écartées, une
 >   PR de fork s'affiche sans son texte, un workflow désactivé n'est nommé que si son fichier est
 >   dans la copie (LE-26). C'est un écart à la spec du lot, décidé pendant ses revues.
+>
+> **Amendé le 2026-10-28, à la clôture du lot 9, de la même façon.** Le lot 9 n'était pas au §11 :
+> il vient de l'issue #19, jugée importante le 27/10. Il ajoute une étape au §6.3 :
+>
+> - **après chaque déploiement ou retour arrière réussi**, `deployer.sh` lance
+>   `deploiement/nettoyer-images.sh`. Le script retire du serveur les images du projet que ni
+>   l'état des deux environnements, ni un conteneur, ni la marge des 3 plus récentes ne gardent.
+>   Il ne passe jamais `-f` et ne touche aucune image d'un autre dépôt ; une surprise annule le
+>   ménage sans rien retirer (M-0004, amendé). La sonde de `serveur` ne supprime toujours rien
+>   (§6.2), et GHCR garde tout ;
+> - **deux écarts à la spec du lot**, décidés pendant ses revues : une image qui porte plusieurs
+>   étiquettes se retire par ses étiquettes, puisque Docker refuse sans `-f` le retrait par
+>   identifiant d'une telle image ; les images se lisent par un gabarit que les CLI 28 et 29 de
+>   Docker acceptent (LE-28).
+>
+> Le hook `SessionStart` du lot 8 a 30 s au lieu de 20 (#45, LE-27).
 
 Ce cadrage est la partie publique de la spec de conception du modèle, issue d'une séance de questions avec Edouard : 12 questions, puis 5 parties de design validées une à une. La partie qui nomme le serveur est privée et n'est pas reproduite ici.
 
