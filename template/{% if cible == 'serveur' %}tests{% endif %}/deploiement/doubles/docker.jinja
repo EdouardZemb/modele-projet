@@ -1,14 +1,39 @@
 {#- Gabarit Copier. `${ {{- prefixe }}X}` : l'espace et le tiret évitent `${{{`, que Jinja lit mal. -#}
 #!/usr/bin/env bash
 {%- if sauvegardes %}
-# Double de `docker` pour les tests de la sonde, du déploiement, de la sauvegarde et de la
-# restauration : il note chaque appel dans $APPELS (le nom puis les arguments, séparés par des
-# espaces) et simule ce que ces scripts attendent de Docker. Rien n'est réellement tiré ni lancé.
+# Double de `docker` pour les tests de la sonde, du déploiement, du ménage des images, de la
+# sauvegarde et de la restauration : il note chaque appel dans $APPELS (le nom puis les arguments,
+# séparés par des espaces) et simule ce que ces scripts attendent de Docker. Rien n'est réellement
+# tiré, lancé ni retiré.
 {%- else %}
-# Double de `docker` pour les tests de la sonde et du déploiement : il note chaque appel dans
-# $APPELS (le nom puis les arguments, séparés par des espaces) et simule ce que ces scripts
-# attendent de Docker. Rien n'est réellement tiré ni lancé.
+# Double de `docker` pour les tests de la sonde, du déploiement et du ménage des images : il note
+# chaque appel dans $APPELS (le nom puis les arguments, séparés par des espaces) et simule ce que
+# ces scripts attendent de Docker. Rien n'est réellement tiré, lancé ni retiré.
 {%- endif %}
+#
+# Ménage des images : le stock est dans le dossier de $APPELS, posé par poser_image et
+# poser_conteneur (aide.bash). Le fichier images porte une ligne « <id>|<créée>|<noms>|<empreintes> »
+# par image (noms et empreintes séparés par des espaces), le fichier conteneurs une ligne « <id du
+# conteneur> <id de l'image> » par conteneur, arrêté ou non. Un fichier absent vaut un stock vide.
+#   image ls --no-trunc --quiet          l'identifiant de chaque image, une fois par nom, comme
+#                                        docker (une fois pour une image sans nom)
+#   image inspect --format <format> <id…>  la ligne du stock de chaque image : le format est celui
+#                                        du ménage, {% raw %}{{.Id}}|{{.Created}}|{{range .RepoTags}}{{.}} {{end}}|{{range .RepoDigests}}{{.}} {{end}}{% endraw %}
+#                                        (code 1, « No such image », pour un identifiant absent)
+#   ps --all --no-trunc --quiet          l'identifiant de chaque conteneur
+#   container inspect --format {% raw %}'{{.Image}}'{% endraw %} <id…>  l'image de chaque conteneur
+#   image rm <id>                        retire l'image du stock et écrit « Deleted: <id> »
+#   image rm <nom>                       retire ce nom (une étiquette) de l'image et écrit
+#                                        « Untagged: <nom> » ; comme docker, le dernier nom emporte
+#                                        l'image et ses empreintes, et « Deleted: <id> » suit
+# Garde-fou : `image rm` refuse (code 1) le retrait d'une image sans référence, d'une image dont
+# une référence est hors de ghcr.io/edouardzemb/{{ nom }} et de localhost:<port>/edouardzemb/{{ nom }},
+# ou d'une image qu'un conteneur utilise. Il refuse aussi (code 1, avec le message de docker), le
+# retrait par son identifiant d'une image qui porte deux étiquettes ou plus : sans -f, docker le
+# refuse (« image is referenced in multiple repositories »), et une telle image se retire par ses
+# étiquettes. Il refuse (code 125) toute option (-f, --force…), plus d'une image par appel, et tout
+# `image prune`, `system prune` ou `rmi`. Chaque refus est noté, une ligne, dans refus-images, à côté
+# de $APPELS : un test qui le trouve absent sait qu'aucun retrait interdit n'a été demandé.
 #
 # L'« application en service » est le fichier en-service.env, à côté de $APPELS : la configuration
 # effective du dernier `compose up` réussi, effacée par `compose stop|down`. Comme dans compose,
@@ -22,8 +47,13 @@
 #
 # Pilotage :
 #   DOUBLE_DOCKER_PULL_ERREUR        `pull` échoue avec ce message (« manifest unknown »…)
-#   DOUBLE_DOCKER_EMPREINTE          réponse de `image inspect` pour RepoDigests (une référence
+#   DOUBLE_DOCKER_EMPREINTE          réponse de `image inspect -f` pour RepoDigests (une référence
 #                                    image@sha256:… ; défaut : condensé de « a »)
+#   DOUBLE_DOCKER_IMAGE_LS_ECHEC     `image ls` échoue (code 1)
+#   DOUBLE_DOCKER_IMAGE_INSPECT_ECHEC  `image inspect --format` échoue (code 1) ; `-f` n'en dépend pas
+#   DOUBLE_DOCKER_PS_ECHEC           `ps` échoue (code 1)
+#   DOUBLE_DOCKER_IMAGE_RM_ECHEC     identifiants ou noms (séparés par des espaces) dont `image rm`
+#                                    échoue (code 1), sans refus noté
 {%- if sauvegardes %}
 #   DOUBLE_DOCKER_SAUVEGARDE_CODE    code de `compose exec … <sauvegarder> <dossier>` (défaut 0)
 #   DOUBLE_DOCKER_SAUVEGARDE_SORTIE  sa sortie (défaut : rien)
@@ -94,12 +124,27 @@
 {%- endif %}
 { printf '%s' docker; for argument in "$@"; do printf ' %s' "$argument"; done; printf '\n'; } >>"${APPELS:?APPELS non défini}"
 
+ARGUMENTS="$*"
 DOSSIER="$(dirname "$APPELS")"
 EN_SERVICE="$DOSSIER/en-service.env"
+STOCK_IMAGES="$DOSSIER/images"
+STOCK_CONTENEURS="$DOSSIER/conteneurs"
+# Le format de `image inspect` du ménage : identifiant, date de création, noms, empreintes.
+FORMAT_IMAGES='{% raw %}{{.Id}}|{{.Created}}|{{range .RepoTags}}{{.}} {{end}}|{{range .RepoDigests}}{{.}} {{end}}{% endraw %}'
 
 refuser() {
   echo "double docker : $*" >&2
   exit 125
+}
+
+# refuser_retrait <code> <raison> : un retrait que le ménage ne doit jamais demander. Noté dans
+# refus-images, puis refusé avec ce code.
+refuser_retrait() {
+  local code="$1"
+  shift
+  printf '%s : docker %s\n' "$*" "$ARGUMENTS" >>"$DOSSIER/refus-images"
+  echo "double docker : retrait refusé, $*" >&2
+  exit "$code"
 }
 
 [ -n "${DOCKER_CONFIG:-}" ] || refuser "DOCKER_CONFIG absent"
@@ -114,6 +159,119 @@ revision_de() {
   printf '%s\n' "${condense:0:40}"
 }
 
+# ligne_d_image <id> : la ligne du stock de cette image ; échec si elle n'y est pas.
+ligne_d_image() {
+  local ligne
+  [ -f "$STOCK_IMAGES" ] || return 1
+  while IFS= read -r ligne; do
+    if [ "${ligne%%|*}" = "$1" ]; then
+      printf '%s\n' "$ligne"
+      return 0
+    fi
+  done <"$STOCK_IMAGES"
+  return 1
+}
+
+# ligne_formatee <ligne du stock> : ce que Docker imprime pour FORMAT_IMAGES : chaque nom et chaque
+# empreinte est suivi d'une espace, la dernière comprise.
+ligne_formatee() {
+  local id cree noms empreintes element
+  IFS='|' read -r id cree noms empreintes <<<"$1"
+  printf '%s|%s|' "$id" "$cree"
+  for element in $noms; do printf '%s ' "$element"; done
+  printf '|'
+  for element in $empreintes; do printf '%s ' "$element"; done
+  printf '\n'
+}
+
+# du_projet <référence> : la référence est du dépôt du projet ou de son dépôt de test. Son nom
+# s'arrête à « @ », sinon au dernier « : » s'il suit le dernier « / » (pas à celui d'un port).
+du_projet() {
+  local nom="$1"
+  if [[ "$nom" == *@* ]]; then
+    nom="${nom%%@*}"
+  elif [[ "${nom##*/}" == *:* ]]; then
+    nom="${nom%:*}"
+  fi
+  [ "$nom" = ghcr.io/edouardzemb/{{ nom }} ] || [[ "$nom" =~ ^localhost:[0-9]+/edouardzemb/{{ nom }}$ ]]
+}
+
+# ligne_de_l_etiquette <nom> : la ligne du stock de l'image qui porte ce nom ; échec sinon.
+ligne_de_l_etiquette() {
+  local ligne noms nom
+  local -a liste=()
+  [ -f "$STOCK_IMAGES" ] || return 1
+  while IFS= read -r ligne; do
+    IFS='|' read -r _ _ noms _ <<<"$ligne"
+    read -r -a liste <<<"$noms"
+    for nom in "${liste[@]}"; do
+      if [ "$nom" = "$1" ]; then
+        printf '%s\n' "$ligne"
+        return 0
+      fi
+    done
+  done <"$STOCK_IMAGES"
+  return 1
+}
+
+# retirer_image <arguments de `image rm`…> : le garde-fou, puis le retrait. L'argument est
+# l'identifiant de l'image, ou l'un de ses noms : comme docker, le retrait d'un nom ne retire que ce
+# nom, et l'image avec ses empreintes quand c'était le dernier.
+retirer_image() {
+  local cible id ligne cree noms empreintes reference conteneur image reste=""
+  local -a references=() etiquettes=()
+  for argument in "$@"; do
+    case "$argument" in
+      -*) refuser_retrait 125 "option interdite $argument" ;;
+    esac
+  done
+  [ "$#" -eq 1 ] || refuser_retrait 125 "une image par appel"
+  cible="$1"
+  if ! ligne="$(ligne_d_image "$cible")" && ! ligne="$(ligne_de_l_etiquette "$cible")"; then
+    echo "Error response from daemon: No such image: $cible" >&2
+    exit 1
+  fi
+  IFS='|' read -r id cree noms empreintes <<<"$ligne"
+  read -r -a references <<<"$noms $empreintes"
+  read -r -a etiquettes <<<"$noms"
+  [ -n "${references[*]}" ] || refuser_retrait 1 "image sans référence"
+  for reference in "${references[@]}"; do
+    du_projet "$reference" || refuser_retrait 1 "référence hors du dépôt $reference"
+  done
+  if [ -f "$STOCK_CONTENEURS" ]; then
+    while read -r conteneur image; do
+      [ "$image" != "$id" ] || refuser_retrait 1 "image utilisée par le conteneur $conteneur"
+    done <"$STOCK_CONTENEURS"
+  fi
+  # Sans -f, docker ne retire par son identifiant qu'une image d'une étiquette au plus.
+  if [ "$cible" = "$id" ] && [ -n "${etiquettes[1]:-}" ]; then
+    echo "Error response from daemon: conflict: unable to delete ${id:7:12} (must be forced) - image is referenced in multiple repositories" >&2
+    refuser_retrait 1 "identifiant d'une image à plusieurs étiquettes"
+  fi
+  case " ${DOUBLE_DOCKER_IMAGE_RM_ECHEC:-} " in
+    *" $cible "*)
+      echo "Error response from daemon: conflict: unable to delete ${id:7:12} (cannot be forced) - image has dependent child images" >&2
+      exit 1
+      ;;
+  esac
+  if [ "$cible" != "$id" ]; then
+    for reference in "${etiquettes[@]}"; do
+      [ "$reference" = "$cible" ] || reste="${reste:+$reste }$reference"
+    done
+    echo "Untagged: $cible"
+  fi
+  # Il reste des noms : seul celui-ci part. Sinon, l'image quitte le stock, empreintes comprises.
+  while IFS= read -r ligne; do
+    if [ "${ligne%%|*}" != "$id" ]; then
+      printf '%s\n' "$ligne"
+    elif [ -n "$reste" ]; then
+      printf '%s|%s|%s|%s\n' "$id" "$cree" "$reste" "$empreintes"
+    fi
+  done <"$STOCK_IMAGES" >"$STOCK_IMAGES.tmp"
+  mv -f "$STOCK_IMAGES.tmp" "$STOCK_IMAGES"
+  [ -n "$reste" ] || echo "Deleted: $id"
+}
+
 case "${1:-}" in
   pull)
     if [ -n "${DOUBLE_DOCKER_PULL_ERREUR:-}" ]; then
@@ -124,13 +282,105 @@ case "${1:-}" in
     ;;
 
   image)
-    # docker image inspect -f <format> <référence>
-    { [ "${2:-}" = inspect ] && [ "${3:-}" = -f ]; } || refuser "image : attendu « image inspect -f <format> <référence> »"
-    case "$4" in
-      *RepoDigests*) printf '%s\n' "${DOUBLE_DOCKER_EMPREINTE:-ghcr.io/edouardzemb/{{ nom }}@sha256:$(printf 'a%.0s' {1..64})}" ;;
-      *org.opencontainers.image.revision*) revision_de "$5" ;;
-      *) refuser "image inspect : format inconnu $4" ;;
+    case "${2:-}" in
+      inspect)
+        case "${3:-}" in
+          -f)
+            # image inspect -f <format> <référence> : la sonde et le déploiement
+            case "$4" in
+              *RepoDigests*) printf '%s\n' "${DOUBLE_DOCKER_EMPREINTE:-ghcr.io/edouardzemb/{{ nom }}@sha256:$(printf 'a%.0s' {1..64})}" ;;
+              *org.opencontainers.image.revision*) revision_de "$5" ;;
+              *) refuser "image inspect : format inconnu $4" ;;
+            esac
+            ;;
+          --format)
+            # image inspect --format <format du ménage> <id…>
+            [ "${4:-}" = "$FORMAT_IMAGES" ] || refuser "image inspect : format inconnu ${4:-}"
+            [ "$#" -ge 5 ] || refuser "image inspect : identifiant absent"
+            if [ -n "${DOUBLE_DOCKER_IMAGE_INSPECT_ECHEC:-}" ]; then
+              echo "Error response from daemon: inspection impossible" >&2
+              exit 1
+            fi
+            code=0
+            for id in "${@:5}"; do
+              if ligne="$(ligne_d_image "$id")"; then
+                ligne_formatee "$ligne"
+              else
+                echo "Error: No such image: $id" >&2
+                code=1
+              fi
+            done
+            exit "$code"
+            ;;
+          *) refuser "image inspect : attendu -f ou --format" ;;
+        esac
+        ;;
+      ls)
+        [ "$ARGUMENTS" = "image ls --no-trunc --quiet" ] || refuser "image ls : attendu « image ls --no-trunc --quiet »"
+        if [ -n "${DOUBLE_DOCKER_IMAGE_LS_ECHEC:-}" ]; then
+          echo "Cannot connect to the Docker daemon. Is the docker daemon running?" >&2
+          exit 1
+        fi
+        [ -f "$STOCK_IMAGES" ] || exit 0
+        while IFS='|' read -r id _ noms _; do
+          [ -n "$id" ] || continue
+          read -r -a liste <<<"$noms"
+          [ -n "${liste[*]}" ] || liste=(sans-nom)
+          for _ in "${liste[@]}"; do
+            printf '%s\n' "$id"
+          done
+        done <"$STOCK_IMAGES"
+        ;;
+      rm)
+        shift 2
+        retirer_image "$@"
+        ;;
+      prune) refuser_retrait 125 "image prune interdit" ;;
+      *) refuser "image : sous-commande inattendue ${2:-}" ;;
     esac
+    ;;
+
+  rmi) refuser_retrait 125 "rmi interdit" ;;
+
+  system)
+    [ "${2:-}" != prune ] || refuser_retrait 125 "system prune interdit"
+    refuser "system : sous-commande inattendue ${2:-}"
+    ;;
+
+  ps)
+    [ "$ARGUMENTS" = "ps --all --no-trunc --quiet" ] || refuser "ps : attendu « ps --all --no-trunc --quiet »"
+    if [ -n "${DOUBLE_DOCKER_PS_ECHEC:-}" ]; then
+      echo "Cannot connect to the Docker daemon. Is the docker daemon running?" >&2
+      exit 1
+    fi
+    [ -f "$STOCK_CONTENEURS" ] || exit 0
+    while read -r conteneur _; do
+      [ -z "$conteneur" ] || printf '%s\n' "$conteneur"
+    done <"$STOCK_CONTENEURS"
+    ;;
+
+  container)
+    { [ "${2:-}" = inspect ] && [ "${3:-}" = --format ] && [ "${4:-}" = '{% raw %}{{.Image}}{% endraw %}' ] && [ "$#" -ge 5 ]; } \
+      || refuser "container : attendu « container inspect --format {% raw %}'{{.Image}}'{% endraw %} <id…> »"
+    code=0
+    for id in "${@:5}"; do
+      image=""
+      if [ -f "$STOCK_CONTENEURS" ]; then
+        while read -r conteneur image_du_conteneur; do
+          if [ "$conteneur" = "$id" ]; then
+            image="$image_du_conteneur"
+            break
+          fi
+        done <"$STOCK_CONTENEURS"
+      fi
+      if [ -n "$image" ]; then
+        printf '%s\n' "$image"
+      else
+        echo "Error: No such container: $id" >&2
+        code=1
+      fi
+    done
+    exit "$code"
     ;;
 
   compose)

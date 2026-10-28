@@ -217,6 +217,22 @@ def test_sonde_suit_la_branche_principale(rendre):
     assert '"git -C $CLONE merge --ff-only origin/principal"' in bats
 
 
+# Lot 9 : le dépôt GHCR du projet est défini une seule fois, dans lib.sh, et la sonde comme le
+# ménage des images s'en servent. Seule une ligne qui commence par `DEPOT_IMAGE=` le définit :
+# l'usage et les commentaires citent la variable de test, `ESSAI_DEPOT_IMAGE=…`.
+def test_depot_image_defini_une_seule_fois(rendre):
+    rendu = rendre(**REPONSES_SERVEUR)
+    definition = re.compile(r"^DEPOT_IMAGE=.*$", re.MULTILINE)
+    assert definition.findall(lire(rendu, "deploiement/lib.sh")) == ["DEPOT_IMAGE=ghcr.io/edouardzemb/essai"]
+    for chemin in ("deploiement/sonder.sh", "deploiement/nettoyer-images.sh"):
+        texte = lire(rendu, chemin)
+        assert not definition.search(texte), chemin
+        assert "$DEPOT_IMAGE" in texte, chemin
+    for chemin in sorted((rendu / "deploiement").rglob("*.sh")):
+        if chemin.name != "lib.sh":
+            assert not definition.search(chemin.read_text(encoding="utf-8")), chemin
+
+
 def test_pas_de_cloudflared(rendre):
     rendu = rendre(**REPONSES_SERVEUR)
     for chemin in fichiers_texte(rendu):
@@ -267,6 +283,7 @@ SECTIONS_EXPLOITATION = [
     "La mise en service",
     "Mettre en ligne",
     "Revenir en arrière",
+    "Les images",
     "Débloquer un déploiement",
     "Restaurer",
     "Exercice trimestriel",
@@ -280,6 +297,19 @@ SECTIONS_DES_SAUVEGARDES = ("Débloquer un déploiement", "Restaurer", "Exercice
 
 def section(texte, titre):
     return texte.split(f"\n## {titre}\n", 1)[1].split("\n## ", 1)[0]
+
+
+@pytest.mark.parametrize("sauvegardes", [True, False])
+def test_exploitation_dit_le_menage(rendre, sauvegardes):
+    rendu = rendre(**{**REPONSES_SERVEUR, "sauvegardes": sauvegardes})
+    images = section(lire(rendu, "docs/exploitation.md"), "Les images")
+    assert "bash ~/essai/deploiement/nettoyer-images.sh prod" in images
+    assert "les 3 plus récentes" in images
+    # R5 : le retrait des images à plusieurs étiquettes, sans jamais -f
+    assert "docker image rm <dépôt>:<étiquette>" in images
+    assert "jamais `-f`" in images
+    m0004 = lire(rendu, "docs/modele/decisions/M-0004-chaine-de-livraison.md")
+    assert "nettoyer-images.sh" in m0004
 
 
 @pytest.mark.parametrize("visibilite", ["public", "prive"])

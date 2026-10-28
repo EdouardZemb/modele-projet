@@ -82,8 +82,19 @@ def test_mecanique_et_fausse_app_dans_la_ci_du_depot_modele():
         i for i, e in enumerate(fausse_app["steps"]) if "copier copy" in e.get("run", "")
     ]
     assert rendu_avant and rendu_avant[0] < fausse_app["steps"].index(construire)
+    # L'épreuve du ménage des images (#19), sur le vrai Docker du job, après la construction.
+    (epreuve,) = [e for e in fausse_app["steps"] if "epreuve-menage" in e.get("run", "")]
+    assert epreuve["run"] == "bash tests/modele/epreuve-menage.sh rendu"
+    assert fausse_app["steps"].index(construire) < fausse_app["steps"].index(epreuve)
+    # Le registre et les conteneurs de l'épreuve sont retirés quoi qu'il arrive, puis la fausse app :
+    # ce dernier retrait ferme le job.
+    (menage,) = [e for e in fausse_app["steps"] if "epreuve-registre" in e.get("run", "")]
+    assert menage["if"] == "always()"
+    assert "docker rm -f -v epreuve-registre epreuve-conteneur" in menage["run"]
+    assert fausse_app["steps"].index(epreuve) < fausse_app["steps"].index(menage)
     assert fausse_app["steps"][-1]["if"] == "always()"
     assert fausse_app["steps"][-1]["run"] == "docker rm -f -v fausse-app"
+    assert fausse_app["steps"].index(menage) < len(fausse_app["steps"]) - 1
 
 
 def test_claude_md_du_depot_modele():

@@ -1,0 +1,499 @@
+{#- Gabarit Copier. `${ {{- prefixe }}X}` : l'espace et le tiret évitent `${{{`, que Jinja lit mal. -#}
+#!/usr/bin/env bats
+# nettoyer-images.sh : ce qui est une image du projet, ce qui est gardé (l'état des deux
+# environnements, les conteneurs, la marge), les verrous, les retraits, les abstentions.
+#
+# docker est un double (tests/deploiement/doubles/docker) : son stock d'images et de conteneurs est
+# posé par poser_image et poser_conteneur (aide.bash). Il refuse, et le note dans refus-images, tout
+# retrait que le ménage ne doit jamais demander : une image hors du dépôt ou sans référence, une
+# image qu'un conteneur utilise, une option, un `prune`, un `rmi`.
+
+# Chaque test tourne dans son propre processus : les `export` d'un test ne fuient pas dans les
+# autres, comme le veut le pilotage des doubles.
+# shellcheck disable=SC2030,SC2031
+
+bats_require_minimum_version 1.5.0
+
+load aide
+
+setup() {
+  preparer_environnement
+  installer_doubles docker
+  DEPOT_DU_PROJET=ghcr.io/edouardzemb/{{ nom }}
+  STOCK="$BATS_TEST_TMPDIR/images"
+  REFUS="$BATS_TEST_TMPDIR/refus-images"
+}
+
+teardown() {
+  abandonner_le_verrou
+}
+
+nettoyer() {
+  run bash "$CLONE/deploiement/nettoyer-images.sh" "$@"
+}
+
+# etat <env> <fichier> <contenu> : un fichier d'état de cet environnement (vide, sans contenu).
+etat() {
+  local dossier="${{ prefixe }}RACINE_ETAT/$1"
+  mkdir -p "$dossier"
+  if [ -n "$3" ]; then
+    printf '%s\n' "$3" >"$dossier/$2"
+  else
+    : >"$dossier/$2"
+  fi
+}
+
+# vider : un stock, un état et un journal des appels neufs, pour le cas suivant d'une boucle.
+vider() {
+  rm -rf "${{ prefixe }}RACINE_ETAT" "$STOCK" "$BATS_TEST_TMPDIR/conteneurs" "$REFUS"
+  : >"$APPELS"
+}
+
+# cinq_images : cinq images du dépôt, de 1 (la plus ancienne) à 5 (la plus récente, :main), que rien
+# ne protège. Sans autre protection, 1 et 2 partent, et 3, 4 et 5 restent en marge.
+cinq_images() {
+  local c
+  for c in 1 2 3 4; do
+    poser_image "$c" "2026-10-0${c}T10:00:00Z" "" "$(empreinte_de "$c")"
+  done
+  poser_image 5 2026-10-05T10:00:00Z "$DEPOT_DU_PROJET:main" "$(empreinte_de 5)"
+}
+
+# restent <c…> : ces images sont encore dans le stock.
+restent() {
+  local c
+  for c in "$@"; do
+    grep -q "^$(image_de "$c")|" "$STOCK" || {
+      echo "image $c retirée" >&2
+      return 1
+    }
+  done
+}
+
+# parties <c…> : ces images ont quitté le stock.
+parties() {
+  local c
+  for c in "$@"; do
+    if grep -q "^$(image_de "$c")|" "$STOCK"; then
+      echo "image $c encore là" >&2
+      return 1
+    fi
+  done
+}
+
+# retraits : les appels `docker image rm`, un par ligne.
+retraits() {
+  appels_de docker | grep -E '^docker image rm( |$)' || true
+}
+
+# retrait_de <c…> : les lignes de `retraits` qui retirent ces images, dans cet ordre.
+retrait_de() {
+  local c
+  for c in "$@"; do
+    printf 'docker image rm %s\n' "$(image_de "$c")"
+  done
+}
+
+# journal_dit <ligne> : le journal du dernier `run` a cette ligne, à l'heure près.
+journal_dit() {
+  printf '%s\n' "$output" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z //' | grep -Fxq -- "$1" || {
+    echo "ligne absente du journal : $1" >&2
+    return 1
+  }
+}
+
+# annule : le dernier `run` a annulé le ménage, sans rien retirer.
+annule() {
+  [ "$status" -eq 1 ]
+  [ -z "$(retraits)" ]
+  [[ "$output" == *"ménage des images annulé, rien n'est retiré : "* ]]
+}
+
+# bilan <texte> : la ligne de bilan du ménage.
+bilan() {
+  journal_dit "ménage des images : $1"
+}
+
+# --- ce qui est une image du projet ----------------------------------------------------------
+
+@test "retire_seulement_les_images_du_depot" {
+  # quatre images du dépôt que rien ne protège : la plus ancienne part, les trois autres sont la
+  # marge
+  poser_image 1 2026-10-01T10:00:00Z "$DEPOT_DU_PROJET:0.1.0" "$(empreinte_de 1)"
+  poser_image 2 2026-10-02T10:00:00Z "" "$(empreinte_de 2)"
+  poser_image 3 2026-10-03T10:00:00Z "$DEPOT_DU_PROJET:0.2.0" "$(empreinte_de 3)"
+  poser_image 4 2026-10-04T10:00:00Z "$DEPOT_DU_PROJET:main" "$(empreinte_de 4)"
+  # plus anciennes encore, mais à laisser : une image étrangère, une qui a aussi un nom ailleurs,
+  # une sans référence, et deux aux noms voisins du dépôt
+  poser_image 5 2026-09-01T10:00:00Z docker.io/library/busybox:1.36 \
+    "$(empreinte_de 5 docker.io/library/busybox)"
+  poser_image 6 2026-09-02T10:00:00Z ghcr.io/autre/projet:1 "$(empreinte_de 6)"
+  poser_image 7 2026-09-03T10:00:00Z "" ""
+  poser_image 8 2026-09-04T10:00:00Z "$DEPOT_DU_PROJET-autre:1" "$(empreinte_de 8 "$DEPOT_DU_PROJET-autre")"
+  poser_image 9 2026-09-05T10:00:00Z "$DEPOT_DU_PROJET/sous:1" "$(empreinte_de 9 "$DEPOT_DU_PROJET/sous")"
+  nettoyer prod
+  [ "$status" -eq 0 ]
+  [ "$(retraits)" = "$(retrait_de 1)" ]
+  parties 1
+  restent 2 3 4 5 6 7 8 9
+  [ ! -e "$REFUS" ]
+  journal_dit "image retirée : 111111111111 ($DEPOT_DU_PROJET:0.1.0 $(empreinte_de 1))"
+  bilan "1 retirée, 3 gardées (0 par l'état, 0 par un conteneur, 3 en marge)"
+}
+
+@test "depot_de_test_refuse_tout_sauf_un_registre_local" {
+  cinq_images
+  local valeur
+  for valeur in ghcr.io/edouardzemb/autre docker.io/x/y localhost/x '' $'localhost:5000/x\nghcr.io/y'; do
+    echo "cas : '$valeur'"
+    : >"$APPELS"
+    {{ prefixe }}DEPOT_IMAGE="$valeur" nettoyer prod
+    [ "$status" -eq 64 ]
+    [ ! -s "$APPELS" ]
+    journal_dit "{{ prefixe }}DEPOT_IMAGE refusée : seul un registre de la machine (localhost:<port>/…) est accepté"
+  done
+  restent 1 2 3 4 5
+}
+
+@test "depot_de_test_avec_un_port" {
+  local depot=localhost:5000/edouardzemb/{{ nom }}
+  poser_image 1 2026-10-01T10:00:00Z "" "$(empreinte_de 1 "$depot")"
+  poser_image 2 2026-10-02T10:00:00Z "" "$(empreinte_de 2 "$depot")"
+  poser_image 3 2026-10-03T10:00:00Z "" "$(empreinte_de 3 "$depot")"
+  poser_image 4 2026-10-04T10:00:00Z "$depot:main" "$(empreinte_de 4 "$depot")"
+  # plus anciennes, hors du dépôt de test : un nom voisin, et le dépôt GHCR du projet
+  poser_image 5 2026-09-01T10:00:00Z "$depot-autre:1" "$(empreinte_de 5 "$depot-autre")"
+  poser_image 6 2026-09-02T10:00:00Z "$DEPOT_DU_PROJET:0.1.0" "$(empreinte_de 6)"
+  {{ prefixe }}DEPOT_IMAGE="$depot" nettoyer prod
+  [ "$status" -eq 0 ]
+  # le nom de localhost:5000/…:main s'arrête au dernier « : », pas à celui du port
+  [ "$(retraits)" = "$(retrait_de 1)" ]
+  restent 2 3 4 5 6
+  [ ! -e "$REFUS" ]
+  bilan "1 retirée, 3 gardées (0 par l'état, 0 par un conteneur, 3 en marge)"
+}
+
+@test "une_image_listee_deux_fois_se_retire_une_fois" {
+  poser_image 1 2026-10-01T10:00:00Z "$DEPOT_DU_PROJET:0.1.0 $DEPOT_DU_PROJET:0.1.1" "$(empreinte_de 1)"
+  poser_image 2 2026-10-02T10:00:00Z "" "$(empreinte_de 2)"
+  poser_image 3 2026-10-03T10:00:00Z "" "$(empreinte_de 3)"
+  poser_image 4 2026-10-04T10:00:00Z "$DEPOT_DU_PROJET:0.2.0 $DEPOT_DU_PROJET:main" "$(empreinte_de 4)"
+  # le double, comme docker, liste une image une fois par nom (hors du journal des appels)
+  local liste
+  liste="$(APPELS="$BATS_TEST_TMPDIR/hors-journal.log" DOCKER_CONFIG="$BATS_TEST_TMPDIR/docker" \
+    docker image ls --no-trunc --quiet)"
+  [ "$(grep -cx "$(image_de 1)" <<<"$liste")" -eq 2 ]
+  [ "$(grep -cx "$(image_de 4)" <<<"$liste")" -eq 2 ]
+  nettoyer prod
+  [ "$status" -eq 0 ]
+  # chaque identifiant n'est inspecté qu'une fois, retiré une fois, compté une fois
+  local inspection
+  inspection="$(appels_de docker | grep '^docker image inspect --format ')"
+  [ "$(grep -o "$(image_de 1)" <<<"$inspection" | wc -l)" -eq 1 ]
+  [ "$(grep -o "$(image_de 4)" <<<"$inspection" | wc -l)" -eq 1 ]
+  # deux étiquettes : docker refuse sans -f le retrait par l'identifiant, elle part par ses
+  # étiquettes, une par appel, et la dernière emporte l'image
+  [ "$(retraits)" = "$(printf 'docker image rm %s\n' "$DEPOT_DU_PROJET:0.1.0" "$DEPOT_DU_PROJET:0.1.1")" ]
+  parties 1
+  restent 2 3 4
+  [ ! -e "$REFUS" ]
+  [ "$(grep -c 'image retirée : ' <<<"$output")" -eq 1 ]
+  journal_dit "image retirée : 111111111111 ($DEPOT_DU_PROJET:0.1.0 $DEPOT_DU_PROJET:0.1.1 $(empreinte_de 1))"
+  bilan "1 retirée, 3 gardées (0 par l'état, 0 par un conteneur, 3 en marge)"
+}
+
+@test "un_retrait_par_etiquette_en_echec_passe_a_l_image_suivante" {
+  # 1 et 2 partent ; 1 a deux étiquettes, et le retrait de la seconde échoue
+  poser_image 1 2026-10-01T10:00:00Z "$DEPOT_DU_PROJET:0.1.0 $DEPOT_DU_PROJET:0.1.1" "$(empreinte_de 1)"
+  local c
+  for c in 2 3 4; do
+    poser_image "$c" "2026-10-0${c}T10:00:00Z" "" "$(empreinte_de "$c")"
+  done
+  poser_image 5 2026-10-05T10:00:00Z "$DEPOT_DU_PROJET:main" "$(empreinte_de 5)"
+  export DOUBLE_DOCKER_IMAGE_RM_ECHEC="$DEPOT_DU_PROJET:0.1.1"
+  nettoyer prod
+  [ "$status" -eq 1 ]
+  [ "$(retraits)" = "$(printf 'docker image rm %s\n' "$DEPOT_DU_PROJET:0.1.0" "$DEPOT_DU_PROJET:0.1.1" \
+    "$(image_de 2)")" ]
+  # 1 reste, avec la seule étiquette que docker n'a pas pu retirer ; 2 part quand même
+  grep -Fx "$(image_de 1)|2026-10-01T10:00:00Z|$DEPOT_DU_PROJET:0.1.1|$(empreinte_de 1)" "$STOCK"
+  parties 2
+  restent 3 4 5
+  [ ! -e "$REFUS" ]
+  journal_dit "retrait impossible : 111111111111 (Error response from daemon: conflict: unable to delete 111111111111 (cannot be forced) - image has dependent child images)"
+  [[ "$output" != *"image retirée : 111111111111"* ]]
+  journal_dit "image retirée : 222222222222 ($(empreinte_de 2))"
+  bilan "1 retirée, 3 gardées (0 par l'état, 0 par un conteneur, 3 en marge)"
+}
+
+# --- ce qui est gardé ------------------------------------------------------------------------
+
+@test "chaque_fichier_d_etat_protege_son_image" {
+  local env_etat env_lance fichier version contenu
+  for env_etat in prod staging; do
+    version=0.1.0
+    [ "$env_etat" = prod ] || version=main
+    for fichier in deploye precedent echec compose.env compose.env.precedent; do
+      case "$fichier" in
+        deploye | precedent) contenu="$(empreinte_de 1) $version" ;;
+        echec) contenu="$(empreinte_de 1)" ;;
+        *) contenu="$(contenu_compose_env "$env_etat" "$(empreinte_de 1)" "$version")" ;;
+      esac
+      # son propre état, puis celui de l'autre environnement
+      for env_lance in prod staging; do
+        echo "cas : $env_etat/$fichier, ménage lancé en $env_lance"
+        vider
+        cinq_images
+        etat "$env_etat" "$fichier" "$contenu"
+        nettoyer "$env_lance"
+        [ "$status" -eq 0 ]
+        # 1, la plus ancienne, reste : son fichier d'état la nomme ; 2 part à sa place
+        [ "$(retraits)" = "$(retrait_de 2)" ]
+        restent 1 3 4 5
+        bilan "1 retirée, 4 gardées (1 par l'état, 0 par un conteneur, 3 en marge)"
+        [ ! -e "$REFUS" ]
+      done
+    done
+  done
+}
+
+@test "un_etat_illisible_annule_tout" {
+  local env cas fichier contenu
+  for env in prod staging; do
+    for cas in "deploye|$(empreinte_de 1)" "echec|" \
+      "compose.env|$(contenu_compose_env "$env" "$(empreinte_de 1)" main | grep -v '^{{ prefixe }}IMAGE=')"; do
+      fichier="${cas%%|*}"
+      contenu="${cas#*|}"
+      echo "cas : $env/$fichier"
+      vider
+      cinq_images
+      etat "$env" "$fichier" "$contenu"
+      nettoyer prod
+      annule
+      restent 1 2 3 4 5
+    done
+  done
+}
+
+@test "une_image_utilisee_par_un_conteneur_reste" {
+  cinq_images
+  poser_conteneur arrete 1
+  nettoyer prod
+  [ "$status" -eq 0 ]
+  [ "$(retraits)" = "$(retrait_de 2)" ]
+  restent 1 3 4 5
+  [ ! -e "$REFUS" ]
+  bilan "1 retirée, 4 gardées (0 par l'état, 1 par un conteneur, 3 en marge)"
+  # nommée par l'état et utilisée par un conteneur, elle compte une fois, pour l'état
+  vider
+  cinq_images
+  poser_conteneur arrete 1
+  etat prod deploye "$(empreinte_de 1) 0.1.0"
+  nettoyer prod
+  [ "$status" -eq 0 ]
+  bilan "1 retirée, 4 gardées (1 par l'état, 0 par un conteneur, 3 en marge)"
+}
+
+@test "la_marge_garde_les_plus_recentes_quelle_que_soit_la_precision" {
+  # Docker retire les zéros de fin de la fraction : un tri brut mettrait 00.5Z avant 00Z
+  poser_image 1 2026-10-27T10:00:00Z "" "$(empreinte_de 1)"
+  poser_image 2 2026-10-27T10:00:00.5Z "" "$(empreinte_de 2)"
+  poser_image 3 2026-10-27T10:00:01.25Z "" "$(empreinte_de 3)"
+  poser_image 4 2026-10-27T09:59:59.999999999Z "" "$(empreinte_de 4)"
+  poser_image 5 2026-10-27T10:00:02Z "" "$(empreinte_de 5)"
+  nettoyer prod
+  [ "$status" -eq 0 ]
+  restent 2 3 5
+  parties 1 4
+  bilan "2 retirées, 3 gardées (0 par l'état, 0 par un conteneur, 3 en marge)"
+}
+
+# --- les verrous -----------------------------------------------------------------------------
+
+@test "verrou_de_l_autre_environnement_pris_rien_ne_part" {
+  local env autre
+  for env in prod staging; do
+    autre=staging
+    [ "$env" = prod ] || autre=prod
+    echo "cas : ménage en $env, verrou de $autre pris"
+    vider
+    cinq_images
+    tenir_le_verrou "${{ prefixe }}RACINE_ETAT/$autre/verrou"
+    nettoyer "$env"
+    relacher_le_verrou
+    [ "$status" -eq 0 ]
+    [ ! -s "$APPELS" ]
+    restent 1 2 3 4 5
+    journal_dit "ménage des images sauté : le verrou ${{ prefixe }}RACINE_ETAT/$autre/verrou est pris ; le prochain déploiement le fera"
+  done
+}
+
+@test "autre_etat_absent_le_menage_a_lieu" {
+  cinq_images
+  nettoyer prod
+  [ "$status" -eq 0 ]
+  parties 1 2
+  restent 3 4 5
+  journal_dit "staging : aucun état (${{ prefixe }}RACINE_ETAT/staging absent), rien à y protéger"
+  # le ménage ne crée pas le dossier de l'autre environnement
+  [ ! -e "${{ prefixe }}RACINE_ETAT/staging" ]
+}
+
+@test "verrou_de_l_autre_qui_ne_s_ouvre_pas_annule_tout" {
+  cinq_images
+  mkdir -p "${{ prefixe }}RACINE_ETAT/staging/verrou"
+  nettoyer prod
+  annule
+  [ ! -s "$APPELS" ]
+  restent 1 2 3 4 5
+}
+
+@test "verrou_propre" {
+  cinq_images
+  tenir_le_verrou "${{ prefixe }}RACINE_ETAT/prod/verrou"
+  # à la main : il attend son verrou, puis abandonne sans rien lire
+  {{ prefixe }}VERROU_ATTENTE=1 nettoyer prod
+  [ "$status" -eq 1 ]
+  [ ! -s "$APPELS" ]
+  journal_dit "verrou ${{ prefixe }}RACINE_ETAT/prod/verrou toujours pris après 1 s : ménage abandonné, rien n'est retiré"
+  # tenu par celui qui le lance (le déploiement) : il ne l'attend pas
+  {{ prefixe }}VERROU_TENU=1 {{ prefixe }}VERROU_ATTENTE=1 nettoyer prod
+  relacher_le_verrou
+  [ "$status" -eq 0 ]
+  parties 1 2
+  bilan "2 retirées, 3 gardées (0 par l'état, 0 par un conteneur, 3 en marge)"
+}
+
+# --- les retraits et les abstentions ---------------------------------------------------------
+
+@test "un_retrait_en_echec_n_arrete_pas_les_suivants" {
+  cinq_images
+  DOUBLE_DOCKER_IMAGE_RM_ECHEC="$(image_de 1)"
+  export DOUBLE_DOCKER_IMAGE_RM_ECHEC
+  nettoyer prod
+  [ "$status" -eq 1 ]
+  # de la plus ancienne à la plus récente : 1, en échec, puis 2
+  [ "$(retraits)" = "$(retrait_de 1 2)" ]
+  restent 1 3 4 5
+  parties 2
+  [ ! -e "$REFUS" ]
+  journal_dit "retrait impossible : 111111111111 (Error response from daemon: conflict: unable to delete 111111111111 (cannot be forced) - image has dependent child images)"
+  bilan "1 retirée, 3 gardées (0 par l'état, 0 par un conteneur, 3 en marge)"
+}
+
+@test "liste_ou_inspection_en_echec_annule_tout" {
+  local variable
+  for variable in DOUBLE_DOCKER_IMAGE_LS_ECHEC DOUBLE_DOCKER_IMAGE_INSPECT_ECHEC DOUBLE_DOCKER_PS_ECHEC; do
+    echo "cas : $variable"
+    vider
+    cinq_images
+    poser_conteneur arrete 5
+    export "$variable=1"
+    nettoyer prod
+    unset "$variable"
+    annule
+    restent 1 2 3 4 5
+  done
+}
+
+@test "deux_menages_de_suite_le_second_ne_retire_rien" {
+  cinq_images
+  nettoyer prod
+  [ "$status" -eq 0 ]
+  parties 1 2
+  : >"$APPELS"
+  nettoyer prod
+  [ "$status" -eq 0 ]
+  [ -z "$(retraits)" ]
+  restent 3 4 5
+  bilan "0 retirée, 3 gardées (0 par l'état, 0 par un conteneur, 3 en marge)"
+}
+
+@test "usage" {
+  cinq_images
+  nettoyer
+  [ "$status" -eq 64 ]
+  nettoyer prod staging
+  [ "$status" -eq 64 ]
+  nettoyer recette
+  [ "$status" -eq 64 ]
+  [ ! -s "$APPELS" ]
+  restent 1 2 3 4 5
+}
+
+@test "jamais_de_force_ni_de_prune" {
+  # 1 et 2 partent, 1 par ses deux étiquettes, 2 par son identifiant
+  poser_image 1 2026-10-01T10:00:00Z "$DEPOT_DU_PROJET:0.1.0 $DEPOT_DU_PROJET:0.1.1" "$(empreinte_de 1)"
+  local c
+  for c in 2 3 4 5; do
+    poser_image "$c" "2026-10-0${c}T10:00:00Z" "" "$(empreinte_de "$c")"
+  done
+  nettoyer prod
+  [ "$status" -eq 0 ]
+  # trois retraits, chacun d'une seule cible, un identifiant ou une étiquette du dépôt, sans option
+  [ "$(retraits | wc -l)" -eq 3 ]
+  local ligne
+  while IFS= read -r ligne; do
+    [[ "$ligne" =~ ^docker\ image\ rm\ (sha256:[0-9a-f]{64}|ghcr\.io/edouardzemb/{{ nom }}:[^\ ]+)$ ]]
+  done < <(retraits)
+  aucune_ligne 'prune|rmi' "$APPELS"
+  [ ! -e "$REFUS" ]
+}
+
+# Le garde-fou des tests précédents : sans ces refus, « refus-images absent » ne prouverait rien.
+@test "le_double_refuse_les_retraits_interdits" {
+  export DOCKER_CONFIG="$BATS_TEST_TMPDIR/docker"
+  poser_image 1 2026-10-01T10:00:00Z "$DEPOT_DU_PROJET:0.1.0" "$(empreinte_de 1)"
+  poser_image 2 2026-10-02T10:00:00Z ghcr.io/autre/projet:1 "$(empreinte_de 2)"
+  poser_image 3 2026-10-03T10:00:00Z "" ""
+  poser_image 4 2026-10-04T10:00:00Z "" "$(empreinte_de 4)"
+  poser_conteneur arrete 4
+  poser_image 5 2026-10-05T10:00:00Z "$DEPOT_DU_PROJET:0.5.0 $DEPOT_DU_PROJET:0.5.1" "$(empreinte_de 5)"
+  local -a cas=(
+    "125 image rm -f $(image_de 1)"
+    "125 image rm --force $(image_de 1)"
+    "125 image rm $(image_de 1) $(image_de 4)"
+    "125 rmi $(image_de 1)"
+    "125 image prune -a"
+    "125 system prune"
+    "1 image rm $(image_de 2)"
+    "1 image rm ghcr.io/autre/projet:1"
+    "1 image rm $(image_de 3)"
+    "1 image rm $(image_de 4)"
+    "1 image rm $(image_de 5)"
+  )
+  local ligne refus=0
+  for ligne in "${cas[@]}"; do
+    echo "cas : docker ${ligne#* }"
+    # shellcheck disable=SC2086  # découpage voulu
+    run docker ${ligne#* }
+    [ "$status" -eq "${ligne%% *}" ]
+    refus=$((refus + 1))
+    [ "$(wc -l <"$REFUS")" -eq "$refus" ]
+  done
+  restent 1 2 3 4 5
+  # par son identifiant, une image à deux étiquettes est refusée avec le message de docker
+  run docker image rm "$(image_de 5)"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"(must be forced) - image is referenced in multiple repositories"* ]]
+  refus=$((refus + 1))
+  # un nom inconnu : l'erreur de docker, sans refus noté
+  run docker image rm "$DEPOT_DU_PROJET:inconnue"
+  [ "$status" -eq 1 ]
+  [ "$(wc -l <"$REFUS")" -eq "$refus" ]
+  # les retraits permis, et rien n'est noté : par l'identifiant, l'image quitte le stock…
+  run docker image rm "$(image_de 1)"
+  [ "$status" -eq 0 ]
+  [ "$output" = "Deleted: $(image_de 1)" ]
+  parties 1
+  # …par une étiquette, ce nom seul part, et la dernière emporte l'image et ses empreintes
+  run docker image rm "$DEPOT_DU_PROJET:0.5.0"
+  [ "$status" -eq 0 ]
+  [ "$output" = "Untagged: $DEPOT_DU_PROJET:0.5.0" ]
+  grep -Fx "$(image_de 5)|2026-10-05T10:00:00Z|$DEPOT_DU_PROJET:0.5.1|$(empreinte_de 5)" "$STOCK"
+  run docker image rm "$DEPOT_DU_PROJET:0.5.1"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf '%s\n' "Untagged: $DEPOT_DU_PROJET:0.5.1" "Deleted: $(image_de 5)")" ]
+  parties 5
+  [ "$(wc -l <"$REFUS")" -eq "$refus" ]
+}
