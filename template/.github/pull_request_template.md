@@ -1,6 +1,6 @@
 ## Ce que fait cette PR
 
-<!-- Une à trois phrases. Le lien vers l'issue du lot : « Ferme #n ». -->
+<!-- Une à trois phrases. Le lien vers l'issue du lot : « Closes #n », le mot-clé anglais que GitHub reconnaît pour fermer l'issue à la fusion. -->
 
 ## Vérifications
 
