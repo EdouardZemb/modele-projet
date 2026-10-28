@@ -18,7 +18,7 @@
 #   image ls --no-trunc --quiet          l'identifiant de chaque image, une fois par nom, comme
 #                                        docker (une fois pour une image sans nom)
 #   image inspect --format <format> <id…>  la ligne du stock de chaque image : le format est celui
-#                                        du ménage, {% raw %}{{.Id}}|{{.Created}}|{{join .RepoTags " "}}|{{join .RepoDigests " "}}{% endraw %}
+#                                        du ménage, {% raw %}{{.Id}}|{{.Created}}|{{range .RepoTags}}{{.}} {{end}}|{{range .RepoDigests}}{{.}} {{end}}{% endraw %}
 #                                        (code 1, « No such image », pour un identifiant absent)
 #   ps --all --no-trunc --quiet          l'identifiant de chaque conteneur
 #   container inspect --format {% raw %}'{{.Image}}'{% endraw %} <id…>  l'image de chaque conteneur
@@ -130,7 +130,7 @@ EN_SERVICE="$DOSSIER/en-service.env"
 STOCK_IMAGES="$DOSSIER/images"
 STOCK_CONTENEURS="$DOSSIER/conteneurs"
 # Le format de `image inspect` du ménage : identifiant, date de création, noms, empreintes.
-FORMAT_IMAGES='{% raw %}{{.Id}}|{{.Created}}|{{join .RepoTags " "}}|{{join .RepoDigests " "}}{% endraw %}'
+FORMAT_IMAGES='{% raw %}{{.Id}}|{{.Created}}|{{range .RepoTags}}{{.}} {{end}}|{{range .RepoDigests}}{{.}} {{end}}{% endraw %}'
 
 refuser() {
   echo "double docker : $*" >&2
@@ -170,6 +170,18 @@ ligne_d_image() {
     fi
   done <"$STOCK_IMAGES"
   return 1
+}
+
+# ligne_formatee <ligne du stock> : ce que Docker imprime pour FORMAT_IMAGES : chaque nom et chaque
+# empreinte est suivi d'une espace, la dernière comprise.
+ligne_formatee() {
+  local id cree noms empreintes element
+  IFS='|' read -r id cree noms empreintes <<<"$1"
+  printf '%s|%s|' "$id" "$cree"
+  for element in $noms; do printf '%s ' "$element"; done
+  printf '|'
+  for element in $empreintes; do printf '%s ' "$element"; done
+  printf '\n'
 }
 
 # du_projet <référence> : la référence est du dépôt du projet ou de son dépôt de test. Son nom
@@ -292,7 +304,7 @@ case "${1:-}" in
             code=0
             for id in "${@:5}"; do
               if ligne="$(ligne_d_image "$id")"; then
-                printf '%s\n' "$ligne"
+                ligne_formatee "$ligne"
               else
                 echo "Error: No such image: $id" >&2
                 code=1

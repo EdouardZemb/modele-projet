@@ -53,7 +53,7 @@ def test_regex_reste_de_jinja():
     assert not RESTE_DE_JINJA.search("{{index .RepoDigests 0}}")
     assert not RESTE_DE_JINJA.search("{{ json .State.Health }}")
     # le format de `docker image inspect` du ménage des images (lot 9)
-    assert not RESTE_DE_JINJA.search('{{join .RepoTags " "}}')
+    assert not RESTE_DE_JINJA.search('{{range .RepoTags}}{{.}} {{end}}')
     assert RESTE_DE_JINJA.search("{{ joindre }}")
     assert not RESTE_DE_JINJA.search("${{ secrets.X }}")
 

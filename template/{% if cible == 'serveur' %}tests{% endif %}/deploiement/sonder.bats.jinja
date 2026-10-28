@@ -363,16 +363,16 @@ signal() {
 
 # Le double trie les étiquettes avec `sort -rV` : on vérifie ici que c'est l'ordre du vrai git.
 @test "le_double_de_git_trie_les_etiquettes_comme_git" {
-  local vrai_git depot etiquette
+  local vrai_git origine etiquette
   vrai_git="$(PATH="${PATH//"$DOUBLES":/}" command -v git)"
-  depot="$BATS_TEST_TMPDIR/depot-reel"
-  "$vrai_git" init -q "$depot"
-  "$vrai_git" -C "$depot" -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m t
+  origine="$BATS_TEST_TMPDIR/depot-reel"
+  "$vrai_git" init -q "$origine"
+  "$vrai_git" -C "$origine" -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m t
   for etiquette in v0.9.0 v0.10.0 v0.2.1 v1.0.0-rc1 v1.0.0; do
-    "$vrai_git" -C "$depot" tag "$etiquette"
+    "$vrai_git" -C "$origine" tag "$etiquette"
   done
   export DOUBLE_GIT_ETIQUETTES='v0.9.0 v0.10.0 v0.2.1 v1.0.0-rc1 v1.0.0'
-  [ "$(git tag --list --sort=-v:refname)" = "$("$vrai_git" -C "$depot" tag --list --sort=-v:refname)" ]
+  [ "$(git tag --list --sort=-v:refname)" = "$("$vrai_git" -C "$origine" tag --list --sort=-v:refname)" ]
 }
 
 # Une étiquette posée à tort puis supprimée sur GitHub doit disparaître du clone de prod : `git
