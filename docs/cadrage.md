@@ -80,6 +80,21 @@
 >   Docker acceptent (LE-28).
 >
 > Le hook `SessionStart` du lot 8 a 30 s au lieu de 20 (#45, LE-27).
+>
+> **Amendé le 2026-10-28, à la clôture du lot 10, de la même façon.** Le lot 10 n'était pas au
+> §11 : il vient de l'issue #49, ouverte le 28/10 depuis un projet né du modèle. Il ajoute une
+> garde au §6.3, pour les projets qui ont des sauvegardes (§6.6) :
+>
+> - **avant l'instantané**, quand une version est déployée, `deployer.sh` refuse un déploiement
+>   ou un retour arrière si le dossier de données est vide, ou s'il n'est plus celui du dernier
+>   succès. Le chemin canonique du dernier succès est dans le fichier d'état `donnees` ; pour un
+>   état d'avant la `v0.5.0`, celui de `compose.env` en tient lieu. Le refus alerte, sans rien
+>   changer ni marquer la version en échec. Le geste 👤 `--donnees-neuves` lève la garde pour un
+>   déploiement (M-0005, amendé) ;
+> - **un écart du plan, puis un retour à la spec** : le plan avait pris pour seule référence le
+>   chemin écrit dans `compose.env`. La revue finale a montré qu'un lien repointé sur place
+>   passait alors, le cas même qui motivait le contrôle (LE-32). Le fichier `donnees` de la spec
+>   est rétabli, et `compose.env` reste le repli.
 
 Ce cadrage est la partie publique de la spec de conception du modèle, issue d'une séance de questions avec Edouard : 12 questions, puis 5 parties de design validées une à une. La partie qui nomme le serveur est privée et n'est pas reproduite ici.
 
