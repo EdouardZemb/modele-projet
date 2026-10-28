@@ -106,6 +106,7 @@ signal() {
   installer_doubles curl
   preparer staging
   echo "$AUTRE main" >"$ETAT/deploye"
+  poser_donnees staging
   poser_image 9 2026-01-01T10:00:00Z "" "$(empreinte_de 9)"
   poser_image 6 2026-10-06T10:00:00Z "" "$(empreinte_de 6)"
   poser_image 7 2026-10-07T10:00:00Z "" "$(empreinte_de 7)"
@@ -646,6 +647,7 @@ signal() {
 {%- if sauvegardes %}
 
   # 3. une nouvelle image de main : instantané, puis déploiement
+  poser_donnees staging
   : >"$APPELS"
   export DOUBLE_DOCKER_EMPREINTE="$AUTRE"
   sonder staging
@@ -654,6 +656,7 @@ signal() {
 {%- else %}
 
   # 3. une nouvelle image de main : déploiement, sans instantané
+  poser_donnees staging
   : >"$APPELS"
   export DOUBLE_DOCKER_EMPREINTE="$AUTRE"
   sonder staging
