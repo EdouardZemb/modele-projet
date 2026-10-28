@@ -43,7 +43,7 @@ declare -A ID=()
 declare -A EMPREINTE=()
 
 nettoyer() {
-  exec 7>&- 2>/dev/null || true
+  exec 7>&-
   docker rm -f -v "$CONTENEUR" >/dev/null 2>&1 || true
   docker rm -f -v "$REGISTRE" >/dev/null 2>&1 || true
   # Les images de l'épreuve : par leurs références d'abord (une image à plusieurs étiquettes ne se
@@ -113,6 +113,7 @@ lancer() {
   sed 's/^/    /' "$TRAVAIL/journal-$1"
 }
 
+echo "épreuve : moteur $(docker version --format '{{.Server.Version}}'), magasin $(docker info --format '{{.Driver}}')"
 echo "== le registre et les images"
 mkdir -p "$TRAVAIL/docker"
 docker rm -f -v "$REGISTRE" >/dev/null 2>&1 || true
@@ -151,19 +152,24 @@ for n in 2 3 4 5 6 7 8 9 10; do
       pousser "$DEPOT:0.1.0"
       ;;
   esac
-  EMPREINTE[m$n]="$(empreinte "m$n")"
+  EMPREINTE[m$n]="$(empreinte "m$n" || true)"
+  [ -n "${EMPREINTE[m$n]}" ] || {
+    echo "épreuve : pas d'empreinte pour m$n après le push" >&2
+    exit 1
+  }
 done
 # Hors du dépôt : une image d'un dépôt voisin, et une image sans aucune référence.
 construire autre localhost:5000/edouardzemb/fausse-app-autre:1
 pousser localhost:5000/edouardzemb/fausse-app-autre:1
 construire sans-nom
-# Le magasin d'images classique garde une image dont on déplace l'étiquette : sans nom, avec son
-# empreinte, comme sur le serveur. Celui de containerd la supprime. Chaque image qui manque est donc
-# tirée du registre par son empreinte, et revient sans nom, avec elle.
+# Le magasin classique garde une image dont l'étiquette bouge, sans nom, avec son empreinte ; celui
+# de containerd la supprime. L'épreuve rétablit cet état en tirant l'image par son empreinte.
 for n in 2 3 4 5 6 7 8 9 10; do
   if ! docker image inspect "${ID[m$n]}" >/dev/null 2>&1; then
-    docker pull -q "${EMPREINTE[m$n]}" >/dev/null
-    ID[m$n]="$(docker image inspect --format '{{.Id}}' "${EMPREINTE[m$n]}")"
+    ID[m$n]="$(docker pull -q "${EMPREINTE[m$n]}" >/dev/null 2>&1       && docker image inspect --format '{{.Id}}' "${EMPREINTE[m$n]}" 2>/dev/null)" || {
+      echo "épreuve : m$n manquante et non récupérable par son empreinte" >&2
+      exit 1
+    }
   fi
 done
 # Un conteneur jamais lancé sur m2 (une commande est requise pour une image sans CMD).
@@ -196,7 +202,7 @@ exec 7>&-
 echo "== 2. le verrou est libre : le ménage a lieu"
 lancer 2
 verifier "code 0" code_vaut 0
-verifier "le journal dit « 3 retirées »" journal_dit 2 '3 retirées'
+verifier "le journal dit « 3 retirées »" journal_dit 2 'ménage des images : 3 retirées'
 verifier "le journal ne dit pas « retrait impossible »" journal_tait 2 'retrait impossible'
 verifier "le journal ne dit pas « annulé »" journal_tait 2 'annulé'
 for n in m0 m1 m5; do verifier "$n est partie" absente "$n"; done
@@ -205,7 +211,7 @@ for n in m2 m3 m4 m6 m7 m8 m9 m10 autre sans-nom; do verifier "$n est encore là
 echo "== 3. un second ménage ne retire rien"
 lancer 3
 verifier "code 0" code_vaut 0
-verifier "le journal dit « 0 retirée »" journal_dit 3 '0 retirée'
+verifier "le journal dit « 0 retirée »" journal_dit 3 'ménage des images : 0 retirée'
 for n in m2 m3 m4 m6 m7 m8 m9 m10 autre sans-nom; do verifier "$n est encore là" present "$n"; done
 
 if [ "$ECHECS" -ne 0 ]; then
