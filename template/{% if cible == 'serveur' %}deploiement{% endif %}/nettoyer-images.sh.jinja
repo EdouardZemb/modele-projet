@@ -19,7 +19,8 @@
 #      pourrait partir avant d'être inscrite dans son état. Si le dossier d'état de l'autre
 #      environnement est absent, il n'y a rien à y protéger, et le journal le dit ;
 #   3. l'état des deux environnements, lu sans être sourcé : deploye, precedent, echec, et l'image
-#      de compose.env et de compose.env.precedent ;
+#      de compose.env et de compose.env.precedent, à la forme qu'écrit deployer.sh (MOTIF_REFERENCE
+#      et MOTIF_VERSION, lire_version : lib.sh) ;
 #   4. les conteneurs, même arrêtés, et l'image de chacun ;
 #   5. les images, chacune une fois, et leur tri :
 #      - une image est du projet si toutes ses références, noms et empreintes, portent exactement
@@ -38,10 +39,21 @@
 # Jamais de `-f`, de `docker image prune`, de `docker system prune` ni de retrait par un filtre : le
 # script liste toutes les images et choisit lui-même celles du projet.
 #
-# Le ménage est annulé en entier, sans rien retirer (code 1), si un fichier d'état existe mais ne se
-# lit pas ou n'a pas la forme qu'écrit deployer.sh, si la liste des images, leur inspection, la
-# liste des conteneurs ou leur inspection échoue, ou si le verrou de l'autre environnement ne
-# s'ouvre pas. Dans le doute, rien ne part.
+# Le ménage est annulé en entier, avant tout retrait (code 1), si :
+#   - le verrou de l'autre environnement ne s'ouvre pas, ou flock y échoue autrement que parce
+#     qu'il est pris ;
+#   - un fichier d'état existe mais ne se lit pas, ou n'a pas la forme qu'écrit deployer.sh ;
+#   - la liste des conteneurs ou leur inspection échoue, ou l'image d'un conteneur est illisible ;
+#   - la liste des images ou leur inspection échoue, un identifiant d'image est illisible, ou
+#     l'inspection est inattendue (un identifiant que la liste n'a pas donné) ou incomplète (moins
+#     d'images inspectées que listées) ;
+#   - la date de création d'une image candidate à la marge est illisible (attendu : la forme
+#     RFC 3339 en UTC que rend Docker ; un décalage, +02:00, ou une date vide annule) ;
+#   - le tri des images est impossible.
+# Dans le doute, rien ne part. Ce tout ou rien vaut jusqu'au premier retrait ; les retraits, eux,
+# se font image par image (étape 6), et une image retirée par ses étiquettes l'est en plusieurs
+# appels : un échec au milieu laisse l'image avec une étiquette de moins, ni retirée ni gardée
+# (code 1), et un ménage suivant la reprend avec celles qui lui restent.
 #
 # Journal : une ligne par image retirée, une fois partie (les 12 premiers chiffres de son
 # identifiant, puis ses références), une par image dont un retrait échoue, puis le bilan : les
@@ -65,11 +77,9 @@ set -euo pipefail
 # La marge : parmi les images du projet que rien ne protège, les plus récentes, gardées.
 MARGE=3
 
-# Ce qu'écrit deployer.sh dans l'état : ses motifs.
-MOTIF_REFERENCE='^[a-z0-9][a-z0-9._/:-]*@sha256:[0-9a-f]{64}$'
-MOTIF_VERSION='^(main|[0-9]+\.[0-9]+\.[0-9]+)$'
-# Ce que rend Docker : un identifiant, et une date RFC 3339 en UTC dont la fraction perd ses zéros
-# de fin, et disparaît s'il n'en reste rien (…T10:00:00Z, …T10:00:00.5Z, …T10:00:00.123456789Z).
+# Ce qu'écrit deployer.sh dans l'état suit MOTIF_REFERENCE et MOTIF_VERSION, de lib.sh. Ce que
+# rend Docker : un identifiant, et une date RFC 3339 en UTC dont la fraction perd ses zéros de fin,
+# et disparaît s'il n'en reste rien (…T10:00:00Z, …T10:00:00.5Z, …T10:00:00.123456789Z).
 MOTIF_IDENTIFIANT='^sha256:[0-9a-f]{64}$'
 MOTIF_DATE='^([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2})(\.([0-9]{1,9}))?Z$'
 # Le seul dépôt que la variable de test peut désigner : un registre de la machine.
@@ -84,8 +94,6 @@ declare -A UTILISEE=()   # identifiant → 1 : les images d'un conteneur, arrêt
 declare -A REFERENCES=() # identifiant → ses références, pour le journal
 declare -A ETIQUETTES=() # identifiant → ses noms (RepoTags), ses cibles de retrait s'il y en a 2+
 NOM=""                   # posé par nom_de
-IMAGE_LUE=""             # posée par lire_version
-VERSION_LUE=""           # posée par lire_version
 
 # annuler <raison> : le ménage s'arrête avant tout retrait, code 1.
 annuler() {
@@ -113,21 +121,12 @@ nom_de() {
   fi
 }
 
-# lire_version <fichier> : l'image et la version d'un fichier "<image@sha256:…> <version>" (deploye,
-# precedent) dans IMAGE_LUE et VERSION_LUE, comme deployer.sh les lit. Échec si le fichier manque,
-# ne se lit pas, ou si l'une des deux n'a pas la forme que deployer.sh écrit.
-lire_version() {
-  IMAGE_LUE="" VERSION_LUE=""
-  [ -f "$1" ] || return 1
-  { read -r IMAGE_LUE VERSION_LUE _ || true; } <"$1" || return 1
-  [[ "$IMAGE_LUE" =~ $MOTIF_REFERENCE ]] && [[ "$VERSION_LUE" =~ $MOTIF_VERSION ]]
-}
-
 # lire_etat <dossier> : NOMMEE ← les images que nomment les fichiers d'état de ce dossier, lus,
-# jamais sourcés : deploye et precedent ("<image@sha256:…> <version>"), echec ("<image@sha256:…>"),
-# et la ligne {{ prefixe }}IMAGE= de compose.env et de compose.env.precedent. Un fichier absent (ou un
-# dossier absent) ne protège rien ; un fichier présent qui ne se lit pas, ou qui n'a pas la forme
-# qu'écrit deployer.sh, annule le ménage.
+# jamais sourcés : deploye et precedent ("<image@sha256:…> <version>", par lire_version de lib.sh,
+# comme deployer.sh les lit), echec ("<image@sha256:…>"), et la ligne {{ prefixe }}IMAGE= de
+# compose.env et de compose.env.precedent. Un fichier absent (ou un dossier absent) ne protège
+# rien ; un fichier présent qui ne se lit pas, ou qui n'a pas la forme qu'écrit deployer.sh, annule
+# le ménage.
 lire_etat() {
   local fichier chemin image
   for fichier in deploye precedent echec compose.env compose.env.precedent; do

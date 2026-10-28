@@ -52,6 +52,7 @@
 #   DOUBLE_DOCKER_IMAGE_LS_ECHEC     `image ls` échoue (code 1)
 #   DOUBLE_DOCKER_IMAGE_INSPECT_ECHEC  `image inspect --format` échoue (code 1) ; `-f` n'en dépend pas
 #   DOUBLE_DOCKER_PS_ECHEC           `ps` échoue (code 1)
+#   DOUBLE_DOCKER_CONTAINER_INSPECT_ECHEC  `container inspect` échoue (code 1)
 #   DOUBLE_DOCKER_IMAGE_RM_ECHEC     identifiants ou noms (séparés par des espaces) dont `image rm`
 #                                    échoue (code 1), sans refus noté
 {%- if sauvegardes %}
@@ -362,6 +363,10 @@ case "${1:-}" in
   container)
     { [ "${2:-}" = inspect ] && [ "${3:-}" = --format ] && [ "${4:-}" = '{% raw %}{{.Image}}{% endraw %}' ] && [ "$#" -ge 5 ]; } \
       || refuser "container : attendu « container inspect --format {% raw %}'{{.Image}}'{% endraw %} <id…> »"
+    if [ -n "${DOUBLE_DOCKER_CONTAINER_INSPECT_ECHEC:-}" ]; then
+      echo "Error response from daemon: inspection impossible" >&2
+      exit 1
+    fi
     code=0
     for id in "${@:5}"; do
       image=""

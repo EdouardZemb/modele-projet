@@ -43,7 +43,7 @@
 #   6. échec : echec ← <image> d'abord (la sonde ne la retentera pas, même si la suite est
 #      coupée), puis retour à compose.env.precedent et contrôle de sa santé ; sans version
 #      précédente (premier déploiement), la version en échec est arrêtée. Signal /fail ;
-#   7. succès seulement (un déploiement et un retour arrière réussis), après le signal ok :
+#   7. succès seulement (un déploiement ou un retour arrière réussi), après le signal ok :
 #      nettoyer-images.sh, sous le même verrou ({{ prefixe }}VERROU_TENU=1 : il ne l'attend pas). Son
 #      échec est journalisé et ne change pas le résultat.
 {%- if sauvegardes %}
@@ -101,11 +101,10 @@ RETOUR=0         # 1 pour --retour
 ECHEC_IMAGE=""   # l'image que echec doit nommer si le lancement échoue : REFERENCE, ou en retour la version quittée
 VERSION_QUITTEE="" # en retour : la version en service avant le retour
 
-# Ce qui s'écrit dans compose.env : une seule ligne chacune, sans surprise.
-MOTIF_REFERENCE='^[a-z0-9][a-z0-9._/:-]*@sha256:[0-9a-f]{64}$'
-MOTIF_VERSION='^(main|[0-9]+\.[0-9]+\.[0-9]+)$'
-# L'origine du site, sans chemin ni requête : la forme que l'application accepte, en plus strict
-# (hôte en minuscules, sans identifiants).
+# Ce qui s'écrit dans compose.env : une seule ligne chacune, sans surprise. L'image et la version
+# suivent MOTIF_REFERENCE et MOTIF_VERSION, définis dans lib.sh : ceux que lire_version et le ménage
+# des images exigent en relisant l'état. L'origine du site, sans chemin ni requête : la forme que
+# l'application accepte, en plus strict (hôte en minuscules, sans identifiants).
 MOTIF_URL_PUBLIQUE='^https?://[a-z0-9.-]+(:[0-9]+)?$'
 
 # ecrire_atomique <fichier> <ligne…> : remplace le fichier d'un coup (fichier temporaire, puis mv).
@@ -236,18 +235,9 @@ purger_pre_deploiement() {
 }
 {%- endif %}
 
-# lire_version <fichier> : l'image et la version d'un fichier "<image@sha256:…> <version>" (deploye,
-# precedent) dans IMAGE_LUE et VERSION_LUE. Échec si le fichier manque ou si l'une des deux n'a pas
-# la forme qu'on écrit dans compose.env.
-lire_version() {
-  IMAGE_LUE="" VERSION_LUE=""
-  [ -f "$1" ] || return 1
-  { read -r IMAGE_LUE VERSION_LUE _ || true; } <"$1"
-  [[ "$IMAGE_LUE" =~ $MOTIF_REFERENCE ]] && [[ "$VERSION_LUE" =~ $MOTIF_VERSION ]]
-}
-
-# preparer_retour : sous le verrou, REFERENCE et VERSION ← la précédente ; ECHEC_IMAGE et
-# VERSION_QUITTEE ← la version en service. Code 64 et aucune écriture si le retour est impossible.
+# preparer_retour : sous le verrou, REFERENCE et VERSION ← la précédente (lire_version, lib.sh) ;
+# ECHEC_IMAGE et VERSION_QUITTEE ← la version en service. Code 64 et aucune écriture si le retour
+# est impossible.
 preparer_retour() {
   local etat="${{ prefixe }}ETAT" image_quittee
   lire_version "$etat/deploye" \

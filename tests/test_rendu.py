@@ -44,7 +44,7 @@ def test_nom_invalide_refuse(rendre, nom):
 
 
 # Un reste de Jinja : `{{` qui n'ouvre ni un `${{` de GitHub ni une action de gabarit Go.
-RESTE_DE_JINJA = re.compile(r"(?<!\$)\{\{(?!-?\s*(?:\.|index\b|json\b|join\b|range\b|end\b|if\b))")
+RESTE_DE_JINJA = re.compile(r"(?<!\$)\{\{(?!-?\s*(?:\.|index\b|json\b|range\b|end\b|if\b))")
 
 
 def test_regex_reste_de_jinja():
