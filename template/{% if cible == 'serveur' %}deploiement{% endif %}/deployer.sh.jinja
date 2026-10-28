@@ -42,7 +42,10 @@
 #   5. succès : deploye ← "<image> <version>" (l'ancien dans precedent), echec effacé, signal ok ;
 #   6. échec : echec ← <image> d'abord (la sonde ne la retentera pas, même si la suite est
 #      coupée), puis retour à compose.env.precedent et contrôle de sa santé ; sans version
-#      précédente (premier déploiement), la version en échec est arrêtée. Signal /fail.
+#      précédente (premier déploiement), la version en échec est arrêtée. Signal /fail ;
+#   7. succès seulement (un déploiement et un retour arrière réussis), après le signal ok :
+#      nettoyer-images.sh, sous le même verrou ({{ prefixe }}VERROU_TENU=1 : il ne l'attend pas). Son
+#      échec est journalisé et ne change pas le résultat.
 {%- if sauvegardes %}
 #
 # L'étape 2 n'a rien changé quand elle échoue. Un instantané impossible ne marque pas la version en
@@ -123,6 +126,18 @@ copier_atomique() {
 # journalisé, et le silence alertera de lui-même : le résultat du déploiement ne change pas.
 signaler_sonde() {
   signaler HC_SONDE "$@" || true
+}
+
+# menage_des_images : retire les images du projet qui ne servent plus (nettoyer-images.sh), sous le
+# verrou que ce script tient déjà. Le déploiement est fini et réussi : le ménage ne le remet pas en
+# cause, et ne rend jamais autre chose que 0.
+menage_des_images() {
+  local code=0
+  {{ prefixe }}VERROU_TENU=1 bash "${{ prefixe }}CLONE/deploiement/nettoyer-images.sh" "$NOM_ENV" || code=$?
+  if [ "$code" -ne 0 ]; then
+    journal "ménage des images en échec (code $code) : le déploiement reste réussi"
+  fi
+  return 0
 }
 
 # lancer : `up` du compose.env courant. Les secrets dont compose.projet.yml a besoin viennent de
@@ -442,6 +457,7 @@ main() {
     rm -f -- "$etat/precedent"
     journal "retour effectué : $VERSION ($REFERENCE) ; $VERSION_QUITTEE reste marquée en échec"
     signaler_sonde ok "retour à $VERSION effectué (depuis $VERSION_QUITTEE)"
+    menage_des_images
     return 0
   fi
   if [ -f "$etat/deploye" ]; then
@@ -451,6 +467,7 @@ main() {
   rm -f -- "$etat/echec"
   journal "déployé : $VERSION ($REFERENCE)"
   signaler_sonde ok "déployé $VERSION"
+  menage_des_images
   return 0
 }
 

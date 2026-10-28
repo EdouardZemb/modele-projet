@@ -6,8 +6,9 @@
 #
 #   bash deploiement/nettoyer-images.sh <prod|staging>
 #
-# Lancé avec {{ prefixe }}VERROU_TENU=1 par un script qui tient déjà le verrou de l'environnement, ou
-# à la main : il prend alors ce verrou lui-même. Toujours par `bash`, depuis le clone de
+# Lancé par deployer.sh après chaque déploiement ou retour arrière réussi, avec
+# {{ prefixe }}VERROU_TENU=1 (deployer.sh tient déjà le verrou de l'environnement), ou à la main : il
+# prend alors ce verrou lui-même. Toujours par `bash`, depuis le clone de
 # l'environnement.
 #
 # Déroulé :

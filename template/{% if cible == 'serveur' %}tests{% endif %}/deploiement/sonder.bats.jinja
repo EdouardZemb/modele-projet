@@ -98,6 +98,27 @@ signal() {
   [ "$(nombre_d_appels installer-unites.sh)" -eq 0 ]
 }
 
+# Le ménage des images, lancé par le vrai deployer.sh sous le verrou que la sonde tient : il hérite de
+# {{ prefixe }}VERROU_TENU=1 et ne l'attend pas. Sans cela il attendrait son propre verrou
+# ({{ prefixe }}VERROU_ATTENTE secondes, 600 par défaut) et abandonnerait.
+@test "la_sonde_deploie_puis_fait_le_menage_sans_attendre" {
+  cp "$DEPOT/deploiement/deployer.sh" "$CLONE/deploiement/deployer.sh"
+  installer_doubles curl
+  preparer staging
+  echo "$AUTRE main" >"$ETAT/deploye"
+  poser_image 9 2026-01-01T10:00:00Z "" "$(empreinte_de 9)"
+  poser_image 6 2026-10-06T10:00:00Z "" "$(empreinte_de 6)"
+  poser_image 7 2026-10-07T10:00:00Z "" "$(empreinte_de 7)"
+  poser_image 8 2026-10-08T10:00:00Z "" "$(empreinte_de 8)"
+  export {{ prefixe }}VERROU_ATTENTE=1 {{ prefixe }}SANTE_DELAI=0
+  sonder staging
+  [ "$status" -eq 0 ]
+  [ "$(cat "$ETAT/deploye")" = "$EMPREINTE main" ]
+  appels_de docker | grep -Fx 'docker image ls --no-trunc --quiet'
+  [[ "$output" != *"toujours pris"* ]]
+  aucune_ligne "^$(image_de 9)\|" "$BATS_TEST_TMPDIR/images"
+}
+
 @test "renvoie_le_code_du_deploiement" {
   preparer staging
   export DOUBLE_DEPLOYER_CODE=1
