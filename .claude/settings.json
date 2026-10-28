@@ -19,7 +19,7 @@
           {
             "type": "command",
             "command": "sh \"$CLAUDE_PROJECT_DIR/template/scripts/modele/lancer.sh\" \"$CLAUDE_PROJECT_DIR/template/scripts/modele/signaux.py\" --branche main",
-            "timeout": 20
+            "timeout": 30
           }
         ]
       }

@@ -62,7 +62,7 @@ def test_settings_porte_garde_et_signaux(rendre, cible):
     (groupe,) = doc["hooks"]["SessionStart"]
     assert groupe["matcher"] == "startup|resume"
     (crochet,) = groupe["hooks"]
-    assert crochet["type"] == "command" and crochet["timeout"] == 20
+    assert crochet["type"] == "command" and crochet["timeout"] == 30
     assert (
         crochet["command"]
         == 'sh "$CLAUDE_PROJECT_DIR/scripts/modele/lancer.sh" "$CLAUDE_PROJECT_DIR/scripts/modele/signaux.py"'
