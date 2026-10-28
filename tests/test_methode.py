@@ -131,6 +131,13 @@ def test_modele_de_pr():
         assert titre in texte.splitlines(), titre
 
 
+def test_modele_de_pr_ferme_l_issue():
+    # GitHub ne ferme l'issue à la fusion que sur un mot-clé anglais (LE-30).
+    texte = lire(TEMPLATE / ".github/pull_request_template.md")
+    assert "« Closes #n »" in texte
+    assert "Ferme #" not in texte
+
+
 # --- revue finale du lot 1 ---
 
 CHEMINS_GERES = (
