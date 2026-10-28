@@ -1121,6 +1121,23 @@ stock_a_nettoyer() {
   [ "$(ligne_de ' -K -')" -lt "$(ligne_de ' image ls')" ]
 }
 
+# De bout en bout : ce que deployer.sh vient d'écrire dans l'état (deploye, precedent, compose.env,
+# compose.env.precedent), le ménage le lit. Les images de la version déployée (d) et de la
+# précédente (c) sont plus anciennes que les trois de la marge : seul l'état les garde, et sans
+# lui elles partiraient avec la quatrième image, plus ancienne encore (9).
+@test "le_menage_garde_ce_que_le_deploiement_vient_d_ecrire" {
+  deja_en_service "$ANCIENNE" 0.1.0
+  poser_image c 2026-01-02T10:00:00Z "" "$ANCIENNE"
+  poser_image d 2026-01-03T10:00:00Z "" "$NOUVELLE"
+  stock_a_nettoyer
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 0 ]
+  grep -q "^$(image_de c)|" "$BATS_TEST_TMPDIR/images"
+  grep -q "^$(image_de d)|" "$BATS_TEST_TMPDIR/images"
+  aucune_ligne "^$(image_de 9)\|" "$BATS_TEST_TMPDIR/images"
+  [[ "$output" == *"ménage des images : 1 retirée, 5 gardées (2 par l'état, 0 par un conteneur, 3 en marge)"* ]]
+}
+
 # --- divers ----------------------------------------------------------------------------------
 
 # Le signal est un plus : un service de supervision injoignable ne change pas le résultat (son

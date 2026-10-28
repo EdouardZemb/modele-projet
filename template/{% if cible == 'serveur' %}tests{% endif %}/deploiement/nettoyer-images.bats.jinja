@@ -260,8 +260,12 @@ bilan() {
 @test "un_etat_illisible_annule_tout" {
   local env cas fichier contenu
   for env in prod staging; do
+    # deploye sans version, echec vide, compose.env sans image ; compose.env.precedent qui nomme
+    # une image par étiquette, et precedent dont la version n'a pas la forme qu'écrit deployer.sh
     for cas in "deploye|$(empreinte_de 1)" "echec|" \
-      "compose.env|$(contenu_compose_env "$env" "$(empreinte_de 1)" main | grep -v '^{{ prefixe }}IMAGE=')"; do
+      "compose.env|$(contenu_compose_env "$env" "$(empreinte_de 1)" main | grep -v '^{{ prefixe }}IMAGE=')" \
+      "compose.env.precedent|$(contenu_compose_env "$env" "$DEPOT_DU_PROJET:0.1.0" 0.1.0)" \
+      "precedent|$(empreinte_de 1) v0.1.0"; do
       fichier="${cas%%|*}"
       contenu="${cas#*|}"
       echo "cas : $env/$fichier"
@@ -382,8 +386,13 @@ bilan() {
 }
 
 @test "liste_ou_inspection_en_echec_annule_tout" {
-  local variable
-  for variable in DOUBLE_DOCKER_IMAGE_LS_ECHEC DOUBLE_DOCKER_IMAGE_INSPECT_ECHEC DOUBLE_DOCKER_PS_ECHEC; do
+  local cas variable raison
+  for cas in "DOUBLE_DOCKER_IMAGE_LS_ECHEC|liste des images impossible (docker image ls : code 1)" \
+    "DOUBLE_DOCKER_IMAGE_INSPECT_ECHEC|inspection des images impossible (docker image inspect : code 1)" \
+    "DOUBLE_DOCKER_PS_ECHEC|liste des conteneurs impossible (docker ps : code 1)" \
+    "DOUBLE_DOCKER_CONTAINER_INSPECT_ECHEC|inspection des conteneurs impossible (docker container inspect : code 1)"; do
+    variable="${cas%%|*}"
+    raison="${cas#*|}"
     echo "cas : $variable"
     vider
     cinq_images
@@ -392,6 +401,26 @@ bilan() {
     nettoyer prod
     unset "$variable"
     annule
+    journal_dit "ménage des images annulé, rien n'est retiré : $raison"
+    restent 1 2 3 4 5
+  done
+}
+
+# Une date de création que le ménage ne sait pas ranger, avec un décalage horaire ou vide : la
+# marge serait fausse, et le ménage s'annule plutôt que de deviner.
+@test "une_date_illisible_annule_tout" {
+  local date c
+  for date in 2026-10-01T12:00:00+02:00 ''; do
+    echo "cas : date '$date'"
+    vider
+    poser_image 1 "$date" "" "$(empreinte_de 1)"
+    for c in 2 3 4; do
+      poser_image "$c" "2026-10-0${c}T10:00:00Z" "" "$(empreinte_de "$c")"
+    done
+    poser_image 5 2026-10-05T10:00:00Z "$DEPOT_DU_PROJET:main" "$(empreinte_de 5)"
+    nettoyer prod
+    annule
+    journal_dit "ménage des images annulé, rien n'est retiré : date de création illisible pour 111111111111 : '$date'"
     restent 1 2 3 4 5
   done
 }

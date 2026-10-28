@@ -36,6 +36,12 @@ def test_ruleset_du_depot_modele():
     assert contextes <= produits
 
 
+def test_le_job_des_tests_a_25_minutes():
+    """LE-29 : sous Windows, la suite a dépassé 15 min ; GitHub coupait le job sans test en échec."""
+    jobs = yaml.safe_load(CI.read_text(encoding="utf-8"))["jobs"]
+    assert jobs["tests"]["timeout-minutes"] == 25
+
+
 def test_mecanique_et_fausse_app_dans_la_ci_du_depot_modele():
     """R17 : seul le job mecanique lance les bats ; fausse-app passe l'action d'image d'un rendu."""
     jobs = yaml.safe_load(CI.read_text(encoding="utf-8"))["jobs"]

@@ -13,9 +13,16 @@
 # m10, de la plus ancienne à la plus récente), des images hors du dépôt, un conteneur jamais lancé,
 # un état de prod et de staging. Puis trois lancements de deploiement/nettoyer-images.sh staging :
 #   1. verrou de la prod tenu : le ménage est sauté (code 0), rien ne part ;
-#   2. verrou libre : m0 (une étiquette et son empreinte, retirée par son identifiant), m1 (trois
-#      étiquettes, retirée par ses étiquettes) et m5 (une ancienne :main sans nom) partent ;
+#   2. verrou libre : m0 (une étiquette et son empreinte, retirée par son identifiant), m1 (deux
+#      étiquettes, 0.0.1 et 0.0.2, retirée par ses étiquettes : construite sous trois, elle a perdu
+#      :main au profit de m2) et m5 (une ancienne :main sans nom) partent ;
 #   3. un second ménage ne retire rien.
+#
+# Le magasin d'images : le classique garde une image dont l'étiquette bouge, sans nom, avec son
+# empreinte ; celui de containerd la supprime. Sous GITHUB_ACTIONS=true, l'épreuve exige le
+# magasin classique, et s'arrête (code 1) sur un Docker en magasin containerd : la CI ne prouverait
+# plus ce cas. Ailleurs, elle le dit par une ligne AVERTISSEMENT et rattrape ces images en les
+# tirant par leur empreinte.
 #
 # Code de sortie : 0 si tout est comme attendu, 1 sinon, en disant quoi. À la fin, l'épreuve retire
 # son registre, son conteneur et ses images, et rien d'autre (ni prune, ni -f hors d'elle).
@@ -114,6 +121,15 @@ lancer() {
 }
 
 echo "épreuve : moteur $(docker version --format '{{.Server.Version}}'), magasin $(docker info --format '{{.Driver}}')"
+# Le magasin containerd se reconnaît à son pilote de clichés, dans DriverStatus.
+MAGASIN="$(docker info --format '{{json .DriverStatus}}')"
+if [[ "$MAGASIN" == *io.containerd.snapshotter* ]]; then
+  if [ "${GITHUB_ACTIONS:-}" = true ]; then
+    echo "épreuve : le Docker de la CI garde ses images dans le magasin containerd ($MAGASIN) ; la CI ne prouve plus le cas du magasin classique, celui que le ménage suppose. Arrêt." >&2
+    exit 1
+  fi
+  echo "AVERTISSEMENT : magasin containerd ($MAGASIN) ; les anciennes :main, qu'il supprime, seront rattrapées par leur empreinte : le cas du magasin classique n'est pas éprouvé ici"
+fi
 echo "== le registre et les images"
 mkdir -p "$TRAVAIL/docker"
 docker rm -f -v "$REGISTRE" >/dev/null 2>&1 || true
@@ -134,7 +150,8 @@ done
   echo "épreuve : le registre ne répond pas sur localhost:5000" >&2
   exit 1
 }
-# m1 : trois étiquettes (retirée par ses étiquettes).
+# m1 : construite sous trois étiquettes. m2 lui prend :main : au moment du ménage, il lui en reste
+# deux, 0.0.1 et 0.0.2 (retirée par ses étiquettes, une par appel).
 construire m1 "$DEPOT:main" "$DEPOT:0.0.1" "$DEPOT:0.0.2"
 pousser "$DEPOT:main" "$DEPOT:0.0.1" "$DEPOT:0.0.2"
 # m2 à m10 : chacune prend :main, la précédente reste sans nom, avec son empreinte. m3 reçoit aussi

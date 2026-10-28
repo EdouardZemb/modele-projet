@@ -37,6 +37,7 @@
 {%- endif %}
 #   refuser_image_heritee              refus si {{ prefixe }}IMAGE ou {{ prefixe }}VERSION est dans l'environnement
 #   prendre_verrou                     le verrou de l'état, partagé, sur le descripteur 9
+#   lire_version <fichier>             IMAGE_LUE et VERSION_LUE, depuis deploye ou precedent
 #   lire_deploye                       DEPLOYE_IMAGE et DEPLOYE_VERSION, depuis le fichier deploye
 {%- if sauvegardes %}
 #   verifier_copie <image> <dossier>   contrôle d'un dossier qui a la forme de /donnees, par la commande VERIFIER
@@ -44,10 +45,12 @@
 #   retirer_partiels <dossier> <regex> retire les instantanés en échec (.partiel) avant un nouvel essai
 #   retirer_restes_de_restauration     retire, sous le verrou, ce qu'une restauration tuée a laissé
 # Variables posées : {{ prefixe }}CLONE (racine du clone qui lance le script), DEPOT_IMAGE (le dépôt
-# GHCR du projet) et {{ prefixe }}OPTIONS_JETABLES (options des conteneurs jetables).
+# GHCR du projet), MOTIF_REFERENCE et MOTIF_VERSION (la forme de l'image et de la version dans
+# l'état) et {{ prefixe }}OPTIONS_JETABLES (options des conteneurs jetables).
 {%- else %}
-# Variables posées : {{ prefixe }}CLONE (racine du clone qui lance le script) et DEPOT_IMAGE (le
-# dépôt GHCR du projet).
+# Variables posées : {{ prefixe }}CLONE (racine du clone qui lance le script), DEPOT_IMAGE (le
+# dépôt GHCR du projet), MOTIF_REFERENCE et MOTIF_VERSION (la forme de l'image et de la version
+# dans l'état).
 {%- endif %}
 #
 # Codes de sortie : 64 = usage (environnement inconnu, argument invalide), 3 = secrets absents,
@@ -68,6 +71,14 @@
 # Défini ici seulement.
 # shellcheck disable=SC2034  # lue par sonder.sh et nettoyer-images.sh, qui sourcent lib.sh
 DEPOT_IMAGE=ghcr.io/edouardzemb/{{ nom }}
+
+# La forme d'une image et d'une version de l'état : ce que deployer.sh accepte en argument et écrit
+# dans deploye, precedent et compose.env, et ce qu'exigent ceux qui les relisent (lire_version, pour
+# deployer.sh et nettoyer-images.sh ; lire_deploye, pour l'image). Définis ici seulement : une
+# forme nouvelle (une version X.Y.Z-rc.1…) vaut à la fois pour l'écriture et pour la lecture, et le
+# ménage des images ne s'annule pas, en silence, à chaque passage.
+MOTIF_REFERENCE='^[a-z0-9][a-z0-9._/:-]*@sha256:[0-9a-f]{64}$'
+MOTIF_VERSION='^(main|[0-9]+\.[0-9]+\.[0-9]+)$'
 
 # journal <message…> : une ligne sur stderr, préfixée de l'heure ISO (UTC).
 journal() {
@@ -334,9 +345,22 @@ prendre_verrou() {
   flock -w "${ {{- prefixe }}VERROU_ATTENTE:-600}" 9
 }
 
+# lire_version <fichier> : l'image et la version d'un fichier "<image@sha256:…> <version>" (deploye,
+# precedent), écrit par deployer.sh, dans IMAGE_LUE et VERSION_LUE. Échec, sans rien journaliser,
+# si le fichier manque, ne se lit pas, ou si l'une des deux n'a pas la forme que deployer.sh écrit
+# (MOTIF_REFERENCE, MOTIF_VERSION). Utilisée par deployer.sh (le retour arrière) et par
+# nettoyer-images.sh (l'état des deux environnements).
+lire_version() {
+  IMAGE_LUE="" VERSION_LUE=""
+  [ -f "$1" ] || return 1
+  { read -r IMAGE_LUE VERSION_LUE _ || true; } <"$1" || return 1
+  [[ "$IMAGE_LUE" =~ $MOTIF_REFERENCE ]] && [[ "$VERSION_LUE" =~ $MOTIF_VERSION ]]
+}
+
 # lire_deploye : l'image et la version de ${{ prefixe }}ETAT/deploye ("<image@sha256:…> <version>", écrit
 # par deployer.sh) dans DEPLOYE_IMAGE et DEPLOYE_VERSION. Échec, journalisé, si le fichier manque
-# ou si l'image n'a pas la forme que deployer.sh écrit.
+# ou si l'image n'a pas la forme que deployer.sh écrit (MOTIF_REFERENCE) ; la version doit
+# seulement ne pas être vide.
 lire_deploye() {
   DEPLOYE_IMAGE="" DEPLOYE_VERSION=""
   if [ ! -f "${{ prefixe }}ETAT/deploye" ]; then
@@ -344,7 +368,7 @@ lire_deploye() {
     return 1
   fi
   { read -r DEPLOYE_IMAGE DEPLOYE_VERSION _ || true; } <"${{ prefixe }}ETAT/deploye"
-  if ! [[ "$DEPLOYE_IMAGE" =~ ^[a-z0-9][a-z0-9._/:-]*@sha256:[0-9a-f]{64}$ ]] || [ -z "$DEPLOYE_VERSION" ]; then
+  if ! [[ "$DEPLOYE_IMAGE" =~ $MOTIF_REFERENCE ]] || [ -z "$DEPLOYE_VERSION" ]; then
     journal "${{ prefixe }}ETAT/deploye illisible : '$DEPLOYE_IMAGE' '$DEPLOYE_VERSION'"
     return 1
   fi
