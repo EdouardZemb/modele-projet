@@ -1,8 +1,8 @@
 # M-0005 — Sauvegardes et restauration : un instantané chaque nuit, une copie que le serveur ne sait pas relire, une restauration rejouée
 
 - **Statut** : accepté le 2026-10-18
-- **Amendé** le 2026-10-28, avec le lot 10 : avant un déploiement ou un retour arrière, la garde du dossier de données
-  refuse un dossier vide ou changé (§ 3)
+- **Amendé** le 2026-10-28, avec le lot 10 : avant un déploiement ou un retour arrière, la garde
+  du dossier de données refuse un dossier vide ou changé (§ 3)
 - **Contexte amont** : les sauvegardes d'`ancrage` (son ADR-0007, §4 et §5), dont la mécanique
   est extraite ; M-0003 (le contrat de l'instantané) ; M-0004 (la chaîne de livraison)
 
@@ -50,13 +50,18 @@ le déploiement n'a pas lieu et rien ne change ; la sonde réessaie, et alerte, 
 Après un instantané réussi, il purge `pre-deploiement/` de ce qui a plus de 30 jours, d'après le
 nom : la sauvegarde de la nuit ne tourne qu'en prod, et le staging n'aurait sinon aucune purge.
 
-**La garde du dossier de données.** Quand une version est déployée (`deploye` existe), le même
-déploiement, ou retour arrière, refuse, avant l'instantané et sans rien changer, un dossier de données vide, ou autre que
-celui que décrit le `compose.env` de la version déployée (code 1, journal et signal d'échec sans
-chemin, la sonde réessaie et alerte). Sans référence dans le `compose.env`, seul le vide est
-contrôlé. L'option `--donnees-neuves`, en 4e position, à la main, lève les deux contrôles pour un
+**La garde du dossier de données.** Quand une version est déployée (`deploye` existe), un
+déploiement comme un retour arrière refuse, avant l'instantané et sans rien changer, un dossier de
+données qui n'est plus celui de la version déployée, ou qui est vide. La référence est le chemin
+canonique (`realpath`) que chaque succès écrit dans le fichier `donnees` de l'état : le chemin
+canonique du jour doit être exactement celui-là, et un lien repointé sur place est donc vu. Un état
+d'avant la `v0.5.0` du modèle, sans ce fichier, se rabat sur le dossier que décrit le `compose.env`
+de la version déployée ; sans l'un ni l'autre, seul le vide est contrôlé. Le refus rend 1 : le
+journal porte les chemins, le signal d'échec n'en porte aucun, et la sonde réessaie et alerte.
+L'option `--donnees-neuves`, en 4e position, à la main, lève les deux contrôles pour un
 déploiement ; elle est refusée avec `--retour` (code 64). **La limite** : une racine de l'état
-déplacée elle aussi emporte `deploye`, et le déploiement passe pour un premier, sans contrôle.
+déplacée elle aussi emporte `deploye` et `donnees`, et le déploiement passe pour un premier, sans
+contrôle.
 
 ### 4. La clé hors ligne n'est jamais sur le serveur
 
