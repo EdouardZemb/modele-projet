@@ -28,8 +28,11 @@
 #        comparaison porte sur les chaînes <dépôt>@sha256:… : l'image d'une référence n'a pas à
 #        être sur le serveur), si un conteneur l'utilise, ou si elle est parmi les 3 plus récentes
 #        des autres, d'après leur date de création (la marge, tous environnements confondus) ;
-#   6. les autres partent, de la plus ancienne à la plus récente, une à une et par leur identifiant
-#      (`docker image rm <id>`). Un retrait en échec est journalisé, et le suivant est tenté.
+#   6. les autres partent, de la plus ancienne à la plus récente, une à une : par leur identifiant
+#      (`docker image rm <id>`) si elles portent une étiquette au plus ; sinon par leurs
+#      étiquettes, une par appel (`docker image rm <dépôt>:<étiquette>`), car docker refuse sans -f
+#      le retrait par l'identifiant d'une image qui en porte plusieurs, et la dernière emporte
+#      l'image et ses empreintes. Un retrait en échec est journalisé, et l'image suivante est tentée.
 #
 # Jamais de `-f`, de `docker image prune`, de `docker system prune` ni de retrait par un filtre : le
 # script liste toutes les images et choisit lui-même celles du projet.
@@ -39,10 +42,11 @@
 # liste des conteneurs ou leur inspection échoue, ou si le verrou de l'autre environnement ne
 # s'ouvre pas. Dans le doute, rien ne part.
 #
-# Journal : une ligne par image retirée (les 12 premiers chiffres de son identifiant, puis ses
-# références), une par retrait en échec, puis le bilan : les retirées, et les gardées, par l'état,
-# par un conteneur ou en marge. Une image compte une fois, pour la première de ces trois raisons qui
-# la garde ; un retrait en échec ne compte ni parmi les retirées ni parmi les gardées.
+# Journal : une ligne par image retirée, une fois partie (les 12 premiers chiffres de son
+# identifiant, puis ses références), une par image dont un retrait échoue, puis le bilan : les
+# retirées, et les gardées, par l'état, par un conteneur ou en marge. Une image compte une fois,
+# pour la première de ces trois raisons qui la garde ; une image dont un retrait échoue ne compte ni
+# parmi les retirées ni parmi les gardées.
 #
 # Codes de sortie : 0 fait, ou sauté (verrou de l'autre environnement pris) ; 1 un retrait en échec,
 # un ménage annulé, ou le verrou de l'environnement toujours pris après l'attente ; 64 usage, ou
@@ -77,6 +81,7 @@ DEPOT=""                 # le dépôt visé : DEPOT_IMAGE, ou la variable de tes
 declare -A NOMMEE=()     # référence → 1 : les images que nomme l'état des deux environnements
 declare -A UTILISEE=()   # identifiant → 1 : les images d'un conteneur, arrêté ou non
 declare -A REFERENCES=() # identifiant → ses références, pour le journal
+declare -A ETIQUETTES=() # identifiant → ses noms (RepoTags), ses cibles de retrait s'il y en a 2+
 NOM=""                   # posé par nom_de
 IMAGE_LUE=""             # posée par lire_version
 VERSION_LUE=""           # posée par lire_version
@@ -155,9 +160,10 @@ main() {
   valider_env "$nom_env"
   charger_env "$nom_env"
   local etat="${{ prefixe }}ETAT" autre dossier_autre verrou_autre sortie ligne code=0
-  local id cree noms empreintes reference du_depot nommee fraction tries rang
+  local id cree noms empreintes reference du_depot nommee fraction tries rang cible partie
   local par_etat=0 par_conteneur=0 en_marge=0 retirees=0 listees=0 inspectees=0
   local -a conteneurs=() identifiants=() references=() liste_empreintes=() candidats=() a_retirer=()
+  local -a etiquettes=() cibles=()
   local -A vue=()
 
   # Le dépôt : celui du projet, ou, pour l'épreuve sur un vrai Docker, un registre de la machine.
@@ -264,6 +270,7 @@ main() {
       fraction="${BASH_REMATCH[3]}000000000"
       candidats+=("${BASH_REMATCH[1]}.${fraction:0:9}Z $id")
       REFERENCES["$id"]="${references[*]}"
+      ETIQUETTES["$id"]="$noms"
     fi
   done <<<"$sortie"
   [ "$inspectees" -eq "$listees" ] \
@@ -283,15 +290,29 @@ main() {
     done <<<"$tries"
   fi
 
-  # 6. Les retraits, un à un, par l'identifiant ; un échec n'arrête pas les suivants.
+  # 6. Les retraits, une image à la fois : par l'identifiant (une étiquette au plus), sinon par ses
+  # étiquettes, une par appel, que docker accepte sans -f ; la dernière emporte l'image et ses
+  # empreintes. Un échec arrête cette image, pas les suivantes.
   code=0
   for id in "${a_retirer[@]}"; do
-    if sortie="$(docker image rm "$id" 2>&1)"; then
+    read -r -a etiquettes <<<"${ETIQUETTES[$id]}"
+    if [ -n "${etiquettes[1]:-}" ]; then
+      cibles=("${etiquettes[@]}")
+    else
+      cibles=("$id")
+    fi
+    partie=1
+    for cible in "${cibles[@]}"; do
+      if ! sortie="$(docker image rm "$cible" 2>&1)"; then
+        journal "retrait impossible : ${id:7:12} (${sortie//$'\n'/ })"
+        code=1
+        partie=0
+        break
+      fi
+    done
+    if [ "$partie" -eq 1 ]; then
       journal "image retirée : ${id:7:12} (${REFERENCES[$id]})"
       retirees=$((retirees + 1))
-    else
-      journal "retrait impossible : ${id:7:12} (${sortie//$'\n'/ })"
-      code=1
     fi
   done
 

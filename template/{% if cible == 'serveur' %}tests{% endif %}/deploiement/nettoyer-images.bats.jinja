@@ -191,8 +191,38 @@ bilan() {
   inspection="$(appels_de docker | grep '^docker image inspect --format ')"
   [ "$(grep -o "$(image_de 1)" <<<"$inspection" | wc -l)" -eq 1 ]
   [ "$(grep -o "$(image_de 4)" <<<"$inspection" | wc -l)" -eq 1 ]
-  [ "$(retraits)" = "$(retrait_de 1)" ]
+  # deux étiquettes : docker refuse sans -f le retrait par l'identifiant, elle part par ses
+  # étiquettes, une par appel, et la dernière emporte l'image
+  [ "$(retraits)" = "$(printf 'docker image rm %s\n' "$DEPOT_DU_PROJET:0.1.0" "$DEPOT_DU_PROJET:0.1.1")" ]
+  parties 1
   restent 2 3 4
+  [ ! -e "$REFUS" ]
+  [ "$(grep -c 'image retirée : ' <<<"$output")" -eq 1 ]
+  journal_dit "image retirée : 111111111111 ($DEPOT_DU_PROJET:0.1.0 $DEPOT_DU_PROJET:0.1.1 $(empreinte_de 1))"
+  bilan "1 retirée, 3 gardées (0 par l'état, 0 par un conteneur, 3 en marge)"
+}
+
+@test "un_retrait_par_etiquette_en_echec_passe_a_l_image_suivante" {
+  # 1 et 2 partent ; 1 a deux étiquettes, et le retrait de la seconde échoue
+  poser_image 1 2026-10-01T10:00:00Z "$DEPOT_DU_PROJET:0.1.0 $DEPOT_DU_PROJET:0.1.1" "$(empreinte_de 1)"
+  local c
+  for c in 2 3 4; do
+    poser_image "$c" "2026-10-0${c}T10:00:00Z" "" "$(empreinte_de "$c")"
+  done
+  poser_image 5 2026-10-05T10:00:00Z "$DEPOT_DU_PROJET:main" "$(empreinte_de 5)"
+  export DOUBLE_DOCKER_IMAGE_RM_ECHEC="$DEPOT_DU_PROJET:0.1.1"
+  nettoyer prod
+  [ "$status" -eq 1 ]
+  [ "$(retraits)" = "$(printf 'docker image rm %s\n' "$DEPOT_DU_PROJET:0.1.0" "$DEPOT_DU_PROJET:0.1.1" \
+    "$(image_de 2)")" ]
+  # 1 reste, avec la seule étiquette que docker n'a pas pu retirer ; 2 part quand même
+  grep -Fx "$(image_de 1)|2026-10-01T10:00:00Z|$DEPOT_DU_PROJET:0.1.1|$(empreinte_de 1)" "$STOCK"
+  parties 2
+  restent 3 4 5
+  [ ! -e "$REFUS" ]
+  journal_dit "retrait impossible : 111111111111 (Error response from daemon: conflict: unable to delete 111111111111 (cannot be forced) - image has dependent child images)"
+  [[ "$output" != *"image retirée : 111111111111"* ]]
+  journal_dit "image retirée : 222222222222 ($(empreinte_de 2))"
   bilan "1 retirée, 3 gardées (0 par l'état, 0 par un conteneur, 3 en marge)"
 }
 
@@ -392,14 +422,19 @@ bilan() {
 }
 
 @test "jamais_de_force_ni_de_prune" {
-  cinq_images
+  # 1 et 2 partent, 1 par ses deux étiquettes, 2 par son identifiant
+  poser_image 1 2026-10-01T10:00:00Z "$DEPOT_DU_PROJET:0.1.0 $DEPOT_DU_PROJET:0.1.1" "$(empreinte_de 1)"
+  local c
+  for c in 2 3 4 5; do
+    poser_image "$c" "2026-10-0${c}T10:00:00Z" "" "$(empreinte_de "$c")"
+  done
   nettoyer prod
   [ "$status" -eq 0 ]
-  # deux retraits, chacun d'une seule image, par son identifiant, sans option
-  [ "$(retraits | wc -l)" -eq 2 ]
+  # trois retraits, chacun d'une seule cible, un identifiant ou une étiquette du dépôt, sans option
+  [ "$(retraits | wc -l)" -eq 3 ]
   local ligne
   while IFS= read -r ligne; do
-    [[ "$ligne" =~ ^docker\ image\ rm\ sha256:[0-9a-f]{64}$ ]]
+    [[ "$ligne" =~ ^docker\ image\ rm\ (sha256:[0-9a-f]{64}|ghcr\.io/edouardzemb/{{ nom }}:[^\ ]+)$ ]]
   done < <(retraits)
   aucune_ligne 'prune|rmi' "$APPELS"
   [ ! -e "$REFUS" ]
@@ -413,6 +448,7 @@ bilan() {
   poser_image 3 2026-10-03T10:00:00Z "" ""
   poser_image 4 2026-10-04T10:00:00Z "" "$(empreinte_de 4)"
   poser_conteneur arrete 4
+  poser_image 5 2026-10-05T10:00:00Z "$DEPOT_DU_PROJET:0.5.0 $DEPOT_DU_PROJET:0.5.1" "$(empreinte_de 5)"
   local -a cas=(
     "125 image rm -f $(image_de 1)"
     "125 image rm --force $(image_de 1)"
@@ -421,8 +457,10 @@ bilan() {
     "125 image prune -a"
     "125 system prune"
     "1 image rm $(image_de 2)"
+    "1 image rm ghcr.io/autre/projet:1"
     "1 image rm $(image_de 3)"
     "1 image rm $(image_de 4)"
+    "1 image rm $(image_de 5)"
   )
   local ligne refus=0
   for ligne in "${cas[@]}"; do
@@ -433,11 +471,29 @@ bilan() {
     refus=$((refus + 1))
     [ "$(wc -l <"$REFUS")" -eq "$refus" ]
   done
-  restent 1 2 3 4
-  # un retrait permis : l'image quitte le stock, et rien n'est noté
+  restent 1 2 3 4 5
+  # par son identifiant, une image à deux étiquettes est refusée avec le message de docker
+  run docker image rm "$(image_de 5)"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"(must be forced) - image is referenced in multiple repositories"* ]]
+  refus=$((refus + 1))
+  # un nom inconnu : l'erreur de docker, sans refus noté
+  run docker image rm "$DEPOT_DU_PROJET:inconnue"
+  [ "$status" -eq 1 ]
+  [ "$(wc -l <"$REFUS")" -eq "$refus" ]
+  # les retraits permis, et rien n'est noté : par l'identifiant, l'image quitte le stock…
   run docker image rm "$(image_de 1)"
   [ "$status" -eq 0 ]
   [ "$output" = "Deleted: $(image_de 1)" ]
   parties 1
+  # …par une étiquette, ce nom seul part, et la dernière emporte l'image et ses empreintes
+  run docker image rm "$DEPOT_DU_PROJET:0.5.0"
+  [ "$status" -eq 0 ]
+  [ "$output" = "Untagged: $DEPOT_DU_PROJET:0.5.0" ]
+  grep -Fx "$(image_de 5)|2026-10-05T10:00:00Z|$DEPOT_DU_PROJET:0.5.1|$(empreinte_de 5)" "$STOCK"
+  run docker image rm "$DEPOT_DU_PROJET:0.5.1"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf '%s\n' "Untagged: $DEPOT_DU_PROJET:0.5.1" "Deleted: $(image_de 5)")" ]
+  parties 5
   [ "$(wc -l <"$REFUS")" -eq "$refus" ]
 }

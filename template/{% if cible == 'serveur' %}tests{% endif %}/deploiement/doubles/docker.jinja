@@ -23,12 +23,17 @@
 #   ps --all --no-trunc --quiet          l'identifiant de chaque conteneur
 #   container inspect --format {% raw %}'{{.Image}}'{% endraw %} <id…>  l'image de chaque conteneur
 #   image rm <id>                        retire l'image du stock et écrit « Deleted: <id> »
+#   image rm <nom>                       retire ce nom (une étiquette) de l'image et écrit
+#                                        « Untagged: <nom> » ; comme docker, le dernier nom emporte
+#                                        l'image et ses empreintes, et « Deleted: <id> » suit
 # Garde-fou : `image rm` refuse (code 1) le retrait d'une image sans référence, d'une image dont
 # une référence est hors de ghcr.io/edouardzemb/{{ nom }} et de localhost:<port>/edouardzemb/{{ nom }},
-# ou d'une image qu'un conteneur utilise. Il refuse (code 125) toute option (-f, --force…), plus
-# d'une image par appel, et tout `image prune`, `system prune` ou `rmi`. Chaque refus est noté, une
-# ligne, dans refus-images, à côté de $APPELS : un test qui le trouve absent sait qu'aucun retrait
-# interdit n'a été demandé.
+# ou d'une image qu'un conteneur utilise. Il refuse aussi (code 1, avec le message de docker), le
+# retrait par son identifiant d'une image qui porte deux étiquettes ou plus : sans -f, docker le
+# refuse (« image is referenced in multiple repositories »), et une telle image se retire par ses
+# étiquettes. Il refuse (code 125) toute option (-f, --force…), plus d'une image par appel, et tout
+# `image prune`, `system prune` ou `rmi`. Chaque refus est noté, une ligne, dans refus-images, à côté
+# de $APPELS : un test qui le trouve absent sait qu'aucun retrait interdit n'a été demandé.
 #
 # L'« application en service » est le fichier en-service.env, à côté de $APPELS : la configuration
 # effective du dernier `compose up` réussi, effacée par `compose stop|down`. Comme dans compose,
@@ -47,8 +52,8 @@
 #   DOUBLE_DOCKER_IMAGE_LS_ECHEC     `image ls` échoue (code 1)
 #   DOUBLE_DOCKER_IMAGE_INSPECT_ECHEC  `image inspect --format` échoue (code 1) ; `-f` n'en dépend pas
 #   DOUBLE_DOCKER_PS_ECHEC           `ps` échoue (code 1)
-#   DOUBLE_DOCKER_IMAGE_RM_ECHEC     identifiants (séparés par des espaces) dont `image rm` échoue
-#                                    (code 1), sans refus noté
+#   DOUBLE_DOCKER_IMAGE_RM_ECHEC     identifiants ou noms (séparés par des espaces) dont `image rm`
+#                                    échoue (code 1), sans refus noté
 {%- if sauvegardes %}
 #   DOUBLE_DOCKER_SAUVEGARDE_CODE    code de `compose exec … <sauvegarder> <dossier>` (défaut 0)
 #   DOUBLE_DOCKER_SAUVEGARDE_SORTIE  sa sortie (défaut : rien)
@@ -179,23 +184,44 @@ du_projet() {
   [ "$nom" = ghcr.io/edouardzemb/{{ nom }} ] || [[ "$nom" =~ ^localhost:[0-9]+/edouardzemb/{{ nom }}$ ]]
 }
 
-# retirer_image <arguments de `image rm`…> : le garde-fou, puis le retrait du stock.
+# ligne_de_l_etiquette <nom> : la ligne du stock de l'image qui porte ce nom ; échec sinon.
+ligne_de_l_etiquette() {
+  local ligne noms nom
+  local -a liste=()
+  [ -f "$STOCK_IMAGES" ] || return 1
+  while IFS= read -r ligne; do
+    IFS='|' read -r _ _ noms _ <<<"$ligne"
+    read -r -a liste <<<"$noms"
+    for nom in "${liste[@]}"; do
+      if [ "$nom" = "$1" ]; then
+        printf '%s\n' "$ligne"
+        return 0
+      fi
+    done
+  done <"$STOCK_IMAGES"
+  return 1
+}
+
+# retirer_image <arguments de `image rm`…> : le garde-fou, puis le retrait. L'argument est
+# l'identifiant de l'image, ou l'un de ses noms : comme docker, le retrait d'un nom ne retire que ce
+# nom, et l'image avec ses empreintes quand c'était le dernier.
 retirer_image() {
-  local id ligne noms empreintes reference conteneur image
-  local -a references=()
+  local cible id ligne cree noms empreintes reference conteneur image reste=""
+  local -a references=() etiquettes=()
   for argument in "$@"; do
     case "$argument" in
       -*) refuser_retrait 125 "option interdite $argument" ;;
     esac
   done
   [ "$#" -eq 1 ] || refuser_retrait 125 "une image par appel"
-  id="$1"
-  if ! ligne="$(ligne_d_image "$id")"; then
-    echo "Error response from daemon: No such image: $id" >&2
+  cible="$1"
+  if ! ligne="$(ligne_d_image "$cible")" && ! ligne="$(ligne_de_l_etiquette "$cible")"; then
+    echo "Error response from daemon: No such image: $cible" >&2
     exit 1
   fi
-  IFS='|' read -r _ _ noms empreintes <<<"$ligne"
+  IFS='|' read -r id cree noms empreintes <<<"$ligne"
   read -r -a references <<<"$noms $empreintes"
+  read -r -a etiquettes <<<"$noms"
   [ -n "${references[*]}" ] || refuser_retrait 1 "image sans référence"
   for reference in "${references[@]}"; do
     du_projet "$reference" || refuser_retrait 1 "référence hors du dépôt $reference"
@@ -205,17 +231,33 @@ retirer_image() {
       [ "$image" != "$id" ] || refuser_retrait 1 "image utilisée par le conteneur $conteneur"
     done <"$STOCK_CONTENEURS"
   fi
+  # Sans -f, docker ne retire par son identifiant qu'une image d'une étiquette au plus.
+  if [ "$cible" = "$id" ] && [ -n "${etiquettes[1]:-}" ]; then
+    echo "Error response from daemon: conflict: unable to delete ${id:7:12} (must be forced) - image is referenced in multiple repositories" >&2
+    refuser_retrait 1 "identifiant d'une image à plusieurs étiquettes"
+  fi
   case " ${DOUBLE_DOCKER_IMAGE_RM_ECHEC:-} " in
-    *" $id "*)
+    *" $cible "*)
       echo "Error response from daemon: conflict: unable to delete ${id:7:12} (cannot be forced) - image has dependent child images" >&2
       exit 1
       ;;
   esac
+  if [ "$cible" != "$id" ]; then
+    for reference in "${etiquettes[@]}"; do
+      [ "$reference" = "$cible" ] || reste="${reste:+$reste }$reference"
+    done
+    echo "Untagged: $cible"
+  fi
+  # Il reste des noms : seul celui-ci part. Sinon, l'image quitte le stock, empreintes comprises.
   while IFS= read -r ligne; do
-    [ "${ligne%%|*}" = "$id" ] || printf '%s\n' "$ligne"
+    if [ "${ligne%%|*}" != "$id" ]; then
+      printf '%s\n' "$ligne"
+    elif [ -n "$reste" ]; then
+      printf '%s|%s|%s|%s\n' "$id" "$cree" "$reste" "$empreintes"
+    fi
   done <"$STOCK_IMAGES" >"$STOCK_IMAGES.tmp"
   mv -f "$STOCK_IMAGES.tmp" "$STOCK_IMAGES"
-  echo "Deleted: $id"
+  [ -n "$reste" ] || echo "Deleted: $id"
 }
 
 case "${1:-}" in
