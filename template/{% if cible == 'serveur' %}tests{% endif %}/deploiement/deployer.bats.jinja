@@ -44,6 +44,7 @@ deployer() {
 # prod (en_service, aide.bash).
 deja_en_service() {
   en_service prod "$1" "$2"
+  poser_donnees prod
 }
 
 # dc_de <env> : le début de chaque appel de compose du déploiement, celui de `dc` (lib.sh) : le
@@ -254,6 +255,7 @@ nombre_de_lancements() {
 @test "deployer_purge_ses_instantanes_de_plus_de_30_jours" {
   preparer_secrets_de_test staging JETON=jeton-staging-7 HC_SONDE=https://hc.example/ping/sonde-staging
   en_service staging "$ANCIENNE" main
+  poser_donnees staging
   local pre="${{ prefixe }}RACINE_DONNEES/staging/sauvegardes/pre-deploiement" vieux recent nom
   vieux="$(date -u -d '31 days ago' +%Y%m%dT%H%M%SZ)"
   recent="$(date -u -d '1 hour ago' +%Y%m%dT%H%M%SZ)"
@@ -486,6 +488,16 @@ exec '$DOUBLES/docker-double' \"\$@\""
   [ "$(appels_de docker | grep -cE ' compose .* (ps|exec) ')" -eq 0 ]
   [ ! -e "$HOME/backups" ]
 }
+
+# --donnees-neuves est celle de la garde du dossier de données, qui n'existe qu'avec les sauvegardes :
+# l'usage reste celui d'avant, et rien n'est touché.
+@test "donnees_neuves_n_existe_pas_sans_sauvegardes" {
+  deployer prod "$NOUVELLE" 0.2.0 --donnees-neuves
+  [ "$status" -eq 64 ]
+  [[ "$output" == *"usage : bash deploiement/deployer.sh <prod|staging> <image@sha256:…> <version> | bash deploiement/deployer.sh <prod|staging> --retour"* ]]
+  [ ! -s "$APPELS" ]
+  [ ! -e "$ETAT/compose.env" ]
+}
 {%- endif %}
 
 # --- échecs et retour arrière ----------------------------------------------------------------
@@ -653,6 +665,7 @@ deux_versions() {
 {%- endif %}
   deployer prod "$ANCIENNE" 0.1.0
   [ "$status" -eq 0 ]
+  poser_donnees prod
   deployer prod "$NOUVELLE" 0.2.0
   [ "$status" -eq 0 ]
   [ "$(cat "$ETAT/precedent")" = "$ANCIENNE 0.1.0" ]
@@ -866,6 +879,258 @@ exec '$DOUBLES/docker-double' \"\$@\""
   [ "$(signaux)" = "$(signal 'retour arrière incomplet : compose.env ne décrit pas la version déployée (0.2.0)') $HC/fail" ]
   [ "$(nombre_de_lancements)" -eq 0 ]
 }
+
+{%- if sauvegardes %}
+
+# --- la garde du dossier de données ----------------------------------------------------------
+#
+# Une version est déployée, et le dossier de données est vide ou n'est plus celui de cette version
+# (un disque ou une racine mal montés) : un déploiement ou un retour arrière repartirait de zéro, et
+# l'instantané suivant copierait du vide. deployer.sh le refuse, code 1 signalé, avant tout
+# changement. Le dossier de référence est celui du compose.env de la version déployée ;
+# `--donnees-neuves` lève la garde pour un déploiement voulu.
+
+# vider_donnees <env> : le dossier de données reste, sans une seule entrée (fichiers cachés compris).
+vider_donnees() {
+  find "${{ prefixe }}RACINE_DONNEES/$1/donnees" -mindepth 1 -delete
+}
+
+# figer_etat <env> : comme etat_fige, pour cet environnement, après avoir créé le verrou que prend
+# tout déploiement, pour que `diff -r` ne voie que ce qu'un refus changerait.
+figer_etat() {
+  local etat="${{ prefixe }}RACINE_ETAT/$1"
+  : >"$etat/verrou"
+  rm -rf "$BATS_TEST_TMPDIR/etat-avant"
+  cp -a "$etat" "$BATS_TEST_TMPDIR/etat-avant"
+  : >"$APPELS"
+}
+
+# refus_sans_trace : ce qu'un refus de la garde garantit, après figer_etat : rien n'a changé dans
+# l'état (deploye, compose.env, compose.env.precedent, pas d'echec), rien n'a été lancé, arrêté ni
+# copié.
+refus_sans_trace() {
+  diff -r "$BATS_TEST_TMPDIR/etat-avant" "$ETAT"
+  [ ! -e "$ETAT/echec" ]
+  [ "$(nombre_de_lancements)" -eq 0 ]
+  [ "$(appels_de docker | grep -cE ' (up|stop|down) ')" -eq 0 ]
+  [ "$(appels_de docker | grep -c ' exec ')" -eq 0 ]
+}
+
+@test "un_deploiement_suivant_sur_un_dossier_vide_est_refuse" {
+  deja_en_service "$ANCIENNE" 0.1.0
+  local donnees="${{ prefixe }}RACINE_DONNEES/prod/donnees"
+  vider_donnees prod
+  figer_etat prod
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"dossier de données vide : $donnees, alors qu'une version est déployée : déploiement de 0.2.0 refusé, rien n'a changé."* ]]
+  [[ "$output" == *"--donnees-neuves"* ]]
+  refus_sans_trace
+  # le signal ne porte aucun chemin
+  [ "$(signaux)" = "$(signal 'dossier de données vide avant 0.2.0, rien n'"'"'a changé (voir le journal)') $HC/fail" ]
+}
+
+# Sans version déployée, un dossier vide est normal : c'est le premier déploiement.
+@test "un_premier_deploiement_sur_un_dossier_vide_passe" {
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 0 ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+}
+
+# C'est aussi le cas d'un état d'avant la garde : son compose.env porte déjà le chemin des données.
+@test "un_deploiement_suivant_sur_le_meme_dossier_plein_passe" {
+  deja_en_service "$ANCIENNE" 0.1.0
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"dossier de données"* ]]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+}
+
+# Plein ne suffit pas : une autre racine, elle aussi pleine, n'est pas le dossier de la version
+# déployée. Le journal cite le nouveau chemin et l'ancien.
+@test "un_dossier_change_est_refuse_meme_plein" {
+  deja_en_service "$ANCIENNE" 0.1.0
+  local ancien="${{ prefixe }}RACINE_DONNEES/prod/donnees" autre="$BATS_TEST_TMPDIR/autre"
+  export {{ prefixe }}RACINE_DONNEES="$autre"
+  poser_donnees prod
+  figer_etat prod
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"dossier de données changé : $autre/prod/donnees au lieu de $ancien, celui de la version déployée : déploiement de 0.2.0 refusé, rien n'a changé."* ]]
+  [[ "$output" == *"--donnees-neuves"* ]]
+  refus_sans_trace
+  [ "$(signaux)" = "$(signal 'dossier de données changé avant 0.2.0, rien n'"'"'a changé (voir le journal)') $HC/fail" ]
+}
+
+@test "un_ancien_chemin_disparu_compte_comme_change" {
+  deja_en_service "$ANCIENNE" 0.1.0
+  local ancien="${{ prefixe }}RACINE_DONNEES/prod/donnees" autre="$BATS_TEST_TMPDIR/autre"
+  rm -rf "${{ prefixe }}RACINE_DONNEES"
+  export {{ prefixe }}RACINE_DONNEES="$autre"
+  poser_donnees prod
+  figer_etat prod
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"dossier de données changé : $autre/prod/donnees au lieu de $ancien,"* ]]
+  refus_sans_trace
+  [ "$(signaux)" = "$(signal 'dossier de données changé avant 0.2.0, rien n'"'"'a changé (voir le journal)') $HC/fail" ]
+}
+
+@test "un_retour_sur_un_dossier_vide_est_refuse" {
+  deux_versions
+  vider_donnees prod
+  figer_etat prod
+  deployer prod --retour
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"dossier de données vide : ${{ prefixe }}RACINE_DONNEES/prod/donnees, alors qu'une version est déployée : retour à 0.1.0 refusé, rien n'a changé."* ]]
+  # la version quittée n'est même pas marquée en échec
+  refus_sans_trace
+  [ "$(signaux)" = "$(signal 'dossier de données vide avant le retour à 0.1.0, rien n'"'"'a changé (voir le journal)') $HC/fail" ]
+}
+
+# --donnees-neuves : le déploiement voulu sur des données neuves. L'instantané est pris sur l'ancien
+# conteneur, avec ses propres données, comme à l'ordinaire.
+@test "donnees_neuves_passe_sur_un_dossier_vide" {
+  deja_en_service "$ANCIENNE" 0.1.0
+  local donnees="${{ prefixe }}RACINE_DONNEES/prod/donnees"
+  vider_donnees prod
+  deployer prod "$NOUVELLE" 0.2.0 --donnees-neuves
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"données neuves voulues : $donnees (contrôles du dossier de données levés pour ce déploiement)"* ]]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+  [ "$(cat "$ETAT/compose.env")" = "$(contenu_compose_env prod "$NOUVELLE" 0.2.0)" ]
+  [ "$(appels_de docker | grep -c ' exec -T app ')" -eq 1 ]
+}
+
+@test "donnees_neuves_passe_sur_un_dossier_change" {
+  deja_en_service "$ANCIENNE" 0.1.0
+  local autre="$BATS_TEST_TMPDIR/autre"
+  export {{ prefixe }}RACINE_DONNEES="$autre"
+  poser_donnees prod
+  deployer prod "$NOUVELLE" 0.2.0 --donnees-neuves
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"données neuves voulues : $autre/prod/donnees (contrôles du dossier de données levés pour ce déploiement)"* ]]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+  # le nouveau compose.env porte le nouveau chemin : le déploiement suivant le prend pour référence
+  grep -Fx "{{ prefixe }}DONNEES=$autre/prod/donnees" "$ETAT/compose.env"
+  [ "$(appels_de docker | grep -c ' exec -T app ')" -eq 1 ]
+}
+
+# L'option n'est pas un moyen de contourner la garde d'un retour : c'est une erreur d'usage.
+@test "donnees_neuves_avec_retour_rend_64" {
+  deux_versions
+  vider_donnees prod
+  figer_etat prod
+  deployer prod --retour --donnees-neuves
+  [ "$status" -eq 64 ]
+  [[ "$output" == *"usage :"* ]]
+  diff -r "$BATS_TEST_TMPDIR/etat-avant" "$ETAT"
+  [ ! -s "$APPELS" ]
+}
+
+# Ce qui compte comme vide, comme le même dossier, et ce qu'on compare.
+
+@test "un_fichier_cache_suffit" {
+  deja_en_service "$ANCIENNE" 0.1.0
+  vider_donnees prod
+  : >"${{ prefixe }}RACINE_DONNEES/prod/donnees/.cache"
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 0 ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+}
+
+# Un lien symbolique vers la même racine donne une autre chaîne que celle de compose.env, mais le
+# même dossier : le déploiement passe. Un lien vers une autre racine, pleine, est un autre dossier.
+@test "un_lien_vers_le_meme_dossier_passe_un_lien_ailleurs_non" {
+  deja_en_service "$ANCIENNE" 0.1.0
+  local racine="${{ prefixe }}RACINE_DONNEES" ailleurs="$BATS_TEST_TMPDIR/ailleurs"
+  mkdir -p "$ailleurs"
+  ln -s "$racine" "$BATS_TEST_TMPDIR/lien-ici"
+  ln -s "$ailleurs" "$BATS_TEST_TMPDIR/lien-ailleurs"
+  # ailleurs : refus
+  export {{ prefixe }}RACINE_DONNEES="$BATS_TEST_TMPDIR/lien-ailleurs"
+  poser_donnees prod
+  figer_etat prod
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"dossier de données changé : $BATS_TEST_TMPDIR/lien-ailleurs/prod/donnees au lieu de $racine/prod/donnees,"* ]]
+  refus_sans_trace
+  # le même dossier sous un autre nom : passe
+  export {{ prefixe }}RACINE_DONNEES="$BATS_TEST_TMPDIR/lien-ici"
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"dossier de données"* ]]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+}
+
+# Le compose.env ne sert de référence que s'il existe et décrit la version déployée (un déploiement
+# interrompu ne l'a pas laissé tel quel). Sans référence, seul le vide est contrôlé, et le journal
+# le dit : un autre dossier, plein, passe ; un dossier vide, non.
+@test "sans_reference_seul_le_vide_est_controle" {
+  local cas autre="$BATS_TEST_TMPDIR/autre" racine="${{ prefixe }}RACINE_DONNEES" suivante
+  suivante="ghcr.io/edouardzemb/{{ nom }}@sha256:$(printf '3%.0s' {1..64})"
+  for cas in absent autre-version; do
+    rm -rf "$ETAT" "$racine" "$autre"
+    export {{ prefixe }}RACINE_DONNEES="$racine"
+    deja_en_service "$ANCIENNE" 0.1.0
+    if [ "$cas" = absent ]; then
+      rm "$ETAT/compose.env"
+    else
+      contenu_compose_env prod "$suivante" 0.3.0 >"$ETAT/compose.env"
+    fi
+    # vide : refus, quoi qu'il en soit de la référence
+    vider_donnees prod
+    deployer prod "$NOUVELLE" 0.2.0
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"dossier de données vide : $racine/prod/donnees,"* ]]
+    [ "$(cat "$ETAT/deploye")" = "$ANCIENNE 0.1.0" ]
+    # un autre dossier, plein : passe, et le journal dit qu'il n'est pas comparé
+    export {{ prefixe }}RACINE_DONNEES="$autre"
+    poser_donnees prod
+    deployer prod "$NOUVELLE" 0.2.0
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"compose.env ne décrit pas la version déployée : le chemin des données n'est pas comparé, seul le vide est contrôlé"* ]]
+    [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+  done
+}
+
+# La sonde rend le code du déploiement. Le refus n'écrit pas `echec` : elle réessaie au passage
+# suivant, et déploie dès que le dossier est rétabli. L'installation des unités systemd, que la sonde
+# de prod lance avant de déployer, n'est pas ce que ce test examine : un double qui réussit.
+@test "la_sonde_rend_le_refus_de_la_garde_et_reessaie" {
+  deja_en_service "$ANCIENNE" 0.1.0
+  printf '#!/usr/bin/env bash
+exit 0
+' >"$CLONE/deploiement/installer-unites.sh"
+  vider_donnees prod
+  passage_de_la_sonde
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"dossier de données vide :"* ]]
+  [ ! -e "$ETAT/echec" ]
+  [ "$(cat "$ETAT/deploye")" = "$ANCIENNE 0.1.0" ]
+  [ "$(nombre_de_lancements)" -eq 0 ]
+  [ "$(signaux)" = "$(signal 'dossier de données vide avant 0.2.0, rien n'"'"'a changé (voir le journal)') $HC/fail" ]
+  # le dossier est rétabli : le passage suivant déploie
+  poser_donnees prod
+  passage_de_la_sonde
+  [ "$status" -eq 0 ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+}
+
+@test "la_garde_vaut_aussi_en_staging" {
+  preparer_secrets_de_test staging JETON=jeton-staging-7 HC_SONDE=https://hc.example/ping/sonde-staging
+  en_service staging "$ANCIENNE" main
+  local etat="${{ prefixe }}RACINE_ETAT/staging"
+  mkdir -p "${{ prefixe }}RACINE_DONNEES/staging/donnees"
+  figer_etat staging
+  deployer staging "$NOUVELLE" main
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"dossier de données vide : ${{ prefixe }}RACINE_DONNEES/staging/donnees,"* ]]
+  diff -r "$BATS_TEST_TMPDIR/etat-avant" "$etat"
+  [ "$(nombre_de_lancements)" -eq 0 ]
+  [ "$(signaux)" = "$(signal 'dossier de données vide avant main, rien n'"'"'a changé (voir le journal)') https://hc.example/ping/sonde-staging/fail" ]
+}
+{%- endif %}
 
 # --- compose : deux fichiers, orphelins ------------------------------------------------------
 
