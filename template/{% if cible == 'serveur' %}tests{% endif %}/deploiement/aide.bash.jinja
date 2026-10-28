@@ -207,6 +207,39 @@ en_service() {
   echo "$2 $3" >"$etat/deploye"
 }
 
+# --- Stock d'images et de conteneurs du double de docker (ménage des images) -----------------
+
+# image_de <c> : l'identifiant d'une image de test, « sha256: » puis 64 fois le caractère <c> (un
+# chiffre hexadécimal).
+image_de() {
+  local suite
+  printf -v suite '%64s' ''
+  printf 'sha256:%s\n' "${suite// /$1}"
+}
+
+# empreinte_de <c> [dépôt] : une empreinte de test, <dépôt>@sha256: puis 32 fois <c> et 32 fois 0
+# (défaut : le dépôt du projet). Une empreinte n'est jamais l'identifiant d'une image : le ménage
+# ne doit pas confondre les deux.
+empreinte_de() {
+  local depot="${2:-}" moitie
+  [ -n "$depot" ] || depot=ghcr.io/edouardzemb/{{ nom }}
+  printf -v moitie '%32s' ''
+  printf '%s@sha256:%s%s\n' "$depot" "${moitie// /$1}" "${moitie// /0}"
+}
+
+# poser_image <c> <créée> <noms> <empreintes> : ajoute au stock du double de docker l'image
+# image_de <c>, créée à cette date (RFC 3339, la forme de .Created), avec ces noms et ces
+# empreintes, séparés par des espaces (une chaîne vide : aucun).
+poser_image() {
+  printf '%s|%s|%s|%s\n' "$(image_de "$1")" "$2" "$3" "$4" >>"$(dirname "$APPELS")/images"
+}
+
+# poser_conteneur <id> <c> : ajoute au stock du double un conteneur, arrêté ou non, de l'image
+# image_de <c>.
+poser_conteneur() {
+  printf '%s %s\n' "$1" "$(image_de "$2")" >>"$(dirname "$APPELS")/conteneurs"
+}
+
 # envois_supervision : les appels de curl vers un service de supervision (`signaler`), un par ligne,
 # dans la forme « curl … --data-raw <message> <adresse> ». L'adresse n'est jamais dans les arguments
 # notés dans $APPELS (`signaler` la donne à curl sur l'entrée standard, `-K -`) : elle vient de

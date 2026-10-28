@@ -52,8 +52,6 @@ set -euo pipefail
 # shellcheck source=deploiement/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-DEPOT_IMAGE=ghcr.io/edouardzemb/{{ nom }}
-
 # signaler_sonde ok|echec <message> : le signal n'est qu'un plus (signaler journalise son échec) ;
 # le code de la sonde n'en dépend pas.
 signaler_sonde() {

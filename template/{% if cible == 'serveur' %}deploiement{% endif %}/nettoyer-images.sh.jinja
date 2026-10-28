@@ -1,0 +1,304 @@
+{#- Gabarit Copier. `${ {{- prefixe }}X}` : l'espace et le tiret évitent `${{{`, que Jinja lit mal. -#}
+#!/usr/bin/env bash
+# Ménage des images d'{{ nom }} : retire du Docker du serveur les images du dépôt du projet qui ne
+# servent plus. Les deux environnements partagent ce Docker, donc ce stock d'images. GHCR garde
+# tout : une image retirée revient par un `docker pull`, et `docker compose up` la tire lui-même.
+#
+#   bash deploiement/nettoyer-images.sh <prod|staging>
+#
+# Lancé avec {{ prefixe }}VERROU_TENU=1 par un script qui tient déjà le verrou de l'environnement, ou
+# à la main : il prend alors ce verrou lui-même. Toujours par `bash`, depuis le clone de
+# l'environnement.
+#
+# Déroulé :
+#   1. verrou ${{ prefixe }}ETAT/verrou, partagé avec la sonde et le déploiement (600 s d'attente au
+#      plus, prendre_verrou), sauf si {{ prefixe }}VERROU_TENU=1 ;
+#   2. verrou de l'autre environnement, sans attente. S'il est pris, le ménage est sauté (code 0) :
+#      le prochain déploiement le fera. Sans ce verrou, une image que l'autre sonde vient de tirer
+#      pourrait partir avant d'être inscrite dans son état. Si le dossier d'état de l'autre
+#      environnement est absent, il n'y a rien à y protéger, et le journal le dit ;
+#   3. l'état des deux environnements, lu sans être sourcé : deploye, precedent, echec, et l'image
+#      de compose.env et de compose.env.precedent ;
+#   4. les conteneurs, même arrêtés, et l'image de chacun ;
+#   5. les images, chacune une fois, et leur tri :
+#      - une image est du projet si toutes ses références, noms et empreintes, portent exactement
+#        le dépôt (DEPOT_IMAGE, de lib.sh) : ni <dépôt>-autre, ni <dépôt>/sous-image. Une image sans
+#        aucune référence, ou qui en a une ailleurs, n'est jamais touchée ;
+#      - une image du projet est gardée si l'une de ses empreintes est une référence de l'état (la
+#        comparaison porte sur les chaînes <dépôt>@sha256:… : l'image d'une référence n'a pas à
+#        être sur le serveur), si un conteneur l'utilise, ou si elle est parmi les 3 plus récentes
+#        des autres, d'après leur date de création (la marge, tous environnements confondus) ;
+#   6. les autres partent, de la plus ancienne à la plus récente, une à une et par leur identifiant
+#      (`docker image rm <id>`). Un retrait en échec est journalisé, et le suivant est tenté.
+#
+# Jamais de `-f`, de `docker image prune`, de `docker system prune` ni de retrait par un filtre : le
+# script liste toutes les images et choisit lui-même celles du projet.
+#
+# Le ménage est annulé en entier, sans rien retirer (code 1), si un fichier d'état existe mais ne se
+# lit pas ou n'a pas la forme qu'écrit deployer.sh, si la liste des images, leur inspection, la
+# liste des conteneurs ou leur inspection échoue, ou si le verrou de l'autre environnement ne
+# s'ouvre pas. Dans le doute, rien ne part.
+#
+# Journal : une ligne par image retirée (les 12 premiers chiffres de son identifiant, puis ses
+# références), une par retrait en échec, puis le bilan : les retirées, et les gardées, par l'état,
+# par un conteneur ou en marge. Une image compte une fois, pour la première de ces trois raisons qui
+# la garde ; un retrait en échec ne compte ni parmi les retirées ni parmi les gardées.
+#
+# Codes de sortie : 0 fait, ou sauté (verrou de l'autre environnement pris) ; 1 un retrait en échec,
+# un ménage annulé, ou le verrou de l'environnement toujours pris après l'attente ; 64 usage, ou
+# {{ prefixe }}DEPOT_IMAGE refusée.
+#
+# Variables de test :
+#   {{ prefixe }}DEPOT_IMAGE     le dépôt visé, à la place de DEPOT_IMAGE. Seul un registre de la machine
+#                          (localhost:<port>/…) est accepté, sinon code 64 avant toute lecture : le
+#                          ménage ne vise jamais le dépôt d'un autre projet
+#   {{ prefixe }}VERROU_ATTENTE  secondes d'attente du verrou de l'environnement (défaut 600)
+set -euo pipefail
+# shellcheck source=deploiement/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+
+# La marge : parmi les images du projet que rien ne protège, les plus récentes, gardées.
+MARGE=3
+
+# Ce qu'écrit deployer.sh dans l'état : ses motifs.
+MOTIF_REFERENCE='^[a-z0-9][a-z0-9._/:-]*@sha256:[0-9a-f]{64}$'
+MOTIF_VERSION='^(main|[0-9]+\.[0-9]+\.[0-9]+)$'
+# Ce que rend Docker : un identifiant, et une date RFC 3339 en UTC dont la fraction perd ses zéros
+# de fin, et disparaît s'il n'en reste rien (…T10:00:00Z, …T10:00:00.5Z, …T10:00:00.123456789Z).
+MOTIF_IDENTIFIANT='^sha256:[0-9a-f]{64}$'
+MOTIF_DATE='^([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2})(\.([0-9]{1,9}))?Z$'
+# Le seul dépôt que la variable de test peut désigner : un registre de la machine.
+MOTIF_DEPOT_DE_TEST='^localhost:[0-9]+/[a-z0-9._/-]+$'
+# Le format de `docker image inspect` : identifiant, date de création, noms, empreintes.
+FORMAT_IMAGE='{% raw %}{{.Id}}|{{.Created}}|{{join .RepoTags " "}}|{{join .RepoDigests " "}}{% endraw %}'
+
+# Posées par main et ses fonctions.
+DEPOT=""                 # le dépôt visé : DEPOT_IMAGE, ou la variable de test
+declare -A NOMMEE=()     # référence → 1 : les images que nomme l'état des deux environnements
+declare -A UTILISEE=()   # identifiant → 1 : les images d'un conteneur, arrêté ou non
+declare -A REFERENCES=() # identifiant → ses références, pour le journal
+NOM=""                   # posé par nom_de
+IMAGE_LUE=""             # posée par lire_version
+VERSION_LUE=""           # posée par lire_version
+
+# annuler <raison> : le ménage s'arrête avant tout retrait, code 1.
+annuler() {
+  arreter 1 "ménage des images annulé, rien n'est retiré : $1"
+}
+
+# accorder <nombre> <mot> : « 0 retirée », « 1 retirée », « 2 retirées ».
+accorder() {
+  if [ "$1" -ge 2 ]; then
+    printf '%s %ss\n' "$1" "$2"
+  else
+    printf '%s %s\n' "$1" "$2"
+  fi
+}
+
+# nom_de <référence> : NOM ← le nom de la référence, sans son empreinte (ce qui précède « @ ») ni
+# son étiquette (le « :<étiquette> » final, si le dernier « : » suit le dernier « / » ; celui d'un
+# port, localhost:5000/…, n'en est pas une).
+nom_de() {
+  NOM="$1"
+  if [[ "$NOM" == *@* ]]; then
+    NOM="${NOM%%@*}"
+  elif [[ "${NOM##*/}" == *:* ]]; then
+    NOM="${NOM%:*}"
+  fi
+}
+
+# lire_version <fichier> : l'image et la version d'un fichier "<image@sha256:…> <version>" (deploye,
+# precedent) dans IMAGE_LUE et VERSION_LUE, comme deployer.sh les lit. Échec si le fichier manque,
+# ne se lit pas, ou si l'une des deux n'a pas la forme que deployer.sh écrit.
+lire_version() {
+  IMAGE_LUE="" VERSION_LUE=""
+  [ -f "$1" ] || return 1
+  { read -r IMAGE_LUE VERSION_LUE _ || true; } <"$1" || return 1
+  [[ "$IMAGE_LUE" =~ $MOTIF_REFERENCE ]] && [[ "$VERSION_LUE" =~ $MOTIF_VERSION ]]
+}
+
+# lire_etat <dossier> : NOMMEE ← les images que nomment les fichiers d'état de ce dossier, lus,
+# jamais sourcés : deploye et precedent ("<image@sha256:…> <version>"), echec ("<image@sha256:…>"),
+# et la ligne {{ prefixe }}IMAGE= de compose.env et de compose.env.precedent. Un fichier absent (ou un
+# dossier absent) ne protège rien ; un fichier présent qui ne se lit pas, ou qui n'a pas la forme
+# qu'écrit deployer.sh, annule le ménage.
+lire_etat() {
+  local fichier chemin image
+  for fichier in deploye precedent echec compose.env compose.env.precedent; do
+    chemin="$1/$fichier"
+    [ -e "$chemin" ] || [ -L "$chemin" ] || continue
+    image=""
+    case "$fichier" in
+      deploye | precedent)
+        if lire_version "$chemin"; then
+          image="$IMAGE_LUE"
+        fi
+        ;;
+      echec)
+        if [ -f "$chemin" ]; then
+          { read -r image _ || true; } <"$chemin" || image=""
+        fi
+        ;;
+      *)
+        image="$(valeur_de {{ prefixe }}IMAGE "$chemin")" || image=""
+        ;;
+    esac
+    [[ "$image" =~ $MOTIF_REFERENCE ]] \
+      || annuler "$chemin illisible (attendu : la forme qu'écrit deployer.sh)"
+    NOMMEE["$image"]=1
+  done
+}
+
+main() {
+  [ "$#" -eq 1 ] || arreter 64 "usage : bash deploiement/nettoyer-images.sh <prod|staging>"
+  local nom_env="$1"
+  valider_env "$nom_env"
+  charger_env "$nom_env"
+  local etat="${{ prefixe }}ETAT" autre dossier_autre verrou_autre sortie ligne code=0
+  local id cree noms empreintes reference du_depot nommee fraction tries rang
+  local par_etat=0 par_conteneur=0 en_marge=0 retirees=0 listees=0 inspectees=0
+  local -a conteneurs=() identifiants=() references=() liste_empreintes=() candidats=() a_retirer=()
+  local -A vue=()
+
+  # Le dépôt : celui du projet, ou, pour l'épreuve sur un vrai Docker, un registre de la machine.
+  DEPOT="$DEPOT_IMAGE"
+  if [ -n "${ {{- prefixe }}DEPOT_IMAGE+present}" ]; then
+    [[ "${{ prefixe }}DEPOT_IMAGE" =~ $MOTIF_DEPOT_DE_TEST ]] \
+      || arreter 64 "{{ prefixe }}DEPOT_IMAGE refusée : seul un registre de la machine (localhost:<port>/…) est accepté"
+    DEPOT="${{ prefixe }}DEPOT_IMAGE"
+  fi
+
+  # 1. Le verrou de l'environnement : tenu par celui qui lance le ménage, ou pris ici.
+  if [ "${ {{- prefixe }}VERROU_TENU:-}" != 1 ] && ! prendre_verrou; then
+    arreter 1 "verrou $etat/verrou toujours pris après ${ {{- prefixe }}VERROU_ATTENTE:-600} s : ménage abandonné, rien n'est retiré"
+  fi
+
+  # 2. Le verrou de l'autre environnement, sans attente, sur le descripteur 8. flock rend 1 quand
+  # il est pris ; tout autre code est une erreur.
+  case "$nom_env" in
+    prod) autre=staging ;;
+    *) autre=prod ;;
+  esac
+  dossier_autre="$(dirname "$etat")/$autre"
+  if [ -e "$dossier_autre" ] || [ -L "$dossier_autre" ]; then
+    verrou_autre="$dossier_autre/verrou"
+    { exec 8>"$verrou_autre"; } 2>/dev/null || annuler "le verrou $verrou_autre ne s'ouvre pas"
+    flock -n 8 || code=$?
+    case "$code" in
+      0) ;;
+      1)
+        journal "ménage des images sauté : le verrou $verrou_autre est pris ; le prochain déploiement le fera"
+        return 0
+        ;;
+      *) annuler "le verrou $verrou_autre ne se prend pas (flock : code $code)" ;;
+    esac
+  else
+    journal "$autre : aucun état ($dossier_autre absent), rien à y protéger"
+  fi
+
+  # 3. L'état des deux environnements.
+  lire_etat "$etat"
+  lire_etat "$dossier_autre"
+
+  # 4. Les conteneurs, même arrêtés, et leurs images.
+  sortie="$(docker ps --all --no-trunc --quiet)" \
+    || annuler "liste des conteneurs impossible (docker ps : code $?)"
+  while IFS= read -r ligne; do
+    [ -z "$ligne" ] || conteneurs+=("$ligne")
+  done <<<"$sortie"
+  if [ -n "${conteneurs[*]}" ]; then
+    sortie="$(docker container inspect --format '{% raw %}{{.Image}}{% endraw %}' "${conteneurs[@]}")" \
+      || annuler "inspection des conteneurs impossible (docker container inspect : code $?)"
+    while IFS= read -r ligne; do
+      [[ "$ligne" =~ $MOTIF_IDENTIFIANT ]] || annuler "image d'un conteneur illisible : '$ligne'"
+      UTILISEE["$ligne"]=1
+    done <<<"$sortie"
+  fi
+
+  # 5. Les images : chaque identifiant une fois (une image à deux noms est listée deux fois), puis
+  # leur inspection, et le tri.
+  sortie="$(docker image ls --no-trunc --quiet)" \
+    || annuler "liste des images impossible (docker image ls : code $?)"
+  while IFS= read -r ligne; do
+    [ -n "$ligne" ] || continue
+    [[ "$ligne" =~ $MOTIF_IDENTIFIANT ]] || annuler "identifiant d'image illisible : '$ligne'"
+    [ -z "${vue[$ligne]+present}" ] || continue
+    vue["$ligne"]=1
+    identifiants+=("$ligne")
+    listees=$((listees + 1))
+  done <<<"$sortie"
+  sortie=""
+  if [ "$listees" -gt 0 ]; then
+    sortie="$(docker image inspect --format "$FORMAT_IMAGE" "${identifiants[@]}")" \
+      || annuler "inspection des images impossible (docker image inspect : code $?)"
+  fi
+  while IFS='|' read -r id cree noms empreintes; do
+    [ -n "$id$cree$noms$empreintes" ] || continue
+    [ -n "${vue[$id]+present}" ] || annuler "inspection inattendue : '$id'"
+    inspectees=$((inspectees + 1))
+    read -r -a references <<<"$noms $empreintes"
+    read -r -a liste_empreintes <<<"$empreintes"
+    # Sans aucune référence, ou avec une référence hors du dépôt : jamais touchée.
+    [ -n "${references[*]}" ] || continue
+    du_depot=1
+    for reference in "${references[@]}"; do
+      nom_de "$reference"
+      if [ "$NOM" != "$DEPOT" ]; then
+        du_depot=0
+        break
+      fi
+    done
+    [ "$du_depot" -eq 1 ] || continue
+    # Gardée par l'état, puis par un conteneur ; sinon, candidate à la marge.
+    nommee=0
+    for reference in "${liste_empreintes[@]}"; do
+      [ -z "${NOMMEE[$reference]+present}" ] || nommee=1
+    done
+    if [ "$nommee" -eq 1 ]; then
+      par_etat=$((par_etat + 1))
+    elif [ -n "${UTILISEE[$id]+present}" ]; then
+      par_conteneur=$((par_conteneur + 1))
+    else
+      # La fraction complétée à 9 chiffres : l'ordre des chaînes est alors celui du temps.
+      [[ "$cree" =~ $MOTIF_DATE ]] || annuler "date de création illisible pour ${id:7:12} : '$cree'"
+      fraction="${BASH_REMATCH[3]}000000000"
+      candidats+=("${BASH_REMATCH[1]}.${fraction:0:9}Z $id")
+      REFERENCES["$id"]="${references[*]}"
+    fi
+  done <<<"$sortie"
+  [ "$inspectees" -eq "$listees" ] \
+    || annuler "inspection incomplète : $inspectees images inspectées sur $listees listées"
+
+  # La marge : les plus récentes d'abord ; au-delà, de la plus ancienne à la plus récente.
+  if [ -n "${candidats[*]}" ]; then
+    tries="$(printf '%s\n' "${candidats[@]}" | LC_ALL=C sort -r)" || annuler "tri des images impossible"
+    rang=0
+    while IFS=' ' read -r _ id; do
+      rang=$((rang + 1))
+      if [ "$rang" -le "$MARGE" ]; then
+        en_marge=$((en_marge + 1))
+      else
+        a_retirer=("$id" "${a_retirer[@]}")
+      fi
+    done <<<"$tries"
+  fi
+
+  # 6. Les retraits, un à un, par l'identifiant ; un échec n'arrête pas les suivants.
+  code=0
+  for id in "${a_retirer[@]}"; do
+    if sortie="$(docker image rm "$id" 2>&1)"; then
+      journal "image retirée : ${id:7:12} (${REFERENCES[$id]})"
+      retirees=$((retirees + 1))
+    else
+      journal "retrait impossible : ${id:7:12} (${sortie//$'\n'/ })"
+      code=1
+    fi
+  done
+
+  journal "ménage des images : $(accorder "$retirees" retirée), $(accorder "$((par_etat + par_conteneur + en_marge))" gardée) ($par_etat par l'état, $par_conteneur par un conteneur, $en_marge en marge)"
+  return "$code"
+}
+
+# Tout le corps est dans main, appelée sur la dernière ligne : bash a lu tout le fichier avant
+# qu'un `git checkout` ne le remplace.
+main "$@"; exit $?

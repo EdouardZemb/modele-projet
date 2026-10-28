@@ -44,7 +44,7 @@ def test_nom_invalide_refuse(rendre, nom):
 
 
 # Un reste de Jinja : `{{` qui n'ouvre ni un `${{` de GitHub ni une action de gabarit Go.
-RESTE_DE_JINJA = re.compile(r"(?<!\$)\{\{(?!-?\s*(?:\.|index\b|json\b|range\b|end\b|if\b))")
+RESTE_DE_JINJA = re.compile(r"(?<!\$)\{\{(?!-?\s*(?:\.|index\b|json\b|join\b|range\b|end\b|if\b))")
 
 
 def test_regex_reste_de_jinja():
@@ -52,6 +52,9 @@ def test_regex_reste_de_jinja():
     assert RESTE_DE_JINJA.search("{{nom}}")
     assert not RESTE_DE_JINJA.search("{{index .RepoDigests 0}}")
     assert not RESTE_DE_JINJA.search("{{ json .State.Health }}")
+    # le format de `docker image inspect` du ménage des images (lot 9)
+    assert not RESTE_DE_JINJA.search('{{join .RepoTags " "}}')
+    assert RESTE_DE_JINJA.search("{{ joindre }}")
     assert not RESTE_DE_JINJA.search("${{ secrets.X }}")
 
 

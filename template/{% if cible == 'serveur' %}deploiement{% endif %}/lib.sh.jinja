@@ -43,10 +43,11 @@
 #   purger_par_nom <dossier> <regex> <limite>  retire les dossiers dont le nom date d'avant <limite>
 #   retirer_partiels <dossier> <regex> retire les instantanés en échec (.partiel) avant un nouvel essai
 #   retirer_restes_de_restauration     retire, sous le verrou, ce qu'une restauration tuée a laissé
-# Variables posées : {{ prefixe }}CLONE (racine du clone qui lance le script) et {{ prefixe }}OPTIONS_JETABLES
-# (options des conteneurs jetables).
+# Variables posées : {{ prefixe }}CLONE (racine du clone qui lance le script), DEPOT_IMAGE (le dépôt
+# GHCR du projet) et {{ prefixe }}OPTIONS_JETABLES (options des conteneurs jetables).
 {%- else %}
-# Variable posée : {{ prefixe }}CLONE (racine du clone qui lance le script).
+# Variables posées : {{ prefixe }}CLONE (racine du clone qui lance le script) et DEPOT_IMAGE (le
+# dépôt GHCR du projet).
 {%- endif %}
 #
 # Codes de sortie : 64 = usage (environnement inconnu, argument invalide), 3 = secrets absents,
@@ -62,6 +63,11 @@
 
 # Racine du dépôt auquel appartient cette bibliothèque : le clone qui lance le script.
 {{ prefixe }}CLONE="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Le dépôt GHCR du projet : celui que tire la sonde, et le seul que vise le ménage des images.
+# Défini ici seulement.
+# shellcheck disable=SC2034  # lue par sonder.sh et nettoyer-images.sh, qui sourcent lib.sh
+DEPOT_IMAGE=ghcr.io/edouardzemb/{{ nom }}
 
 # journal <message…> : une ligne sur stderr, préfixée de l'heure ISO (UTC).
 journal() {
