@@ -937,7 +937,9 @@ def test_historique_fusion_nom_et_binaire_crees_par_la_resolution(tmp_path, env_
     _commit(d, env, "feat: autre", a__txt="autre\n")
     git(d, env, "switch", "-q", "main")
     _commit(d, env, "feat: main", a__txt="main\n")
-    subprocess.run(["git", "merge", "--no-ff", "autre"], cwd=d, env=env, capture_output=True)
+    subprocess.run(
+        ["git", "merge", "--no-ff", "autre"], cwd=d, env=env, capture_output=True, check=False
+    )
     (d / "a.txt").write_text("resolu\n", encoding="utf-8")
     (d / "nom-prive.txt").write_text("propre\n", encoding="utf-8")
     (d / "fusion.dat").write_bytes(b"\0x")
