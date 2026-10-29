@@ -265,3 +265,16 @@ def test_liste_d_alignement():
     assert "git add -- <chemins>" in texte
     for lien in ("CLAUDE.md", "README.md"):
         assert "docs/aligner.md" in (RACINE / lien).read_text(encoding="utf-8"), lien
+
+
+def test_aucun_passage_planifie_ne_lit_le_contexte_du_depot():
+    """Sur un déclenchement `schedule`, `github.event.repository` peut manquer : la visibilité
+    se lit par l'API, pas par ce contexte."""
+    planifies = []
+    for dossier in (RACINE / "template/.github/workflows", RACINE / ".github/workflows"):
+        for chemin in dossier.iterdir():
+            texte = chemin.read_text(encoding="utf-8")
+            if re.search(r"^\s+schedule:", texte, re.MULTILINE):
+                planifies.append(chemin)
+                assert "github.event.repository" not in texte, chemin.name
+    assert len(planifies) >= 2

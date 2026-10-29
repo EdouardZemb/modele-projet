@@ -292,11 +292,16 @@ def test_historique_lance_la_porte(rendre):
         "python scripts/modele/confidentialite.py --exiger-prives --historique "
         "--acceptes .github/constats-acceptes.txt"
     )
-    assert porte["env"] == {
-        "MOTIFS_INTERDITS": "${{ secrets.MOTIFS_INTERDITS }}",
-        "DEPOT_PRIVE": "${{ github.event.repository.private }}",
-        "BRANCHE_DEFAUT": "${{ github.event.repository.default_branch }}",
-    }
+    assert porte["env"] == {"MOTIFS_INTERDITS": "${{ secrets.MOTIFS_INTERDITS }}"}
+    # la visibilité et la branche par défaut viennent de l'API, avant la porte, jamais de
+    # github.event.repository (absent d'un déclenchement planifié)
+    (lecture,) = [e for e in etapes[:rang] if e.get("name") == "Visibilité du dépôt"]
+    assert lecture["env"] == {"GH_TOKEN": "${{ github.token }}"}
+    assert "set -euo pipefail" in lecture["run"]
+    assert "gh api" in lecture["run"]
+    assert "DEPOT_PRIVE=" in lecture["run"] and "BRANCHE_DEFAUT=" in lecture["run"]
+    assert '>> "$GITHUB_ENV"' in lecture["run"]
+    assert "github.event.repository" not in (rendu / HISTORIQUE).read_text(encoding="utf-8")
 
 
 def test_historique_hors_contextes_requis(rendre):

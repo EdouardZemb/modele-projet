@@ -487,7 +487,6 @@ def test_depot_de_donnees_erreurs_toujours_64(rendre, tmp_path, env_isole):
     [
         ("donnees", "false", 1),
         ("donnees", "False", 1),
-        ("donnees", "", 1),
         ("code", "true", 1),
         ("code", "false", 1),
     ],
@@ -499,7 +498,7 @@ def test_visibilite_reelle_en_ci(rendre, tmp_path, env_isole, nature, depot_priv
     env = {**env_isole(), "DEPOT_PRIVE": depot_prive}
     r = lancer_porte(script, ["--fichiers", str(f)], env)
     assert r.returncode == attendu, r.stderr
-    assert ("avertissement" in r.stderr) is (attendu == 0)
+    assert "avertissement" not in r.stderr
 
 
 # --- lot 11 : la nature se lit sur la branche par défaut, jamais dans la PR ---
@@ -601,6 +600,64 @@ def test_depot_public_toujours_code(tmp_path, env_isole):
     assert r.returncode == 1
     assert "avertissement" not in r.stderr
     assert NATURES_ILLISIBLES not in r.stderr
+
+
+@pytest.mark.parametrize("depot_prive", ["true", "True"])
+def test_depot_prive_en_ci_lit_la_nature_de_la_branche_par_defaut(tmp_path, env_isole, depot_prive):
+    """Cas positifs : un dépôt privé dont la branche par défaut est en `donnees` avertit."""
+    env = env_isole()
+    clone, f = depot_de_nature(tmp_path, env, "donnees", "code")
+    r = porte_en_ci(clone, f, env, depot_prive=depot_prive, BRANCHE_DEFAUT="main")
+    assert r.returncode == 0, r.stderr
+    assert "dépôt de données : avertissement, pas de refus" in r.stderr
+
+
+def test_visibilite_vide_en_ci_est_inconnue(tmp_path, env_isole):
+    """DEPOT_PRIVE posée mais vide : on le dit, et c'est le régime code (un constat refuse)."""
+    env = env_isole()
+    clone, f = depot_de_nature(tmp_path, env, "donnees", "donnees")
+    r = porte_en_ci(clone, f, env, depot_prive="", BRANCHE_DEFAUT="main")
+    assert r.returncode == 1
+    assert "confidentialité : visibilité inconnue : régime code" in r.stderr
+    assert "avertissement" not in r.stderr
+    assert "adresse IP privée" in r.stderr
+
+
+def test_une_etiquette_ne_masque_pas_la_branche_par_defaut(tmp_path, env_isole):
+    """git résout `refs/tags/origin/main` avant `refs/remotes/origin/main` : on lit la seconde."""
+    env = env_isole()
+    clone, f = depot_de_nature(tmp_path, env, "code", "code")
+    reglages = clone / "scripts/modele/reglages.py"
+    reglages.write_text('NATURE = "donnees"' + chr(10), encoding="utf-8")
+    git(clone, env, "add", "scripts/modele/reglages.py")
+    git(clone, env, "commit", "-q", "-m", "chore: piège")
+    git(clone, env, "tag", "origin/main")
+    git(clone, env, "reset", "-q", "--hard", "origin/main")
+    r = porte_en_ci(clone, f, env, BRANCHE_DEFAUT="main")
+    assert r.returncode == 1, r.stderr
+    assert "avertissement" not in r.stderr
+
+
+@pytest.mark.parametrize("octets", ["é".encode("cp1252"), "é".encode("utf-16-le")])
+def test_liste_non_utf8_sans_message_du_codec(tmp_path, env_isole, octets):
+    """Une liste illisible dit « illisible » et rend 64, sans le message du codec (qui cite
+    un octet et sa position)."""
+    f = tmp_path / "f.txt"
+    f.write_text("rien" + chr(10), encoding="utf-8")
+    liste = tmp_path / "liste.txt"
+    liste.write_bytes(b"ab" + octets + bytes([0xFF, 0xFE]))
+    r = lancer_porte(SCRIPT, ["--motifs", str(liste), "--fichiers", str(f)], env_isole())
+    assert r.returncode == 64
+    assert "liste de motifs privés illisible" in r.stderr
+    assert "codec" not in r.stderr and "position" not in r.stderr and "0x" not in r.stderr
+    acceptes = tmp_path / "acceptes.txt"
+    acceptes.write_bytes(b"ab" + octets + bytes([0xFF, 0xFE]))
+    r = lancer_porte(
+        SCRIPT, ["--historique", "--acceptes", str(acceptes)], env_isole(), cwd=tmp_path
+    )
+    assert r.returncode == 64
+    assert "liste des constats acceptés illisible" in r.stderr
+    assert "codec" not in r.stderr and "position" not in r.stderr and "0x" not in r.stderr
 
 
 # --- relecture de la vague : les secrets refusent partout, ce qui identifie avertit en privé ---
@@ -937,9 +994,10 @@ def test_historique_fusion_nom_et_binaire_crees_par_la_resolution(tmp_path, env_
     _commit(d, env, "feat: autre", a__txt="autre\n")
     git(d, env, "switch", "-q", "main")
     _commit(d, env, "feat: main", a__txt="main\n")
-    subprocess.run(
+    fusion = subprocess.run(
         ["git", "merge", "--no-ff", "autre"], cwd=d, env=env, capture_output=True, check=False
     )
+    assert fusion.returncode == 1  # le conflit attendu sur a.txt, que la résolution tranche
     (d / "a.txt").write_text("resolu\n", encoding="utf-8")
     (d / "nom-prive.txt").write_text("propre\n", encoding="utf-8")
     (d / "fusion.dat").write_bytes(b"\0x")
