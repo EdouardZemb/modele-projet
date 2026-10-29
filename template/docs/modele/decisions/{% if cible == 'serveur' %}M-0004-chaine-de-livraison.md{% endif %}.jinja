@@ -59,7 +59,7 @@ l'étiquette quittée.
   plus haute étiquette.
 - Les adresses : `<sous_domaine>.<domaine>` et `<sous_domaine>-staging.<domaine>`, un seul niveau
   de sous-domaine, celui que couvre le certificat gratuit de Cloudflare.
-- Les images vont sur GHCR, `ghcr.io/edouardzemb/<nom>`. **Un paquet GHCR est privé par
+- Les images vont sur GHCR, `ghcr.io/{{ compte | lower }}/<nom>`. **Un paquet GHCR est privé par
   défaut** : à la mise en service d'un dépôt public, 👤 Edouard le passe en public
   (`docs/exploitation.md`). Le serveur tire avec un seul jeton `read:packages` pour tout le parc,
   rangé dans `~/.config/serveur/docker` par la sonde de `serveur`.

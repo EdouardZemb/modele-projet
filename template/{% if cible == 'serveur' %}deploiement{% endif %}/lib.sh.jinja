@@ -70,7 +70,7 @@
 # Le dépôt GHCR du projet : celui que tire la sonde, et le seul que vise le ménage des images.
 # Défini ici seulement.
 # shellcheck disable=SC2034  # lue par sonder.sh et nettoyer-images.sh, qui sourcent lib.sh
-DEPOT_IMAGE=ghcr.io/edouardzemb/{{ nom }}
+DEPOT_IMAGE=ghcr.io/{{ compte | lower }}/{{ nom }}
 
 # La forme d'une image et d'une version de l'état : ce que deployer.sh accepte en argument et écrit
 # dans deploye, precedent et compose.env, et ce qu'exigent ceux qui les relisent (lire_version, pour

@@ -119,3 +119,9 @@ def test_fins_de_ligne_lf(rendre):
     assert fichiers, "aucun fichier rendu : le test passerait à vide"
     for chemin in fichiers:
         assert b"\r" not in chemin.read_bytes(), chemin
+
+
+@pytest.mark.parametrize("compte", ["-x", "a b", "x-", "a--b"])
+def test_compte_invalide_refuse(rendre, compte):
+    with pytest.raises(Exception, match="compte GitHub"):
+        rendre(compte=compte)

@@ -563,7 +563,7 @@ projet_env() {
 
 @test "lire_deploye_lit_l_image_et_la_version" {
   local image
-  image="ghcr.io/edouardzemb/{{ nom }}@sha256:$(printf 'a%.0s' {1..64})"
+  image="ghcr.io/{{ compte | lower }}/{{ nom }}@sha256:$(printf 'a%.0s' {1..64})"
   en_service prod "$image" 0.4.2
   avec_lib 'charger_env prod; lire_deploye; printf "%s\n" "$DEPLOYE_IMAGE" "$DEPLOYE_VERSION"'
   [ "$status" -eq 0 ]
@@ -591,7 +591,7 @@ projet_env() {
 
 @test "verifier_copie_lance_verifier_dans_un_conteneur_jetable" {
   local image
-  image="ghcr.io/edouardzemb/{{ nom }}@sha256:$(printf 'a%.0s' {1..64})"
+  image="ghcr.io/{{ compte | lower }}/{{ nom }}@sha256:$(printf 'a%.0s' {1..64})"
   projet_env "SAUVEGARDER=outil sauvegarder" "VERIFIER=outil verifier --strict"
   creer_double docker 'echo "conforme : 3 fichiers"'
   run --separate-stderr bash -c 'set -euo pipefail; . "$CLONE/deploiement/lib.sh"; verifier_copie '"$image"' /un/dossier'
@@ -607,7 +607,7 @@ projet_env() {
 
 @test "verifier_copie_rend_0_2_ou_1_selon_le_code_de_verifier" {
   local image code
-  image="ghcr.io/edouardzemb/{{ nom }}@sha256:$(printf 'a%.0s' {1..64})"
+  image="ghcr.io/{{ compte | lower }}/{{ nom }}@sha256:$(printf 'a%.0s' {1..64})"
   projet_env "VERIFIER=outil verifier"
   # 2 : l'image dit « non conforme » ; la sortie va au journal, rien sur stdout
   creer_double docker 'echo "écart : donnees.txt"; exit 2'

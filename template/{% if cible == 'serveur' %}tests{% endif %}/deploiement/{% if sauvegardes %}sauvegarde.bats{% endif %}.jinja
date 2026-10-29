@@ -31,7 +31,7 @@ setup() {
   DONNEES="${{ prefixe }}RACINE_DONNEES/prod/donnees"
   EN_SERVICE="$BATS_TEST_TMPDIR/en-service.env"
   DISTANT="$BATS_TEST_TMPDIR/distant/sauvegardes/{{ nom }}-sauvegardes"
-  IMAGE="ghcr.io/edouardzemb/{{ nom }}@sha256:$(printf '1%.0s' {1..64})"
+  IMAGE="ghcr.io/{{ compte | lower }}/{{ nom }}@sha256:$(printf '1%.0s' {1..64})"
   HC_SAUVEGARDE=https://hc.example/ping/sauvegarde-prod
   HC_TEST=https://hc.example/ping/test-restauration-prod
   SNAPSHOT={{ nom }}-20261014T024500Z
@@ -906,7 +906,7 @@ aucune_copie_jetable() {
 }
 
 @test "sauvegarde_refuse_une_image_heritee_de_l_environnement" {
-  {{ prefixe }}IMAGE=ghcr.io/edouardzemb/{{ nom }}@sha256:ffff sauvegarder prod
+  {{ prefixe }}IMAGE=ghcr.io/{{ compte | lower }}/{{ nom }}@sha256:ffff sauvegarder prod
   [ "$status" -eq 1 ]
   [[ "$output" == *"{{ prefixe }}IMAGE est posée dans l'environnement"* ]]
   [ -z "$(appels_de docker)" ]

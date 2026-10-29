@@ -19,7 +19,7 @@ load aide
 setup() {
   preparer_environnement
   installer_doubles docker
-  DEPOT_DU_PROJET=ghcr.io/edouardzemb/{{ nom }}
+  DEPOT_DU_PROJET=ghcr.io/{{ compte | lower }}/{{ nom }}
   STOCK="$BATS_TEST_TMPDIR/images"
   REFUS="$BATS_TEST_TMPDIR/refus-images"
 }
@@ -144,7 +144,7 @@ bilan() {
 @test "depot_de_test_refuse_tout_sauf_un_registre_local" {
   cinq_images
   local valeur
-  for valeur in ghcr.io/edouardzemb/autre docker.io/x/y localhost/x '' $'localhost:5000/x\nghcr.io/y'; do
+  for valeur in ghcr.io/{{ compte | lower }}/autre docker.io/x/y localhost/x '' $'localhost:5000/x\nghcr.io/y'; do
     echo "cas : '$valeur'"
     : >"$APPELS"
     {{ prefixe }}DEPOT_IMAGE="$valeur" nettoyer prod
@@ -156,7 +156,7 @@ bilan() {
 }
 
 @test "depot_de_test_avec_un_port" {
-  local depot=localhost:5000/edouardzemb/{{ nom }}
+  local depot=localhost:5000/{{ compte | lower }}/{{ nom }}
   poser_image 1 2026-10-01T10:00:00Z "" "$(empreinte_de 1 "$depot")"
   poser_image 2 2026-10-02T10:00:00Z "" "$(empreinte_de 2 "$depot")"
   poser_image 3 2026-10-03T10:00:00Z "" "$(empreinte_de 3 "$depot")"
@@ -463,7 +463,7 @@ bilan() {
   [ "$(retraits | wc -l)" -eq 3 ]
   local ligne
   while IFS= read -r ligne; do
-    [[ "$ligne" =~ ^docker\ image\ rm\ (sha256:[0-9a-f]{64}|ghcr\.io/edouardzemb/{{ nom }}:[^\ ]+)$ ]]
+    [[ "$ligne" =~ ^docker\ image\ rm\ (sha256:[0-9a-f]{64}|ghcr\.io/{{ compte | lower }}/{{ nom }}:[^\ ]+)$ ]]
   done < <(retraits)
   aucune_ligne 'prune|rmi' "$APPELS"
   [ ! -e "$REFUS" ]

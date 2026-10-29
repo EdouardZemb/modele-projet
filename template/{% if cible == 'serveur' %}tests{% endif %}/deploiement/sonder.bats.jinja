@@ -18,8 +18,8 @@ setup() {
   preparer_environnement
   installer_doubles docker git curl
   # La référence que le double de docker donne par défaut à la cible, et une autre.
-  EMPREINTE="ghcr.io/edouardzemb/{{ nom }}@sha256:$(printf 'a%.0s' {1..64})"
-  AUTRE="ghcr.io/edouardzemb/{{ nom }}@sha256:$(printf 'b%.0s' {1..64})"
+  EMPREINTE="ghcr.io/{{ compte | lower }}/{{ nom }}@sha256:$(printf 'a%.0s' {1..64})"
+  AUTRE="ghcr.io/{{ compte | lower }}/{{ nom }}@sha256:$(printf 'b%.0s' {1..64})"
   # Le double de deployer.sh note aussi si le verrou de la sonde est tenu pendant son exécution.
   # shellcheck disable=SC2016  # corps des doubles : développé quand ils tournent, pas ici
   remplacer_par_un_double deployer.sh '
@@ -75,7 +75,7 @@ signal() {
   [ "$(appels_de git)" = "$(printf '%s\n' "git -C $CLONE status --porcelain" \
     "git -C $CLONE fetch origin {{ branche_principale }}" \
     "git -C $CLONE merge --ff-only origin/{{ branche_principale }}")" ]
-  appels_de docker | grep -Fx 'docker pull -q ghcr.io/edouardzemb/{{ nom }}:main'
+  appels_de docker | grep -Fx 'docker pull -q ghcr.io/{{ compte | lower }}/{{ nom }}:main'
   # …puis, rien à déployer : l'adresse publique répond (corps lu, code HTTP vérifié), signal ok
   [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
   appels_de curl | grep -Fx 'curl -sS -m 10 -w \n%{http_code} https://{{ sous_domaine }}-staging.{{ domaine }}{{ chemin_sante }}'
@@ -166,7 +166,7 @@ signal() {
 # En staging, :main doit toujours exister : une image introuvable est une panne, pas une attente.
 @test "staging_alerte_si_l_image_est_introuvable" {
   preparer staging
-  export DOUBLE_DOCKER_PULL_ERREUR='manifest for ghcr.io/edouardzemb/{{ nom }}:main not found: manifest unknown: manifest unknown'
+  export DOUBLE_DOCKER_PULL_ERREUR='manifest for ghcr.io/{{ compte | lower }}/{{ nom }}:main not found: manifest unknown: manifest unknown'
   sonder staging
   [ "$status" -eq 1 ]
   [[ "$(signaux)" == *" $HC/fail" ]]
@@ -352,7 +352,7 @@ signal() {
   sonder prod
   [ "$status" -eq 0 ]
   appels_de git | grep -Fx "git -C $CLONE fetch --prune --prune-tags --tags origin"
-  appels_de docker | grep -Fx 'docker pull -q ghcr.io/edouardzemb/{{ nom }}:0.10.0'
+  appels_de docker | grep -Fx 'docker pull -q ghcr.io/{{ compte | lower }}/{{ nom }}:0.10.0'
   [ "$(appels_de deployer.sh)" = "deployer.sh prod $EMPREINTE 0.10.0" ]
   # le clone passe sur l'étiquette, les unités sont réinstallées, puis on déploie
   [ "$(appels_de installer-unites.sh)" = installer-unites.sh ]
@@ -384,7 +384,7 @@ signal() {
   export DOUBLE_GIT_ETIQUETTES='v0.1.0 v0.2.0' DOUBLE_GIT_ORIGINE='v0.1.0 v0.2.0'
   sonder prod
   [ "$status" -eq 0 ]
-  appels_de docker | grep -Fx 'docker pull -q ghcr.io/edouardzemb/{{ nom }}:0.2.0'
+  appels_de docker | grep -Fx 'docker pull -q ghcr.io/{{ compte | lower }}/{{ nom }}:0.2.0'
   [ "$(appels_de deployer.sh)" = "deployer.sh prod $EMPREINTE 0.2.0" ]
 
   # v0.2.0 est supprimée sur l'origine : la sonde suivante vise v0.1.0
@@ -392,7 +392,7 @@ signal() {
   export DOUBLE_GIT_ORIGINE='v0.1.0'
   sonder prod
   [ "$status" -eq 0 ]
-  appels_de docker | grep -Fx 'docker pull -q ghcr.io/edouardzemb/{{ nom }}:0.1.0'
+  appels_de docker | grep -Fx 'docker pull -q ghcr.io/{{ compte | lower }}/{{ nom }}:0.1.0'
   [ "$(appels_de docker | grep -c ':0.2.0')" -eq 0 ]
   [ "$(appels_de deployer.sh)" = "deployer.sh prod $EMPREINTE 0.1.0" ]
   appels_de git | grep -Fx "git -C $CLONE checkout --quiet v0.1.0"
@@ -442,13 +442,13 @@ signal() {
 @test "prod_attend_une_image_pas_encore_publiee" {
   preparer prod
   export DOUBLE_GIT_ETIQUETTES='v0.1.0 v0.2.0'
-  echo "ghcr.io/edouardzemb/{{ nom }}@sha256:$(printf 'c%.0s' {1..64}) 0.1.0" >"$ETAT/deploye"
+  echo "ghcr.io/{{ compte | lower }}/{{ nom }}@sha256:$(printf 'c%.0s' {1..64}) 0.1.0" >"$ETAT/deploye"
   local erreur
   # un cas par forme acceptée, puis le message complet de docker
   for erreur in 'manifest unknown' \
-    'manifest for ghcr.io/edouardzemb/{{ nom }}:0.2.0 not found' \
-    'ghcr.io/edouardzemb/{{ nom }}:0.2.0: not found' \
-    'manifest for ghcr.io/edouardzemb/{{ nom }}:0.2.0 not found: manifest unknown: manifest unknown'; do
+    'manifest for ghcr.io/{{ compte | lower }}/{{ nom }}:0.2.0 not found' \
+    'ghcr.io/{{ compte | lower }}/{{ nom }}:0.2.0: not found' \
+    'manifest for ghcr.io/{{ compte | lower }}/{{ nom }}:0.2.0 not found: manifest unknown: manifest unknown'; do
     : >"$APPELS"
     export DOUBLE_DOCKER_PULL_ERREUR="$erreur"
     sonder prod
@@ -469,13 +469,13 @@ signal() {
   # shellcheck disable=SC2016  # « $PATH » littéral : c'est le message de docker
   for erreur in \
     'error getting credentials - err: exec: "docker-credential-desktop": executable file not found in $PATH, out: ``' \
-    'repository ghcr.io/edouardzemb/{{ nom }} not found: name unknown: repository name not known to registry' \
-    'manifest for ghcr.io/edouardzemb/{{ nom }}:0.1.0 not found'; do
+    'repository ghcr.io/{{ compte | lower }}/{{ nom }} not found: name unknown: repository name not known to registry' \
+    'manifest for ghcr.io/{{ compte | lower }}/{{ nom }}:0.1.0 not found'; do
     : >"$APPELS"
     export DOUBLE_DOCKER_PULL_ERREUR="$erreur"
     sonder prod
     [ "$status" -eq 1 ]
-    [ "$(signaux)" = "$(signal 'docker pull ghcr.io/edouardzemb/{{ nom }}:0.2.0 impossible') $HC/fail" ]
+    [ "$(signaux)" = "$(signal 'docker pull ghcr.io/{{ compte | lower }}/{{ nom }}:0.2.0 impossible') $HC/fail" ]
     [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
   done
 }
@@ -488,17 +488,17 @@ signal() {
   sonder prod
   [ "$status" -eq 1 ]
   [[ "$output" == *"docker: command not found"* ]]
-  [ "$(signaux)" = "$(signal 'docker pull ghcr.io/edouardzemb/{{ nom }}:0.2.0 impossible') $HC/fail" ]
+  [ "$(signaux)" = "$(signal 'docker pull ghcr.io/{{ compte | lower }}/{{ nom }}:0.2.0 impossible') $HC/fail" ]
   [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
 }
 
 @test "alerte_si_ghcr_refuse_l_acces" {
   preparer prod
   export DOUBLE_GIT_ETIQUETTES=v0.2.0
-  export DOUBLE_DOCKER_PULL_ERREUR='Head "https://ghcr.io/v2/edouardzemb/{{ nom }}/manifests/0.2.0": unauthorized'
+  export DOUBLE_DOCKER_PULL_ERREUR='Head "https://ghcr.io/v2/{{ compte | lower }}/{{ nom }}/manifests/0.2.0": unauthorized'
   sonder prod
   [ "$status" -eq 1 ]
-  [[ "$(signaux)" == "$(signal 'docker pull ghcr.io/edouardzemb/{{ nom }}:0.2.0 impossible')"*" $HC/fail" ]]
+  [[ "$(signaux)" == "$(signal 'docker pull ghcr.io/{{ compte | lower }}/{{ nom }}:0.2.0 impossible')"*" $HC/fail" ]]
   [[ "$output" == *unauthorized* ]]
   [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
 }
