@@ -308,6 +308,7 @@ Un `CLAUDE.md` à la fois géré par le modèle et propre au projet ferait un co
   | M-0003 Contrat de l'image | `serveur` | §6.1 |
   | M-0004 Chaîne de livraison | `serveur`, `statique` | ADR-0006 d'`ancrage`, généralisé |
   | M-0005 Sauvegardes et restauration | `serveur`, avec sauvegardes | partie générique de l'ADR-0007 d'`ancrage` |
+  | M-0006 Le code et les données | toutes | l'analyse du 29/10, faite pour `veille-emploi` (amendement du 29/10) |
 
   M-0001 répond à une faiblesse que l'ADR-0010 avoue lui-même : *« Cet ADR vit dans le dépôt de
   Martha (`creche-planner`) mais gouverne des applications qui n'y sont pas »*. Le modèle devient la maison de ces
