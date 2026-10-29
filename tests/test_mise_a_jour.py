@@ -138,7 +138,13 @@ def test_passage_en_cible_serveur(tmp_path, env_isole):
 
     copier.run_update(
         str(projet),
-        data={"cible": "serveur", "bloc_ports": 4310, "sauvegardes": True, "fusion": "session"},
+        data={
+            "cible": "serveur",
+            "bloc_ports": 4310,
+            "sauvegardes": True,
+            "fusion": "session",
+            "domaine": "exemple.org",
+        },
         defaults=True,
         overwrite=True,
         vcs_ref="v0.0.2",

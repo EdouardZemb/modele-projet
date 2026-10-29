@@ -21,7 +21,7 @@ def test_questions_serveur_enregistrees(rendre):
     rendu = rendre(**REPONSES_SERVEUR)
     reponses = yaml.safe_load(lire(rendu, ".copier-answers.yml"))
     assert reponses["cible"] == "serveur"
-    assert reponses["domaine"] == "testlens.dev"
+    assert reponses["domaine"] == "exemple.org"
     assert reponses["sous_domaine"] == "essai"
     assert reponses["port_app"] == 3000
     assert reponses["chemin_sante"] == "/api/sante"
@@ -144,14 +144,14 @@ def test_env_prod_et_staging(rendre):
         "ESSAI_ENV=prod",
         "ESSAI_PROJET=essai",
         "ESSAI_PORT=4330",
-        "ESSAI_URL_PUBLIQUE=https://essai.testlens.dev",
+        "ESSAI_URL_PUBLIQUE=https://essai.exemple.org",
         "ESSAI_CANAL=etiquette",
     ]
     assert lire(rendu, "deploiement/env/staging.env").splitlines() == [
         "ESSAI_ENV=staging",
         "ESSAI_PROJET=essai-staging",
         "ESSAI_PORT=4331",
-        "ESSAI_URL_PUBLIQUE=https://essai-staging.testlens.dev",
+        "ESSAI_URL_PUBLIQUE=https://essai-staging.exemple.org",
         "ESSAI_CANAL=main",
     ]
 
