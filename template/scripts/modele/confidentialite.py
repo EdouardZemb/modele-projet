@@ -291,7 +291,7 @@ def _lignes_de_l_historique(non_examines: list[str]) -> list[tuple[str, str]]:
     sortie: list[tuple[str, str]] = []
     marque = secrets.token_hex(16)
     journal = _git(
-        "log", "--all", "--reverse", "--root", "-p", "-U0", "--remerge-diff", *DIFF,
+        "log", "--all", "--reverse", "--root", "--no-show-signature", "-p", "-U0", "--remerge-diff", *DIFF,
         f"--format={marque}%n%H%n%B{marque}",
     )  # fmt: skip
     morceaux = journal.split(marque)
@@ -308,13 +308,14 @@ def _lignes_de_l_historique(non_examines: list[str]) -> list[tuple[str, str]]:
             sortie.append((f"{sha}:{emplacement}", texte))
     # Les noms des fichiers ajoutés (`--diff-filter=A`), et les binaires ajoutés ou modifiés
     # (`-` `-` dans --numstat), en une seule passe : un binaire n'a aucune ligne dans le diff,
-    # on lit l'objet lui-même. Les fusions n'y figurent pas : leurs fichiers sont ceux des parents.
+    # on lit l'objet lui-même. Pour une fusion, --remerge-diff ne montre que ce que la
+    # résolution a créé ou changé.
     suivi = _git(
-        "log", "--all", "--reverse", "--root", "--diff-filter=ACMR", "--numstat", "-z", *DIFF,
+        "log", "--all", "--reverse", "--root", "--no-show-signature", "--remerge-diff", "--diff-filter=ACMR", "--numstat", "-z", *DIFF,
         "--format=%x01%H",
     )  # fmt: skip
     ajoutes = _git(
-        "log", "--all", "--reverse", "--root", "--diff-filter=A", "--name-only", "-z", *DIFF,
+        "log", "--all", "--reverse", "--root", "--no-show-signature", "--remerge-diff", "--diff-filter=A", "--name-only", "-z", *DIFF,
         "--format=%x01%H",
     )  # fmt: skip
     sha = ""

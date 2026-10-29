@@ -926,3 +926,62 @@ def test_historique_lit_le_commit_racine_malgre_show_root(tmp_path, env_isole):
     r = lancer(["--historique"], env, d)
     assert r.returncode == 1
     assert f"{sha}:a.txt:1 — adresse IP privée" in r.stderr
+
+
+def test_historique_fusion_nom_et_binaire_crees_par_la_resolution(tmp_path, env_isole):
+    env = env_isole()
+    env["MOTIFS_INTERDITS"] = "nom-prive"
+    d = depot(tmp_path, env)
+    _commit(d, env, "feat: base", a__txt="1\n")
+    git(d, env, "switch", "-qc", "autre")
+    _commit(d, env, "feat: autre", a__txt="autre\n")
+    git(d, env, "switch", "-q", "main")
+    _commit(d, env, "feat: main", a__txt="main\n")
+    subprocess.run(["git", "merge", "--no-ff", "autre"], cwd=d, env=env, capture_output=True)
+    (d / "a.txt").write_text("resolu\n", encoding="utf-8")
+    (d / "nom-prive.txt").write_text("propre\n", encoding="utf-8")
+    (d / "fusion.dat").write_bytes(b"\0x")
+    git(d, env, "add", "a.txt", "nom-prive.txt", "fusion.dat")
+    git(d, env, "commit", "-q", "-m", "Merge autre")
+    sha = git(d, env, "rev-parse", "HEAD").strip()
+    r = lancer(["--historique"], env, d)
+    assert r.returncode == 1
+    assert f"{sha}:<chemin masqué>:0 — motif privé n°1" in r.stderr
+    assert f"fichier binaire non examiné : {sha}:fusion.dat" in r.stderr
+    assert "nom-prive" not in r.stdout + r.stderr
+
+
+def test_historique_fusion_propre_sans_doublon(tmp_path, env_isole):
+    env = env_isole()
+    env["MOTIFS_INTERDITS"] = "nom-prive"
+    d = depot(tmp_path, env)
+    _commit(d, env, "feat: base", a__txt="1\n")
+    git(d, env, "switch", "-qc", "autre")
+    _commit(d, env, "feat: autre", **{"nom-prive__txt": "x\n"})
+    git(d, env, "switch", "-q", "main")
+    _commit(d, env, "feat: main", b__txt="2\n")
+    git(d, env, "merge", "-q", "--no-ff", "-m", "Merge autre", "autre")
+    r = lancer(["--historique"], env, d)
+    assert r.returncode == 1
+    assert r.stderr.count("— motif privé n°1") == 1  # le commit qui ajoute, pas la fusion
+
+
+def test_historique_illisible_ferme_la_porte(monkeypatch):
+    monkeypatch.setattr(c, "_git", lambda *a: "gpg: No signature\n")
+    with pytest.raises(c.HistoriqueIllisible):
+        c._lignes_de_l_historique([])
+    monkeypatch.setattr(c.secrets, "token_hex", lambda n: "m" * 32)
+    forge = "m" * 32 + "\nPAS-UN-SHA\nmsg" + "m" * 32 + "diff"
+    monkeypatch.setattr(c, "_git", lambda *a: forge)
+    with pytest.raises(c.HistoriqueIllisible):
+        c._lignes_de_l_historique([])
+
+
+def test_historique_ignore_show_signature(tmp_path, env_isole):
+    env = env_isole()
+    d = depot(tmp_path, env)
+    git(d, env, "config", "log.showSignature", "true")
+    sha = _commit(d, env, "feat: a", a__txt=IP + "\n")
+    r = lancer(["--historique"], env, d)
+    assert r.returncode == 1
+    assert f"{sha}:a.txt:1 — adresse IP privée" in r.stderr
