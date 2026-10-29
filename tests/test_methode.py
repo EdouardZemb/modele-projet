@@ -197,15 +197,43 @@ def test_garde_fous_a_jour():
         "un envoi direct de cette tête est accepté et marque la PR fusionnée, sans squash",
         "avertit sur ce qui identifie et refuse toujours les secrets",
         "`DEPOT_PRIVE`",
-        "Avant de passer un dépôt privé en public",
-        "quatre étapes obligatoires",
         "`git commit -F <fichier>`",
         "`gh pr create --body-file <fichier>`",
-        "git log -p --all --no-textconv --no-ext-diff --format='%H%n%B'",
-        "--exiger-prives --public --fichiers",
     ):
         assert fragment in section, fragment
     assert "gitleaks sur tout l'historique ;" not in section
+    assert "quatre étapes obligatoires" not in section
+    assert "VISIBILITE" not in lire(METHODE)
+    assert "visibilite" not in lire(METHODE)
+
+
+def test_methode_dit_la_nature_des_depots():
+    texte = " ".join(lire(METHODE).split())
+    for fragment in (
+        "**Dépôt de code, dépôt de données.**",
+        (
+            "La nature est une réponse du modèle (`nature` dans `.copier-answers.yml`, `NATURE` dans "
+            "`scripts/modele/reglages.py`)."
+        ),
+        "Dans un dépôt de code, tout constat refuse, quelle que soit sa visibilité.",
+        (
+            "En CI, un dépôt public est toujours un dépôt de code, et un dépôt privé prend la nature "
+            "écrite sur sa branche par défaut, jamais celle de la PR."
+        ),
+        (
+            "**Un dépôt de code né après M-0006 passe en public sans travail préalable** : il ne lui "
+            "faut que sa règle de protection."
+        ),
+        "**Un dépôt d'avant M-0006 ne passe pas en public** : il se scinde (M-0006, § 7).",
+        "la porte relit aussi l'historique d'un dépôt de code chaque semaine (`modele-historique.yml`)",
+        "`.github/constats-acceptes.txt`",
+        "le modèle outille en partie seulement « aucune donnée réelle dans le dépôt »",
+        "**Le test d'isolation des chemins de données reste une obligation du projet**",
+        "Un dépôt de données n'a pas de registre à lui",
+        "Arbitrage du 16/10 : le modèle outille **quatre** familles",
+    ):
+        assert fragment in texte, fragment
+    assert "Avant de passer un dépôt privé en public" not in texte
 
 
 def test_garde_fous_dit_la_porte_des_masques():
@@ -292,12 +320,15 @@ def test_m0002_amende():
     texte = lire(DECISIONS / "M-0002-garde-fous-et-confidentialite.md")
     assert "le contrôle de dérive en tient compte" not in texte
     assert "le garde de Claude est alors la seule serrure côté agent" in texte
-    assert "elle avertit sur ce qui identifie" in texte
+    assert "avertit sur ce qui identifie" in texte
     assert "refuse toujours les secrets" in texte
     assert "gitleaks n'est pas concerné" not in texte
     assert "github.event.repository.private" in texte
-    assert "quatre étapes obligatoires" in texte
-    assert "git log -p --all" in texte
+    assert "quatre étapes obligatoires" not in texte
+    assert "visibilite=public" not in texte
+    assert "`VISIBILITE`" not in texte
+    assert "la porte suit la nature du dépôt, de code ou de données (M-0006)" in texte
+    assert "amendement du 2026-10-17" in texte
     assert "`Monitor`" in texte
     assert "PR obligatoire" not in texte
     # amendement du 18/10 : qui fusionne (`fusion`), et les étiquettes réservées à Edouard
@@ -306,7 +337,11 @@ def test_m0002_amende():
     assert "étiquette" in texte
     # les amendements, dans l'ordre chronologique
     dates = re.findall(r"^- \*\*Amendé\*\* le (\S+),", texte, flags=re.MULTILINE)
-    assert dates == ["2026-10-17", "2026-10-18", "2026-10-27"]
+    assert dates == ["2026-10-17", "2026-10-18", "2026-10-27", "2026-10-29"]
+    assert (
+        "- **Amendé** le 2026-10-29, avec le lot 11 : la porte suit la nature du dépôt, de code ou "
+        "de données (M-0006)"
+    ) in texte
     # le remède des masqués, tel que masques.py le prescrit
     texte = " ".join(texte.split())
     assert "ou `!<dossier>/` quand un dossier parent est exclu" in texte

@@ -8,6 +8,7 @@
 - **Amendé** le 2026-10-27, avec le lot 8 : le `pre-commit` refuse un fichier du modèle que le
   `.gitignore` du projet masque (LE-23), et un hook `SessionStart` affiche ce qui est rouge sur
   GitHub
+- **Amendé** le 2026-10-29, avec le lot 11 : la porte suit la nature du dépôt, de code ou de données (M-0006)
 - **Contexte amont** : M-0001 (les garde-fous de qualité comme condition d'entrée)
 
 ## Contexte
@@ -45,23 +46,23 @@ pas de la discipline de celui qui travaille ?
   sur le poste et dans un secret de la CI. Une session à distance n'a pas la liste privée : la CI
   rattrape le reste. Ce secret est posé deux fois par dépôt, comme secret Actions et comme secret Dependabot,
   car les exécutions de Dependabot ne reçoivent pas les secrets Actions.
-- **Dans un dépôt public, la porte refuse ; dans un dépôt privé, elle avertit sur ce qui identifie
-  et refuse toujours les secrets** (amendement du 2026-10-17). Un dépôt privé peut ainsi nommer son
-  propre serveur. Ce qui identifie (adresses privées et Tailscale, cibles SSH et scp, noms MagicDNS,
-  motifs de la liste privée) s'affiche, avec son emplacement et le nom du motif, jamais la valeur, et
-  ne refuse pas. Un secret (clé privée age ou PEM, jeton GitHub, JWT, jeton de tunnel, adresse de
-  ping) refuse partout, au `pre-commit` comme en CI : une clé ne part jamais sur le dépôt distant
-  avec un simple avertissement. gitleaks les cherche aussi, en CI, donc après l'envoi. Les erreurs
-  d'usage et l'absence de la liste privée exigée refusent toujours. En CI, la visibilité réelle du dépôt (`github.event.repository.private`) l'emporte sur celle que
-  déclare `reglages.py` : un dépôt passé public sans `copier update`, ou une PR qui réécrit
-  `VISIBILITE`, refuse comme tout dépôt public.
-- **Avant de passer un dépôt privé en public**, quatre étapes obligatoires, la porte en mode
-  `--public` : elle est propre sur `git ls-files` (`--exiger-prives --public --fichiers`) ; elle est
-  propre sur tout l'historique (`git log -p --all --no-textconv --no-ext-diff --format='%H%n%B'`
-  écrit dans un fichier, puis `--exiger-prives --public --texte`), sans quoi on réécrit
-  l'historique ou l'on publie un nouveau dépôt depuis un commit unique propre ; un passage complet
-  de `modele-historique.yml` est vert ; `copier update` avec `visibilite=public`, puis la règle de
-  protection. Les binaires de l'historique ne sont pas examinés.
+- **La porte suit la nature du dépôt** (amendement du 2026-10-29, M-0006). Dans un dépôt de code, tout
+  constat refuse. Dans un dépôt de données, la porte avertit sur ce qui identifie et refuse toujours
+  les secrets (amendement du 2026-10-17, qui valait alors pour tout dépôt privé). Un dépôt de données
+  peut ainsi nommer son propre serveur. Ce qui identifie (adresses privées et Tailscale, cibles SSH
+  et scp, noms MagicDNS, motifs de la liste privée) s'affiche, avec son emplacement et le nom du
+  motif, jamais la valeur, et ne refuse pas. Un secret (clé privée age ou PEM, jeton GitHub, JWT,
+  jeton de tunnel, adresse de ping) refuse partout, au `pre-commit` comme en CI : une clé ne part
+  jamais sur le dépôt distant avec un simple avertissement. gitleaks les cherche aussi, en CI, donc
+  après l'envoi. Les erreurs d'usage et l'absence de la liste privée exigée refusent toujours.
+- **En CI, la nature ne se lit pas dans la PR.** La visibilité réelle du dépôt
+  (`github.event.repository.private`) l'emporte : un dépôt public est toujours un dépôt de code. Un
+  dépôt privé prend la nature écrite sur sa branche par défaut, jamais celle de la PR, qui pourrait
+  la réécrire. Une nature illisible vaut `code`.
+- **Passer en public.** Un dépôt de code né après M-0006 ne demande que sa règle de protection ; son
+  historique est relu chaque semaine par la porte, qui refuse tout constat absent d'une liste
+  acceptée. Un dépôt d'avant M-0006 ne passe pas en public : il se scinde (M-0006, § 7). Les
+  binaires de l'historique ne sont pas examinés.
 - **Qui fusionne : la réponse `fusion`** (amendement du 2026-10-18), choisie à la création du
   projet. En mode `session`, la session fusionne sa PR une fois tous les contrôles verts. En mode
   `edouard`, elle ouvre la PR, attend le vert, le dit et s'arrête : le garde refuse toute fusion,
@@ -109,10 +110,10 @@ pas de la discipline de celui qui travaille ?
 - Un dépôt privé est moins bien protégé qu'un dépôt public : rien ne retient un contournement des
   hooks. C'est un risque accepté : le garde de Claude est alors la seule serrure côté agent, et la
   CI du socle le seul filet.
-- Dans un dépôt privé, la porte n'empêche plus un nom de serveur ou une adresse d'entrer dans
-  l'historique : elle le signale. Elle y refuse toujours les secrets. L'historique d'un dépôt privé n'est donc pas prêt à être publié ;
-  son passage en public demande l'examen complet décrit plus haut, et un dépôt passé public sans
-  lui exposerait tout ce qui a été averti.
+- Dans un dépôt de données, la porte n'empêche plus un nom de serveur ou une adresse d'entrer dans
+  l'historique : elle le signale. Elle y refuse toujours les secrets. L'historique d'un dépôt de
+  données n'est donc pas prêt à être publié : il ne le sera jamais, et un dépôt d'avant M-0006 se
+  scinde au lieu de passer en public (M-0006, § 7).
 - Les journaux d'Actions d'un dépôt public sont publics : la porte n'y affiche jamais la valeur
   trouvée, seulement l'emplacement et le nom du motif.
 - En mode `edouard`, chaque fusion attend Edouard : c'est le prix d'un dépôt dont une fusion
@@ -120,7 +121,7 @@ pas de la discipline de celui qui travaille ?
   à la main : tant que la branche principale n'a pas la réponse, le garde la lit comme `edouard`.
 - Une mise en production attend toujours Edouard, quel que soit le mode : la session prépare
   l'étiquette, il l'envoie.
-- **Difficile à changer** : la visibilité d'un dépôt, une fois son historique publié.
+- **Difficile à changer** : la nature d'un dépôt, et sa visibilité une fois son historique publié.
 
 ## Révision
 
