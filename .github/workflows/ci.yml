@@ -118,7 +118,7 @@ jobs:
         run: |
           copier copy --vcs-ref HEAD --defaults --trust \
             --data nom=fausse-app --data "description=La fausse app du modèle" \
-            --data cible=serveur --data bloc_ports=4310 --data sauvegardes=true . rendu
+            --data cible=serveur --data bloc_ports=4310 --data sauvegardes=true \n            --data domaine=exemple.org . rendu
           cp tests/modele/fausse-app/* rendu/
       - uses: ./rendu/.github/actions/modele-image-construire
         with:

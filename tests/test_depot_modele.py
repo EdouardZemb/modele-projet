@@ -75,6 +75,7 @@ def test_mecanique_et_fausse_app_dans_la_ci_du_depot_modele():
         "--data bloc_ports=4310",
         # explicite : la preuve de la sauvegarde ne dépend pas d'un défaut de copier.yml (R20)
         "--data sauvegardes=true",
+        "--data domaine=exemple.org",
         ". rendu",
         "cp tests/modele/fausse-app/* rendu/",
     ):
