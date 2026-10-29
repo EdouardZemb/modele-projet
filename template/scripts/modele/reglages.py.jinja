@@ -2,7 +2,7 @@
 
 BRANCHE_PRINCIPALE = "{{ branche_principale }}"
 # « code » : la porte de confidentialité refuse tout constat ; « donnees » : elle avertit sur ce qui identifie et refuse les secrets (M-0006).
-NATURE = "{{ nature }}"
+NATURE = "{{ 'donnees' if cible == 'donnees' else nature }}"
 # Clés que la mécanique du modèle exige dans chaque `.cles`, indexées par le chemin du `.cles`.
 {%- if cible == 'serveur' %}
 SECRETS_EXIGES: dict[str, list[str]] = {

@@ -1,4 +1,17 @@
-# {{ nom }}
+{% if cible == 'donnees' %}# {{ nom }}
+
+{{ description }}
+
+Ce dépôt est le dépôt de données de `{{ nom | regex_replace('-donnees$', '') }}` : il ne porte aucun code.
+
+## Pour s'y retrouver
+
+- [`CLAUDE.md`](CLAUDE.md) : ce que ce dépôt porte, ses règles, ce qui fait foi.
+- [`config/`](config/) : la configuration personnelle de l'application.
+- [`contenu/`](contenu/) : le contenu de l'instance.
+
+Né du modèle `EdouardZemb/modele-projet` ; se met à jour par `copier update`.
+{% else %}# {{ nom }}
 
 {{ description }}
 
@@ -10,3 +23,4 @@
 - [`docs/decisions/`](docs/decisions/) : les décisions d'architecture (ADR).
 
 Né du modèle `EdouardZemb/modele-projet` ; se met à jour par `copier update`.
+{% endif %}

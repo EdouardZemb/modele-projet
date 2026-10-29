@@ -1,4 +1,33 @@
 @docs/modele/methode.md
+{%- if cible == 'donnees' %}
+
+# {{ nom }}
+
+{{ description }}
+
+Ce dépôt est le dépôt de données de `{{ nom | regex_replace('-donnees$', '') }}` : il ne porte aucun code. Il est privé et se nomme `<nom>-donnees` (M-0006).
+
+## Ce qu'il porte
+
+- La configuration personnelle de l'application, dans `config/`.
+- Le contenu de l'instance, dans `contenu/` : ce que l'application montre et qui ne peut pas être public.
+- La documentation qui porte un récit personnel ou des noms du parc.
+
+L'instance (`env/`, secrets, clés) arrive au lot 12 du modèle : ce dépôt ne la porte pas encore.
+
+## Les règles de ce dépôt
+
+- Il est en mode `session` par défaut : la session de ce projet fusionne ses PR une fois tous les contrôles verts.
+- Le contenu d'un secret est un geste 👤 d'Edouard.
+- Les leçons de ce dépôt vont au registre du dépôt de code.
+- La porte de confidentialité y avertit sur ce qui identifie et y refuse les secrets, au hook comme en CI.
+- Il ne conduit pas de lots : ni cadrage, ni pistes, ni registre, ni décisions du projet. Les décisions du modèle sont dans `docs/modele/decisions/`.
+
+## Ce qui fait foi
+
+- La méthode : `docs/modele/methode.md`.
+- Ce qui est une donnée, le contenu de l'instance et le contrat de l'application : `docs/modele/decisions/M-0006-code-et-donnees.md`.
+{%- else %}
 
 # {{ nom }}
 
@@ -28,3 +57,4 @@
 Les invariants communs sont dans `docs/modele/methode.md`. Ceux-ci sont propres au projet.
 
 *Les règles que ce projet ne doit jamais enfreindre, chacune avec sa raison en une phrase. Les supprimer une à une quand elles cessent d'être vraies.*
+{%- endif %}
