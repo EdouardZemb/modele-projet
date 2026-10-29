@@ -1,4 +1,4 @@
-"""Les douze combinaisons du rendu : cible x visibilité x fusion."""
+"""Les seize combinaisons du rendu : cible (quatre) x nature x fusion."""
 
 import shutil
 import subprocess
@@ -12,6 +12,7 @@ CIBLES = {
     "aucune": {},
     "serveur-avec-sauvegardes": REPONSES_SERVEUR,
     "serveur-sans-sauvegardes": {**REPONSES_SERVEUR, "sauvegardes": False},
+    "donnees": {"nom": "essai-donnees", "cible": "donnees"},
 }
 
 
@@ -77,7 +78,7 @@ def scripts_shell(rendu):
 def test_combinaison_shellcheck(rendre, cible, nature, fusion):
     rendu = rendre(**{**CIBLES[cible], "nature": nature, "fusion": fusion})
     scripts = scripts_shell(rendu)
-    assert bool(scripts) == (cible != "aucune"), scripts
+    assert bool(scripts) == cible.startswith("serveur"), scripts
     if not scripts:
         return
     exiger("shellcheck")

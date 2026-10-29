@@ -95,7 +95,7 @@ def test_mise_a_jour_sans_changement(tmp_path, env_isole):
 
 
 LIGNE_GABARIT = "Ligne ajoutée au gabarit en v0.0.2"
-SEMES_RETOUCHES = ("template/CLAUDE.md.jinja", "template/docs/registre.md")
+SEMES_RETOUCHES = ("template/CLAUDE.md.jinja", "template/docs/{% if cible != 'donnees' %}registre.md{% endif %}")
 
 
 def _modele_v2(modele, env):

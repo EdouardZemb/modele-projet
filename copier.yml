@@ -14,6 +14,8 @@ _skip_if_exists:
   - docs/pistes.md
   - docs/registre.md
   - docs/exploitation.md
+  - config/README.md
+  - contenu/README.md
   - .github/workflows/ci.yml
   - .github/dependabot.yml
   - deploiement/projet.env
@@ -30,9 +32,10 @@ description:
   validator: "{% if not description.strip() %}une phrase est requise{% endif %}"
 cible:
   type: str
-  help: Ce que le modèle déploie (le lot 3 ajoutera statique)
-  choices: [aucune, serveur]
+  help: Ce que le modèle rend (aucune, serveur, ou donnees pour un dépôt de données ; le lot 3 ajoutera statique)
+  choices: [aucune, serveur, donnees]
   default: aucune
+  validator: "{% if cible == 'donnees' and not (nom | regex_search('-donnees$')) %}un dépôt de données se nomme <nom>-donnees{% endif %}"
 nature:
   type: str
   help: Ce que le dépôt porte, du code seul ou aussi des données

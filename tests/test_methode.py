@@ -123,7 +123,9 @@ def test_m0006_fixe_le_contrat_de_l_app():
 
 
 def test_skill_consigner():
-    texte = lire(TEMPLATE / ".claude/skills/consigner/SKILL.md")
+    texte = lire(
+        TEMPLATE / ".claude/skills/{% if cible != 'donnees' %}consigner{% endif %}/SKILL.md"
+    )
     _, entete, corps = texte.split("---", 2)
     meta = yaml.safe_load(entete)
     assert meta["name"] == "consigner"
@@ -134,7 +136,9 @@ def test_skill_consigner():
 
 
 def test_formulaire_lot():
-    formulaire = yaml.safe_load(lire(TEMPLATE / ".github/ISSUE_TEMPLATE/lot.yml"))
+    formulaire = yaml.safe_load(
+        lire(TEMPLATE / ".github/{% if cible != 'donnees' %}ISSUE_TEMPLATE{% endif %}/lot.yml")
+    )
     assert formulaire["name"] == "Lot"
     champs = {c["id"]: c for c in formulaire["body"] if c["type"] == "textarea"}
     assert set(champs) == {"objectif", "criteres", "hors-perimetre"}
