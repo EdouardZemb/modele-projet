@@ -85,11 +85,15 @@ def test_textes_du_depot_de_donnees(rendre):
             "monté en lecture seule sur `/config`",
             "jamais en staging",
             "version de schéma",
+            "À partir du lot 12 du modèle, ce dossier est monté",
+            "à partir du lot 12 du modèle, la chaîne refuse un dossier sans sa commande",
         ],
         "contenu/README.md": [
             "monté en lecture seule sur `/contenu`",
             "en staging comme en prod",
             "version de schéma",
+            "À partir du lot 12 du modèle, ce dossier est monté",
+            "à partir du lot 12 du modèle, la chaîne refuse un dossier sans sa commande",
         ],
     }
     for fichier, phrases in attendus.items():
@@ -97,6 +101,16 @@ def test_textes_du_depot_de_donnees(rendre):
         for phrase in phrases:
             assert phrase in texte, (fichier, phrase)
         assert "{%" not in texte and "{{" not in texte, fichier
+
+
+def test_claude_md_du_depot_de_donnees_dit_la_fusion_reelle(rendre):
+    session = aplati(rendre(**DONNEES) / "CLAUDE.md")
+    assert "Il est en mode `session` par défaut" in session
+    assert "mode `edouard`" not in session
+    edouard = aplati(rendre(**DONNEES, fusion="edouard") / "CLAUDE.md")
+    assert "Il est en mode `edouard` : la session ouvre la PR" in edouard
+    assert "Edouard fusionne" in edouard
+    assert "mode `session`" not in edouard
 
 
 def test_ci_du_depot_de_donnees(rendre):

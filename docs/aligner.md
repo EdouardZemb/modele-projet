@@ -28,9 +28,15 @@ Chaque case se coche dans la PR d'alignement. Une case qui ne s'applique pas au 
   ```
 
 - [ ] **La nature est choisie** (`--data nature=<code|donnees>`) : un dépôt qui nomme son serveur ou
-      son instance prend `donnees` jusqu'à sa scission (M-0006, § 7) ; tout autre prend `code`. La
-      nature n'est pas la cible : elle ne change pas les fichiers rendus, seulement le régime de la
-      porte de confidentialité.
+      son instance, ou qui porte la configuration ou le contenu de l'instance (M-0006, § 2), prend
+      `donnees` jusqu'à sa scission (M-0006, § 7) ; tout autre prend `code`. La nature n'est pas la
+      cible : elle ne change pas les fichiers rendus, seulement le régime de la porte de
+      confidentialité.
+- [ ] **Un dépôt de code aligné relit son historique avant la PR** : `python
+      scripts/modele/confidentialite.py --exiger-prives --historique`, en local. Écrire dans
+      `.github/constats-acceptes.txt` les constats acceptés (une ligne `<commit> <chemin>`, le motif
+      en commentaire `# <motif>`, jamais la valeur), comme le dépôt modèle l'a fait ; sinon son
+      premier lundi (`modele-historique.yml`) est rouge.
 - [ ] **Rien d'existant n'a bougé** : `git diff --name-only` est vide, et `git status --short` ne
       montre que des fichiers nouveaux (`??`). Copier ignore les fichiers semés déjà présents
       (`README.md`, `CLAUDE.md`, `.gitignore`…) : il les signale en conflit, sans les toucher. Si un
@@ -273,7 +279,8 @@ Deux cas, selon la nature du dépôt (M-0006).
 - [ ] **Un dépôt de code né après M-0006** n'a pas de travail préalable : la porte a refusé tout
       constat dès son premier commit, et relit son historique chaque semaine
       (`modele-historique.yml`). Il ne lui faut que sa règle de protection (`ruleset-main.json`),
-      puis, 👤, le changement de visibilité.
+      mais dans cet ordre : d'abord, 👤, le changement de visibilité ; ensuite seulement, la règle de
+      protection, que GitHub refuse sur un dépôt privé d'un compte gratuit (M-0002).
 - [ ] **Un dépôt d'avant M-0006 ne passe pas en public** : son historique a pu recevoir des
       constats que la porte ne faisait qu'avertir. Il se scinde : la scission (M-0006, § 7) fait de
       lui le dépôt de données, et un nouveau dépôt de code naît d'un seul commit propre. Jusque-là,
