@@ -70,20 +70,23 @@ def test_fusion_dans_un_autre_depot():
 
 
 # Les ADR hérités selon la cible : M-0003 et M-0004 pour `serveur`, M-0005 avec les sauvegardes.
+# M-0006 (le code et les données) vaut pour toutes les cibles.
 ADR_SOCLE = [
     "M-0001-ecosysteme-des-applications-personnelles.md",
     "M-0002-garde-fous-et-confidentialite.md",
 ]
 ADR_SERVEUR = ["M-0003-contrat-de-l-image.md", "M-0004-chaine-de-livraison.md"]
 ADR_SAUVEGARDES = ["M-0005-sauvegardes-et-restauration.md"]
+ADR_SEPARATION = ["M-0006-code-et-donnees.md"]
+DATES_ADR = {**dict.fromkeys(ADR_SOCLE, "2026-10-16"), "M-0006-code-et-donnees.md": "2026-10-29"}
 
 
 @pytest.mark.parametrize(
     ("reponses", "attendus"),
     [
-        ({}, ADR_SOCLE),
-        ({**REPONSES_SERVEUR, "sauvegardes": False}, ADR_SOCLE + ADR_SERVEUR),
-        (REPONSES_SERVEUR, ADR_SOCLE + ADR_SERVEUR + ADR_SAUVEGARDES),
+        ({}, ADR_SOCLE + ADR_SEPARATION),
+        ({**REPONSES_SERVEUR, "sauvegardes": False}, ADR_SOCLE + ADR_SERVEUR + ADR_SEPARATION),
+        (REPONSES_SERVEUR, ADR_SOCLE + ADR_SERVEUR + ADR_SAUVEGARDES + ADR_SEPARATION),
     ],
     ids=["aucune", "serveur-sans-sauvegardes", "serveur-avec-sauvegardes"],
 )
@@ -93,10 +96,30 @@ def test_adr_herites_format(rendre, reponses, attendus):
     for chemin in adr:
         lignes = lire(chemin).splitlines()
         assert re.match(rf"^# {chemin.name[:6]} — .+ : .+$", lignes[0]), chemin.name
-        date = "2026-10-16" if chemin.name in ADR_SOCLE else "2026-10-18"
+        date = DATES_ADR.get(chemin.name, "2026-10-18")
         assert f"- **Statut** : accepté le {date}" in lignes, chemin.name
         for titre in ("## Contexte", "## Décision", "## Conséquences", "## Révision"):
             assert titre in lignes, (chemin.name, titre)
+
+
+def test_m0006_fixe_le_contrat_de_l_app():
+    """Les noms du contrat sur lesquels les projets bâtissent avant la chaîne à deux dépôts."""
+    texte = " ".join(lire(DECISIONS / "M-0006-code-et-donnees.md").split())
+    for attendu in (
+        "La réponse `nature` (`code` ou `donnees`) remplace la réponse `visibilite`.",
+        "Il est toujours privé et se nomme `<nom>-donnees`.",
+        "configuration d'exemple (`exemple/`)",
+        "Elle lit sa configuration réelle dans `/config`** et son contenu dans `/contenu`",
+        "**Le repli sur l'exemple n'existe pas en prod.**",
+        "un champ `configuration`, qui vaut `exemple` ou `montee`",
+        "**`VERIFIER_CONFIG <dossier>`**",
+        "**`VERIFIER_CONTENU <dossier> [<en service>]`**",
+        "elle rend 0 si la configuration est conforme, 2 si elle ne l'est pas, 64 en cas d'erreur d'usage",
+        "**Le staging ne monte jamais `/config`.**",
+        "Une nature absente ou illisible vaut `code`, la plus stricte.",
+        "**L'état déployé est un couple**",
+    ):
+        assert attendu in texte, attendu
 
 
 def test_skill_consigner():
