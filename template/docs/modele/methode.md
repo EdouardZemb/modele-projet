@@ -74,7 +74,7 @@ sessions à distance.
 
 | Où | Quoi |
 |---|---|
-| hook git `pre-commit` | confidentialité du contenu indexé, fichiers UTF-16 compris ; un autre binaire est signalé « non examiné ». La porte suit la nature du dépôt : elle refuse tout constat dans un dépôt de code ; dans un dépôt de données, elle avertit sur ce qui identifie et refuse toujours les secrets (voir plus haut), au hook comme en CI. Au commit d'un alignement ou d'une mise à jour (celui qui modifie `.copier-answers.yml`), refus d'un fichier du modèle que le `.gitignore` du projet masque |
+| hook git `pre-commit` | confidentialité du contenu indexé, fichiers UTF-16 compris ; un autre binaire est signalé « non examiné ». La porte suit la nature du dépôt : elle refuse tout constat dans un dépôt de code ; dans un dépôt de données, elle avertit sur ce qui identifie et refuse toujours les secrets (voir plus bas), au hook comme en CI. Au commit d'un alignement ou d'une mise à jour (celui qui modifie `.copier-answers.yml`), refus d'un fichier du modèle que le `.gitignore` du projet masque |
 | hook git `commit-msg` | format Conventional Commits, confidentialité du message |
 | hook git `pre-push` | refus d'envoyer sur la branche principale |
 | hook Claude `PreToolUse` (outils `Bash`, `PowerShell`, `Monitor`, et tout outil MCP qui porte une commande) | bloque `git push` vers la branche principale, tout force-push vers elle, `--no-verify`, toute modification de `core.hooksPath` sauf la réparation `git config core.hooksPath .githooks` (variables `GIT_CONFIG_*` comprises), `gh pr merge` tant que les contrôles ne sont pas tous verts (et toute fusion en mode `edouard`), `gh pr merge --admin`, l'envoi d'une étiquette (`git push --tags`, `--follow-tags`, un refspec `refs/tags/…` ou `v1.2.3`) et toute écriture de publication (`gh release` hors `view`, `list`, `download` ; l'API `…/releases`), les alias et extensions de `gh`, ce qui affiche le jeton de `gh` ou les identifiants de git (`gh auth token`, `gh auth status --show-token`, `gh auth git-credential`, `git credential fill`, `git credential-manager get`), et l'effacement, le déplacement ou le renommage de `.githooks` et de `scripts/modele` (`rm`, `mv`, `Remove-Item`, `git rm`…). Il lit aussi les substitutions `$(…)`, même entre guillemets, le texte d'une here-string (`bash <<< '…'`) passée à un interprète, et les enveloppes (`timeout`, `Start-Process`, `Invoke-Expression`…) |
@@ -137,7 +137,7 @@ c'est `code`. Un dépôt privé n'a pas de règle de protection : le garde de Cl
 serrure côté agent, et la CI du socle le seul filet.
 
 **L'historique d'un dépôt de code.** `modele-historique.yml` relit tout l'historique chaque semaine
-et à la demande, après gitleaks. Chaque constat se nomme `<commit>:<chemin>:<ligne>`. Le projet peut
+et à la demande, après gitleaks. Chaque constat se nomme `<commit>:<chemin>:<ligne>` ; le message d'un commit compte comme un chemin, `message`. Le projet peut
 en accepter, dans `.github/constats-acceptes.txt` (un fichier qui lui appartient ; absent, il est
 vide) : une ligne par constat, `<commit> <chemin>`, suivie au besoin de `# <motif>`, jamais la
 valeur. Edouard relit cette liste, et rien d'autre n'est toléré. Dans un dépôt de données, la porte

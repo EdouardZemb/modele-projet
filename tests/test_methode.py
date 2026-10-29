@@ -204,6 +204,8 @@ def test_garde_fous_a_jour():
     assert "gitleaks sur tout l'historique ;" not in section
     assert "quatre étapes obligatoires" not in section
     assert "VISIBILITE" not in lire(METHODE)
+    assert "(voir plus bas)" in section
+    assert "(voir plus haut)" not in section
     assert "visibilite" not in lire(METHODE)
 
 
@@ -227,6 +229,7 @@ def test_methode_dit_la_nature_des_depots():
         "**Un dépôt d'avant M-0006 ne passe pas en public** : il se scinde (M-0006, § 7).",
         "la porte relit aussi l'historique d'un dépôt de code chaque semaine (`modele-historique.yml`)",
         "`.github/constats-acceptes.txt`",
+        "le message d'un commit compte comme un chemin, `message`",
         "le modèle outille en partie seulement « aucune donnée réelle dans le dépôt »",
         "**Le test d'isolation des chemins de données reste une obligation du projet**",
         "Un dépôt de données n'a pas de registre à lui",

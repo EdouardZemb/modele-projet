@@ -79,7 +79,7 @@ Chaque case se coche dans la PR d'alignement. Une case qui ne s'applique pas au 
       `git status --short` a listés au §2, et ceux retouchés au §3. Jamais tout d'un coup
       (`methode.md`, « Les commits ») : un cache ou un dossier de travail non ignoré entrerait dans
       le commit (LE-7). Puis `python scripts/modele/confidentialite.py --exiger-prives --index` rend
-      0 (dans un dépôt privé : aucun avertissement qui ne soit pas attendu). C'est le mode du hook
+      0 (dans un dépôt de données : aucun avertissement qui ne soit pas attendu). C'est le mode du hook
       `pre-commit`, sur ce qui est indexé. Pas `--diff` avant le commit : il compare
       `<base>...HEAD`, n'examine encore rien, et la porte se tait quand elle ne trouve rien (LE-15).
 - [ ] Le lint, les types et les tests du projet passent.
