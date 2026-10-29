@@ -30,6 +30,16 @@ def test_nature_par_defaut_code(rendre):
     assert "VISIBILITE" not in reglages
 
 
+def test_visibilite_passee_en_donnee_ne_fait_pas_un_depot_de_donnees(rendre):
+    """`--data visibilite=prive` (le script du poste) n'est pas une ancienne réponse : un projet
+    neuf naît de code (M-0006 § 1). Seule une mise à jour lit l'ancienne réponse."""
+    rendu = rendre(visibilite="prive")
+    reglages = (rendu / "scripts/modele/reglages.py").read_text(encoding="utf-8")
+    assert 'NATURE = "code"' in reglages
+    reponses = yaml.safe_load((rendu / ".copier-answers.yml").read_text(encoding="utf-8"))
+    assert reponses["nature"] == "code"
+
+
 def test_domaine_sans_defaut():
     copier_yml = yaml.safe_load((RACINE / "copier.yml").read_text(encoding="utf-8"))
     assert "default" not in copier_yml["domaine"]

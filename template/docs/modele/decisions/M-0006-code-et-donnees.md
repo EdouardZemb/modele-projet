@@ -3,6 +3,7 @@
 - **Statut** : accepté le 2026-10-29
 - **Amende** M-0002 (la porte de confidentialité), M-0003 (le contrat de l'image) et M-0004 (la
   chaîne de livraison)
+- **Amendé** le 2026-10-29, avec le lot 11 : la liste des constats acceptés nomme un constat par son commit et son chemin, le motif en commentaire ; le numéro d'un motif change quand la liste privée se réordonne.
 - **S'applique en deux temps.** D'abord la porte par nature et le gabarit de données (§ 1 à 4).
   Ensuite la chaîne à deux dépôts et les règles de chemins (§ 3, dernier point, § 5 à 7). Entre les
   deux, la chaîne lit encore tout dans le clone du code, comme avant.
@@ -141,8 +142,8 @@ décrivent l'instance et le parc, pas l'auteur.
 - **L'historique d'un dépôt de code est relu chaque semaine par la porte**, dans
   `modele-historique.yml`, et plus seulement par gitleaks : `--exiger-prives --public` sur tout
   l'historique exporté. Un constat ancien se reconnaît, il ne s'efface pas. Une liste versionnée
-  nomme chaque constat accepté par son commit et le nom de son motif, jamais par sa valeur, et
-  Edouard la relit. Rien d'autre n'est toléré. Un dépôt de code né après M-0006 part d'un commit
+  nomme chaque constat accepté par son commit et son chemin, le motif en commentaire, jamais par sa
+  valeur, et Edouard la relit. Rien d'autre n'est toléré. Un dépôt de code né après M-0006 part d'un commit
   propre et n'a pas de liste.
 - **Avec la chaîne à deux dépôts**, la porte refuse dans un dépôt de code tout fichier `*.enc`, tout
   `.sops.yaml`, tout `cles/*.pub` et tout `contenu/`, à n'importe quelle profondeur. Une clé

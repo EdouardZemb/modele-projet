@@ -118,6 +118,12 @@ def test_m0006_fixe_le_contrat_de_l_app():
         "**Le staging ne monte jamais `/config`.**",
         "Une nature absente ou illisible vaut `code`, la plus stricte.",
         "**L'état déployé est un couple**",
+        (
+            "- **Amendé** le 2026-10-29, avec le lot 11 : la liste des constats acceptés nomme un "
+            "constat par son commit et son chemin, le motif en commentaire ; le numéro d'un motif "
+            "change quand la liste privée se réordonne."
+        ),
+        "nomme chaque constat accepté par son commit et son chemin, le motif en commentaire",
     ):
         assert attendu in texte, attendu
 
@@ -165,6 +171,14 @@ def test_modele_de_pr_ferme_l_issue():
     assert "Ferme #" not in texte
 
 
+def test_modele_de_pr_renvoie_un_depot_de_donnees_au_registre_du_code():
+    texte = " ".join(lire(TEMPLATE / ".github/pull_request_template.md").split())
+    assert (
+        "ou « aucun constat ». Dans un dépôt de données, le registre est celui du dépôt de code."
+        in texte
+    )
+
+
 # --- revue finale du lot 1 ---
 
 CHEMINS_GERES = (
@@ -207,6 +221,23 @@ def test_garde_fous_a_jour():
     assert "(voir plus bas)" in section
     assert "(voir plus haut)" not in section
     assert "visibilite" not in lire(METHODE)
+
+
+def test_methode_dit_l_ordre_du_passage_en_public():
+    """GitHub refuse une règle de protection sur un dépôt privé d'un compte gratuit : la
+    visibilité d'abord, la règle ensuite (M-0002)."""
+    texte = " ".join(lire(METHODE).split())
+    assert (
+        "d'abord, 👤, Edouard change la visibilité ; ensuite seulement, la règle de protection"
+    ) in texte
+    assert "Le changement de visibilité est ensuite à Edouard" not in texte
+    aligner = " ".join(lire(RACINE / "docs/aligner.md").split())
+    assert (
+        "d'abord, 👤, le changement de visibilité ; ensuite seulement, la règle de protection"
+        in aligner
+    )
+    assert "une ligne par couple (commit, chemin)" in texte
+    assert "une ligne par constat, `<commit> <chemin>`" not in texte
 
 
 def test_methode_dit_la_nature_des_depots():

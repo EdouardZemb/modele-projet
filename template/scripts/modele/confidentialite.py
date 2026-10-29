@@ -523,6 +523,9 @@ def nature() -> str:
     lecture échoue, c'est `code`. Sans DEPOT_PRIVE (le poste, les hooks), c'est le reglages.py
     voisin du script ; sans lui (le dépôt modèle lui-même), `code`."""
     depot_prive = os.environ.get("DEPOT_PRIVE")
+    if depot_prive is not None and not depot_prive.strip():
+        print("confidentialité : visibilité inconnue : régime code", file=sys.stderr)
+        return "code"
     if depot_prive is not None and depot_prive.strip().lower() != "true":
         return "code"
     if depot_prive is None:
@@ -535,7 +538,7 @@ def nature() -> str:
     if BRANCHE_DEFAUT_VALIDE.match(branche):
         try:
             r = subprocess.run(
-                ["git", "show", f"origin/{branche}:scripts/modele/reglages.py"],
+                ["git", "show", f"refs/remotes/origin/{branche}:scripts/modele/reglages.py"],
                 capture_output=True,
                 check=False,
             )
@@ -568,11 +571,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         liste = source_motifs_prives(args.motifs)
         prives = charger_motifs_prives(liste) if liste is not None else ()
+    except (OSError, UnicodeDecodeError):  # avant ValueError (codec)
+        print("confidentialité : liste de motifs privés illisible", file=sys.stderr)
+        return EXIT_USAGE
     except ValueError as e:  # message déjà neutre : « motif privé n°k invalide »
         print(f"confidentialité : {e}", file=sys.stderr)
-        return EXIT_USAGE
-    except (OSError, UnicodeDecodeError):
-        print("confidentialité : liste de motifs privés illisible", file=sys.stderr)
         return EXIT_USAGE
     if args.exiger_prives and not prives:
         print("confidentialité : liste de motifs privés exigée mais absente", file=sys.stderr)
@@ -586,11 +589,11 @@ def main(argv: list[str] | None = None) -> int:
             acceptes = lire_acceptes(Path(args.acceptes).read_text(encoding="utf-8-sig"))
         except FileNotFoundError:  # pas de liste : aucun constat accepté
             pass
+        except (OSError, UnicodeDecodeError):  # avant ValueError (codec)
+            print("confidentialité : liste des constats acceptés illisible", file=sys.stderr)
+            return EXIT_USAGE
         except ValueError as e:  # message déjà neutre : le seul numéro de ligne
             print(f"confidentialité : {e}", file=sys.stderr)
-            return EXIT_USAGE
-        except (OSError, UnicodeDecodeError):
-            print("confidentialité : liste des constats acceptés illisible", file=sys.stderr)
             return EXIT_USAGE
     if args.historique and not args.public and nature() == "donnees":
         print(

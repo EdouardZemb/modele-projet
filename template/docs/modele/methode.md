@@ -137,17 +137,19 @@ c'est `code`. Un dépôt privé n'a pas de règle de protection : le garde de Cl
 serrure côté agent, et la CI du socle le seul filet.
 
 **L'historique d'un dépôt de code.** `modele-historique.yml` relit tout l'historique chaque semaine
-et à la demande, après gitleaks. Chaque constat se nomme `<commit>:<chemin>:<ligne>` ; le message d'un commit compte comme un chemin, `message`. Le projet peut
-en accepter, dans `.github/constats-acceptes.txt` (un fichier qui lui appartient ; absent, il est
-vide) : une ligne par constat, `<commit> <chemin>`, suivie au besoin de `# <motif>`, jamais la
-valeur. Edouard relit cette liste, et rien d'autre n'est toléré. Dans un dépôt de données, la porte
-dit que gitleaks seul relit l'historique.
+et à la demande, après gitleaks. Chaque constat se nomme `<commit>:<chemin>:<ligne>` ; le message
+d'un commit compte comme un chemin, `message`. Le projet peut en accepter, dans
+`.github/constats-acceptes.txt` (un fichier qui lui appartient ; absent, il est vide) : une ligne
+par couple (commit, chemin), `<commit> <chemin>`, suivie au besoin de `# <motif>`, jamais la valeur.
+Elle écarte tous les constats de ce couple. Edouard relit cette liste, et rien d'autre n'est
+toléré. Dans un dépôt de données, la porte dit que gitleaks seul relit l'historique.
 
 **Passer un dépôt en public.** Deux cas.
 
-- **Un dépôt de code né après M-0006 passe en public sans travail préalable** : il ne lui faut que sa
-  règle de protection. Le changement de visibilité est ensuite à Edouard. Son historique est relu chaque
-  semaine.
+- **Un dépôt de code né après M-0006 passe en public sans travail préalable** : il ne lui faut que
+  sa règle de protection. L'ordre compte : d'abord, 👤, Edouard change la visibilité ; ensuite
+  seulement, la règle de protection, que GitHub refuse sur un dépôt privé d'un compte gratuit. Son
+  historique est relu chaque semaine.
 - **Un dépôt d'avant M-0006 ne passe pas en public** : il se scinde (M-0006, § 7). Il devient le
   dépôt de données, et un nouveau dépôt de code naît d'un seul commit propre. Jusque-là, sa nature
   est `donnees`.

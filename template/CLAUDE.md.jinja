@@ -17,7 +17,11 @@ L'instance (`env/`, secrets, clés) arrive au lot 12 du modèle : ce dépôt ne 
 
 ## Les règles de ce dépôt
 
+{%- if fusion == 'edouard' %}
+- Il est en mode `edouard` : la session ouvre la PR, attend que tous les contrôles soient verts, le dit, et s'arrête ; Edouard fusionne.
+{%- else %}
 - Il est en mode `session` par défaut : la session de ce projet fusionne ses PR une fois tous les contrôles verts.
+{%- endif %}
 - Le contenu d'un secret est un geste 👤 d'Edouard.
 - Les leçons de ce dépôt vont au registre du dépôt de code.
 - La porte de confidentialité y avertit sur ce qui identifie et y refuse les secrets, au hook comme en CI.
