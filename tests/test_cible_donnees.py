@@ -108,7 +108,10 @@ def test_ci_du_depot_de_donnees(rendre):
     assert [u["package-ecosystem"] for u in dependabot["updates"]] == ["github-actions"]
 
 
-@pytest.mark.parametrize("reponses", [{}, {"nom": "essai", "cible": "serveur", "bloc_ports": 4310, "domaine": "exemple.org"}])
+@pytest.mark.parametrize(
+    "reponses",
+    [{}, {"nom": "essai", "cible": "serveur", "bloc_ports": 4310, "domaine": "exemple.org"}],
+)
 def test_un_autre_rendu_n_a_pas_les_dossiers_de_donnees(rendre, reponses):
     rendu = rendre(**reponses)
     assert not (rendu / "config/README.md").exists()

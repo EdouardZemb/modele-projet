@@ -53,7 +53,7 @@ def test_gabarits_docs(rendre):
 def test_semes_declares(rendre):
     copier_yml = yaml.safe_load((RACINE / "copier.yml").read_text(encoding="utf-8"))
     rendus = set()
-    for reponses in ({}, REPONSES_SERVEUR):
+    for reponses in ({}, REPONSES_SERVEUR, {"nom": "essai-donnees", "cible": "donnees"}):
         rendu = rendre(**reponses)
         rendus |= {p.relative_to(rendu).as_posix() for p in rendu.rglob("*") if p.is_file()}
     assert set(copier_yml["_skip_if_exists"]) <= rendus
