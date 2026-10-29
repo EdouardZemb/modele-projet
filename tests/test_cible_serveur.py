@@ -406,12 +406,11 @@ def test_exploitation_dit_la_garde_des_donnees(rendre, sauvegardes):
     assert "canonique" in m0005
 
 
-@pytest.mark.parametrize("visibilite", ["public", "prive"])
 @pytest.mark.parametrize("sauvegardes", [True, False])
-def test_exploitation_sections(rendre, sauvegardes, visibilite):
+def test_exploitation_sections(rendre, sauvegardes):
     copier_yml = yaml.safe_load((RACINE / "copier.yml").read_text(encoding="utf-8"))
     assert "docs/exploitation.md" in copier_yml["_skip_if_exists"]
-    rendu = rendre(**{**REPONSES_SERVEUR, "sauvegardes": sauvegardes, "visibilite": visibilite})
+    rendu = rendre(**{**REPONSES_SERVEUR, "sauvegardes": sauvegardes})
     texte = lire(rendu, "docs/exploitation.md")
     assert texte.splitlines()[0] == "# Exploitation"
     attendues = [
@@ -433,8 +432,8 @@ def test_exploitation_sections(rendre, sauvegardes, visibilite):
     # La mise en service : les six étapes, l'étape du paquet GHCR pour un dépôt public.
     mise_en_service = section(texte, "La mise en service")
     assert re.findall(r"^\| (\d) \|", mise_en_service, flags=re.MULTILINE) == list("123456")
-    assert ("Change visibility" in mise_en_service) is (visibilite == "public")
-    assert ("clé de déploiement" in mise_en_service) is (visibilite == "prive")
+    assert "Change visibility" in mise_en_service
+    assert "clé de déploiement" in mise_en_service
 
     # Revenir en arrière : par étiquette d'abord, `--retour` en secours.
     retour = section(texte, "Revenir en arrière")

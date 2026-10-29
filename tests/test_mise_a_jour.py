@@ -259,3 +259,74 @@ def test_mise_a_jour_refuse_un_fichier_masque(tmp_path, env_isole):
         text=True,
     )
     assert "outil_secret.py" in suivis.stdout
+
+
+def _modele_depuis_v0_5_0(tmp_path, env):
+    """Un modèle de test : la v0.5.0 du dépôt (v0.0.1), puis l'arbre de travail actuel (v0.0.2)."""
+    modele = tmp_path / "modele"
+    modele.mkdir()
+    archive = tmp_path / "v0.5.0.tar"
+    subprocess.run(
+        ["git", "archive", "--format=tar", "-o", str(archive), "v0.5.0"],
+        check=True,
+        cwd=RACINE,
+        env=env,
+    )
+    shutil.unpack_archive(archive, modele)
+    git(modele, env, "init", "-q", "-b", "main")
+    git(modele, env, "config", "core.autocrlf", "false")
+    git(modele, env, "add", "-A")
+    git(modele, env, "commit", "-q", "-m", "v0.0.1")
+    git(modele, env, "tag", "v0.0.1")
+    # L'arbre est vidé avant la copie : un fichier retiré depuis la v0.5.0 doit l'être vraiment.
+    for chemin in modele.iterdir():
+        if chemin.name != ".git":
+            shutil.rmtree(chemin) if chemin.is_dir() else chemin.unlink()
+    shutil.copytree(RACINE, modele, ignore=IGNORES, dirs_exist_ok=True)
+    git(modele, env, "add", "-A")
+    git(modele, env, "commit", "-q", "-m", "v0.0.2")
+    git(modele, env, "tag", "v0.0.2")
+    return modele
+
+
+def _mettre_a_jour_depuis_v0_5_0(tmp_path, env, reponses, **update):
+    modele = _modele_depuis_v0_5_0(tmp_path, env)
+    projet = tmp_path / "projet"
+    copier.run_copy(
+        str(modele), str(projet), data=reponses, defaults=True, vcs_ref="v0.0.1", quiet=True
+    )
+    git(projet, env, "init", "-q", "-b", "main")
+    git(projet, env, "config", "core.autocrlf", "false")
+    git(projet, env, "add", "-A")
+    git(projet, env, "commit", "-q", "-m", "etat initial")
+    copier.run_update(
+        str(projet), defaults=True, overwrite=True, vcs_ref="v0.0.2", quiet=True, **update
+    )
+    return projet
+
+
+def test_mise_a_jour_d_un_projet_prive_serveur_garde_tout(tmp_path, env_isole):
+    env = env_isole()
+    reponses = {**REPONSES_SERVEUR, "visibilite": "prive"}
+    projet = _mettre_a_jour_depuis_v0_5_0(tmp_path, env, reponses)
+
+    reglages = (projet / "scripts/modele/reglages.py").read_text(encoding="utf-8")
+    assert 'NATURE = "donnees"' in reglages
+    assert "VISIBILITE" not in reglages
+    assert (projet / "deploiement/deployer.sh").is_file()
+    reponses_finales = yaml.safe_load((projet / ".copier-answers.yml").read_text(encoding="utf-8"))
+    assert reponses_finales["nature"] == "donnees"
+    _sans_conflit(projet)
+
+
+def test_mise_a_jour_d_un_projet_public_passe_en_code(tmp_path, env_isole):
+    env = env_isole()
+    reponses = {**REPONSES_PAR_DEFAUT, "visibilite": "public", "cible": "aucune"}
+    projet = _mettre_a_jour_depuis_v0_5_0(tmp_path, env, reponses)
+
+    reglages = (projet / "scripts/modele/reglages.py").read_text(encoding="utf-8")
+    assert 'NATURE = "code"' in reglages
+    assert "VISIBILITE" not in reglages
+    reponses_finales = yaml.safe_load((projet / ".copier-answers.yml").read_text(encoding="utf-8"))
+    assert reponses_finales["nature"] == "code"
+    _sans_conflit(projet)

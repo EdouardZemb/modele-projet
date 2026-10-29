@@ -21,13 +21,18 @@ REGISTRE_ENTETE = "| N° | Famille | Date | Constat | Motif | Prévention | Crit
 REPONSES_PAR_DEFAUT = {
     "nom": "essai",
     "description": "Projet d'essai",
-    "visibilite": "public",
     "cible": "aucune",
     "branche_principale": "main",
     "fusion": "session",
 }
 
-REPONSES_SERVEUR = {**REPONSES_PAR_DEFAUT, "cible": "serveur", "bloc_ports": 4310, "sauvegardes": True}
+REPONSES_SERVEUR = {
+    **REPONSES_PAR_DEFAUT,
+    "cible": "serveur",
+    "bloc_ports": 4310,
+    "sauvegardes": True,
+    "domaine": "exemple.org",
+}
 
 
 @pytest.fixture

@@ -170,15 +170,15 @@ def test_entree_mal_formee_refusee(monkeypatch, capsys):
     assert pre_push.refs_refusees("\r\n\nrefs/heads/x 1 refs/heads/y 2\r\n", "main") == []
 
 
-def test_visibilite_rendue(rendre):
-    for visibilite in ("prive", "public"):
-        reglages = rendre(visibilite=visibilite) / "scripts/modele/reglages.py"
-        assert f'VISIBILITE = "{visibilite}"' in reglages.read_text(encoding="utf-8")
+def test_nature_rendue(rendre):
+    for nature in ("donnees", "code"):
+        reglages = rendre(nature=nature) / "scripts/modele/reglages.py"
+        assert f'NATURE = "{nature}"' in reglages.read_text(encoding="utf-8")
 
 
 @pytest.mark.skipif(SH is None, reason="aucun sh trouvé")
 def test_commit_prive_avertit_sans_refuser(rendre, env_isole):
-    racine = rendre(visibilite="prive")
+    racine = rendre(nature="donnees")
     env = {**env_isole(), "MOTIFS_INTERDITS": MOTIF}
     git(racine, env, "init", "-q", "-b", "main")
     git(racine, env, "config", "core.autocrlf", "false")
