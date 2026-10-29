@@ -123,7 +123,7 @@ Trois livrables :
 | Q1 | **Aucune stack imposée.** Le modèle fixe un **contrat** (§6.1) | C'est le contrat, pas la stack, qui rend le serveur et le domaine génériques. `pupitre` et le site perso n'auront pas la stack d'`ancrage` |
 | Q2 | **Copier**, pas un *template* GitHub | Le seul des trois outils envisagés qui sache aligner un projet existant **et** propager une correction ensuite. Un *template* GitHub copie une fois, puis plus aucun lien |
 | Q2 bis | **`.copier-answers.yml` est une exception déclarée** à la règle « pas de manifeste machine » (§7 du plan de rangement) | Il ne décrit que son propre dépôt, il est versionné, et `copier update` le relit à chaque fois : faux, il échoue bruyamment. Il ne peut pas mentir en silence |
-| Q3 | **`testlens.dev` par défaut**, mais le domaine est une question de Copier. Adresses `<x>` et `<x>-staging` | Domaine personnel « pour le moment ». Le certificat gratuit de Cloudflare ne couvre qu'un niveau de sous-domaine (ADR-0006 d'`ancrage`, §3) |
+| Q3 | **le domaine public du projet par défaut**, mais le domaine est une question de Copier. Adresses `<x>` et `<x>-staging` | Domaine personnel « pour le moment ». Le certificat gratuit de Cloudflare ne couvre qu'un niveau de sous-domaine (ADR-0006 d'`ancrage`, §3) |
 | Q4 | **Trois cibles** : `aucune`, `statique`, `serveur`. **Changer de cible, c'est changer une réponse** puis lancer `copier update` | Un jeu dans le navigateur est un site statique. Si un tableau des scores ou du multijoueur arrive, le site change de cible sans être refait |
 | Q5 | **Dépôts publics par défaut**, protégés par une règle GitHub (*ruleset*). En plus : un hook git et un hook Claude. Un dépôt **privé** reste possible, et n'a alors que les hooks. **Porte de confidentialité obligatoire.** Le modèle lui-même est public | GitHub refuse la protection de branche sur les dépôts privés d'un compte gratuit (HTTP 403). Edouard ne prend pas GitHub Pro |
 | Q6 | **Un dépôt privé `serveur`** : notice et registre en Markdown. Il remplace les notes d'exploitation actuelles du serveur | Le seul endroit qui survit à la perte du serveur, que voient toutes les sessions, et qui reste privé. Un tableau Markdown corrigé à la main n'est pas un manifeste machine |
@@ -153,7 +153,7 @@ un quatrième projet passera en cible `serveur`.
 | `visibilite` | `public`, `prive` | `public` | toujours |
 | `cible` | `aucune`, `statique`, `serveur` | `aucune` | toujours |
 | `branche_principale` | nom de la branche par défaut | `main` | toujours |
-| `domaine` | un domaine de la zone Cloudflare | `testlens.dev` | cible ≠ `aucune` |
+| `domaine` | un domaine de la zone Cloudflare | `<domaine>` | cible ≠ `aucune` |
 | `sous_domaine` | vide = racine du domaine, en cible `statique` seulement | `{{ nom }}` | cible ≠ `aucune` |
 | `port_app` | port d'écoute **dans** le conteneur | `3000` | `serveur` |
 | `chemin_sante` | chemin de la route de santé | `/api/sante` | `serveur` |
