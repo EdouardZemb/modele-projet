@@ -217,7 +217,12 @@ def test_etape_du_garde_branche(rendre):
         (
             "sans garde",
             json.dumps(
-                {"hooks": {"PreToolUse": [], "SessionStart": json.loads(original)["hooks"]["SessionStart"]}}
+                {
+                    "hooks": {
+                        "PreToolUse": [],
+                        "SessionStart": json.loads(original)["hooks"]["SessionStart"],
+                    }
+                }
             ),
             1,
         ),
@@ -260,7 +265,7 @@ def test_historique_complet(rendre):
     assert set(doc["jobs"]) == {"historique"}
     job = doc["jobs"]["historique"]
     assert job["name"] == "historique"
-    checkout, gitleaks = job["steps"]
+    checkout, gitleaks, *_ = job["steps"]
     assert checkout["uses"].startswith("actions/checkout@")
     assert checkout["with"] == {"fetch-depth": 0, "persist-credentials": False}
     etapes_socle = charger(rendu, SOCLE)["jobs"]["secrets"]["steps"]
@@ -268,6 +273,30 @@ def test_historique_complet(rendre):
     assert gitleaks["uses"] == gitleaks_socle["uses"]
     assert gitleaks["env"] == gitleaks_socle["env"]
     assert "${{ secrets.GITHUB_TOKEN }}" in (rendu / HISTORIQUE).read_text(encoding="utf-8")
+
+
+def test_historique_lance_la_porte(rendre):
+    """Après gitleaks, la porte relit l'historique ; Python est posé comme dans le socle."""
+    rendu = rendre()
+    etapes = charger(rendu, HISTORIQUE)["jobs"]["historique"]["steps"]
+    noms = [e.get("name") for e in etapes]
+    (rang,) = [i for i, n in enumerate(noms) if n == "Confidentialité de l'historique"]
+    (python_socle,) = [
+        e
+        for e in charger(rendu, SOCLE)["jobs"]["confidentialite"]["steps"]
+        if e.get("uses", "").startswith("actions/setup-python@")
+    ]
+    assert etapes[rang - 1] == python_socle
+    porte = etapes[rang]
+    assert porte["run"] == (
+        "python scripts/modele/confidentialite.py --exiger-prives --historique "
+        "--acceptes .github/constats-acceptes.txt"
+    )
+    assert porte["env"] == {
+        "MOTIFS_INTERDITS": "${{ secrets.MOTIFS_INTERDITS }}",
+        "DEPOT_PRIVE": "${{ github.event.repository.private }}",
+        "BRANCHE_DEFAUT": "${{ github.event.repository.default_branch }}",
+    }
 
 
 def test_historique_hors_contextes_requis(rendre):

@@ -17,10 +17,19 @@ refuse toujours. En CI, DEPOT_PRIVE (la visibilité réelle) force le régime `c
 --public force le régime `code`. Sans reglages.py (le dépôt modèle lui-même) ou en `code`, tout
 constat refuse. Les erreurs d'usage et l'absence d'une liste privée exigée refusent toujours (64).
 
+Le mode --historique relit tout l'historique d'un dépôt de code (`git log --all -p`) : chaque
+constat porte l'emplacement `<sha>:<chemin>:<ligne>`, le message d'un commit étant le chemin
+`message`. Une fusion n'a pas de diff dans `git log -p` : son message est examiné, son contenu
+l'est par les commits de ses parents. Dans un dépôt de données (`donnees`), rien n'est relu : gitleaks
+seul lit l'historique. Avec --acceptes FICHIER, les constats nommés par une ligne
+`<sha de 40 caractères> <chemin>` (suivie au choix de `# commentaire`) sont écartés. Un constat dont
+le chemin correspond lui-même à un motif privé ne peut pas être accepté sans écrire ce chemin dans
+la liste : il reste un refus.
+
 Usage (un seul mode) :
     confidentialite.py --index | --message FICHIER | --diff BASE | --texte FICHIER
-                       | --fichiers CHEMIN...
-    options : --motifs FICHIER, --exiger-prives, --public
+                       | --fichiers CHEMIN... | --historique
+    options : --motifs FICHIER, --exiger-prives, --public, --acceptes FICHIER (avec --historique)
 
 Retour : 0 rien trouvé (ou dépôt de données sans secret), 1 au moins un constat qui refuse, 64 erreur
 d'usage ou liste privée exigée absente.
@@ -258,6 +267,49 @@ def _lignes_des_binaires(
         yield from _lignes_de_texte(chemin, octets, non_examines)
 
 
+LONGUEUR_SHA = 40
+
+
+def _lignes_de_l_historique(non_examines: list[str]) -> list[tuple[str, str]]:
+    """Les lignes ajoutées par chaque commit de `git log --all`, sous `<sha>:<chemin>:<ligne>`.
+
+    Le message d'un commit est le chemin `message`. Une ligne ajoutée puis retirée est attribuée
+    au commit qui l'ajoute. Une fusion n'a pas de diff dans `git log -p` : son message est
+    examiné, son contenu l'est par les commits de ses parents."""
+    sortie: list[tuple[str, str]] = []
+    journal = _git("log", "--all", "--reverse", "-p", "-U0", *DIFF, "--format=%x00%H%n%B%x00")
+    morceaux = journal.split("\0")
+    # ["", "sha\nmessage", "diff", "sha\nmessage", "diff", ...]
+    for i in range(1, len(morceaux) - 1, 2):
+        sha, _, message = morceaux[i].partition("\n")
+        for n, ligne in enumerate(message.split("\n"), start=1):
+            sortie.append((f"{sha}:message:{n}", ligne.rstrip("\r")))
+        for emplacement, texte in lignes_ajoutees(morceaux[i + 1]):
+            sortie.append((f"{sha}:{emplacement}", texte))
+    # Les noms des fichiers ajoutés, et ceux que git juge binaires (`-` `-` dans --numstat), en
+    # une seule passe : un binaire n'a aucune ligne dans le diff, on lit l'objet lui-même.
+    suivi = _git(
+        "log", "--all", "--reverse", "--diff-filter=ACMR", "--numstat", "-z", *DIFF,
+        "--format=%x01%H",
+    )  # fmt: skip
+    sha = ""
+    binaires: list[tuple[str, str]] = []
+    for jeton in suivi.split("\0"):
+        if jeton.startswith("\x01"):
+            sha = jeton[1:]
+            continue
+        champs = jeton.lstrip("\n").split("\t", 2)
+        if len(champs) != 3 or not sha:
+            continue
+        sortie.append((f"{sha}:{champs[2]}:0", champs[2]))
+        if champs[0] == "-" and champs[1] == "-":
+            binaires.append((sha, champs[2]))
+    for sha, chemin in binaires:
+        octets = _git_octets("show", "--no-textconv", f"{sha}:{chemin}")
+        sortie.extend(_lignes_de_texte(f"{sha}:{chemin}", octets, non_examines))
+    return sortie
+
+
 def _lire_octets(chemin: str) -> bytes:
     try:
         return Path(chemin).read_bytes()
@@ -295,6 +347,8 @@ def _lignes_du_mode(args: argparse.Namespace) -> tuple[list[tuple[str, str]], li
         noms = _git("diff", *plage, "--name-only", "-z", "--diff-filter=ACMR", *DIFF)
         sortie.extend((f"{c}:0", c) for c in _chemins(noms))
         sortie.extend(_lignes_des_binaires(plage, "HEAD", non_examines))
+    elif args.historique:
+        sortie.extend(_lignes_de_l_historique(non_examines))
     elif args.message is not None:
         sortie.extend(_lignes_de_texte(args.message, _lire_octets(args.message), non_examines))
     elif args.texte is not None:
@@ -324,6 +378,16 @@ def _analyseur() -> argparse.ArgumentParser:
     mode.add_argument("--diff", metavar="BASE", help="lignes ajoutées depuis BASE")
     mode.add_argument("--texte", metavar="FICHIER", help="un fichier de texte (ex. corps de PR)")
     mode.add_argument("--fichiers", metavar="CHEMIN", nargs="+", help="fichiers à examiner")
+    mode.add_argument(
+        "--historique",
+        action="store_true",
+        help="tout l'historique git (dépôt de code) : un constat par commit et par fichier",
+    )
+    p.add_argument(
+        "--acceptes",
+        metavar="FICHIER",
+        help="avec --historique : liste des constats acceptés (« <sha> <chemin> »)",
+    )
     p.add_argument("--motifs", metavar="FICHIER", help="liste de motifs privés")
     p.add_argument("--exiger-prives", action="store_true", help="échoue sans liste privée")
     p.add_argument(
@@ -347,6 +411,51 @@ def _masquer(emplacement: str, motifs: Sequence[Motif]) -> str:
         chemin, reste = emplacement, ""
     chemin = _masquer_chemin(chemin, motifs)
     return f"{chemin}:{reste}" if reste else chemin
+
+
+def _masquer_historique(emplacement: str, motifs: Sequence[Motif]) -> str:
+    """Comme _masquer, pour `<sha>:<chemin>:<ligne>` : le sha reste lisible, le chemin se masque."""
+    sha, reste = emplacement[:LONGUEUR_SHA], emplacement[LONGUEUR_SHA + 1 :]
+    return f"{sha}:{_masquer(reste, motifs)}"
+
+
+def _masquer_binaire_historique(emplacement: str, motifs: Sequence[Motif]) -> str:
+    sha, chemin = emplacement[:LONGUEUR_SHA], emplacement[LONGUEUR_SHA + 1 :]
+    return f"{sha}:{_masquer_chemin(chemin, motifs)}"
+
+
+_LIGNE_ACCEPTEE = re.compile(r"^([0-9a-fA-F]{40})\s+(\S.*?)(?:\s+#.*)?$")
+
+
+def lire_acceptes(texte: str) -> set[tuple[str, str]]:
+    """Les couples (sha, chemin) d'une liste de constats acceptés.
+
+    Les lignes vides et celles qui commencent par `#` sont ignorées, comme les retours chariot et
+    les espaces de fin ; un sha en majuscules se lit en minuscules. Toute autre ligne lève
+    ValueError, avec son seul numéro : la ligne elle-même n'est jamais citée."""
+    acceptes: set[tuple[str, str]] = set()
+    for rang, brut in enumerate(texte.split("\n"), start=1):
+        ligne = brut.replace("\r", "").rstrip()
+        if not ligne or ligne.startswith("#"):
+            continue
+        m = _LIGNE_ACCEPTEE.match(ligne)
+        if not m:
+            raise ValueError(f"liste des constats acceptés invalide (ligne n°{rang})")
+        acceptes.add((m.group(1).lower(), m.group(2)))
+    return acceptes
+
+
+def _ecarter_acceptes(
+    constats: list[Constat], acceptes: set[tuple[str, str]]
+) -> tuple[list[Constat], int]:
+    """Les constats que la liste ne nomme pas, et le nombre de ceux qu'elle écarte."""
+    restants = []
+    for constat in constats:
+        sha = constat.emplacement[:LONGUEUR_SHA].lower()
+        chemin = constat.emplacement[LONGUEUR_SHA + 1 :].rpartition(":")[0]
+        if (sha, chemin) not in acceptes:
+            restants.append(constat)
+    return restants, len(constats) - len(restants)
 
 
 BRANCHE_DEFAUT_VALIDE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
@@ -417,6 +526,9 @@ def main(argv: list[str] | None = None) -> int:
         args = _analyseur().parse_args(argv)
     except SystemExit as sortie:
         return 0 if sortie.code in (0, None) else EXIT_USAGE
+    if args.acceptes is not None and not args.historique:
+        print("confidentialité : --acceptes ne vaut qu'avec --historique", file=sys.stderr)
+        return EXIT_USAGE
     try:
         liste = source_motifs_prives(args.motifs)
         prives = charger_motifs_prives(liste) if liste is not None else ()
@@ -432,25 +544,48 @@ def main(argv: list[str] | None = None) -> int:
     if liste is None:
         print("confidentialité : aucune liste privée, motifs génériques seuls", file=sys.stderr)
     motifs = (*MOTIFS_GENERIQUES, *prives)
+    acceptes: set[tuple[str, str]] = set()
+    if args.acceptes is not None:
+        try:
+            acceptes = lire_acceptes(Path(args.acceptes).read_text(encoding="utf-8-sig"))
+        except FileNotFoundError:  # pas de liste : aucun constat accepté
+            pass
+        except ValueError as e:  # message déjà neutre : le seul numéro de ligne
+            print(f"confidentialité : {e}", file=sys.stderr)
+            return EXIT_USAGE
+        except (OSError, UnicodeDecodeError):
+            print("confidentialité : liste des constats acceptés illisible", file=sys.stderr)
+            return EXIT_USAGE
+    if args.historique and not args.public and nature() == "donnees":
+        print(
+            "confidentialité : dépôt de données : historique relu par gitleaks seul",
+            file=sys.stderr,
+        )
+        return 0
     try:
         lignes, non_examines = _lignes_du_mode(args)
     except ErreurUsage as e:
         print(f"confidentialité : {e}", file=sys.stderr)
         return EXIT_USAGE
+    masquer_chemin = _masquer_binaire_historique if args.historique else _masquer_chemin
+    masquer = _masquer_historique if args.historique else _masquer
     for chemin in non_examines:  # la fin du silence, pas un refus
         print(
-            f"confidentialité : fichier binaire non examiné : {_masquer_chemin(chemin, motifs)}",
+            f"confidentialité : fichier binaire non examiné : {masquer_chemin(chemin, motifs)}",
             file=sys.stderr,
         )
     constats = examiner(lignes, motifs)
+    if args.historique:
+        constats, ecartes = _ecarter_acceptes(constats, acceptes)
+        if ecartes:
+            print(f"confidentialité : {ecartes} constat(s) accepté(s), écarté(s)", file=sys.stderr)
     for constat in constats:
-        print(
-            f"confidentialité : {_masquer(constat.emplacement, motifs)} — {constat.motif}",
-            file=sys.stderr,
-        )
+        emplacement = masquer(constat.emplacement, motifs)
+        print(f"confidentialité : {emplacement} — {constat.motif}", file=sys.stderr)
     if not constats:
         return 0
-    if not args.public and nature() == "donnees":
+    # Dans l'historique, le régime est `code` : même l'identification refuse.
+    if not args.public and not args.historique and nature() == "donnees":
         secrets = sum(1 for c in constats if c.famille == SECRET)
         if not secrets:  # un dépôt de données peut nommer son serveur : il est averti
             print(

@@ -160,11 +160,23 @@ def test_dependabot_du_depot_modele():
 
 
 def test_historique_du_depot_modele():
-    racine = (RACINE / ".github/workflows/historique.yml").read_text(encoding="utf-8")
-    modele = (RACINE / "template/.github/workflows/modele-historique.yml").read_text(
-        encoding="utf-8"
+    """Les étapes du workflow du dépôt modèle sont celles du modèle, chemins préfixés."""
+    modele = yaml.safe_load(
+        (RACINE / "template/.github/workflows/modele-historique.yml").read_text(encoding="utf-8")
     )
-    assert racine.split("\n", 1)[1] == modele.split("\n", 1)[1]
+    racine = yaml.safe_load(
+        (RACINE / ".github/workflows/historique.yml").read_text(encoding="utf-8")
+    )
+    attendues = [
+        {**e, "run": e["run"].replace("scripts/modele/", "template/scripts/modele/")}
+        if "run" in e
+        else e
+        for e in modele["jobs"]["historique"]["steps"]
+    ]
+    assert racine["jobs"]["historique"]["steps"] == attendues
+    assert any("template/scripts/modele/confidentialite.py" in e.get("run", "") for e in attendues)
+    for cle in ("on", True, "permissions", "name"):
+        assert racine.get(cle) == modele.get(cle)
 
 
 def test_ci_du_depot_modele_revoit_une_pr_modifiee():

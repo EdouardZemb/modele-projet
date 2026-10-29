@@ -684,7 +684,9 @@ def test_historique_avant_un_passage_en_public(rendre, tmp_path, env_isole):
     git(racine, env, "commit", "-q", "--allow-empty", "-m", "docs: vu sur nom-du-serveur")
     script = racine / "scripts/modele/confidentialite.py"
     suivis = git(racine, env, "ls-files").split()
-    arbre = lancer_porte(script, ["--exiger-prives", "--public", "--fichiers", *suivis], env, racine)
+    arbre = lancer_porte(
+        script, ["--exiger-prives", "--public", "--fichiers", *suivis], env, racine
+    )
     assert arbre.returncode == 0, arbre.stderr  # l'arbre seul ne voit rien
 
     historique = tmp_path / "historique.txt"
@@ -698,3 +700,164 @@ def test_historique_avant_un_passage_en_public(rendre, tmp_path, env_isole):
     assert r.returncode == 1
     assert r.stderr.count("— motif privé n°1") == 3  # ajout, retrait, message
     assert "nom-du-serveur" not in r.stdout + r.stderr
+
+
+# --- l'historique (--historique, --acceptes) ---------------------------------------------------
+
+
+def _commit(d, env, message, **fichiers):
+    for nom, contenu in fichiers.items():
+        chemin = d / nom.replace("__", ".")
+        chemin.write_text(contenu, encoding="utf-8")
+        git(d, env, "add", chemin.name)
+    git(d, env, "commit", "-q", "--allow-empty", "-m", message)
+    return git(d, env, "rev-parse", "HEAD").strip()
+
+
+def _depot_historique(tmp_path, env_isole):
+    """Deux commits : un constat dans a.txt, puis un constat dans le message."""
+    env = env_isole()
+    d = depot(tmp_path, env)
+    sha1 = _commit(d, env, "feat: a", a__txt=IP + "\n")
+    sha2 = _commit(d, env, "docs: vu " + IP)
+    return env, d, sha1, sha2
+
+
+def test_historique_attribue_commit_et_fichier(tmp_path, env_isole):
+    env, d, sha1, sha2 = _depot_historique(tmp_path, env_isole)
+    r = lancer(["--historique"], env, d)
+    assert r.returncode == 1
+    assert f"{sha1}:a.txt:1 — adresse IP privée" in r.stderr
+    assert f"{sha2}:message:1 — adresse IP privée" in r.stderr
+    assert "192.168" not in r.stdout + r.stderr
+
+
+def test_historique_ne_lit_que_les_ajouts(tmp_path, env_isole):
+    env = env_isole()
+    d = depot(tmp_path, env)
+    sha1 = _commit(d, env, "feat: a", a__txt=IP + "\n")
+    _commit(d, env, "fix: retire", a__txt="propre\n")
+    r = lancer(["--historique"], env, d)
+    assert r.returncode == 1
+    assert r.stderr.count("— adresse IP privée") == 1
+    assert f"{sha1}:a.txt:1" in r.stderr
+
+
+def test_historique_ecarte_les_acceptes(tmp_path, env_isole):
+    env, d, sha1, sha2 = _depot_historique(tmp_path, env_isole)
+    liste = d.parent / "acceptes.txt"
+    liste.write_text(f"{sha1} a.txt\n", encoding="utf-8")
+    r = lancer(["--historique", "--acceptes", str(liste)], env, d)
+    assert r.returncode == 1
+    assert f"{sha1}:a.txt" not in r.stderr
+    assert f"{sha2}:message:1" in r.stderr
+    assert "1 constat(s) accepté(s), écarté(s)" in r.stderr
+    liste.write_text(f"{sha1} a.txt\n{sha2} message\n", encoding="utf-8")
+    r = lancer(["--historique", "--acceptes", str(liste)], env, d)
+    assert r.returncode == 0, r.stderr
+    assert "confidentialité : 2 constat(s) accepté(s), écarté(s)" in r.stderr
+
+
+def test_historique_acceptes_absent_vaut_liste_vide(tmp_path, env_isole):
+    env, d, sha1, _ = _depot_historique(tmp_path, env_isole)
+    r = lancer(["--historique", "--acceptes", "n-existe-pas.txt"], env, d)
+    assert r.returncode == 1
+    assert f"{sha1}:a.txt:1" in r.stderr
+
+
+def test_historique_en_depot_de_donnees(tmp_path, env_isole):
+    env = env_isole()
+    clone, _ = depot_de_nature(tmp_path, env, "donnees", "donnees")
+    git(clone, env, "add", "f.txt")
+    git(clone, env, "commit", "-q", "-m", "docs: vu " + IP)
+    env = {**env, "DEPOT_PRIVE": "true", "BRANCHE_DEFAUT": "main"}
+    r = lancer(["--historique"], env, clone)
+    assert r.returncode == 0, r.stderr
+    assert "confidentialité : dépôt de données : historique relu par gitleaks seul" in r.stderr
+    assert "192.168" not in r.stdout + r.stderr
+    assert "adresse IP privée" not in r.stderr
+
+
+def test_historique_public_force_le_regime_code(tmp_path, env_isole):
+    env = env_isole()
+    clone, _ = depot_de_nature(tmp_path, env, "donnees", "donnees")
+    git(clone, env, "add", "f.txt")
+    git(clone, env, "commit", "-q", "-m", "docs: note")
+    env = {**env, "DEPOT_PRIVE": "true", "BRANCHE_DEFAUT": "main"}
+    r = lancer(["--historique", "--public"], env, clone)
+    assert r.returncode == 1
+    assert "f.txt:1 — adresse IP privée" in r.stderr
+
+
+@pytest.mark.parametrize("fin", ["\n", "\r\n"])
+def test_liste_des_acceptes_crlf_et_commentaires(tmp_path, env_isole, fin):
+    env, d, sha1, sha2 = _depot_historique(tmp_path, env_isole)
+    lignes = [
+        "# les constats acceptés",
+        "",
+        f"{sha1.upper()} a.txt   ",
+        f"{sha2} message  # vu en revue",
+    ]
+    liste = d.parent / "acceptes.txt"
+    liste.write_bytes(fin.join(lignes).encode() + fin.encode())
+    r = lancer(["--historique", "--acceptes", str(liste)], env, d)
+    assert r.returncode == 0, r.stderr
+    assert "2 constat(s) accepté(s), écarté(s)" in r.stderr
+
+
+def test_liste_des_acceptes_invalide(tmp_path, env_isole):
+    env, d, sha1, _ = _depot_historique(tmp_path, env_isole)
+    liste = d.parent / "acceptes.txt"
+    liste.write_text(f"# ok\n{sha1} a.txt\npasunsha a.txt\n", encoding="utf-8")
+    r = lancer(["--historique", "--acceptes", str(liste)], env, d)
+    assert r.returncode == 64
+    assert "liste des constats acceptés invalide (ligne n°3)" in r.stderr
+    assert "pasunsha" not in r.stdout + r.stderr
+
+
+def test_historique_binaire_et_chemin_masques(tmp_path, env_isole):
+    env = env_isole()
+    env["MOTIFS_INTERDITS"] = "nom-prive"
+    d = depot(tmp_path, env)
+    (d / "b.dat").write_bytes(b"\0x")
+    (d / "nom-prive.txt").write_text(IP + "\n", encoding="utf-8")
+    (d / "nom-prive.dat").write_bytes(b"\0y")
+    git(d, env, "add", "b.dat", "nom-prive.txt", "nom-prive.dat")
+    git(d, env, "commit", "-q", "-m", "feat: fichiers")
+    sha = git(d, env, "rev-parse", "HEAD").strip()
+    r = lancer(["--historique"], env, d)
+    assert r.returncode == 1
+    sortie = r.stdout + r.stderr
+    assert f"fichier binaire non examiné : {sha}:b.dat" in r.stderr
+    assert f"fichier binaire non examiné : {sha}:<chemin masqué>" in r.stderr
+    assert f"{sha}:<chemin masqué>:1 — adresse IP privée" in r.stderr
+    assert "nom-prive" not in sortie
+    assert "192.168" not in sortie
+
+
+def test_historique_binaire_utf16_examine(tmp_path, env_isole):
+    env = env_isole()
+    d = depot(tmp_path, env)
+    (d / "r.txt").write_bytes(utf16(IP + "\n"))
+    git(d, env, "add", "r.txt")
+    git(d, env, "commit", "-q", "-m", "feat: r")
+    sha = git(d, env, "rev-parse", "HEAD").strip()
+    r = lancer(["--historique"], env, d)
+    assert r.returncode == 1
+    assert f"{sha}:r.txt:1 — adresse IP privée" in r.stderr
+
+
+def test_historique_nom_de_fichier_examine(tmp_path, env_isole):
+    env = env_isole()
+    env["MOTIFS_INTERDITS"] = "nom-prive"
+    d = depot(tmp_path, env)
+    sha = _commit(d, env, "feat: x", **{"nom-prive__txt": "propre\n"})
+    r = lancer(["--historique"], env, d)
+    assert r.returncode == 1
+    assert f"{sha}:<chemin masqué>:0 — motif privé n°1" in r.stderr
+    assert "nom-prive" not in r.stdout + r.stderr
+
+
+def test_acceptes_hors_historique_refuse(tmp_path, env_isole):
+    r = lancer(["--texte", "x", "--acceptes", "y"], env_isole())
+    assert r.returncode == 64
