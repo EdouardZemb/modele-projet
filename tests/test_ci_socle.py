@@ -120,6 +120,7 @@ def test_messages_de_commit_examines(rendre):
     assert e["env"] == {
         "MOTIFS_INTERDITS": "${{ secrets.MOTIFS_INTERDITS }}",
         "DEPOT_PRIVE": "${{ github.event.repository.private }}",
+        "BRANCHE_DEFAUT": "${{ github.event.repository.default_branch }}",
     }
     assert 'git log --format=%B "$BASE..HEAD" > "$RUNNER_TEMP/messages.txt"' in e["run"]
     assert 'git log --format=%B HEAD > "$RUNNER_TEMP/messages.txt"' in e["run"]
@@ -280,8 +281,8 @@ def test_historique_hors_contextes_requis(rendre):
     assert contextes == {"socle / secrets", "socle / confidentialite"}
 
 
-def test_la_porte_recoit_la_visibilite_reelle(rendre):
-    """En CI, la visibilité réelle du dépôt l'emporte sur reglages.py (relecture de la vague, n1)."""
+def test_la_porte_recoit_la_visibilite_et_la_branche_par_defaut(rendre):
+    """En CI, la visibilité réelle l'emporte, et la nature se lit sur la branche par défaut."""
     etapes = charger(rendre(), SOCLE)["jobs"]["confidentialite"]["steps"]
     portes = [e for e in etapes if "confidentialite.py" in e.get("run", "")]
     assert [e["name"] for e in portes] == [
@@ -291,6 +292,8 @@ def test_la_porte_recoit_la_visibilite_reelle(rendre):
     ]
     for e in portes:
         assert e["env"]["DEPOT_PRIVE"] == "${{ github.event.repository.private }}", e["name"]
+        branche = e["env"]["BRANCHE_DEFAUT"]
+        assert branche == "${{ github.event.repository.default_branch }}", e["name"]
 
 
 def test_secrets_chiffres_controles(rendre):

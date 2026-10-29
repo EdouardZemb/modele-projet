@@ -6,7 +6,7 @@ import re
 import garde_claude
 import pytest
 import yaml
-from conftest import REPONSES_SERVEUR, fichiers_texte
+from conftest import RACINE, REPONSES_SERVEUR, fichiers_texte
 
 
 def test_reponses_enregistrees(rendre):
@@ -14,12 +14,30 @@ def test_reponses_enregistrees(rendre):
     reponses = yaml.safe_load((rendu / ".copier-answers.yml").read_text(encoding="utf-8"))
     assert reponses["nom"] == "essai"
     assert reponses["description"] == "Projet d'essai"
-    assert reponses["visibilite"] == "public"
+    assert reponses["nature"] == "code"
+    assert "visibilite" not in reponses
     assert reponses["cible"] == "aucune"
     assert reponses["branche_principale"] == "main"
     assert reponses["fusion"] == "session"
     assert "_commit" in reponses
     assert "_src_path" in reponses
+
+
+def test_nature_par_defaut_code(rendre):
+    rendu = rendre()
+    reglages = (rendu / "scripts/modele/reglages.py").read_text(encoding="utf-8")
+    assert 'NATURE = "code"' in reglages
+    assert "VISIBILITE" not in reglages
+
+
+def test_domaine_sans_defaut():
+    copier_yml = yaml.safe_load((RACINE / "copier.yml").read_text(encoding="utf-8"))
+    assert "default" not in copier_yml["domaine"]
+
+
+def test_exploitation_sans_visibilite():
+    gabarit = RACINE / "template/docs/{% if cible == 'serveur' %}exploitation.md{% endif %}.jinja"
+    assert "visibilite" not in gabarit.read_text(encoding="utf-8")
 
 
 def test_fusion_edouard_enregistree(rendre):

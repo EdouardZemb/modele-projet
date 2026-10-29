@@ -28,16 +28,17 @@ description:
   type: str
   help: Le projet en une phrase
   validator: "{% if not description.strip() %}une phrase est requise{% endif %}"
-visibilite:
-  type: str
-  help: Visibilité du dépôt GitHub
-  choices: {public: public, privé: prive}
-  default: public
 cible:
   type: str
   help: Ce que le modèle déploie (le lot 3 ajoutera statique)
   choices: [aucune, serveur]
   default: aucune
+nature:
+  type: str
+  help: Ce que le dépôt porte, du code seul ou aussi des données
+  choices: {code: code, données: donnees}
+  default: "{{ 'donnees' if cible == 'donnees' or (visibilite | default('')) == 'prive' else 'code' }}"
+  when: "{{ cible != 'donnees' }}"
 branche_principale:
   type: str
   help: Branche par défaut du dépôt
@@ -51,7 +52,6 @@ fusion:
 domaine:
   type: str
   help: Domaine public sous lequel le projet est servi
-  default: testlens.dev
   when: "{{ cible == 'serveur' }}"
   validator: "{% if not (domaine | regex_search('^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$')) %}un nom de domaine en minuscules{% endif %}"
 sous_domaine:

@@ -21,7 +21,7 @@ def test_questions_serveur_enregistrees(rendre):
     rendu = rendre(**REPONSES_SERVEUR)
     reponses = yaml.safe_load(lire(rendu, ".copier-answers.yml"))
     assert reponses["cible"] == "serveur"
-    assert reponses["domaine"] == "testlens.dev"
+    assert reponses["domaine"] == "exemple.org"
     assert reponses["sous_domaine"] == "essai"
     assert reponses["port_app"] == 3000
     assert reponses["chemin_sante"] == "/api/sante"
@@ -144,14 +144,14 @@ def test_env_prod_et_staging(rendre):
         "ESSAI_ENV=prod",
         "ESSAI_PROJET=essai",
         "ESSAI_PORT=4330",
-        "ESSAI_URL_PUBLIQUE=https://essai.testlens.dev",
+        "ESSAI_URL_PUBLIQUE=https://essai.exemple.org",
         "ESSAI_CANAL=etiquette",
     ]
     assert lire(rendu, "deploiement/env/staging.env").splitlines() == [
         "ESSAI_ENV=staging",
         "ESSAI_PROJET=essai-staging",
         "ESSAI_PORT=4331",
-        "ESSAI_URL_PUBLIQUE=https://essai-staging.testlens.dev",
+        "ESSAI_URL_PUBLIQUE=https://essai-staging.exemple.org",
         "ESSAI_CANAL=main",
     ]
 
@@ -406,12 +406,11 @@ def test_exploitation_dit_la_garde_des_donnees(rendre, sauvegardes):
     assert "canonique" in m0005
 
 
-@pytest.mark.parametrize("visibilite", ["public", "prive"])
 @pytest.mark.parametrize("sauvegardes", [True, False])
-def test_exploitation_sections(rendre, sauvegardes, visibilite):
+def test_exploitation_sections(rendre, sauvegardes):
     copier_yml = yaml.safe_load((RACINE / "copier.yml").read_text(encoding="utf-8"))
     assert "docs/exploitation.md" in copier_yml["_skip_if_exists"]
-    rendu = rendre(**{**REPONSES_SERVEUR, "sauvegardes": sauvegardes, "visibilite": visibilite})
+    rendu = rendre(**{**REPONSES_SERVEUR, "sauvegardes": sauvegardes})
     texte = lire(rendu, "docs/exploitation.md")
     assert texte.splitlines()[0] == "# Exploitation"
     attendues = [
@@ -433,8 +432,8 @@ def test_exploitation_sections(rendre, sauvegardes, visibilite):
     # La mise en service : les six étapes, l'étape du paquet GHCR pour un dépôt public.
     mise_en_service = section(texte, "La mise en service")
     assert re.findall(r"^\| (\d) \|", mise_en_service, flags=re.MULTILINE) == list("123456")
-    assert ("Change visibility" in mise_en_service) is (visibilite == "public")
-    assert ("clé de déploiement" in mise_en_service) is (visibilite == "prive")
+    assert "Change visibility" in mise_en_service
+    assert "clé de déploiement" in mise_en_service
 
     # Revenir en arrière : par étiquette d'abord, `--retour` en secours.
     retour = section(texte, "Revenir en arrière")
