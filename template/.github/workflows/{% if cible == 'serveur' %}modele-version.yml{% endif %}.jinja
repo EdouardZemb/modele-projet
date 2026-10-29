@@ -29,7 +29,7 @@ jobs:
       contents: write
       packages: write
     env:
-      IMAGE: ghcr.io/edouardzemb/{{ nom }}
+      IMAGE: ghcr.io/{{ compte | lower }}/{{ nom }}
     steps:
       # Historique complet : il faut la branche principale d'origin pour vérifier que le commit en
       # est un ancêtre.

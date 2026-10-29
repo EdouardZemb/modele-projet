@@ -24,8 +24,8 @@ setup() {
   export {{ prefixe }}SANTE_DELAI=0
   ETAT="${{ prefixe }}RACINE_ETAT/prod"
   EN_SERVICE="$BATS_TEST_TMPDIR/en-service.env"
-  ANCIENNE="ghcr.io/edouardzemb/{{ nom }}@sha256:$(printf '1%.0s' {1..64})"
-  NOUVELLE="ghcr.io/edouardzemb/{{ nom }}@sha256:$(printf '2%.0s' {1..64})"
+  ANCIENNE="ghcr.io/{{ compte | lower }}/{{ nom }}@sha256:$(printf '1%.0s' {1..64})"
+  NOUVELLE="ghcr.io/{{ compte | lower }}/{{ nom }}@sha256:$(printf '2%.0s' {1..64})"
   HC=https://hc.example/ping/sonde-prod
   preparer_secrets_de_test prod JETON=jeton-prod-7 "HC_SONDE=$HC"
 {%- if sauvegardes %}
@@ -73,7 +73,7 @@ nombre_de_lancements() {
 
 @test "deploiement_reussi_ecrit_l_etat" {
   deja_en_service "$ANCIENNE" 0.1.0
-  echo "ghcr.io/edouardzemb/{{ nom }}@sha256:$(printf '9%.0s' {1..64})" >"$ETAT/echec"
+  echo "ghcr.io/{{ compte | lower }}/{{ nom }}@sha256:$(printf '9%.0s' {1..64})" >"$ETAT/echec"
   deployer prod "$NOUVELLE" 0.2.0
   [ "$status" -eq 0 ]
   # état : la nouvelle version déployée, l'ancienne gardée comme précédente, plus d'échec
@@ -160,7 +160,7 @@ nombre_de_lancements() {
 # arrive monte /sauvegardes, et le déploiement suivant prend le sien.
 @test "pas_d_instantane_si_la_version_en_service_ne_monte_pas_les_sauvegardes" {
   local cas suivante pre="${{ prefixe }}RACINE_SAUVEGARDES/pre-deploiement"
-  suivante="ghcr.io/edouardzemb/{{ nom }}@sha256:$(printf '3%.0s' {1..64})"
+  suivante="ghcr.io/{{ compte | lower }}/{{ nom }}@sha256:$(printf '3%.0s' {1..64})"
   for cas in absente vide; do
     rm -rf "$ETAT" "$pre"
     : >"$APPELS"
@@ -652,7 +652,7 @@ exec '$DOUBLES/docker-double' \"\$@\""
 # version déployée. Il ne doit pas devenir la cible du retour arrière suivant.
 @test "un_deploiement_interrompu_ne_devient_pas_la_cible_du_retour_arriere" {
   local interrompue
-  interrompue="ghcr.io/edouardzemb/{{ nom }}@sha256:$(printf '3%.0s' {1..64})"
+  interrompue="ghcr.io/{{ compte | lower }}/{{ nom }}@sha256:$(printf '3%.0s' {1..64})"
   deja_en_service "$ANCIENNE" 0.1.0
   cp "$ETAT/compose.env" "$ETAT/compose.env.precedent"
   contenu_compose_env prod "$interrompue" 0.1.5 >"$ETAT/compose.env"
@@ -752,7 +752,7 @@ EOF
 
 @test "apres_un_retour_manuel_la_version_suivante_se_deploie_normalement" {
   local suivante
-  suivante="ghcr.io/edouardzemb/{{ nom }}@sha256:$(printf '3%.0s' {1..64})"
+  suivante="ghcr.io/{{ compte | lower }}/{{ nom }}@sha256:$(printf '3%.0s' {1..64})"
   deux_versions
   deployer prod --retour
   [ "$status" -eq 0 ]
@@ -1084,7 +1084,7 @@ refus_sans_trace() {
 # contrôlé, et le journal le dit : un autre dossier, plein, passe ; un dossier vide, non.
 @test "sans_reference_seul_le_vide_est_controle" {
   local cas autre="$BATS_TEST_TMPDIR/autre" racine="${{ prefixe }}RACINE_DONNEES" suivante
-  suivante="ghcr.io/edouardzemb/{{ nom }}@sha256:$(printf '3%.0s' {1..64})"
+  suivante="ghcr.io/{{ compte | lower }}/{{ nom }}@sha256:$(printf '3%.0s' {1..64})"
   for cas in absent autre-version; do
     rm -rf "$ETAT" "$racine" "$autre"
     export {{ prefixe }}RACINE_DONNEES="$racine"
@@ -1271,7 +1271,7 @@ lier_donnees() {
 # de la prod, plein.
 @test "un_staging_lie_au_dossier_de_la_prod_est_refuse" {
   local racine="${{ prefixe }}RACINE_DONNEES" suivante ancien
-  suivante="ghcr.io/edouardzemb/{{ nom }}@sha256:$(printf '3%.0s' {1..64})"
+  suivante="ghcr.io/{{ compte | lower }}/{{ nom }}@sha256:$(printf '3%.0s' {1..64})"
   preparer_secrets_de_test staging JETON=jeton-staging-7 HC_SONDE=https://hc.example/ping/sonde-staging
   ETAT="${{ prefixe }}RACINE_ETAT/staging"
   deployer staging "$NOUVELLE" main
@@ -1316,7 +1316,7 @@ lier_donnees() {
 # déploiement suivant refuse donc « changé » (exploitation.md, « Un geste qui échoue »).
 @test "donnees_neuves_en_echec_garde_le_chemin_d_avant" {
   local autre="$BATS_TEST_TMPDIR/autre" ancien suivante
-  suivante="ghcr.io/edouardzemb/{{ nom }}@sha256:$(printf '3%.0s' {1..64})"
+  suivante="ghcr.io/{{ compte | lower }}/{{ nom }}@sha256:$(printf '3%.0s' {1..64})"
   deployer prod "$ANCIENNE" 0.1.0
   [ "$status" -eq 0 ]
   poser_donnees prod
@@ -1626,8 +1626,8 @@ stock_a_nettoyer() {
     "prod $NOUVELLE"
     "prod $NOUVELLE 0.2.0 en-trop"
     "essai $NOUVELLE 0.2.0"
-    "prod ghcr.io/edouardzemb/{{ nom }}:main main"
-    "prod ghcr.io/edouardzemb/{{ nom }}@sha256:1234 main"
+    "prod ghcr.io/{{ compte | lower }}/{{ nom }}:main main"
+    "prod ghcr.io/{{ compte | lower }}/{{ nom }}@sha256:1234 main"
     "prod $NOUVELLE v0.2.0"
     "prod $NOUVELLE 0.2"
     "prod --retour en-trop"

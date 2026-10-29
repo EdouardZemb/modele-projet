@@ -52,6 +52,11 @@ fusion:
   help: Qui fusionne les PR une fois tous les contrôles verts
   choices: {la session fusionne quand tout est vert: session, Edouard fusionne: edouard}
   default: session
+compte:
+  type: str
+  help: Compte GitHub qui porte le dépôt et les images du projet
+  default: EdouardZemb
+  validator: "{% if not (compte | regex_search('^[A-Za-z0-9](-?[A-Za-z0-9])*$')) %}un compte GitHub{% endif %}"
 domaine:
   type: str
   help: Domaine public sous lequel le projet est servi

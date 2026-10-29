@@ -231,7 +231,7 @@ image_de() {
 # ne doit pas confondre les deux.
 empreinte_de() {
   local depot="${2:-}" moitie
-  [ -n "$depot" ] || depot=ghcr.io/edouardzemb/{{ nom }}
+  [ -n "$depot" ] || depot=ghcr.io/{{ compte | lower }}/{{ nom }}
   printf -v moitie '%32s' ''
   printf '%s@sha256:%s%s\n' "$depot" "${moitie// /$1}" "${moitie// /0}"
 }

@@ -27,7 +27,7 @@
 #                                        « Untagged: <nom> » ; comme docker, le dernier nom emporte
 #                                        l'image et ses empreintes, et « Deleted: <id> » suit
 # Garde-fou : `image rm` refuse (code 1) le retrait d'une image sans référence, d'une image dont
-# une référence est hors de ghcr.io/edouardzemb/{{ nom }} et de localhost:<port>/edouardzemb/{{ nom }},
+# une référence est hors de ghcr.io/{{ compte | lower }}/{{ nom }} et de localhost:<port>/{{ compte | lower }}/{{ nom }},
 # ou d'une image qu'un conteneur utilise. Il refuse aussi (code 1, avec le message de docker), le
 # retrait par son identifiant d'une image qui porte deux étiquettes ou plus : sans -f, docker le
 # refuse (« image is referenced in multiple repositories »), et une telle image se retire par ses
@@ -194,7 +194,7 @@ du_projet() {
   elif [[ "${nom##*/}" == *:* ]]; then
     nom="${nom%:*}"
   fi
-  [ "$nom" = ghcr.io/edouardzemb/{{ nom }} ] || [[ "$nom" =~ ^localhost:[0-9]+/edouardzemb/{{ nom }}$ ]]
+  [ "$nom" = ghcr.io/{{ compte | lower }}/{{ nom }} ] || [[ "$nom" =~ ^localhost:[0-9]+/{{ compte | lower }}/{{ nom }}$ ]]
 }
 
 # ligne_de_l_etiquette <nom> : la ligne du stock de l'image qui porte ce nom ; échec sinon.
@@ -289,7 +289,7 @@ case "${1:-}" in
           -f)
             # image inspect -f <format> <référence> : la sonde et le déploiement
             case "$4" in
-              *RepoDigests*) printf '%s\n' "${DOUBLE_DOCKER_EMPREINTE:-ghcr.io/edouardzemb/{{ nom }}@sha256:$(printf 'a%.0s' {1..64})}" ;;
+              *RepoDigests*) printf '%s\n' "${DOUBLE_DOCKER_EMPREINTE:-ghcr.io/{{ compte | lower }}/{{ nom }}@sha256:$(printf 'a%.0s' {1..64})}" ;;
               *org.opencontainers.image.revision*) revision_de "$5" ;;
               *) refuser "image inspect : format inconnu $4" ;;
             esac

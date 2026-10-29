@@ -659,3 +659,25 @@ def test_en_tetes_du_report_et_du_compose(rendre):
     compose = lire(rendu, "deploiement/compose.yml")
     assert "Toujours lancé par" not in compose
     assert "ou à la main avec les mêmes arguments" in compose
+
+
+# Lot 12 : le compte GitHub est une réponse du modèle. Sans elle, le défaut est celui d'Edouard ; avec
+# elle, l'image, la CI, la doc et les tests rendus suivent, en minuscules comme GHCR.
+def test_compte_par_defaut(rendre):
+    rendu = rendre(**REPONSES_SERVEUR)
+    assert "DEPOT_IMAGE=ghcr.io/edouardzemb/essai" in lire(rendu, "deploiement/lib.sh")
+
+
+def test_compte_rendu_partout(rendre):
+    rendu = rendre(**REPONSES_SERVEUR, compte="Autre-Compte")
+    for chemin in (
+        "deploiement/lib.sh",
+        ".github/workflows/modele-version.yml",
+        ".github/actions/modele-image-publier/action.yml",
+        "docs/exploitation.md",
+    ):
+        assert "ghcr.io/autre-compte/essai" in lire(rendu, chemin), chemin
+    for chemin in fichiers_texte(rendu):
+        texte = chemin.read_bytes().decode("utf-8", errors="replace")
+        assert "ghcr.io/edouardzemb" not in texte, chemin
+        assert "/edouardzemb/" not in texte, chemin
