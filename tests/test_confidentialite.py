@@ -1,5 +1,6 @@
 """Tests de la porte de confidentialité. Aucun faux secret n'est écrit en clair : tout est construit."""
 
+import shutil
 import subprocess
 import sys
 
@@ -400,9 +401,9 @@ def test_lignes_ajoutees():
     ]
 
 
-# --- revue finale du lot 1, section I : un dépôt privé avertit sans refuser ---
+# --- revue finale du lot 1, section I : un dépôt de données avertit sans refuser ---
 
-AVERTISSEMENT = "1 constat(s), dépôt privé : avertissement, pas de refus"
+AVERTISSEMENT = "1 constat(s), dépôt de données : avertissement, pas de refus"
 
 
 def lancer_porte(script, args, env, cwd=None):
@@ -417,8 +418,8 @@ def lancer_porte(script, args, env, cwd=None):
     )
 
 
-def test_depot_prive_avertit(rendre, tmp_path, env_isole):
-    script = rendre(visibilite="prive") / "scripts/modele/confidentialite.py"
+def test_depot_de_donnees_avertit(rendre, tmp_path, env_isole):
+    script = rendre(nature="donnees") / "scripts/modele/confidentialite.py"
     f = tmp_path / "f.txt"
     f.write_text("rien\n" + IP + "\n", encoding="utf-8")
     r = lancer_porte(script, ["--fichiers", str(f)], env_isole())
@@ -428,8 +429,8 @@ def test_depot_prive_avertit(rendre, tmp_path, env_isole):
     assert "refus." not in r.stderr
 
 
-def test_depot_public_refuse(rendre, tmp_path, env_isole):
-    script = rendre(visibilite="public") / "scripts/modele/confidentialite.py"
+def test_depot_de_code_refuse(rendre, tmp_path, env_isole):
+    script = rendre(nature="code") / "scripts/modele/confidentialite.py"
     f = tmp_path / "f.txt"
     f.write_text(IP + "\n", encoding="utf-8")
     r = lancer_porte(script, ["--fichiers", str(f)], env_isole())
@@ -447,8 +448,8 @@ def test_depot_modele_sans_reglages_refuse(tmp_path, env_isole):
     assert "refus." in r.stderr
 
 
-def test_depot_prive_ne_divulgue_rien(rendre, tmp_path, env_isole):
-    script = rendre(visibilite="prive") / "scripts/modele/confidentialite.py"
+def test_depot_de_donnees_ne_divulgue_rien(rendre, tmp_path, env_isole):
+    script = rendre(nature="donnees") / "scripts/modele/confidentialite.py"
     env = env_isole()
     env["MOTIFS_INTERDITS"] = "valeur-privee-xyz"
     f = tmp_path / "f.txt"
@@ -460,11 +461,13 @@ def test_depot_prive_ne_divulgue_rien(rendre, tmp_path, env_isole):
     assert CLE_AGE not in sortie
     assert "motif privé n°1" in sortie
     assert "clé privée age" in sortie
-    assert "2 constat(s), refus : 1 secret(s), qui refusent même dans un dépôt privé." in sortie
+    assert (
+        "2 constat(s), refus : 1 secret(s), qui refusent même dans un dépôt de données." in sortie
+    )
 
 
-def test_depot_prive_erreurs_toujours_64(rendre, tmp_path, env_isole):
-    script = rendre(visibilite="prive") / "scripts/modele/confidentialite.py"
+def test_depot_de_donnees_erreurs_toujours_64(rendre, tmp_path, env_isole):
+    script = rendre(nature="donnees") / "scripts/modele/confidentialite.py"
     f = tmp_path / "f.txt"
     f.write_text(IP + "\n", encoding="utf-8")
     exige = lancer_porte(script, ["--exiger-prives", "--fichiers", str(f)], env_isole())
@@ -476,28 +479,128 @@ def test_depot_prive_erreurs_toujours_64(rendre, tmp_path, env_isole):
     assert lancer_porte(script, ["--fichiers", absent], env_isole()).returncode == 64
 
 
-# --- relecture de la vague, n1 : en CI, la visibilité réelle l'emporte ---
+# --- relecture de la vague, n1 : en CI, la visibilité réelle l'emporte sur la nature ---
 
 
 @pytest.mark.parametrize(
-    ("visibilite", "depot_prive", "attendu"),
+    ("nature", "depot_prive", "attendu"),
     [
-        ("prive", "false", 1),
-        ("prive", "true", 0),
-        ("prive", "True", 0),
-        ("prive", "", 1),
-        ("public", "true", 1),
-        ("public", "false", 1),
+        ("donnees", "false", 1),
+        ("donnees", "False", 1),
+        ("donnees", "", 1),
+        ("code", "true", 1),
+        ("code", "false", 1),
     ],
 )
-def test_visibilite_reelle_en_ci(rendre, tmp_path, env_isole, visibilite, depot_prive, attendu):
-    script = rendre(visibilite=visibilite) / "scripts/modele/confidentialite.py"
+def test_visibilite_reelle_en_ci(rendre, tmp_path, env_isole, nature, depot_prive, attendu):
+    script = rendre(nature=nature) / "scripts/modele/confidentialite.py"
     f = tmp_path / "f.txt"
     f.write_text(IP + chr(10), encoding="utf-8")
     env = {**env_isole(), "DEPOT_PRIVE": depot_prive}
     r = lancer_porte(script, ["--fichiers", str(f)], env)
     assert r.returncode == attendu, r.stderr
     assert ("avertissement" in r.stderr) is (attendu == 0)
+
+
+# --- lot 11 : la nature se lit sur la branche par défaut, jamais dans la PR ---
+
+NATURES_ILLISIBLES = "confidentialité : nature illisible sur la branche par défaut : régime code"
+
+
+@pytest.mark.parametrize(
+    ("texte", "attendu"),
+    [
+        ('NATURE = "donnees"\n', "donnees"),
+        ('NATURE = "code"\n', "code"),
+        ('VISIBILITE = "prive"\n', "donnees"),
+        ('VISIBILITE = "prive"\nNATURE = "code"\n', "code"),
+        ('VISIBILITE = "public"\n', "code"),
+        (None, "code"),
+        ("", "code"),
+        ("NATURE = 'donnees'\n", "code"),
+    ],
+)
+def test_nature_du_texte(texte, attendu):
+    assert c.nature_du_texte(texte) == attendu
+
+
+def depot_de_nature(tmp_path, env, sur_la_branche, dans_la_copie, branche="main"):
+    """Un clone dont `origin/<branche>` porte `sur_la_branche` et la copie `dans_la_copie`."""
+    origine = tmp_path / "origine.git"
+    origine.mkdir()
+    git(origine, env, "init", "-q", "--bare", "-b", branche)
+    clone = tmp_path / "clone"
+    clone.mkdir()
+    git(clone, env, "init", "-q", "-b", branche)
+    git(clone, env, "config", "core.autocrlf", "false")
+    dossier = clone / "scripts/modele"
+    dossier.mkdir(parents=True)
+    shutil.copy(SCRIPT, dossier / "confidentialite.py")
+    reglages = dossier / "reglages.py"
+    reglages.write_text(f'NATURE = "{sur_la_branche}"\n', encoding="utf-8")
+    git(clone, env, "add", "scripts/modele/confidentialite.py", "scripts/modele/reglages.py")
+    git(clone, env, "commit", "-q", "-m", "chore: base")
+    git(clone, env, "remote", "add", "origin", str(origine))
+    git(clone, env, "push", "-q", "origin", branche)
+    reglages.write_text(f'NATURE = "{dans_la_copie}"\n', encoding="utf-8")
+    f = clone / "f.txt"
+    f.write_text(IP + chr(10), encoding="utf-8")
+    return clone, f
+
+
+def porte_en_ci(clone, f, env, depot_prive="true", **variables):
+    env = {**env, "DEPOT_PRIVE": depot_prive}
+    env.pop("BRANCHE_DEFAUT", None)
+    env.update(variables)
+    script = clone / "scripts/modele/confidentialite.py"
+    return lancer_porte(script, ["--fichiers", str(f)], env, clone)
+
+
+def test_nature_en_ci_lue_sur_la_branche_par_defaut(tmp_path, env_isole):
+    env = env_isole()
+    clone, f = depot_de_nature(tmp_path, env, "donnees", "code")
+    r = porte_en_ci(clone, f, env, BRANCHE_DEFAUT="main")
+    assert r.returncode == 0, r.stderr
+    assert "adresse IP privée" in r.stderr
+    assert "dépôt de données : avertissement, pas de refus" in r.stderr
+
+
+def test_une_pr_ne_change_pas_sa_nature(tmp_path, env_isole):
+    env = env_isole()
+    clone, f = depot_de_nature(tmp_path, env, "code", "donnees")
+    r = porte_en_ci(clone, f, env, BRANCHE_DEFAUT="main")
+    assert r.returncode == 1
+    assert "constat(s), refus." in r.stderr
+    assert "avertissement" not in r.stderr
+
+
+def test_nature_lue_sur_une_branche_par_defaut_autre_que_main(tmp_path, env_isole):
+    env = env_isole()
+    clone, f = depot_de_nature(tmp_path, env, "donnees", "code", branche="principal")
+    r = porte_en_ci(clone, f, env, BRANCHE_DEFAUT="principal")
+    assert r.returncode == 0, r.stderr
+    assert "dépôt de données : avertissement, pas de refus" in r.stderr
+
+
+@pytest.mark.parametrize(
+    "variables", [{}, {"BRANCHE_DEFAUT": "--x"}, {"BRANCHE_DEFAUT": "absente"}]
+)
+def test_nature_illisible_vaut_code(tmp_path, env_isole, variables):
+    env = env_isole()
+    clone, f = depot_de_nature(tmp_path, env, "donnees", "donnees")
+    r = porte_en_ci(clone, f, env, **variables)
+    assert r.returncode == 1
+    assert NATURES_ILLISIBLES in r.stderr
+    assert "constat(s), refus." in r.stderr
+
+
+def test_depot_public_toujours_code(tmp_path, env_isole):
+    env = env_isole()
+    clone, f = depot_de_nature(tmp_path, env, "donnees", "donnees")
+    r = porte_en_ci(clone, f, env, depot_prive="false", BRANCHE_DEFAUT="main")
+    assert r.returncode == 1
+    assert "avertissement" not in r.stderr
+    assert NATURES_ILLISIBLES not in r.stderr
 
 
 # --- relecture de la vague : les secrets refusent partout, ce qui identifie avertit en privé ---
@@ -521,9 +624,9 @@ def test_deux_familles():
     assert constat.famille == c.SECRET
 
 
-def test_depot_prive_les_secrets_refusent(rendre, tmp_path, env_isole):
+def test_depot_de_donnees_les_secrets_refusent(rendre, tmp_path, env_isole):
     """Famille « secret » : chaque motif refuse, même dans un dépôt privé."""
-    script = rendre(visibilite="prive") / "scripts/modele/confidentialite.py"
+    script = rendre(nature="donnees") / "scripts/modele/confidentialite.py"
     noms = sorted(SECRETS)
     f = tmp_path / "f.txt"
     f.write_text("".join(ECHANTILLONS[nom] + chr(10) for nom in noms), encoding="utf-8")
@@ -532,12 +635,12 @@ def test_depot_prive_les_secrets_refusent(rendre, tmp_path, env_isole):
     for i, nom in enumerate(noms, start=1):
         assert f"{f}:{i} — {nom}" in r.stderr
         assert ECHANTILLONS[nom] not in r.stdout + r.stderr
-    assert f"{len(noms)} secret(s), qui refusent même dans un dépôt privé." in r.stderr
+    assert f"{len(noms)} secret(s), qui refusent même dans un dépôt de données." in r.stderr
 
 
-def test_depot_prive_ce_qui_identifie_avertit(rendre, tmp_path, env_isole):
+def test_depot_de_donnees_ce_qui_identifie_avertit(rendre, tmp_path, env_isole):
     """Famille « identification » : génériques et motifs privés avertissent dans un dépôt privé."""
-    script = rendre(visibilite="prive") / "scripts/modele/confidentialite.py"
+    script = rendre(nature="donnees") / "scripts/modele/confidentialite.py"
     env = {**env_isole(), "MOTIFS_INTERDITS": "valeur-privee-xyz"}
     noms = sorted({m.nom for m in c.MOTIFS_GENERIQUES} - SECRETS)
     lignes = [ECHANTILLONS[nom] for nom in noms] + ["a valeur-privee-xyz"]
@@ -547,15 +650,15 @@ def test_depot_prive_ce_qui_identifie_avertit(rendre, tmp_path, env_isole):
     assert r.returncode == 0, r.stderr
     for i, nom in enumerate([*noms, "motif privé n°1"], start=1):
         assert f"{f}:{i} — {nom}" in r.stderr
-    assert f"{len(lignes)} constat(s), dépôt privé : avertissement, pas de refus" in r.stderr
+    assert f"{len(lignes)} constat(s), dépôt de données : avertissement, pas de refus" in r.stderr
     assert "valeur-privee-xyz" not in r.stdout + r.stderr
 
 
 # --- relecture de la vague, n2 : --public, et l'historique avant un passage en public ---
 
 
-def test_option_public_refuse_dans_un_depot_prive(rendre, tmp_path, env_isole):
-    script = rendre(visibilite="prive") / "scripts/modele/confidentialite.py"
+def test_option_public_refuse_dans_un_depot_de_donnees(rendre, tmp_path, env_isole):
+    script = rendre(nature="donnees") / "scripts/modele/confidentialite.py"
     f = tmp_path / "f.txt"
     f.write_text(IP + chr(10), encoding="utf-8")
     assert lancer_porte(script, ["--fichiers", str(f)], env_isole()).returncode == 0
@@ -567,7 +670,7 @@ def test_option_public_refuse_dans_un_depot_prive(rendre, tmp_path, env_isole):
 def test_historique_avant_un_passage_en_public(rendre, tmp_path, env_isole):
     """Un nom privé ajouté puis retiré, ou cité dans un message : l'arbre est propre, l'historique
     ne l'est pas. La procédure de methode.md le trouve, en mode public."""
-    racine = rendre(visibilite="prive")
+    racine = rendre(nature="donnees")
     env = {**env_isole(), "MOTIFS_INTERDITS": "nom-du-serveur"}
     git(racine, env, "init", "-q", "-b", "main")
     git(racine, env, "config", "core.autocrlf", "false")

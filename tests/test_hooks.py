@@ -188,7 +188,7 @@ def test_commit_prive_avertit_sans_refuser(rendre, env_isole):
     r = lancer_git(racine, env, "commit", "-m", f"feat: essai {MOTIF}")
     assert r.returncode == 0, r.stderr
     assert "note.txt:1 — motif privé n°1" in r.stderr
-    assert "dépôt privé : avertissement, pas de refus" in r.stderr
+    assert "dépôt de données : avertissement, pas de refus" in r.stderr
     assert MOTIF not in r.stderr.replace(f"feat: essai {MOTIF}", "")
 
 

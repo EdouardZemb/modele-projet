@@ -9,19 +9,20 @@ Pour la même raison, un chemin de fichier qui correspond lui-même à un motif 
 Un fichier UTF-16 (avec BOM) est examiné comme du texte ; un autre binaire est signalé par une
 ligne « fichier binaire non examiné », sans refus.
 
-Dans un dépôt privé (`VISIBILITE = "prive"` dans reglages.py), un constat de la famille
-« identification » (adresse, cible, nom de machine, motif privé) s'affiche de la même façon, sans
-refuser ; un constat de la famille « secret » (clé, jeton) refuse toujours. En CI, DEPOT_PRIVE
-(la visibilité réelle) l'emporte sur reglages.py ; --public force le mode public. Sans
-reglages.py (le dépôt modèle lui-même) ou en `public`, tout constat refuse. Les erreurs d'usage et
-l'absence d'une liste privée exigée refusent toujours (64).
+Le régime vient de la nature du dépôt (`NATURE` dans reglages.py). Dans un dépôt de données
+(`donnees`), un constat de la famille « identification » (adresse, cible, nom de machine, motif
+privé) s'affiche de la même façon, sans refuser ; un constat de la famille « secret » (clé, jeton)
+refuse toujours. En CI, DEPOT_PRIVE (la visibilité réelle) force le régime `code` s'il ne vaut pas
+`true`, et la nature se lit sur la branche par défaut (BRANCHE_DEFAUT), jamais dans la PR ;
+--public force le régime `code`. Sans reglages.py (le dépôt modèle lui-même) ou en `code`, tout
+constat refuse. Les erreurs d'usage et l'absence d'une liste privée exigée refusent toujours (64).
 
 Usage (un seul mode) :
     confidentialite.py --index | --message FICHIER | --diff BASE | --texte FICHIER
                        | --fichiers CHEMIN...
     options : --motifs FICHIER, --exiger-prives, --public
 
-Retour : 0 rien trouvé (ou dépôt privé sans secret), 1 au moins un constat qui refuse, 64 erreur
+Retour : 0 rien trouvé (ou dépôt de données sans secret), 1 au moins un constat qui refuse, 64 erreur
 d'usage ou liste privée exigée absente.
 """
 
@@ -41,8 +42,8 @@ LISTE_PAR_DEFAUT = ".config/modele-projet/motifs-interdits.txt"
 EXIT_USAGE = 64
 
 
-# Deux familles. Un secret (clé, jeton) refuse toujours, même dans un dépôt privé. Ce qui identifie
-# (adresse, cible, nom de machine, motif privé) avertit seulement dans un dépôt privé.
+# Deux familles. Un secret (clé, jeton) refuse toujours, même dans un dépôt de données. Ce qui
+# identifie (adresse, cible, nom de machine, motif privé) avertit seulement dans un dépôt de données.
 SECRET = "secret"
 IDENTIFICATION = "identification"
 
@@ -328,7 +329,7 @@ def _analyseur() -> argparse.ArgumentParser:
     p.add_argument(
         "--public",
         action="store_true",
-        help="mode public quelle que soit la visibilité : tout constat refuse (avant un passage "
+        help="régime code quelle que soit la nature : tout constat refuse (avant un passage "
         "en public)",
     )
     return p
@@ -348,23 +349,62 @@ def _masquer(emplacement: str, motifs: Sequence[Motif]) -> str:
     return f"{chemin}:{reste}" if reste else chemin
 
 
-def visibilite() -> str:
-    """La visibilité qui s'applique : `prive` ou `public`.
+BRANCHE_DEFAUT_VALIDE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
+_LIGNE_NATURE = re.compile(r'^NATURE = "([^"\n]*)"\s*$', re.MULTILINE)
+_LIGNE_VISIBILITE = re.compile(r'^VISIBILITE = "prive"\s*$', re.MULTILINE)
 
-    En CI, la variable DEPOT_PRIVE porte la visibilité réelle du dépôt
-    (`github.event.repository.private`) et l'emporte : toute autre valeur que `true` donne
-    `public`, quoi que dise reglages.py. Un dépôt passé public sans `copier update`, ou une PR qui
-    réécrit VISIBILITE, ne s'ouvre donc pas. Sans la variable (le poste, les hooks), c'est la
-    visibilité posée au rendu (`reglages.VISIBILITE`) qui décide. Sans réglages (le dépôt modèle
-    lui-même), ou pour toute autre valeur que `prive` : `public`, où un constat refuse."""
+
+def nature_du_texte(texte: str | None) -> str:
+    """La nature (`code` ou `donnees`) que dit un texte de reglages.py, lu sans l'exécuter.
+
+    Une ligne `NATURE = "donnees"` donne `donnees`. Sans ligne `NATURE`, une ligne
+    `VISIBILITE = "prive"` donne `donnees` : c'est le repli d'une version, à retirer au lot 12.
+    Tout autre cas, dont un texte absent ou des apostrophes, donne `code`."""
+    if not texte:
+        return "code"
+    ligne = _LIGNE_NATURE.search(texte)
+    if ligne:
+        return "donnees" if ligne.group(1) == "donnees" else "code"
+    return "donnees" if _LIGNE_VISIBILITE.search(texte) else "code"
+
+
+def nature() -> str:
+    """Le régime qui s'applique : `code` (tout constat refuse) ou `donnees` (l'identification
+    avertit, le secret refuse).
+
+    En CI, DEPOT_PRIVE porte la visibilité réelle du dépôt : toute autre valeur que `true` donne
+    `code`. Un dépôt privé en CI lit sa nature sur la branche par défaut que GitHub déclare
+    (`origin/<BRANCHE_DEFAUT>`), jamais dans la copie de la PR, qui pourrait la réécrire ; si cette
+    lecture échoue, c'est `code`. Sans DEPOT_PRIVE (le poste, les hooks), c'est le reglages.py
+    voisin du script ; sans lui (le dépôt modèle lui-même), `code`."""
     depot_prive = os.environ.get("DEPOT_PRIVE")
     if depot_prive is not None and depot_prive.strip().lower() != "true":
-        return "public"
-    try:
-        from reglages import VISIBILITE
-    except ImportError:
-        return "public"
-    return "prive" if VISIBILITE == "prive" else "public"
+        return "code"
+    if depot_prive is None:
+        try:
+            return nature_du_texte((Path(__file__).parent / "reglages.py").read_text("utf-8"))
+        except (OSError, UnicodeDecodeError):
+            return "code"
+    branche = os.environ.get("BRANCHE_DEFAUT", "")
+    texte = None
+    if BRANCHE_DEFAUT_VALIDE.match(branche):
+        try:
+            r = subprocess.run(
+                ["git", "show", f"origin/{branche}:scripts/modele/reglages.py"],
+                capture_output=True,
+                check=False,
+            )
+            if r.returncode == 0:
+                texte = r.stdout.decode("utf-8")
+        except (OSError, UnicodeDecodeError):
+            texte = None
+    if texte is None:
+        print(
+            "confidentialité : nature illisible sur la branche par défaut : régime code",
+            file=sys.stderr,
+        )
+        return "code"
+    return nature_du_texte(texte)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -410,18 +450,18 @@ def main(argv: list[str] | None = None) -> int:
         )
     if not constats:
         return 0
-    if not args.public and visibilite() == "prive":
+    if not args.public and nature() == "donnees":
         secrets = sum(1 for c in constats if c.famille == SECRET)
-        if not secrets:  # un dépôt privé peut nommer son serveur : il est averti
+        if not secrets:  # un dépôt de données peut nommer son serveur : il est averti
             print(
                 f"confidentialité : {len(constats)} constat(s), "
-                "dépôt privé : avertissement, pas de refus",
+                "dépôt de données : avertissement, pas de refus",
                 file=sys.stderr,
             )
             return 0
         print(
             f"confidentialité : {len(constats)} constat(s), refus : "
-            f"{secrets} secret(s), qui refusent même dans un dépôt privé.",
+            f"{secrets} secret(s), qui refusent même dans un dépôt de données.",
             file=sys.stderr,
         )
         return 1

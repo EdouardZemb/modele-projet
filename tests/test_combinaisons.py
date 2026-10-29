@@ -28,10 +28,10 @@ def lancer(commande, rendu, env=None):
 
 
 @pytest.mark.parametrize("fusion", ["session", "edouard"])
-@pytest.mark.parametrize("visibilite", ["public", "prive"])
+@pytest.mark.parametrize("nature", ["code", "donnees"])
 @pytest.mark.parametrize("cible", list(CIBLES))
-def test_combinaison(rendre, env_isole, cible, visibilite, fusion):
-    rendu = rendre(**{**CIBLES[cible], "visibilite": visibilite, "fusion": fusion})
+def test_combinaison(rendre, env_isole, cible, nature, fusion):
+    rendu = rendre(**{**CIBLES[cible], "nature": nature, "fusion": fusion})
     fichiers = fichiers_texte(rendu)
     assert fichiers
     for chemin in fichiers:
@@ -44,7 +44,7 @@ def test_combinaison(rendre, env_isole, cible, visibilite, fusion):
 
     env = env_isole()
     commande = [sys.executable, "scripts/modele/confidentialite.py", "--fichiers", *[str(f) for f in fichiers]]
-    if visibilite == "public":
+    if nature == "code":
         commande.append("--public")
     r = lancer(commande, rendu, env)
     assert r.returncode == 0, r.stderr
@@ -72,10 +72,10 @@ def scripts_shell(rendu):
 # Seul ce contrôle demande shellcheck : sans lui, les autres contrôles de la combinaison ne sautent
 # pas (R7).
 @pytest.mark.parametrize("fusion", ["session", "edouard"])
-@pytest.mark.parametrize("visibilite", ["public", "prive"])
+@pytest.mark.parametrize("nature", ["code", "donnees"])
 @pytest.mark.parametrize("cible", list(CIBLES))
-def test_combinaison_shellcheck(rendre, cible, visibilite, fusion):
-    rendu = rendre(**{**CIBLES[cible], "visibilite": visibilite, "fusion": fusion})
+def test_combinaison_shellcheck(rendre, cible, nature, fusion):
+    rendu = rendre(**{**CIBLES[cible], "nature": nature, "fusion": fusion})
     scripts = scripts_shell(rendu)
     assert bool(scripts) == (cible != "aucune"), scripts
     if not scripts:
