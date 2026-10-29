@@ -272,7 +272,7 @@ def _modele_depuis_v0_5_0(tmp_path, env):
         cwd=RACINE,
         env=env,
     )
-    shutil.unpack_archive(archive, modele)
+    shutil.unpack_archive(archive, modele, filter="data")
     git(modele, env, "init", "-q", "-b", "main")
     git(modele, env, "config", "core.autocrlf", "false")
     git(modele, env, "add", "-A")
