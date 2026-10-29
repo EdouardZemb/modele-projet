@@ -1,0 +1,6 @@
+# Constats de l'historique que la relecture hebdomadaire accepte (M-0006, § 3).
+# Chaque ligne nomme un commit et un chemin, jamais une valeur : <sha de 40 caractères> <chemin>.
+# Une ligne par couple (commit, chemin). Un constat nouveau refuse tant qu'il n'est pas décidé.
+ff95d490864e863ad2294e7866f5e4dd84a14e9d docs/cadrage.md  # motif privé n°8
+8cbe0c718487811c7a1d63d348a2df21982be7ce copier.yml  # motif privé n°8
+8cbe0c718487811c7a1d63d348a2df21982be7ce tests/test_cible_serveur.py  # motif privé n°8
