@@ -19,8 +19,8 @@ constat refuse. Les erreurs d'usage et l'absence d'une liste privée exigée ref
 
 Le mode --historique relit tout l'historique d'un dépôt de code (`git log --all -p`) : chaque
 constat porte l'emplacement `<sha>:<chemin>:<ligne>`, le message d'un commit étant le chemin
-`message`. Une fusion n'a pas de diff dans `git log -p` : son message est examiné, son contenu
-l'est par les commits de ses parents. Dans un dépôt de données (`donnees`), rien n'est relu : gitleaks
+`message`. Une fusion est lue par `--remerge-diff` : ce que sa résolution a changé est attribué à
+la fusion. Dans un dépôt de données (`donnees`), rien n'est relu : gitleaks
 seul lit l'historique. Avec --acceptes FICHIER, les constats nommés par une ligne
 `<sha de 40 caractères> <chemin>` (suivie au choix de `# commentaire`) sont écartés. Un constat dont
 le chemin correspond lui-même à un motif privé ne peut pas être accepté sans écrire ce chemin dans
@@ -40,6 +40,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import secrets
 import subprocess
 import sys
 from collections.abc import Iterable, Iterator, Sequence
@@ -270,28 +271,61 @@ def _lignes_des_binaires(
 LONGUEUR_SHA = 40
 
 
+SHA_VALIDE = re.compile(r"^[0-9a-f]{40}$")
+
+
+class HistoriqueIllisible(ErreurUsage):
+    pass
+
+
 def _lignes_de_l_historique(non_examines: list[str]) -> list[tuple[str, str]]:
     """Les lignes ajoutées par chaque commit de `git log --all`, sous `<sha>:<chemin>:<ligne>`.
 
     Le message d'un commit est le chemin `message`. Une ligne ajoutée puis retirée est attribuée
-    au commit qui l'ajoute. Une fusion n'a pas de diff dans `git log -p` : son message est
-    examiné, son contenu l'est par les commits de ses parents."""
+    au commit qui l'ajoute. Une fusion est lue par `--remerge-diff` : ce que sa résolution a
+    changé par rapport à une fusion automatique est attribué à la fusion.
+
+    Le découpage se fait sur une marque tirée au hasard à chaque passage, que le contenu d'un
+    dépôt ne peut pas porter (un NUL, lui, peut passer dans un diff). En cas de doute, la porte
+    se ferme : un sha d'en-tête qui n'en est pas un rend `HistoriqueIllisible`."""
     sortie: list[tuple[str, str]] = []
-    journal = _git("log", "--all", "--reverse", "-p", "-U0", *DIFF, "--format=%x00%H%n%B%x00")
-    morceaux = journal.split("\0")
-    # ["", "sha\nmessage", "diff", "sha\nmessage", "diff", ...]
+    marque = secrets.token_hex(16)
+    journal = _git(
+        "log", "--all", "--reverse", "--root", "-p", "-U0", "--remerge-diff", *DIFF,
+        f"--format={marque}%n%H%n%B{marque}",
+    )  # fmt: skip
+    morceaux = journal.split(marque)
+    # ["", "\nsha\nmessage", "diff", "\nsha\nmessage", "diff", ...]
+    if len(morceaux) % 2 == 0 or morceaux[0].strip():
+        raise HistoriqueIllisible("historique illisible")
     for i in range(1, len(morceaux) - 1, 2):
-        sha, _, message = morceaux[i].partition("\n")
+        sha, _, message = morceaux[i].lstrip("\n").partition("\n")
+        if not SHA_VALIDE.match(sha):
+            raise HistoriqueIllisible("historique illisible")
         for n, ligne in enumerate(message.split("\n"), start=1):
             sortie.append((f"{sha}:message:{n}", ligne.rstrip("\r")))
         for emplacement, texte in lignes_ajoutees(morceaux[i + 1]):
             sortie.append((f"{sha}:{emplacement}", texte))
-    # Les noms des fichiers ajoutés, et ceux que git juge binaires (`-` `-` dans --numstat), en
-    # une seule passe : un binaire n'a aucune ligne dans le diff, on lit l'objet lui-même.
+    # Les noms des fichiers ajoutés (`--diff-filter=A`), et les binaires ajoutés ou modifiés
+    # (`-` `-` dans --numstat), en une seule passe : un binaire n'a aucune ligne dans le diff,
+    # on lit l'objet lui-même. Les fusions n'y figurent pas : leurs fichiers sont ceux des parents.
     suivi = _git(
-        "log", "--all", "--reverse", "--diff-filter=ACMR", "--numstat", "-z", *DIFF,
+        "log", "--all", "--reverse", "--root", "--diff-filter=ACMR", "--numstat", "-z", *DIFF,
         "--format=%x01%H",
     )  # fmt: skip
+    ajoutes = _git(
+        "log", "--all", "--reverse", "--root", "--diff-filter=A", "--name-only", "-z", *DIFF,
+        "--format=%x01%H",
+    )  # fmt: skip
+    sha = ""
+    for jeton in ajoutes.split("\0"):
+        if jeton.startswith("\x01"):
+            sha = jeton[1:].lstrip("\n")
+            if not SHA_VALIDE.match(sha):
+                raise HistoriqueIllisible("historique illisible")
+        elif sha and jeton.strip("\n"):
+            chemin = jeton.lstrip("\n")
+            sortie.append((f"{sha}:{chemin}:0", chemin))
     sha = ""
     binaires: list[tuple[str, str]] = []
     for jeton in suivi.split("\0"):
@@ -299,10 +333,7 @@ def _lignes_de_l_historique(non_examines: list[str]) -> list[tuple[str, str]]:
             sha = jeton[1:]
             continue
         champs = jeton.lstrip("\n").split("\t", 2)
-        if len(champs) != 3 or not sha:
-            continue
-        sortie.append((f"{sha}:{champs[2]}:0", champs[2]))
-        if champs[0] == "-" and champs[1] == "-":
+        if len(champs) == 3 and sha and champs[0] == "-" and champs[1] == "-":
             binaires.append((sha, champs[2]))
     for sha, chemin in binaires:
         octets = _git_octets("show", "--no-textconv", f"{sha}:{chemin}")
@@ -416,11 +447,15 @@ def _masquer(emplacement: str, motifs: Sequence[Motif]) -> str:
 def _masquer_historique(emplacement: str, motifs: Sequence[Motif]) -> str:
     """Comme _masquer, pour `<sha>:<chemin>:<ligne>` : le sha reste lisible, le chemin se masque."""
     sha, reste = emplacement[:LONGUEUR_SHA], emplacement[LONGUEUR_SHA + 1 :]
+    if not SHA_VALIDE.match(sha):  # en cas de doute, tout est masqué
+        return "<emplacement masqué>"
     return f"{sha}:{_masquer(reste, motifs)}"
 
 
 def _masquer_binaire_historique(emplacement: str, motifs: Sequence[Motif]) -> str:
     sha, chemin = emplacement[:LONGUEUR_SHA], emplacement[LONGUEUR_SHA + 1 :]
+    if not SHA_VALIDE.match(sha):
+        return "<emplacement masqué>"
     return f"{sha}:{_masquer_chemin(chemin, motifs)}"
 
 

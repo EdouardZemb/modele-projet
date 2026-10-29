@@ -859,5 +859,70 @@ def test_historique_nom_de_fichier_examine(tmp_path, env_isole):
 
 
 def test_acceptes_hors_historique_refuse(tmp_path, env_isole):
-    r = lancer(["--texte", "x", "--acceptes", "y"], env_isole())
+    f = tmp_path / "t.txt"
+    f.write_text("propre\n", encoding="utf-8")
+    r = lancer(["--texte", str(f), "--acceptes", "y"], env_isole())
     assert r.returncode == 64
+    assert "--acceptes ne vaut qu'avec --historique" in r.stderr
+
+
+def test_historique_un_nul_tardif_ne_decale_rien(tmp_path, env_isole):
+    """Git ne cherche un NUL que dans les 8000 premiers octets : un NUL plus loin reste du texte
+    dans le diff. Il ne doit ni décaler l'attribution ni faire imprimer du contenu."""
+    env = env_isole()
+    env["MOTIFS_INTERDITS"] = "nom-prive"
+    d = depot(tmp_path, env)
+    contenu = "a\n" * 4500 + "x\0nom-prive " + IP + "\n"
+    (d / "gros.txt").write_bytes(contenu.encode())
+    git(d, env, "add", "gros.txt")
+    git(d, env, "commit", "-q", "-m", "feat: gros")
+    sha2 = _commit(d, env, "docs: vu " + IP)
+    r = lancer(["--historique"], env, d)
+    sortie = r.stdout + r.stderr
+    assert r.returncode == 1
+    assert "nom-prive" not in sortie
+    assert "192.168" not in sortie
+    assert f"{sha2}:message:1 — adresse IP privée" in r.stderr
+
+
+def test_historique_fusion_resolue_attribuee_a_la_fusion(tmp_path, env_isole):
+    env = env_isole()
+    d = depot(tmp_path, env)
+    _commit(d, env, "feat: base", a__txt="1\n")
+    git(d, env, "switch", "-qc", "autre")
+    _commit(d, env, "feat: autre", a__txt="autre\n")
+    git(d, env, "switch", "-q", "main")
+    _commit(d, env, "feat: main", a__txt="main\n")
+    r = subprocess.run(
+        ["git", "merge", "--no-ff", "autre"], cwd=d, env=env, capture_output=True, check=False
+    )
+    assert r.returncode != 0  # conflit voulu
+    (d / "a.txt").write_text("resolu " + IP + "\n", encoding="utf-8")
+    git(d, env, "add", "a.txt")
+    git(d, env, "commit", "-q", "-m", "Merge autre")
+    sha = git(d, env, "rev-parse", "HEAD").strip()
+    r = lancer(["--historique"], env, d)
+    assert r.returncode == 1
+    assert f"{sha}:a.txt:" in r.stderr
+    assert "192.168" not in r.stdout + r.stderr
+
+
+def test_historique_nom_examine_a_l_ajout_seulement(tmp_path, env_isole):
+    env = env_isole()
+    env["MOTIFS_INTERDITS"] = "nom-prive"
+    d = depot(tmp_path, env)
+    _commit(d, env, "feat: x", **{"nom-prive__txt": "un\n"})
+    _commit(d, env, "feat: y", **{"nom-prive__txt": "deux\n"})
+    r = lancer(["--historique"], env, d)
+    assert r.returncode == 1
+    assert r.stderr.count("— motif privé n°1") == 1
+
+
+def test_historique_lit_le_commit_racine_malgre_show_root(tmp_path, env_isole):
+    env = env_isole()
+    d = depot(tmp_path, env)
+    git(d, env, "config", "log.showRoot", "false")
+    sha = _commit(d, env, "feat: racine", a__txt=IP + "\n")
+    r = lancer(["--historique"], env, d)
+    assert r.returncode == 1
+    assert f"{sha}:a.txt:1 — adresse IP privée" in r.stderr
