@@ -38,9 +38,9 @@ cible:
   validator: "{% if cible == 'donnees' and not (nom | regex_search('-donnees$')) %}un dépôt de données se nomme <nom>-donnees{% endif %}"
 nature:
   type: str
-  help: Ce que le dépôt porte, du code seul ou aussi des données
+  help: code pour tout projet né après M-0006 ; donnees pour un dépôt de données, ou un dépôt d'avant M-0006 jusqu'à sa scission
   choices: {code: code, données: donnees}
-  default: "{{ 'donnees' if cible == 'donnees' or (visibilite | default('')) == 'prive' else 'code' }}"
+  default: "{{ 'donnees' if cible == 'donnees' or ((visibilite | default('')) == 'prive' and 'visibilite' not in _copier_conf.data) else 'code' }}"
   when: "{{ cible != 'donnees' }}"
 branche_principale:
   type: str
