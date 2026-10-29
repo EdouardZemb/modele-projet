@@ -74,12 +74,12 @@ sessions à distance.
 
 | Où | Quoi |
 |---|---|
-| hook git `pre-commit` | confidentialité du contenu indexé, fichiers UTF-16 compris ; un autre binaire est signalé « non examiné ». La porte refuse dans un dépôt public ; dans un dépôt privé, elle avertit sur ce qui identifie et refuse toujours les secrets (voir plus bas), au hook comme en CI. Au commit d'un alignement ou d'une mise à jour (celui qui modifie `.copier-answers.yml`), refus d'un fichier du modèle que le `.gitignore` du projet masque |
+| hook git `pre-commit` | confidentialité du contenu indexé, fichiers UTF-16 compris ; un autre binaire est signalé « non examiné ». La porte suit la nature du dépôt : elle refuse tout constat dans un dépôt de code ; dans un dépôt de données, elle avertit sur ce qui identifie et refuse toujours les secrets (voir plus bas), au hook comme en CI. Au commit d'un alignement ou d'une mise à jour (celui qui modifie `.copier-answers.yml`), refus d'un fichier du modèle que le `.gitignore` du projet masque |
 | hook git `commit-msg` | format Conventional Commits, confidentialité du message |
 | hook git `pre-push` | refus d'envoyer sur la branche principale |
 | hook Claude `PreToolUse` (outils `Bash`, `PowerShell`, `Monitor`, et tout outil MCP qui porte une commande) | bloque `git push` vers la branche principale, tout force-push vers elle, `--no-verify`, toute modification de `core.hooksPath` sauf la réparation `git config core.hooksPath .githooks` (variables `GIT_CONFIG_*` comprises), `gh pr merge` tant que les contrôles ne sont pas tous verts (et toute fusion en mode `edouard`), `gh pr merge --admin`, l'envoi d'une étiquette (`git push --tags`, `--follow-tags`, un refspec `refs/tags/…` ou `v1.2.3`) et toute écriture de publication (`gh release` hors `view`, `list`, `download` ; l'API `…/releases`), les alias et extensions de `gh`, ce qui affiche le jeton de `gh` ou les identifiants de git (`gh auth token`, `gh auth status --show-token`, `gh auth git-credential`, `git credential fill`, `git credential-manager get`), et l'effacement, le déplacement ou le renommage de `.githooks` et de `scripts/modele` (`rm`, `mv`, `Remove-Item`, `git rm`…). Il lit aussi les substitutions `$(…)`, même entre guillemets, le texte d'une here-string (`bash <<< '…'`) passée à un interprète, et les enveloppes (`timeout`, `Start-Process`, `Invoke-Expression`…) |
 | hook Claude `SessionStart` (au démarrage et à la reprise) | affiche ce qui est rouge sur GitHub : les exécutions de la branche principale, les PR ouvertes et les workflows désactivés. Il ne bloque jamais. Ce que n'importe qui écrit depuis un fork n'entre pas dans le contexte de Claude : les exécutions de PR (`pull_request…`) sont écartées, et une PR ou un workflow venus d'ailleurs que le dépôt s'affichent sans le texte qu'ils portent. Une PR d'un fork paraît ainsi sans titre ni nom de contrôle, un workflow absent de la copie, sans son nom |
-| CI de base | gitleaks examine les commits de chaque PR et de chaque envoi, et tout l'historique chaque semaine et à la demande (`modele-historique.yml`) ; confidentialité du diff, des messages de commit et du texte de la PR ; format des commits ; le garde de Claude **et les signaux** toujours branchés dans `.claude/settings.json` ; actions épinglées par SHA |
+| CI de base | gitleaks examine les commits de chaque PR et de chaque envoi, et tout l'historique chaque semaine et à la demande (`modele-historique.yml`) ; la porte relit aussi l'historique d'un dépôt de code chaque semaine (`modele-historique.yml`), à côté de gitleaks, et refuse tout constat absent de `.github/constats-acceptes.txt` ; confidentialité du diff, des messages de commit et du texte de la PR ; format des commits ; le garde de Claude **et les signaux** toujours branchés dans `.claude/settings.json` ; actions épinglées par SHA |
 | Dependabot | chaque lundi, les versions des actions épinglées (`.github/dependabot.yml`), après trois jours de recul |
 | règle de protection GitHub | tout commit qui arrive sur la branche principale est la tête d'une PR dont les contrôles requis sont verts ; un envoi direct de cette tête est accepté et marque la PR fusionnée, sans squash. Côté agent, c'est le refus de pousser vers la branche principale par le garde qui ferme ce chemin. Ni force-push ni suppression de la branche principale. Posée sur les dépôts publics |
 
@@ -116,33 +116,41 @@ envoie pas et n'écrit aucune publication.
 **La PR qui apporte l'option `fusion` à un projet se fusionne à la main**, puisque la branche
 principale n'a pas encore la réponse : le garde la lit comme `edouard` tant qu'elle n'y est pas.
 
-**Dépôt public, dépôt privé.** La visibilité est une réponse du modèle (`visibilite` dans
-`.copier-answers.yml`, `VISIBILITE` dans `scripts/modele/reglages.py`). Dans un dépôt **public**, un
-constat de la porte de confidentialité refuse, à chaque hook comme en CI. Dans un dépôt **privé**,
-qui peut nommer son propre serveur, **la porte avertit sur ce qui identifie et refuse toujours les
-secrets**. Ce qui identifie (adresses privées et Tailscale, cibles SSH et scp, noms MagicDNS,
-motifs de la liste privée) s'affiche, avec son emplacement et le nom du motif, jamais la valeur, et
-ne refuse pas. Un secret (clé privée age ou PEM, jeton GitHub, JWT, jeton de tunnel, adresse de
-ping) refuse partout, au `pre-commit` comme en CI ; gitleaks les cherche aussi, en CI. **En CI,
-c'est la visibilité réelle du dépôt qui s'applique** (`github.event.repository.private`, passée à
-la porte par `DEPOT_PRIVE`) : un dépôt public refuse, quoi que dise `reglages.py`. Les erreurs
-d'usage et l'absence de la liste privée exigée refusent toujours. Un dépôt privé n'a pas de règle
-de protection : le garde de Claude y est la seule serrure côté agent, et la CI du socle le seul
-filet.
+**Dépôt de code, dépôt de données.** La nature est une réponse du modèle (`nature` dans
+`.copier-answers.yml`, `NATURE` dans `scripts/modele/reglages.py`). Elle vaut `code` par défaut, ou `donnees`
+(M-0006). Un dépôt de code porte l'application ; un dépôt de données porte ce qui fait d'une instance
+celle d'Edouard, et reste privé. Dans un dépôt de code, tout constat refuse, quelle que soit sa
+visibilité. Il refuse au hook comme en CI. Dans un dépôt de données, qui peut nommer son propre serveur, **la
+porte avertit sur ce qui identifie et refuse toujours les secrets**. Ce qui identifie (adresses
+privées et Tailscale, cibles SSH et scp, noms MagicDNS, motifs de la liste privée) s'affiche, avec
+son emplacement et le nom du motif, jamais la valeur, et ne refuse pas. Un secret (clé privée age ou
+PEM, jeton GitHub, JWT, jeton de tunnel, adresse de ping) refuse partout, au `pre-commit` comme en
+CI ; gitleaks les cherche aussi, en CI. Les erreurs d'usage et l'absence de la liste privée exigée
+refusent toujours.
 
-**Avant de passer un dépôt privé en public**, quatre étapes obligatoires, dans cet ordre. `--public`
-fait refuser la porte comme dans un dépôt public, puisque le dépôt est encore privé :
+**En CI, la nature ne se lit pas dans la PR.** En CI, un dépôt public est toujours un dépôt de code,
+et un dépôt privé prend la nature écrite sur sa branche par défaut, jamais celle de la PR. La porte
+la lit par `git show origin/<branche par défaut>:scripts/modele/reglages.py` (la branche arrive par
+`BRANCHE_DEFAUT`, la visibilité réelle par `DEPOT_PRIVE`). Une nature illisible vaut `code`, la plus
+stricte. Hors CI, aux hooks, la porte lit le `reglages.py` de la copie ; sans lui (le dépôt modèle),
+c'est `code`. Un dépôt privé n'a pas de règle de protection : le garde de Claude y est la seule
+serrure côté agent, et la CI du socle le seul filet.
 
-1. l'arbre : `python scripts/modele/confidentialite.py --exiger-prives --public --fichiers <la liste
-   de git ls-files>` est propre ;
-2. tout l'historique : `git log -p --all --no-textconv --no-ext-diff --format='%H%n%B' > <fichier
-   temporaire>`, puis `python scripts/modele/confidentialite.py --exiger-prives --public --texte
-   <fichier temporaire>` est propre (aucun constat, aucune ligne « non examiné »). Les lignes
-   ajoutées et retirées et les messages sont examinés ; les binaires de l'historique ne le sont
-   pas. Si un constat apparaît : réécrire l'historique, ou publier un nouveau dépôt depuis un
-   commit unique propre ;
-3. un passage complet de `modele-historique.yml` est vert ;
-4. `copier update` avec `visibilite=public`, puis la règle de protection.
+**L'historique d'un dépôt de code.** `modele-historique.yml` relit tout l'historique chaque semaine
+et à la demande, après gitleaks. Chaque constat se nomme `<commit>:<chemin>:<ligne>` ; le message d'un commit compte comme un chemin, `message`. Le projet peut
+en accepter, dans `.github/constats-acceptes.txt` (un fichier qui lui appartient ; absent, il est
+vide) : une ligne par constat, `<commit> <chemin>`, suivie au besoin de `# <motif>`, jamais la
+valeur. Edouard relit cette liste, et rien d'autre n'est toléré. Dans un dépôt de données, la porte
+dit que gitleaks seul relit l'historique.
+
+**Passer un dépôt en public.** Deux cas.
+
+- **Un dépôt de code né après M-0006 passe en public sans travail préalable** : il ne lui faut que sa
+  règle de protection. Le changement de visibilité est ensuite à Edouard. Son historique est relu chaque
+  semaine.
+- **Un dépôt d'avant M-0006 ne passe pas en public** : il se scinde (M-0006, § 7). Il devient le
+  dépôt de données, et un nouveau dépôt de code naît d'un seul commit propre. Jusque-là, sa nature
+  est `donnees`.
 
 Le secret `MOTIFS_INTERDITS` (la liste privée) est posé **deux fois** par dépôt : comme secret
 Actions et comme secret Dependabot (`gh secret set MOTIFS_INTERDITS --app dependabot`). Les
@@ -197,6 +205,8 @@ Les numéros ne se réutilisent jamais. **Au 3e constat portant le même motif, 
 test, un hook, une vérification de CI), et la ligne le dit. La compétence `/consigner`
 (`.claude/skills/consigner/SKILL.md`) écrit la ligne.
 
+Un dépôt de données n'a pas de registre à lui : ses leçons vont au registre de son dépôt de code.
+
 ## Les familles de garde-fous de l'écosystème
 
 Toute application de l'écosystème est tenue à cinq familles de garde-fous (M-0001, d'après
@@ -212,3 +222,9 @@ Arbitrage du 16/10 : le modèle outille **quatre** familles (ADR, CI qui refuse,
 secrets, aucune donnée réelle). **La mutation reste une obligation du projet**, avec l'outil de sa
 stack, dès que le projet a une logique de domaine. Un site sans logique de domaine n'est pas
 concerné.
+
+Même arbitrage pour la cinquième : le modèle outille en partie seulement « aucune donnée réelle dans
+le dépôt », par la séparation du code et des données (M-0006) et par la porte de confidentialité.
+**Le test d'isolation des chemins de données reste une obligation du projet**, écrit avec l'outil de
+sa stack, comme la mutation : chaque chemin de données d'un dépôt de code est redirigé vers des
+fixtures, et un test garde-fou le vérifie.

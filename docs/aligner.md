@@ -23,10 +23,14 @@ Chaque case se coche dans la PR d'alignement. Une case qui ne s'applique pas au 
 
   ```sh
   copier copy --defaults --vcs-ref <étiquette> --data nom=<nom> --data "description=<une phrase>" \
-    --data visibilite=<public|prive> --data cible=aucune --data branche_principale=<branche> \
+    --data nature=<code|donnees> --data cible=aucune --data branche_principale=<branche> \
     gh:EdouardZemb/modele-projet .
   ```
 
+- [ ] **La nature est choisie** (`--data nature=<code|donnees>`) : un dépôt qui nomme son serveur ou
+      son instance prend `donnees` jusqu'à sa scission (M-0006, § 7) ; tout autre prend `code`. La
+      nature n'est pas la cible : elle ne change pas les fichiers rendus, seulement le régime de la
+      porte de confidentialité.
 - [ ] **Rien d'existant n'a bougé** : `git diff --name-only` est vide, et `git status --short` ne
       montre que des fichiers nouveaux (`??`). Copier ignore les fichiers semés déjà présents
       (`README.md`, `CLAUDE.md`, `.gitignore`…) : il les signale en conflit, sans les toucher. Si un
@@ -75,7 +79,7 @@ Chaque case se coche dans la PR d'alignement. Une case qui ne s'applique pas au 
       `git status --short` a listés au §2, et ceux retouchés au §3. Jamais tout d'un coup
       (`methode.md`, « Les commits ») : un cache ou un dossier de travail non ignoré entrerait dans
       le commit (LE-7). Puis `python scripts/modele/confidentialite.py --exiger-prives --index` rend
-      0 (dans un dépôt privé : aucun avertissement qui ne soit pas attendu). C'est le mode du hook
+      0 (dans un dépôt de données : aucun avertissement qui ne soit pas attendu). C'est le mode du hook
       `pre-commit`, sur ce qui est indexé. Pas `--diff` avant le commit : il compare
       `<base>...HEAD`, n'examine encore rien, et la porte se tait quand elle ne trouve rien (LE-15).
 - [ ] Le lint, les types et les tests du projet passent.
@@ -262,25 +266,15 @@ restaient. `CLAUDE.md` et `docs/registre.md`, eux, survivent.
 - [ ] **Après** : récupérer ce qui est utile, par `git show <commit>:deploiement/projet.env` ou
       `git checkout <commit> -- deploiement/`.
 
-## Avant de passer un dépôt privé en public
+## Passer un dépôt en public
 
-Dans un dépôt privé, la porte de confidentialité avertit sur ce qui identifie (elle ne refuse que
-les secrets) : des constats ont pu entrer dans l'historique. Avant de changer la visibilité, quatre
-étapes, obligatoires et dans cet ordre. `--public` fait refuser la porte comme dans un dépôt
-public, puisque le dépôt est encore privé.
+Deux cas, selon la nature du dépôt (M-0006).
 
-1. [ ] **L'arbre** : `python scripts/modele/confidentialite.py --exiger-prives --public --fichiers
-       <la liste de git ls-files>` est propre : aucun constat.
-2. [ ] **Tout l'historique** :
-
-   ```sh
-   git log -p --all --no-textconv --no-ext-diff --format='%H%n%B' > "$TMP/historique.txt"
-   python scripts/modele/confidentialite.py --exiger-prives --public --texte "$TMP/historique.txt"
-   ```
-
-   est propre : aucun constat, aucune ligne « non examiné ». Les lignes ajoutées et retirées et les
-   messages sont examinés ; les binaires de l'historique ne le sont pas. Si un constat apparaît :
-   réécrire l'historique, ou publier un nouveau dépôt depuis un commit unique propre.
-3. [ ] Un passage complet de `modele-historique.yml` est vert.
-4. [ ] `copier update` avec `visibilite=public`, fusionné ; puis, 👤, la visibilité du dépôt et la
-       règle de protection.
+- [ ] **Un dépôt de code né après M-0006** n'a pas de travail préalable : la porte a refusé tout
+      constat dès son premier commit, et relit son historique chaque semaine
+      (`modele-historique.yml`). Il ne lui faut que sa règle de protection (`ruleset-main.json`),
+      puis, 👤, le changement de visibilité.
+- [ ] **Un dépôt d'avant M-0006 ne passe pas en public** : son historique a pu recevoir des
+      constats que la porte ne faisait qu'avertir. Il se scinde : la scission (M-0006, § 7) fait de
+      lui le dépôt de données, et un nouveau dépôt de code naît d'un seul commit propre. Jusque-là,
+      sa nature est `donnees`.
