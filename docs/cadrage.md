@@ -95,6 +95,29 @@
 >   chemin écrit dans `compose.env`. La revue finale a montré qu'un lien repointé sur place
 >   passait alors, le cas même qui motivait le contrôle (LE-32). Le fichier `donnees` de la spec
 >   est rétabli, et `compose.env` reste le repli.
+>
+> **Amendé le 2026-10-29, à la clôture du lot 11, de la même façon.** Les lots 11 et 12 ne sont
+> pas au §11 : ils viennent de M-0006, « Le code et les données », héritée le 29/10 (PR #56).
+> M-0006 rejoint les ADR hérités du §5.3, pour toutes les cibles. Elle sépare chaque projet en un
+> dépôt de code, toujours publiable, et un dépôt de données privé. Le lot 11 en fait la première
+> étape (M-0006, § 1 à 4) ; le lot 12 fera la chaîne à deux dépôts (§ 5 à 7).
+>
+> - **§5.1** : la question `visibilite` disparaît au profit de `nature` (`code` ou `donnees`, `code`
+>   par défaut). À la mise à jour, un projet dont l'ancienne réponse était `prive` passe en
+>   `donnees`. `domaine` n'a plus de défaut : le tableau du §5.1 le dit `<domaine>`, il est
+>   désormais toujours une réponse. `cible` gagne `donnees`, qui rend le dépôt `<nom>-donnees` et
+>   impose la nature `donnees` ;
+> - **§5.6** : la porte suit la nature et non plus la visibilité. Dans un dépôt de code, tout
+>   constat refuse ; dans un dépôt de données, ce qui identifie avertit et un secret refuse. En CI,
+>   un dépôt public est de code, et un dépôt privé prend la nature de sa branche par défaut,
+>   jamais celle de la PR. Chaque lundi, elle relit l'historique d'un dépôt de code et écarte les
+>   constats de `.github/constats-acceptes.txt` (M-0002, amendé ; LE-33, LE-34) ;
+> - **le passage en public** : un dépôt de code né après M-0006 n'a besoin que de sa règle de
+>   protection, posée une fois la visibilité changée. Un dépôt d'avant ne passe pas en public : il
+>   se scinde (M-0006, § 7) ;
+> - **la liste privée** s'étend au domaine, au foyer, aux employeurs, aux lieux, aux courriels et
+>   aux téléphones. Le dépôt modèle y passe sa porte : deux valeurs de ce cadrage ont été
+>   remplacées par leur rôle, et trois constats anciens de l'historique sont acceptés.
 
 Ce cadrage est la partie publique de la spec de conception du modèle, issue d'une séance de questions avec Edouard : 12 questions, puis 5 parties de design validées une à une. La partie qui nomme le serveur est privée et n'est pas reproduite ici.
 
