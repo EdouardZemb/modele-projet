@@ -2,6 +2,7 @@
 
 La configuration personnelle de l'application : identité, employeur, lieu, salaire, choix de
 recherche, noms des personnes du foyer. Rien de cela ne va dans un dépôt de code (M-0006, § 2).
+Ce qui se règle au téléphone vit en base, pas ici : ce dossier n'en porte que la graine.
 
 Pour une application en cible `serveur` :
 
@@ -16,4 +17,3 @@ Pour une application en cible `serveur` :
   dossier présent sans sa commande, et une commande sans son dossier. Le dossier est présent quand
   il porte au moins un fichier autre que ce `README.md` : seul, ce fichier ne compte pas.
 - La CI de ce dépôt, `modele-donnees.yml`, le vérifie à chaque PR, contre les images du code.
-- Ce qui se règle au téléphone vit en base, pas ici : ce dossier n'en porte que la graine.

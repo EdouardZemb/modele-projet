@@ -197,6 +197,16 @@ def test_textes_du_depot_de_donnees(rendre):
         assert "{%" not in texte and "{{" not in texte, fichier
         # les textes semés disent ce qui est, sans renvoyer au lot qui l'a apporté
         assert "lot 12" not in texte, fichier
+    # ce qui ne vaut qu'avec un serveur vient sous son en-tête, le reste avant lui
+    for fichier, avant in (
+        ("config/README.md", "Ce qui se règle au téléphone vit en base"),
+        ("contenu/README.md", "Les mentions que la loi oblige"),
+    ):
+        texte = aplati(rendu / fichier)
+        general, serveur = texte.split("Pour une application en cible `serveur` :", 1)
+        assert avant in general, fichier
+        assert "`modele-donnees.yml`" in serveur, fichier
+        assert "`modele-donnees.yml`" not in general, fichier
     serveur = aplati(rendre(**REPONSES_DONNEES_SERVEUR) / "CLAUDE.md")
     assert "L'instance du serveur : `env/`, les secrets chiffrés dans `secrets/`" in serveur
     assert "`ESSAI_BRANCHE_DONNEES` dans `env/staging.env`, `main` à la création" in serveur
