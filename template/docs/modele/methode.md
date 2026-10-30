@@ -74,10 +74,10 @@ sessions à distance.
 
 | Où | Quoi |
 |---|---|
-| hook git `pre-commit` | confidentialité du contenu indexé, fichiers UTF-16 compris ; un autre binaire est signalé « non examiné ». La porte suit la nature du dépôt : elle refuse tout constat dans un dépôt de code ; dans un dépôt de données, elle avertit sur ce qui identifie et refuse toujours les secrets (voir plus bas), au hook comme en CI. Au commit d'un alignement ou d'une mise à jour (celui qui modifie `.copier-answers.yml`), refus d'un fichier du modèle que le `.gitignore` du projet masque |
+| hook git `pre-commit` | confidentialité du contenu indexé, fichiers UTF-16 compris ; un autre binaire est signalé « non examiné ». La porte suit la nature du dépôt : elle refuse tout constat dans un dépôt de code ; dans un dépôt de données, elle avertit sur ce qui identifie et refuse toujours les secrets (voir plus bas), au hook comme en CI. Dans un dépôt de code, elle refuse aussi les fichiers de l'instance, lus sur leur chemin, et toute clé publique `age` (voir plus bas). Au commit d'un alignement ou d'une mise à jour (celui qui modifie `.copier-answers.yml`), refus d'un fichier du modèle que le `.gitignore` du projet masque |
 | hook git `commit-msg` | format Conventional Commits, confidentialité du message |
 | hook git `pre-push` | refus d'envoyer sur la branche principale |
-| hook Claude `PreToolUse` (outils `Bash`, `PowerShell`, `Monitor`, et tout outil MCP qui porte une commande) | bloque `git push` vers la branche principale, tout force-push vers elle, `--no-verify`, toute modification de `core.hooksPath` sauf la réparation `git config core.hooksPath .githooks` (variables `GIT_CONFIG_*` comprises), `gh pr merge` tant que les contrôles ne sont pas tous verts (et toute fusion en mode `edouard`), `gh pr merge --admin`, l'envoi d'une étiquette (`git push --tags`, `--follow-tags`, un refspec `refs/tags/…` ou `v1.2.3`) et toute écriture de publication (`gh release` hors `view`, `list`, `download` ; l'API `…/releases`), les alias et extensions de `gh`, ce qui affiche le jeton de `gh` ou les identifiants de git (`gh auth token`, `gh auth status --show-token`, `gh auth git-credential`, `git credential fill`, `git credential-manager get`), et l'effacement, le déplacement ou le renommage de `.githooks` et de `scripts/modele` (`rm`, `mv`, `Remove-Item`, `git rm`…). Il lit aussi les substitutions `$(…)`, même entre guillemets, le texte d'une here-string (`bash <<< '…'`) passée à un interprète, et les enveloppes (`timeout`, `Start-Process`, `Invoke-Expression`…) |
+| hook Claude `PreToolUse` (outils `Bash`, `PowerShell`, `Monitor`, et tout outil MCP qui porte une commande) | bloque `git push` vers la branche principale, tout force-push vers elle, `--no-verify`, toute modification de `core.hooksPath` sauf la réparation `git config core.hooksPath .githooks` (variables `GIT_CONFIG_*` comprises), `gh pr merge` tant que les contrôles ne sont pas tous verts (et toute fusion en mode `edouard`), `gh pr merge --admin`, l'envoi d'une étiquette (`git push --tags`, `--follow-tags`, un refspec `refs/tags/…`, `v1.2.3` ou `donnees-…`) et toute écriture de publication (`gh release` hors `view`, `list`, `download` ; l'API `…/releases`), les alias et extensions de `gh`, ce qui affiche le jeton de `gh` ou les identifiants de git (`gh auth token`, `gh auth status --show-token`, `gh auth git-credential`, `git credential fill`, `git credential-manager get`), et l'effacement, le déplacement ou le renommage de `.githooks` et de `scripts/modele` (`rm`, `mv`, `Remove-Item`, `git rm`…). Il lit aussi les substitutions `$(…)`, même entre guillemets, le texte d'une here-string (`bash <<< '…'`) passée à un interprète, et les enveloppes (`timeout`, `Start-Process`, `Invoke-Expression`…) |
 | hook Claude `SessionStart` (au démarrage et à la reprise) | affiche ce qui est rouge sur GitHub : les exécutions de la branche principale, les PR ouvertes et les workflows désactivés. Il ne bloque jamais. Ce que n'importe qui écrit depuis un fork n'entre pas dans le contexte de Claude : les exécutions de PR (`pull_request…`) sont écartées, et une PR ou un workflow venus d'ailleurs que le dépôt s'affichent sans le texte qu'ils portent. Une PR d'un fork paraît ainsi sans titre ni nom de contrôle, un workflow absent de la copie, sans son nom |
 | CI de base | gitleaks examine les commits de chaque PR et de chaque envoi, et tout l'historique chaque semaine et à la demande (`modele-historique.yml`) ; la porte relit aussi l'historique d'un dépôt de code chaque semaine (`modele-historique.yml`), à côté de gitleaks, et refuse tout constat absent de `.github/constats-acceptes.txt` ; confidentialité du diff, des messages de commit et du texte de la PR ; format des commits ; le garde de Claude **et les signaux** toujours branchés dans `.claude/settings.json` ; actions épinglées par SHA |
 | Dependabot | chaque lundi, les versions des actions épinglées (`.github/dependabot.yml`), après trois jours de recul |
@@ -110,8 +110,9 @@ toute façon. On fusionne par `gh pr merge <n>`, depuis le clone. Un plan qui to
 dépôts dit, pour chaque PR, qui la fusionne : une session ouverte dans son dépôt, ou Edouard.
 
 **Les étiquettes et les publications sont à Edouard**, dans les deux modes : une étiquette peut
-mettre un projet en production. La session les prépare (`git tag` en local est permis), mais ne les
-envoie pas et n'écrit aucune publication.
+mettre un projet en production. Les étiquettes de données `donnees-AAAA.MM.JJ.n` sont à Edouard,
+comme les `vX.Y.Z` : elles mettent en production une configuration ou un contenu. La session les
+prépare (`git tag` en local est permis), mais ne les envoie pas et n'écrit aucune publication.
 
 **La PR qui apporte l'option `fusion` à un projet se fusionne à la main**, puisque la branche
 principale n'a pas encore la réponse : le garde la lit comme `edouard` tant qu'elle n'y est pas.
@@ -127,6 +128,14 @@ son emplacement et le nom du motif, jamais la valeur, et ne refuse pas. Un secre
 PEM, jeton GitHub, JWT, jeton de tunnel, adresse de ping) refuse partout, au `pre-commit` comme en
 CI ; gitleaks les cherche aussi, en CI. Les erreurs d'usage et l'absence de la liste privée exigée
 refusent toujours.
+
+**La porte d'un dépôt de code suit aussi les chemins.** Un dépôt de code ne porte rien de
+l'instance (M-0006, § 3). La porte y refuse, au hook comme en CI : tout fichier nommé `*.enc` ou
+`.sops.yaml`, et tout `*.pub` dans un dossier `cles/`, à toute profondeur ; tout fichier dont le
+premier segment du chemin est `instance/`, `config/` ou `contenu/` (un `src/config/` reste du
+code) ; et une clé publique `age`, où qu'elle soit écrite. Un gabarit `….jinja` n'est pas le fichier
+qu'il rend. Dans un dépôt de données, ces fichiers sont chez eux : ces règles n'y donnent aucun
+constat.
 
 **En CI, la nature ne se lit pas dans la PR.** En CI, un dépôt public est toujours un dépôt de code,
 et un dépôt privé prend la nature écrite sur sa branche par défaut, jamais celle de la PR. La porte
@@ -153,6 +162,24 @@ toléré. Dans un dépôt de données, la porte dit que gitleaks seul relit l'hi
 - **Un dépôt d'avant M-0006 ne passe pas en public** : il se scinde (M-0006, § 7). Il devient le
   dépôt de données, et un nouveau dépôt de code naît d'un seul commit propre. Jusque-là, sa nature
   est `donnees`.
+
+**Les deux modes de la chaîne.** En cible `serveur`, le mode suit la nature, sans réponse de plus
+(M-0004, § 8).
+
+- **À deux dépôts**, pour un dépôt de code né après M-0006. L'instance vit à la racine du dépôt de
+  données `<nom>-donnees` : `env/`, `secrets/`, `.sops.yaml`, `cles/`, `config/` et `contenu/`. Le
+  staging suit les deux branches principales ; la prod suit la plus haute `vX.Y.Z` du code et la
+  plus haute étiquette de données. Les secrets du dépôt de données sont contrôlés par
+  `modele-donnees.yml`, contre le `.cles` du dépôt de code, et ses destinataires contre `cles/*.pub`.
+  `secrets.ps1 refaire` y prend le `.cles` du clone voisin du dépôt de code : le dépôt de code se
+  clone à côté. Le dépôt de code garde gitleaks et le contrôle de ses `.cles`.
+- **À un dépôt**, pour un dépôt de nature `donnees`, d'avant M-0006, jusqu'à sa scission. Tout est
+  dans le même dépôt : `deploiement/env/`, `deploiement/secrets/`, `deploiement/cles/`,
+  `.sops.yaml`, puis `instance/config/` et `instance/contenu/`. Le staging suit la branche
+  principale ; la prod prend le commit de la plus haute `vX.Y.Z`, sans étiquette de données.
+
+Dans les deux modes, un projet qui ne déclare ni `VERIFIER_CONFIG` ni `VERIFIER_CONTENU` ne monte
+rien et se déploie comme avant (M-0003, § 6).
 
 Le secret `MOTIFS_INTERDITS` (la liste privée) est posé **deux fois** par dépôt : comme secret
 Actions et comme secret Dependabot (`gh secret set MOTIFS_INTERDITS --app dependabot`). Les

@@ -578,3 +578,33 @@ def test_m0006_dit_le_choix_des_deux_modes():
         in texte
     )
     assert not RENVOI_AU_PLAN.search(texte)
+
+
+def test_methode_dit_les_deux_modes_et_les_etiquettes_de_donnees():
+    """La méthode : les étiquettes de données sont à Edouard (la table du garde), la porte d'un
+    dépôt de code suit les chemins, et les deux modes de la chaîne, avec le contrôle des secrets
+    d'un dépôt de données."""
+    texte = " ".join(lire(METHODE).split())
+
+    def ligne_de_la_table(debut, suivante):
+        return texte.split(debut, 1)[1].split(suivante, 1)[0]
+
+    garde = ligne_de_la_table("| hook Claude `PreToolUse`", "| hook Claude `SessionStart`")
+    assert "un refspec `refs/tags/…`, `v1.2.3` ou `donnees-…`" in garde
+    pre_commit = ligne_de_la_table("| hook git `pre-commit` |", "| hook git `commit-msg`")
+    instance = "les fichiers de l'instance, lus sur leur chemin, et toute clé publique `age`"
+    assert instance in pre_commit
+    for fragment in (
+        "Les étiquettes de données `donnees-AAAA.MM.JJ.n` sont à Edouard, comme les `vX.Y.Z`",
+        "**La porte d'un dépôt de code suit aussi les chemins.**",
+        "tout fichier dont le premier segment du chemin est `instance/`, `config/` ou `contenu/`",
+        "**Les deux modes de la chaîne.**",
+        "**À deux dépôts**",
+        "**À un dépôt**",
+        "la plus haute `vX.Y.Z` du code et la plus haute étiquette de données",
+        "la prod prend le commit de la plus haute `vX.Y.Z`",
+        "sont contrôlés par `modele-donnees.yml`, contre le `.cles` du dépôt de code",
+        "`secrets.ps1 refaire` y prend le `.cles` du clone voisin du dépôt de code",
+    ):
+        assert fragment in texte, fragment
+    assert not RENVOI_AU_PLAN.search(texte)
