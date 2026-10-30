@@ -8,7 +8,8 @@
 # docker et curl sont des doubles (tests/deploiement/doubles/) : l'« application en service » est
 # le fichier en-service.env, que `compose up` remplit à partir du compose.env reçu et que le double
 # de curl lit pour répondre à {{ chemin_sante }}. Les tests tournent surtout en prod, où les versions
-# (0.1.0, 0.2.0) se distinguent dans les messages.
+# (0.1.0, 0.2.0) se distinguent dans les messages. L'état retient un couple, l'image et le commit de
+# données (« - » sans données montées) : voir « le couple », plus bas.
 
 # Chaque test tourne dans son propre processus : les `export DOUBLE_*` d'un test ne fuient pas
 # dans les autres, comme le veut le pilotage des doubles.
@@ -26,13 +27,26 @@ setup() {
   EN_SERVICE="$BATS_TEST_TMPDIR/en-service.env"
   ANCIENNE="ghcr.io/{{ compte | lower }}/{{ nom }}@sha256:$(printf '1%.0s' {1..64})"
   NOUVELLE="ghcr.io/{{ compte | lower }}/{{ nom }}@sha256:$(printf '2%.0s' {1..64})"
+  SUIVANTE="ghcr.io/{{ compte | lower }}/{{ nom }}@sha256:$(printf '3%.0s' {1..64})"
   HC=https://hc.example/ping/sonde-prod
   preparer_secrets_de_test prod JETON=jeton-prod-7 "HC_SONDE=$HC"
+  projet_env_du_test
+}
+
+teardown() {
+  # les instantanés des données sont en lecture seule : bats doit pouvoir retirer le dossier du test
+  chmod -R u+rwX "$BATS_TEST_TMPDIR" 2>/dev/null || true
+}
+
+# projet_env_du_test : le deploiement/projet.env des tests, sans commande de l'instance. Celui du
+# projet n'est jamais lu : il déclare peut-être ses propres commandes{% if sauvegardes %}, et celles de l'image sont
+# ici celles du test, en plusieurs mots{% endif %}.
+projet_env_du_test() {
 {%- if sauvegardes %}
-  # Les commandes de l'image sont celles du test, en plusieurs mots, et non celles que le projet
-  # déclare pour la sienne dans deploiement/projet.env.
   printf '%s\n' 'SAUVEGARDER=outil sauvegarder --forme dossier' 'VERIFIER=outil verifier' \
     >"$CLONE/deploiement/projet.env"
+{%- else %}
+  printf '%s\n' '# Réglages du test' >"$CLONE/deploiement/projet.env"
 {%- endif %}
 }
 
@@ -47,13 +61,18 @@ deja_en_service() {
   poser_donnees prod
 }
 
-# dc_de <env> : le début de chaque appel de compose du déploiement, celui de `dc` (lib.sh) : le
-# projet de l'environnement, ses deux fichiers compose dans l'ordre, et son compose.env.
+# dc_de <env> [<montage>…] : le début de chaque appel de compose du déploiement, celui de `dc`
+# (lib.sh) : le projet de l'environnement, ses deux fichiers compose dans l'ordre, puis les fichiers
+# de ces montages (config, contenu : compose.<montage>.yml), et son compose.env.
 dc_de() {
-  local projet={{ nom }}
-  [ "$1" = prod ] || projet="{{ nom }}-$1"
-  printf 'docker compose -p %s -f %s -f %s --env-file %s' "$projet" "$CLONE/deploiement/compose.yml" \
-    "$CLONE/deploiement/compose.projet.yml" "${{ prefixe }}RACINE_ETAT/$1/compose.env"
+  local nom_env="$1" projet={{ nom }} montages="" montage
+  shift
+  [ "$nom_env" = prod ] || projet="{{ nom }}-$nom_env"
+  for montage in "$@"; do
+    montages="$montages -f $CLONE/deploiement/compose.$montage.yml"
+  done
+  printf 'docker compose -p %s -f %s -f %s%s --env-file %s' "$projet" "$CLONE/deploiement/compose.yml" \
+    "$CLONE/deploiement/compose.projet.yml" "$montages" "${{ prefixe }}RACINE_ETAT/$nom_env/compose.env"
 }
 
 # signaux : les appels de curl vers la supervision.
@@ -77,7 +96,7 @@ nombre_de_lancements() {
   deployer prod "$NOUVELLE" 0.2.0
   [ "$status" -eq 0 ]
   # état : la nouvelle version déployée, l'ancienne gardée comme précédente, plus d'échec
-  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 -" ]
   [ "$(cat "$ETAT/precedent")" = "$ANCIENNE 0.1.0" ]
   [ ! -e "$ETAT/echec" ]
   [ "$(cat "$ETAT/compose.env")" = "$(contenu_compose_env prod "$NOUVELLE" 0.2.0)" ]
@@ -106,7 +125,7 @@ nombre_de_lancements() {
   deployer staging "$NOUVELLE" main
   [ "$status" -eq 0 ]
   local etat="${{ prefixe }}RACINE_ETAT/staging"
-  [ "$(cat "$etat/deploye")" = "$NOUVELLE main" ]
+  [ "$(cat "$etat/deploye")" = "$NOUVELLE main -" ]
   [ "$(cat "$etat/compose.env")" = "$(contenu_compose_env staging "$NOUVELLE" main)" ]
   appels_de docker | grep -F "docker compose -p {{ nom }}-staging -f $CLONE/deploiement/compose.yml -f $CLONE/deploiement/compose.projet.yml --env-file $etat/compose.env up"
   appels_de curl | grep -Fx 'curl -fsS -m 5 http://127.0.0.1:{{ bloc_ports + 1 }}{{ chemin_sante }}'
@@ -137,7 +156,7 @@ nombre_de_lancements() {
   # le `ps` de compose (l'application tourne-t-elle ?), pas le `docker ps --all` du ménage des images
   [ "$(appels_de docker | grep -c ' compose .* ps ')" -eq 0 ]
   [ "$(appels_de docker | grep -c ' exec ')" -eq 0 ]
-  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 -" ]
   [ ! -e "$ETAT/precedent" ]
   [ ! -e "$ETAT/compose.env.precedent" ]
   [ "$(signaux)" = "$(signal 'déployé 0.2.0') $HC" ]
@@ -150,7 +169,7 @@ nombre_de_lancements() {
   [ "$status" -eq 0 ]
   [ "$(appels_de docker | grep -c ' ps -q app$')" -eq 1 ]
   [ "$(appels_de docker | grep -c ' exec ')" -eq 0 ]
-  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 -" ]
 }
 
 # I3 : `sauvegardes` passe de non à oui sur un projet en service. La version en service a été
@@ -175,7 +194,7 @@ nombre_de_lancements() {
     [[ "$output" == *"la version en service ne monte pas /sauvegardes : pas d'instantané"* ]]
     [ "$(appels_de docker | grep -c ' exec ')" -eq 0 ]
     [ ! -e "$pre" ]
-    [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+    [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 -" ]
     [ "$(cat "$ETAT/compose.env")" = "$(contenu_compose_env prod "$NOUVELLE" 0.2.0)" ]
     [ "$(signaux)" = "$(signal 'déployé 0.2.0') $HC" ]
   done
@@ -212,7 +231,7 @@ nombre_de_lancements() {
   [ -f "${{ prefixe }}RACINE_SAUVEGARDES${destination#/sauvegardes}/donnees.txt" ]
   [ ! -e "${{ prefixe }}RACINE_SAUVEGARDES${destination#/sauvegardes}.partiel" ]
   [[ "$output" == *"instantané : $destination"* ]]
-  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 -" ]
 }
 
 # R22 : la commande SAUVEGARDER crée son dossier, pas ses parents. pre-deploiement/ n'existe pas
@@ -232,7 +251,7 @@ nombre_de_lancements() {
   [[ "$(basename "$instantane")" =~ ^[0-9]{8}T[0-9]{6}Z$ ]]
   [ -d "$instantane" ]
   [ -f "$instantane/donnees.txt" ]
-  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 -" ]
 }
 
 # R24 : l'instantané d'avant déploiement est une copie en clair des données. Comme sauvegarder.sh
@@ -273,7 +292,7 @@ nombre_de_lancements() {
   [ -f "$pre/$vieux.copie/sous/donnees.txt" ]
   [ -f "$pre/garder/sous/donnees.txt" ]
   [ "$(find "$pre" -mindepth 1 -maxdepth 1 | wc -l)" -eq 4 ]
-  [ "$(cat "${{ prefixe }}RACINE_ETAT/staging/deploye")" = "$NOUVELLE main" ]
+  [ "$(cat "${{ prefixe }}RACINE_ETAT/staging/deploye")" = "$NOUVELLE main -" ]
 }
 
 # Une purge en échec est journalisée, et le déploiement continue : elle ne change rien à la version.
@@ -289,7 +308,7 @@ nombre_de_lancements() {
   chmod 700 "$pre/$vieux/verrouille"
   [ "$status" -eq 0 ]
   [[ "$output" == *"purge de $pre en échec"* ]]
-  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 -" ]
   [ "$(signaux)" = "$(signal 'déployé 0.2.0') $HC" ]
 }
 
@@ -343,7 +362,7 @@ nombre_de_lancements() {
   [ -z "$(find "$pre" -mindepth 1 -maxdepth 1 ! -type l -regextype posix-extended \
     -regex '.*/[0-9]{8}T[0-9]{6}Z\.partiel')" ]
   [ "$(cat "$pre/$complet/sous/donnees.txt")" = "$complet" ]
-  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 -" ]
 }
 
 # Un .partiel qui ne peut pas être retiré est journalisé, et l'instantané se fait quand même : le
@@ -362,7 +381,7 @@ nombre_de_lancements() {
   [[ "$output" == *"instantanés en échec de $pre : retrait impossible"* ]]
   [ -f "$pre/$ancien/verrouille/donnees.txt" ]
   [ -n "$(find "$pre" -mindepth 1 -maxdepth 1 -type d -regextype posix-extended -regex '.*/[0-9]{8}T[0-9]{6}Z')" ]
-  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 -" ]
   [ "$(signaux)" = "$(signal 'déployé 0.2.0') $HC" ]
 }
 
@@ -474,7 +493,7 @@ exec '$DOUBLES/docker-double' \"\$@\""
   deja_en_service "$ANCIENNE" 0.1.0
   deployer prod "$NOUVELLE" 0.2.0
   [ "$status" -eq 0 ]
-  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 -" ]
   # ni `compose ps` ni `exec` ; le `docker ps --all` du ménage des images n'est pas la question posée
   [ "$(appels_de docker | grep -cE ' compose .* (ps|exec) ')" -eq 0 ]
   [ "$(cat "$ETAT/compose.env")" = "$(contenu_compose_env prod "$NOUVELLE" 0.2.0)" ]
@@ -483,18 +502,18 @@ exec '$DOUBLES/docker-double' \"\$@\""
   : >"$APPELS"
   deployer prod --retour
   [ "$status" -eq 0 ]
-  [ "$(cat "$ETAT/deploye")" = "$ANCIENNE 0.1.0" ]
+  [ "$(cat "$ETAT/deploye")" = "$ANCIENNE 0.1.0 -" ]
   # ni `compose ps` ni `exec` ; le `docker ps --all` du ménage des images n'est pas la question posée
   [ "$(appels_de docker | grep -cE ' compose .* (ps|exec) ')" -eq 0 ]
   [ ! -e "$HOME/backups" ]
 }
 
 # --donnees-neuves est celle de la garde du dossier de données, qui n'existe qu'avec les sauvegardes :
-# l'usage reste celui d'avant, et rien n'est touché.
+# l'usage ne la connaît pas, et rien n'est touché.
 @test "donnees_neuves_n_existe_pas_sans_sauvegardes" {
   deployer prod "$NOUVELLE" 0.2.0 --donnees-neuves
   [ "$status" -eq 64 ]
-  [[ "$output" == *"usage : bash deploiement/deployer.sh <prod|staging> <image@sha256:…> <version> | bash deploiement/deployer.sh <prod|staging> --retour"* ]]
+  [[ "$output" == *"usage : bash deploiement/deployer.sh <prod|staging> <image@sha256:…> <version> [--commit-donnees <sha>] | bash deploiement/deployer.sh <prod|staging> --retour"* ]]
   [ ! -s "$APPELS" ]
   [ ! -e "$ETAT/compose.env" ]
 }
@@ -508,7 +527,7 @@ exec '$DOUBLES/docker-double' \"\$@\""
   [ ! -e "$ETAT/donnees" ]
   deployer prod --retour
   [ "$status" -eq 0 ]
-  [ "$(cat "$ETAT/deploye")" = "$ANCIENNE 0.1.0" ]
+  [ "$(cat "$ETAT/deploye")" = "$ANCIENNE 0.1.0 -" ]
   [ ! -e "$ETAT/donnees" ]
 }
 {%- endif %}
@@ -523,7 +542,7 @@ exec '$DOUBLES/docker-double' \"\$@\""
 exec '$DOUBLES/docker-double' \"\$@\""
   deployer prod "$NOUVELLE" 0.2.0
   [ "$status" -eq 1 ]
-  [ "$(cat "$ETAT/echec")" = "$NOUVELLE" ]
+  [ "$(cat "$ETAT/echec")" = "$NOUVELLE -" ]
   [ "$(cat "$ETAT/compose.env")" = "$(contenu_compose_env prod "$ANCIENNE" 0.1.0)" ]
   [ "$(signaux)" = "$(signal 'échec 0.2.0, retour à 0.1.0') $HC/fail" ]
   [[ "$output" == *"révision illisible"* ]]
@@ -535,7 +554,7 @@ exec '$DOUBLES/docker-double' \"\$@\""
   deployer prod "$NOUVELLE" 0.2.0
   [ "$status" -eq 1 ]
   # la version est marquée en échec, l'ancienne est restaurée et de nouveau en service
-  [ "$(cat "$ETAT/echec")" = "$NOUVELLE" ]
+  [ "$(cat "$ETAT/echec")" = "$NOUVELLE -" ]
   [ "$(cat "$ETAT/compose.env")" = "$(contenu_compose_env prod "$ANCIENNE" 0.1.0)" ]
   [ "$(cat "$ETAT/deploye")" = "$ANCIENNE 0.1.0" ]
   [ ! -e "$ETAT/precedent" ]
@@ -551,7 +570,7 @@ exec '$DOUBLES/docker-double' \"\$@\""
   export DOUBLE_CURL_REVISION_FAUSSE="$NOUVELLE"
   deployer prod "$NOUVELLE" 0.2.0
   [ "$status" -eq 1 ]
-  [ "$(cat "$ETAT/echec")" = "$NOUVELLE" ]
+  [ "$(cat "$ETAT/echec")" = "$NOUVELLE -" ]
   [ "$(cat "$ETAT/compose.env")" = "$(contenu_compose_env prod "$ANCIENNE" 0.1.0)" ]
   [ "$(cat "$ETAT/deploye")" = "$ANCIENNE 0.1.0" ]
   [ "$(signaux)" = "$(signal 'échec 0.2.0, retour à 0.1.0') $HC/fail" ]
@@ -565,7 +584,7 @@ exec '$DOUBLES/docker-double' \"\$@\""
   export DOUBLE_CURL_SANTE_VIDE="$NOUVELLE"
   deployer prod "$NOUVELLE" 0.2.0
   [ "$status" -eq 1 ]
-  [ "$(cat "$ETAT/echec")" = "$NOUVELLE" ]
+  [ "$(cat "$ETAT/echec")" = "$NOUVELLE -" ]
   [ "$(cat "$ETAT/deploye")" = "$ANCIENNE 0.1.0" ]
   [ "$(signaux)" = "$(signal 'échec 0.2.0, retour à 0.1.0') $HC/fail" ]
 }
@@ -575,7 +594,7 @@ exec '$DOUBLES/docker-double' \"\$@\""
   export DOUBLE_DOCKER_UP_ECHEC="$NOUVELLE"
   deployer prod "$NOUVELLE" 0.2.0
   [ "$status" -eq 1 ]
-  [ "$(cat "$ETAT/echec")" = "$NOUVELLE" ]
+  [ "$(cat "$ETAT/echec")" = "$NOUVELLE -" ]
   [ "$(cat "$ETAT/compose.env")" = "$(contenu_compose_env prod "$ANCIENNE" 0.1.0)" ]
   grep -Fx "{{ prefixe }}IMAGE=$ANCIENNE" "$EN_SERVICE"
   # pas de contrôle de santé d'une version qui n'a pas démarré : seul l'ancien est contrôlé
@@ -588,7 +607,7 @@ exec '$DOUBLES/docker-double' \"\$@\""
   export DOUBLE_CURL_SANTE_KO="$NOUVELLE $ANCIENNE"
   deployer prod "$NOUVELLE" 0.2.0
   [ "$status" -eq 1 ]
-  [ "$(cat "$ETAT/echec")" = "$NOUVELLE" ]
+  [ "$(cat "$ETAT/echec")" = "$NOUVELLE -" ]
   [ "$(cat "$ETAT/compose.env")" = "$(contenu_compose_env prod "$ANCIENNE" 0.1.0)" ]
   [ "$(cat "$ETAT/deploye")" = "$ANCIENNE 0.1.0" ]
   [ "$(signaux)" = "$(signal 'échec 0.2.0, retour à 0.1.0 en échec') $HC/fail" ]
@@ -611,7 +630,7 @@ exec '$DOUBLES/docker-double' \"\$@\""
   [ "$status" -eq 137 ]
   # l'état figé par la coupure : echec écrit, compose.env déjà restauré, mais la nouvelle version
   # toujours en service, et aucun signal
-  [ "$(cat "$ETAT/echec")" = "$NOUVELLE" ]
+  [ "$(cat "$ETAT/echec")" = "$NOUVELLE -" ]
   [ "$(cat "$ETAT/deploye")" = "$ANCIENNE 0.1.0" ]
   [ "$(cat "$ETAT/compose.env")" = "$(contenu_compose_env prod "$ANCIENNE" 0.1.0)" ]
   grep -Fx "{{ prefixe }}IMAGE=$NOUVELLE" "$EN_SERVICE"
@@ -638,7 +657,7 @@ exec '$DOUBLES/docker-double' \"\$@\""
   export DOUBLE_CURL_SANTE_KO="$NOUVELLE"
   deployer prod "$NOUVELLE" 0.2.0
   [ "$status" -eq 1 ]
-  [ "$(cat "$ETAT/echec")" = "$NOUVELLE" ]
+  [ "$(cat "$ETAT/echec")" = "$NOUVELLE -" ]
   [ ! -e "$ETAT/deploye" ]
   [ ! -e "$ETAT/compose.env.precedent" ]
   [ "$(nombre_de_lancements)" -eq 1 ]
@@ -681,7 +700,7 @@ deux_versions() {
   poser_donnees prod
   deployer prod "$NOUVELLE" 0.2.0
   [ "$status" -eq 0 ]
-  [ "$(cat "$ETAT/precedent")" = "$ANCIENNE 0.1.0" ]
+  [ "$(cat "$ETAT/precedent")" = "$ANCIENNE 0.1.0 -" ]
   : >"$APPELS"
 }
 
@@ -694,8 +713,10 @@ passage_de_la_sonde() {
   run bash "$CLONE/deploiement/sonder.sh" prod
 }
 
-# etat_fige : une copie de l'état, pour vérifier qu'un refus n'a rien touché.
+# etat_fige : une copie de l'état, pour vérifier qu'un refus n'a rien touché. Une copie d'avant
+# peut porter des instantanés en lecture seule : ses droits sont rendus avant de la retirer.
 etat_fige() {
+  chmod -R u+rwX "$BATS_TEST_TMPDIR/etat-avant" 2>/dev/null || true
   rm -rf "$BATS_TEST_TMPDIR/etat-avant"
   cp -a "$ETAT" "$BATS_TEST_TMPDIR/etat-avant"
   : >"$APPELS"
@@ -716,10 +737,10 @@ EOF
   chmod +x "$DOUBLES/docker"
   deployer prod --retour
   [ "$status" -eq 0 ]
-  [ "$(cat "$ETAT/deploye")" = "$ANCIENNE 0.1.0" ]
-  [ "$(cat "$BATS_TEST_TMPDIR/echec-au-lancement")" = "$NOUVELLE" ]
+  [ "$(cat "$ETAT/deploye")" = "$ANCIENNE 0.1.0 -" ]
+  [ "$(cat "$BATS_TEST_TMPDIR/echec-au-lancement")" = "$NOUVELLE -" ]
   # gardée, pas effacée : c'est ce qui empêche la sonde de redéployer la version quittée
-  [ "$(cat "$ETAT/echec")" = "$NOUVELLE" ]
+  [ "$(cat "$ETAT/echec")" = "$NOUVELLE -" ]
   # plus de version précédente : un second --retour ne rebascule pas vers la version en échec
   [ ! -e "$ETAT/precedent" ]
   [ "$(cat "$ETAT/compose.env")" = "$(contenu_compose_env prod "$ANCIENNE" 0.1.0)" ]
@@ -747,7 +768,7 @@ EOF
     [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
     [ -z "$(signaux)" ]
   done
-  [ "$(cat "$ETAT/deploye")" = "$ANCIENNE 0.1.0" ]
+  [ "$(cat "$ETAT/deploye")" = "$ANCIENNE 0.1.0 -" ]
 }
 
 @test "apres_un_retour_manuel_la_version_suivante_se_deploie_normalement" {
@@ -758,8 +779,8 @@ EOF
   [ "$status" -eq 0 ]
   deployer prod "$suivante" 0.3.0
   [ "$status" -eq 0 ]
-  [ "$(cat "$ETAT/deploye")" = "$suivante 0.3.0" ]
-  [ "$(cat "$ETAT/precedent")" = "$ANCIENNE 0.1.0" ]
+  [ "$(cat "$ETAT/deploye")" = "$suivante 0.3.0 -" ]
+  [ "$(cat "$ETAT/precedent")" = "$ANCIENNE 0.1.0 -" ]
   [ ! -e "$ETAT/echec" ]
   [ "$(cat "$ETAT/compose.env.precedent")" = "$(contenu_compose_env prod "$ANCIENNE" 0.1.0)" ]
 }
@@ -828,9 +849,9 @@ EOF
   export DOUBLE_CURL_SANTE_KO="$ANCIENNE"
   deployer prod --retour
   [ "$status" -eq 1 ]
-  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
-  [ "$(cat "$ETAT/precedent")" = "$ANCIENNE 0.1.0" ]
-  [ "$(cat "$ETAT/echec")" = "$NOUVELLE" ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 -" ]
+  [ "$(cat "$ETAT/precedent")" = "$ANCIENNE 0.1.0 -" ]
+  [ "$(cat "$ETAT/echec")" = "$NOUVELLE -" ]
   [ "$(cat "$ETAT/compose.env")" = "$(contenu_compose_env prod "$NOUVELLE" 0.2.0)" ]
   grep -Fx "{{ prefixe }}IMAGE=$NOUVELLE" "$EN_SERVICE"
   # dix essais pour la précédente, puis un contrôle réussi de la version remise en service
@@ -848,8 +869,8 @@ EOF
   unset DOUBLE_CURL_SANTE_KO
   deployer prod --retour
   [ "$status" -eq 0 ]
-  [ "$(cat "$ETAT/deploye")" = "$ANCIENNE 0.1.0" ]
-  [ "$(cat "$ETAT/echec")" = "$NOUVELLE" ]
+  [ "$(cat "$ETAT/deploye")" = "$ANCIENNE 0.1.0 -" ]
+  [ "$(cat "$ETAT/echec")" = "$NOUVELLE -" ]
 }
 
 # Et si la version quittée ne revient pas non plus : le signal le dit, et la sonde alerte à chaque
@@ -860,8 +881,8 @@ EOF
   deployer prod --retour
   [ "$status" -eq 1 ]
   [ "$(signaux)" = "$(signal 'échec du retour à 0.1.0, 0.2.0 remise en service en échec') $HC/fail" ]
-  [ "$(cat "$ETAT/echec")" = "$NOUVELLE" ]
-  [ "$(cat "$ETAT/precedent")" = "$ANCIENNE 0.1.0" ]
+  [ "$(cat "$ETAT/echec")" = "$NOUVELLE -" ]
+  [ "$(cat "$ETAT/precedent")" = "$ANCIENNE 0.1.0 -" ]
 
   passage_de_la_sonde
   [ "$status" -eq 1 ]
@@ -882,8 +903,8 @@ fi
 exec '$DOUBLES/docker-double' \"\$@\""
   deployer prod --retour
   [ "$status" -eq 137 ]
-  [ "$(cat "$ETAT/echec")" = "$NOUVELLE" ]
-  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+  [ "$(cat "$ETAT/echec")" = "$NOUVELLE -" ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 -" ]
   [ -z "$(signaux)" ]
 
   mv -f "$DOUBLES/docker-double" "$DOUBLES/docker"
@@ -915,6 +936,7 @@ vider_donnees() {
 figer_etat() {
   local etat="${{ prefixe }}RACINE_ETAT/$1"
   : >"$etat/verrou"
+  chmod -R u+rwX "$BATS_TEST_TMPDIR/etat-avant" 2>/dev/null || true
   rm -rf "$BATS_TEST_TMPDIR/etat-avant"
   cp -a "$etat" "$BATS_TEST_TMPDIR/etat-avant"
   : >"$APPELS"
@@ -949,7 +971,7 @@ refus_sans_trace() {
 @test "un_premier_deploiement_sur_un_dossier_vide_passe" {
   deployer prod "$NOUVELLE" 0.2.0
   [ "$status" -eq 0 ]
-  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 -" ]
 }
 
 # C'est aussi le cas d'un état d'avant la garde : son compose.env porte déjà le chemin des données.
@@ -958,7 +980,7 @@ refus_sans_trace() {
   deployer prod "$NOUVELLE" 0.2.0
   [ "$status" -eq 0 ]
   [[ "$output" != *"dossier de données"* ]]
-  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 -" ]
 }
 
 # Plein ne suffit pas : une autre racine, elle aussi pleine, n'est pas le dossier de la version
@@ -1012,7 +1034,7 @@ refus_sans_trace() {
   deployer prod "$NOUVELLE" 0.2.0 --donnees-neuves
   [ "$status" -eq 0 ]
   [[ "$output" == *"données neuves voulues : $donnees (contrôles du dossier de données levés pour ce déploiement)"* ]]
-  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 -" ]
   [ "$(cat "$ETAT/compose.env")" = "$(contenu_compose_env prod "$NOUVELLE" 0.2.0)" ]
   [ "$(appels_de docker | grep -c ' exec -T app ')" -eq 1 ]
 }
@@ -1025,7 +1047,7 @@ refus_sans_trace() {
   deployer prod "$NOUVELLE" 0.2.0 --donnees-neuves
   [ "$status" -eq 0 ]
   [[ "$output" == *"données neuves voulues : $autre/prod/donnees (contrôles du dossier de données levés pour ce déploiement)"* ]]
-  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 -" ]
   # le succès enregistre le nouveau chemin : le déploiement suivant le prend pour référence
   grep -Fx "{{ prefixe }}DONNEES=$autre/prod/donnees" "$ETAT/compose.env"
   [ "$(cat "$ETAT/donnees")" = "$(realpath "$autre/prod/donnees")" ]
@@ -1052,7 +1074,7 @@ refus_sans_trace() {
   : >"${{ prefixe }}RACINE_DONNEES/prod/donnees/.cache"
   deployer prod "$NOUVELLE" 0.2.0
   [ "$status" -eq 0 ]
-  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 -" ]
 }
 
 # Un lien symbolique vers la même racine donne une autre chaîne que celle de compose.env, mais le
@@ -1076,7 +1098,7 @@ refus_sans_trace() {
   deployer prod "$NOUVELLE" 0.2.0
   [ "$status" -eq 0 ]
   [[ "$output" != *"dossier de données"* ]]
-  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 -" ]
 }
 
 # Sans $ETAT/donnees, le compose.env ne sert de référence que s'il existe et décrit la version
@@ -1106,7 +1128,7 @@ refus_sans_trace() {
     deployer prod "$NOUVELLE" 0.2.0
     [ "$status" -eq 0 ]
     [[ "$output" == *"ni l'état ni compose.env ne disent le dossier de la version déployée : le chemin des données n'est pas comparé, seul le vide est contrôlé"* ]]
-    [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+    [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 -" ]
   done
 }
 
@@ -1130,7 +1152,7 @@ exit 0
   poser_donnees prod
   passage_de_la_sonde
   [ "$status" -eq 0 ]
-  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 -" ]
 }
 
 @test "la_garde_vaut_aussi_en_staging" {
@@ -1173,7 +1195,7 @@ exit 0
   deployer prod "$NOUVELLE" 0.2.0 --donnees-neuves
   [ "$status" -eq 0 ]
   [[ "$output" == *"données neuves voulues : ${{ prefixe }}RACINE_DONNEES/prod/donnees (contrôles du dossier de données levés pour ce déploiement)"* ]]
-  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 -" ]
 }
 
 # --- la référence : le chemin canonique du dernier succès ------------------------------------
@@ -1211,7 +1233,7 @@ lier_donnees() {
   rm "$ETAT/donnees"
   deployer prod --retour
   [ "$status" -eq 0 ]
-  [ "$(cat "$ETAT/deploye")" = "$ANCIENNE 0.1.0" ]
+  [ "$(cat "$ETAT/deploye")" = "$ANCIENNE 0.1.0 -" ]
   [ "$(cat "$ETAT/donnees")" = "$canonique" ]
 }
 
@@ -1227,7 +1249,7 @@ lier_donnees() {
   deployer prod "$NOUVELLE" 0.2.0
   [ "$status" -eq 0 ]
   [[ "$output" != *"dossier de données"* ]]
-  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 -" ]
 }
 
 # Le même lien, vers un dossier vidé : le vide se voit à travers le lien.
@@ -1308,7 +1330,7 @@ lier_donnees() {
   deployer prod "$NOUVELLE" 0.2.0
   [ "$status" -eq 0 ]
   [[ "$output" != *"dossier de données"* ]]
-  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 -" ]
 }
 
 # Un --donnees-neuves en échec : la version d'avant revient, sur le nouveau dossier (la valeur
@@ -1326,7 +1348,7 @@ lier_donnees() {
   export DOUBLE_CURL_SANTE_KO="$NOUVELLE"
   deployer prod "$NOUVELLE" 0.2.0 --donnees-neuves
   [ "$status" -eq 1 ]
-  [ "$(cat "$ETAT/deploye")" = "$ANCIENNE 0.1.0" ]
+  [ "$(cat "$ETAT/deploye")" = "$ANCIENNE 0.1.0 -" ]
   [ "$(cat "$ETAT/donnees")" = "$ancien" ]
   grep -Fx "{{ prefixe }}IMAGE=$ANCIENNE" "$EN_SERVICE"
   grep -Fx "{{ prefixe }}DONNEES=$autre/prod/donnees" "$EN_SERVICE"
@@ -1336,6 +1358,594 @@ lier_donnees() {
   [[ "$output" == *"dossier de données changé : $autre/prod/donnees au lieu de $ancien,"* ]]
 }
 {%- endif %}
+
+# --- le couple : l'image et le commit de données (M-0004 et M-0006 § 5, amendés) --------------
+#
+# Un projet qui déclare VERIFIER_CONFIG ou VERIFIER_CONTENU déploie un couple : une image et un
+# commit du clone des données, que donne --commit-donnees. Avant tout changement : la règle des
+# paires, l'instantané du commit, et les commandes déclarées dans un conteneur jetable de l'image
+# visée. Après le `up` : les montages du conteneur, et le champ configuration de la santé. deploye
+# et precedent retiennent « <image> <version> <commit> », echec « <image> <commit> » ; le commit
+# vaut « - » sans données montées.
+
+JETABLES="--user 1000:1000 --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true --memory 384m"
+FORMAT_MONTAGES='{% raw %}{{json .Mounts}}{% endraw %}'
+
+# avec_donnees <commande…> : deploiement/projet.env déclare aussi ces commandes de l'instance
+# (VERIFIER_CONFIG=outil verifier_config…), et l'application suit le contrat de /config (M-0003,
+# amendé) : sa santé dit configuration, montee si /config est monté, exemple sinon.
+avec_donnees() {
+  local commande
+  for commande in "$@"; do
+    printf '%s=outil %s\n' "$commande" "${commande,,}" >>"$CLONE/deploiement/projet.env"
+  done
+  export DOUBLE_CURL_CONFIGURATION=auto
+}
+
+# instantane_de <env> <commit> : l'instantané des données de ce commit, sous l'état de l'environnement.
+instantane_de() {
+  printf '%s/%s/instantanes/%s\n' "${{ prefixe }}RACINE_ETAT" "$1" "$2"
+}
+
+# verifications : les vérifications de l'instance, les conteneurs jetables sans réseau, dans l'ordre.
+verifications() {
+  appels_de docker | grep -F ' run --rm --network none ' || true
+}
+
+# verification <config|contenu> <image> <instantané> [<instantané en service>] : l'appel de docker
+# qui vérifie ce dossier de l'instantané dans un conteneur jetable de l'image (lib.sh), avec, pour le
+# contenu, celui de l'instantané en service sur /en-service.
+verification() {
+  local montages="-v $3/$1:/$1:ro" arguments="/$1"
+  if [ -n "${4:-}" ]; then
+    montages="$montages -v $4/contenu:/en-service:ro"
+    arguments="$arguments /en-service"
+  fi
+  printf 'docker run --rm --network none %s %s %s outil verifier_%s %s\n' "$JETABLES" "$montages" \
+    "$2" "$1" "$arguments"
+}
+
+# montage_de <point> : ce que le conteneur de l'application en service monte sur ce point, que le
+# double de docker note dans en-service.env : « false <source> » en lecture seule, vide sans montage.
+montage_de() {
+  sed -n "s|^MONTAGE=$1 ||p" "$EN_SERVICE"
+}
+
+# rien_n_a_change <signal> : après etat_fige, ce que garantit une vérification du couple qui n'a pas
+# abouti : l'état n'a pas changé (instantanés des données mis à part), rien n'a été lancé, arrêté ni
+# copié, l'application en service est la même, et le signal /fail le dit.
+rien_n_a_change() {
+  diff -r -x instantanes "$BATS_TEST_TMPDIR/etat-avant" "$ETAT"
+  [ "$(nombre_de_lancements)" -eq 0 ]
+  [ "$(appels_de docker | grep -cE ' (up|stop|down|exec) ')" -eq 0 ]
+  grep -Fx "{{ prefixe }}IMAGE=$NOUVELLE" "$EN_SERVICE"
+  [ "$(signaux)" = "$(signal "$1") $HC/fail" ]
+}
+
+@test "deployer : un couple se vérifie avant tout changement" {
+  local premier service vise code
+{%- if sauvegardes %}
+  horloge_qui_avance
+{%- endif %}
+  avec_donnees VERIFIER_CONFIG VERIFIER_CONTENU
+  commit_de_donnees "$SOUS_CONFIG/profil.yml" "$SOUS_CONTENU/page.md"
+  premier="$COMMIT"
+  service="$(instantane_de prod "$premier")"
+  deployer prod "$ANCIENNE" 0.1.0 --commit-donnees "$premier"
+  [ "$status" -eq 0 ]
+  # sans couple en service, VERIFIER_CONTENU ne reçoit pas /en-service
+  [ "$(verifications)" = "$(verification config "$ANCIENNE" "$service")
+$(verification contenu "$ANCIENNE" "$service")" ]
+  poser_donnees prod
+  commit_de_donnees "$SOUS_CONFIG/profil.yml" "$SOUS_CONTENU/page.md" "$SOUS_CONTENU/autre.md"
+  vise="$(instantane_de prod "$COMMIT")"
+  : >"$APPELS"
+  deployer prod "$NOUVELLE" 0.2.0 --commit-donnees "$COMMIT"
+  [ "$status" -eq 0 ]
+  # l'image visée, sur l'instantané visé ; le contenu, avec celui du couple en service
+  [ "$(verifications)" = "$(verification config "$NOUVELLE" "$vise")
+$(verification contenu "$NOUVELLE" "$vise" "$service")" ]
+{%- if sauvegardes %}
+  # avant tout changement : l'instantané de /donnees, puis le lancement
+  [ "$(ligne_de ' --network none ')" -lt "$(ligne_de ' exec -T app ')" ]
+{%- else %}
+  # avant tout changement : le lancement
+{%- endif %}
+  [ "$(ligne_de ' --network none ')" -lt "$(ligne_de ' up -d ')" ]
+  # compose.env monte l'instantané que nomme le commit, et dc ajoute les deux fichiers de montage
+  [ "$(cat "$vise/contenu/autre.md")" = "fichier d'exemple $SOUS_CONTENU/autre.md" ]
+  grep -Fx "{{ prefixe }}CONFIG=$vise/config" "$ETAT/compose.env"
+  grep -Fx "{{ prefixe }}CONTENU=$vise/contenu" "$ETAT/compose.env"
+  appels_de docker | grep -Fx "$(dc_de prod config contenu) up -d --wait --wait-timeout 120 --remove-orphans"
+  # le couple retenu, l'ancien dans precedent
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 $COMMIT" ]
+  [ "$(cat "$ETAT/precedent")" = "$ANCIENNE 0.1.0 $premier" ]
+  [ ! -e "$ETAT/echec" ]
+  [ "$(signaux)" = "$(signal "déployé 0.2.0, données ${COMMIT:0:12}") $HC" ]
+
+  # Un commit hors de la règle des paires (VERIFIER_CONTENU sans contenu) : rien n'est lancé, rien
+  # n'a changé, et rien n'est marqué en échec : la sonde réessaiera.
+  commit_de_donnees "$SOUS_CONFIG/profil.yml"
+  etat_fige
+  deployer prod "$SUIVANTE" 0.3.0 --commit-donnees "$COMMIT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"VERIFIER_CONTENU sans $SOUS_CONTENU (commit de données $COMMIT)"* ]]
+  [ -z "$(verifications)" ]
+  rien_n_a_change "données hors de la règle des paires avant 0.3.0, rien n'a changé (voir le journal)"
+  # Une vérification qui n'a pas eu lieu (l'image ne connaît pas la commande, ou une autre erreur) :
+  # de même.
+  commit_de_donnees "$SOUS_CONFIG/profil.yml" "$SOUS_CONTENU/page.md"
+  for code in 64 1; do
+    export DOUBLE_DOCKER_VERIFIER_INSTANCE_CODE="$code"
+    etat_fige
+    deployer prod "$SUIVANTE" 0.3.0 --commit-donnees "$COMMIT"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"vérification impossible (VERIFIER_CONFIG : code $code)"* ]]
+    rien_n_a_change "vérification des données impossible avant 0.3.0, rien n'a changé (voir le journal)"
+  done
+}
+
+@test "deployer : un refus de VERIFIER_CONFIG marque le couple en échec" {
+  local premier
+{%- if sauvegardes %}
+  horloge_qui_avance
+{%- endif %}
+  avec_donnees VERIFIER_CONFIG
+  commit_de_donnees "$SOUS_CONFIG/profil.yml"
+  premier="$COMMIT"
+  deployer prod "$ANCIENNE" 0.1.0 --commit-donnees "$premier"
+  [ "$status" -eq 0 ]
+  poser_donnees prod
+  commit_de_donnees "$SOUS_CONFIG/profil.yml" "$SOUS_CONFIG/regles.yml"
+  # L'image visée dit les données non conformes : le couple est marqué en échec, rien d'autre ne
+  # change, et le conteneur en service n'est pas touché.
+  export DOUBLE_DOCKER_VERIFIER_REFUSE="$NOUVELLE"
+  etat_fige
+  deployer prod "$NOUVELLE" 0.2.0 --commit-donnees "$COMMIT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"configuration non conforme (VERIFIER_CONFIG : code 2)"* ]]
+  [ "$(cat "$ETAT/echec")" = "$NOUVELLE $COMMIT" ]
+  diff -r -x instantanes -x echec "$BATS_TEST_TMPDIR/etat-avant" "$ETAT"
+  [ "$(nombre_de_lancements)" -eq 0 ]
+  [ "$(appels_de docker | grep -cE ' (up|stop|down|exec) ')" -eq 0 ]
+  grep -Fx "{{ prefixe }}IMAGE=$ANCIENNE" "$EN_SERVICE"
+  [ "$(signaux)" = "$(signal 'données non conformes avant 0.2.0, couple marqué en échec (voir le journal)') $HC/fail" ]
+  # Le même commit avec une autre image est un autre couple : il se tente, et passe.
+  : >"$APPELS"
+  deployer prod "$SUIVANTE" 0.3.0 --commit-donnees "$COMMIT"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$ETAT/deploye")" = "$SUIVANTE 0.3.0 $COMMIT" ]
+  [ "$(cat "$ETAT/precedent")" = "$ANCIENNE 0.1.0 $premier" ]
+  [ ! -e "$ETAT/echec" ]
+  # Un retour vers un couple que son image dit non conforme : refusé de même, ce couple marqué.
+  export DOUBLE_DOCKER_VERIFIER_REFUSE="$ANCIENNE"
+  etat_fige
+  deployer prod --retour
+  [ "$status" -eq 1 ]
+  [ "$(cat "$ETAT/echec")" = "$ANCIENNE $premier" ]
+  diff -r -x instantanes -x echec "$BATS_TEST_TMPDIR/etat-avant" "$ETAT"
+  [ "$(nombre_de_lancements)" -eq 0 ]
+  grep -Fx "{{ prefixe }}IMAGE=$SUIVANTE" "$EN_SERVICE"
+  [ "$(signaux)" = "$(signal 'données non conformes avant le retour à 0.1.0, couple marqué en échec (voir le journal)') $HC/fail" ]
+}
+
+@test "deployer : un commit de données seul redéploie la même image" {
+  local premier service vise
+{%- if sauvegardes %}
+  horloge_qui_avance
+{%- endif %}
+  avec_donnees VERIFIER_CONTENU
+  commit_de_donnees "$SOUS_CONTENU/page.md"
+  premier="$COMMIT"
+  service="$(instantane_de prod "$premier")"
+  deployer prod "$NOUVELLE" 0.2.0 --commit-donnees "$premier"
+  [ "$status" -eq 0 ]
+  poser_donnees prod
+  commit_de_donnees "$SOUS_CONTENU/page.md" "$SOUS_CONTENU/autre.md"
+  vise="$(instantane_de prod "$COMMIT")"
+  : >"$APPELS"
+  deployer prod "$NOUVELLE" 0.2.0 --commit-donnees "$COMMIT"
+  [ "$status" -eq 0 ]
+  # le parcours d'une image nouvelle : vérification, {% if sauvegardes %}instantané de /donnees, {% endif %}lancement, montages
+  [ "$(verifications)" = "$(verification contenu "$NOUVELLE" "$vise" "$service")" ]
+{%- if sauvegardes %}
+  [ "$(appels_de docker | grep -c ' exec -T app ')" -eq 1 ]
+{%- endif %}
+  [ "$(nombre_de_lancements)" -eq 1 ]
+  appels_de docker | grep -Fx "docker container inspect --format $FORMAT_MONTAGES c0ffee"
+  # le conteneur monte le nouvel instantané ; /config, que le projet ne déclare pas, ne l'est pas
+  [ "$(montage_de /contenu)" = "false $vise/contenu" ]
+  [ -z "$(montage_de /config)" ]
+  aucune_ligne '^{{ prefixe }}CONFIG=' "$ETAT/compose.env"
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 $COMMIT" ]
+  [ "$(cat "$ETAT/precedent")" = "$NOUVELLE 0.2.0 $premier" ]
+  grep -Fx "{{ prefixe }}CONTENU=$service/contenu" "$ETAT/compose.env.precedent"
+  [ "$(signaux)" = "$(signal "déployé 0.2.0, données ${COMMIT:0:12}") $HC" ]
+  # Le même retour arrière qu'une image nouvelle. Un déploiement interrompu a laissé un compose.env
+  # de la même image et d'un autre commit : il ne décrit pas le couple déployé, et ne devient pas la
+  # cible du retour, qui reste celle d'avant.
+  sed -i "s|^{{ prefixe }}CONTENU=.*|{{ prefixe }}CONTENU=$(instantane_de prod "$(printf 'e%.0s' {1..40})")/contenu|" \
+    "$ETAT/compose.env"
+  commit_de_donnees "$SOUS_CONTENU/page.md" "$SOUS_CONTENU/quatre.md"
+  # seul le `up` de l'aller garde ses montages ; celui du retour remonte le précédent
+  export DOUBLE_DOCKER_MONTAGES_GARDES_AU_UP=1
+  : >"$APPELS"
+  deployer prod "$NOUVELLE" 0.2.0 --commit-donnees "$COMMIT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"compose.env ne décrit pas le couple déployé (déploiement interrompu ?)"* ]]
+  [ "$(cat "$ETAT/echec")" = "$NOUVELLE $COMMIT" ]
+  grep -Fx "{{ prefixe }}CONTENU=$service/contenu" "$ETAT/compose.env"
+  [ "$(signaux)" = "$(signal 'échec 0.2.0, retour à 0.2.0') $HC/fail" ]
+}
+
+@test "deployer : le montage visé se vérifie après le up" {
+  local premier service vise cas raison retour
+{%- if sauvegardes %}
+  horloge_qui_avance
+{%- endif %}
+  avec_donnees VERIFIER_CONFIG VERIFIER_CONTENU
+  commit_de_donnees "$SOUS_CONFIG/profil.yml" "$SOUS_CONTENU/page.md"
+  premier="$COMMIT"
+  service="$(instantane_de prod "$premier")"
+  deployer prod "$NOUVELLE" 0.2.0 --commit-donnees "$premier"
+  [ "$status" -eq 0 ]
+  # après le `up`, les montages du conteneur de l'application : chaque instantané visé, en lecture
+  # seule, sur son point de montage ; et, en prod, une santé qui dit montee
+  [ "$(ligne_de ' up -d ')" -lt "$(ligne_de " container inspect --format $FORMAT_MONTAGES c0ffee")" ]
+  [ "$(montage_de /config)" = "false $service/config" ]
+  [ "$(montage_de /contenu)" = "false $service/contenu" ]
+  poser_donnees prod
+  commit_de_donnees "$SOUS_CONFIG/profil.yml" "$SOUS_CONTENU/autre.md"
+  vise="$(instantane_de prod "$COMMIT")"
+  # Un conteneur que compose n'a pas recréé (il monte encore l'ancien instantané), un montage en
+  # écriture, des montages illisibles, ou une santé qui ne dit pas montee : échec, et retour au
+  # couple précédent, comme pour toute santé non conforme. Le pilote vaut aussi pour le `up` du
+  # retour, qui se contrôle de même : sauf le conteneur gardé, qui monte encore le couple précédent,
+  # le retour est en échec.
+  for cas in DOUBLE_DOCKER_MONTAGES_GARDES=1 DOUBLE_DOCKER_MONTAGES_EN_ECRITURE=1 \
+    DOUBLE_DOCKER_CONTAINER_INSPECT_ECHEC=1 DOUBLE_CURL_CONFIGURATION=exemple; do
+    rm -f "$ETAT/echec"
+    : >"$APPELS"
+    export "${cas?}"
+    deployer prod "$NOUVELLE" 0.2.0 --commit-donnees "$COMMIT"
+    [ "$status" -eq 1 ]
+    raison="montage des données non conforme"
+    [ "$cas" != DOUBLE_CURL_CONFIGURATION=exemple ] || raison="santé non conforme"
+    retour="retour à 0.2.0 en échec"
+    [ "$cas" != DOUBLE_DOCKER_MONTAGES_GARDES=1 ] || retour="retour à 0.2.0"
+    [[ "$output" == *"échec du déploiement de 0.2.0 ($raison)"* ]]
+    [ "$cas" != DOUBLE_DOCKER_MONTAGES_GARDES=1 ] \
+      || [[ "$output" == *"/config : attendu $vise/config en lecture seule, monté : false $service/config"* ]]
+    [ "$(cat "$ETAT/echec")" = "$NOUVELLE $COMMIT" ]
+    [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 $premier" ]
+    grep -Fx "{{ prefixe }}CONFIG=$service/config" "$ETAT/compose.env"
+    [[ "$(montage_de /config)" == *" $service/config" ]]
+    [ "$(signaux)" = "$(signal "échec 0.2.0, $retour") $HC/fail" ]
+    unset "${cas%%=*}"
+    export DOUBLE_CURL_CONFIGURATION=auto
+  done
+}
+
+@test "deployer : --retour revient au couple entier" {
+  local premier deuxieme troisieme vise service
+{%- if sauvegardes %}
+  horloge_qui_avance
+{%- endif %}
+  # Un couple sans données, d'avant la déclaration des commandes, puis un couple avec données.
+  deployer prod "$ANCIENNE" 0.1.0
+  [ "$status" -eq 0 ]
+  poser_donnees prod
+  avec_donnees VERIFIER_CONFIG VERIFIER_CONTENU
+  commit_de_donnees "$SOUS_CONFIG/profil.yml" "$SOUS_CONTENU/page.md"
+  premier="$COMMIT"
+  deployer prod "$NOUVELLE" 0.2.0 --commit-donnees "$premier"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$ETAT/precedent")" = "$ANCIENNE 0.1.0 -" ]
+  # Le retour au couple sans données : rien n'est vérifié ni monté, le champ configuration n'est
+  # pas lu, et la version quittée est marquée en échec avec son commit.
+  : >"$APPELS"
+  deployer prod --retour
+  [ "$status" -eq 0 ]
+  [ -z "$(verifications)" ]
+  aucune_ligne ' container inspect ' "$APPELS"
+  [ "$(cat "$ETAT/compose.env")" = "$(contenu_compose_env prod "$ANCIENNE" 0.1.0)" ]
+  [ -z "$(montage_de /config)" ]
+  [ -z "$(montage_de /contenu)" ]
+  [ "$(cat "$ETAT/deploye")" = "$ANCIENNE 0.1.0 -" ]
+  [ "$(cat "$ETAT/echec")" = "$NOUVELLE $premier" ]
+
+  # Deux couples de la même image, puis le retour au premier des deux : l'image, la version et le
+  # commit de precedent, après la même vérification qu'un déploiement.
+  commit_de_donnees "$SOUS_CONFIG/profil.yml" "$SOUS_CONTENU/page.md" "$SOUS_CONTENU/deux.md"
+  deuxieme="$COMMIT"
+  deployer prod "$NOUVELLE" 0.2.0 --commit-donnees "$deuxieme"
+  [ "$status" -eq 0 ]
+  commit_de_donnees "$SOUS_CONFIG/profil.yml" "$SOUS_CONTENU/page.md" "$SOUS_CONTENU/trois.md"
+  troisieme="$COMMIT"
+  deployer prod "$NOUVELLE" 0.2.0 --commit-donnees "$troisieme"
+  [ "$status" -eq 0 ]
+  vise="$(instantane_de prod "$deuxieme")"
+  service="$(instantane_de prod "$troisieme")"
+  : >"$APPELS"
+  deployer prod --retour
+  [ "$status" -eq 0 ]
+  [ "$(verifications)" = "$(verification config "$NOUVELLE" "$vise")
+$(verification contenu "$NOUVELLE" "$vise" "$service")" ]
+  grep -Fx "{{ prefixe }}CONFIG=$vise/config" "$ETAT/compose.env"
+  grep -Fx "{{ prefixe }}CONTENU=$vise/contenu" "$ETAT/compose.env"
+  [ "$(montage_de /config)" = "false $vise/config" ]
+  [ "$(montage_de /contenu)" = "false $vise/contenu" ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 $deuxieme" ]
+  [ "$(cat "$ETAT/echec")" = "$NOUVELLE $troisieme" ]
+  [ ! -e "$ETAT/precedent" ]
+  [ "$(signaux)" = "$(signal 'retour à 0.2.0 effectué (depuis 0.2.0)') $HC" ]
+}
+
+# Le retour d'un couple en échec (relecture de la tâche 5, constat 1) : le couple remis en service
+# se contrôle comme à l'aller, ses montages après son `up` (ceux de compose.env.precedent) et, aux
+# conditions de l'aller, le champ configuration de sa santé. Un conteneur que compose ne recrée pas
+# monterait encore l'instantané en échec, et le signal dirait le retour réussi.
+@test "deployer : le retour d'un couple en échec remonte l'instantané du précédent" {
+  local premier service vise
+{%- if sauvegardes %}
+  horloge_qui_avance
+{%- endif %}
+  avec_donnees VERIFIER_CONFIG VERIFIER_CONTENU
+  commit_de_donnees "$SOUS_CONFIG/profil.yml" "$SOUS_CONTENU/page.md"
+  premier="$COMMIT"
+  service="$(instantane_de prod "$premier")"
+  deployer prod "$NOUVELLE" 0.2.0 --commit-donnees "$premier"
+  [ "$status" -eq 0 ]
+  poser_donnees prod
+  commit_de_donnees "$SOUS_CONFIG/profil.yml" "$SOUS_CONTENU/autre.md"
+  vise="$(instantane_de prod "$COMMIT")"
+  # Les données seules en échec (la santé de leur `up` répond 503) : le retour remonte l'instantané
+  # du précédent, ses montages se contrôlent après son `up`, et sa santé dit montee.
+  export DOUBLE_CURL_SANTE_KO_AU_UP=1
+  : >"$APPELS"
+  deployer prod "$NOUVELLE" 0.2.0 --commit-donnees "$COMMIT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"échec du déploiement de 0.2.0 (santé non conforme)"* ]]
+  [ "$(appels_de docker | sed -nE 's/.* (up -d|container inspect) .*/\1/p')" = "up -d
+container inspect
+up -d
+container inspect" ]
+  [[ "$output" == *"montages conformes (/config : $service/config, /contenu : $service/contenu)"* ]]
+  [[ "$output" == *"santé conforme (essai "*", configuration montee"* ]]
+  [ "$(montage_de /config)" = "false $service/config" ]
+  [ "$(montage_de /contenu)" = "false $service/contenu" ]
+  [ "$(cat "$ETAT/echec")" = "$NOUVELLE $COMMIT" ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 $premier" ]
+  [ "$(signaux)" = "$(signal 'échec 0.2.0, retour à 0.2.0') $HC/fail" ]
+  # Un retour dont le `up` ne recrée pas le conteneur : il monte encore l'instantané en échec, et le
+  # retour est en échec, même si sa santé répond.
+  export DOUBLE_DOCKER_MONTAGES_GARDES_AU_UP=2
+  rm -f "$ETAT/echec"
+  : >"$APPELS"
+  deployer prod "$NOUVELLE" 0.2.0 --commit-donnees "$COMMIT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"/config : attendu $service/config en lecture seule, monté : false $vise/config"* ]]
+  [[ "$output" == *"retour à 0.2.0 en échec : intervention nécessaire"* ]]
+  [ "$(montage_de /config)" = "false $vise/config" ]
+  [ "$(signaux)" = "$(signal 'échec 0.2.0, retour à 0.2.0 en échec') $HC/fail" ]
+  # Un retour recréé, mais dont la santé ne dit pas montee : en échec aussi.
+  unset DOUBLE_DOCKER_MONTAGES_GARDES_AU_UP
+  export DOUBLE_CURL_CONFIGURATION=exemple
+  rm -f "$ETAT/echec"
+  : >"$APPELS"
+  deployer prod "$NOUVELLE" 0.2.0 --commit-donnees "$COMMIT"
+  [ "$status" -eq 1 ]
+  [ "$(montage_de /config)" = "false $service/config" ]
+  # l'aller, puis le retour, attendaient montee
+  [ "$(grep -c 'santé non conforme après 10 essais (attendu : statut ok, version 0.2.0, révision .*, configuration montee)' <<<"$output")" -eq 2 ]
+  [ "$(signaux)" = "$(signal 'échec 0.2.0, retour à 0.2.0 en échec') $HC/fail" ]
+}
+
+# Relecture de la tâche 5, constat 2 : docker rend la source d'un montage nettoyée. Un $ETAT qui
+# porte « // » (une racine de l'état avec un « / » final) se compare sous sa forme canonique, sans
+# résoudre les liens.
+@test "deployer : les montages se comparent sous leur forme canonique" {
+  local racine="${{ prefixe }}RACINE_ETAT" vise propre
+{%- if sauvegardes %}
+  horloge_qui_avance
+{%- endif %}
+  export {{ prefixe }}RACINE_ETAT="$racine/"
+  avec_donnees VERIFIER_CONFIG VERIFIER_CONTENU
+  commit_de_donnees "$SOUS_CONFIG/profil.yml" "$SOUS_CONTENU/page.md"
+  vise="$(instantane_de prod "$COMMIT")"
+  propre="$racine/prod/instantanes/$COMMIT"
+  [ "$vise" = "$racine//prod/instantanes/$COMMIT" ]
+  deployer prod "$NOUVELLE" 0.2.0 --commit-donnees "$COMMIT"
+  [ "$status" -eq 0 ]
+  grep -Fx "{{ prefixe }}CONFIG=$vise/config" "$ETAT/compose.env"
+  [ "$(montage_de /config)" = "false $propre/config" ]
+  [ "$(montage_de /contenu)" = "false $propre/contenu" ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 $COMMIT" ]
+  [ "$(signaux)" = "$(signal "déployé 0.2.0, données ${COMMIT:0:12}") $HC" ]
+}
+
+# Relecture de la tâche 5, constat 3 : l'instantané du couple en service, que VERIFIER_CONTENU
+# reçoit sur /en-service, se refait s'il manque. S'il ne se refait pas (son commit n'est plus dans
+# le clone des données), le refus reste : la vérification n'a pas lieu, et rien ne change.
+@test "deployer : l'instantané du couple en service se refait s'il manque" {
+  local premier service vise absent
+{%- if sauvegardes %}
+  horloge_qui_avance
+{%- endif %}
+  avec_donnees VERIFIER_CONTENU
+  commit_de_donnees "$SOUS_CONTENU/page.md"
+  premier="$COMMIT"
+  service="$(instantane_de prod "$premier")"
+  deployer prod "$ANCIENNE" 0.1.0 --commit-donnees "$premier"
+  [ "$status" -eq 0 ]
+  poser_donnees prod
+  chmod -R u+w "$service"
+  rm -rf "$service"
+  commit_de_donnees "$SOUS_CONTENU/page.md" "$SOUS_CONTENU/autre.md"
+  vise="$(instantane_de prod "$COMMIT")"
+  : >"$APPELS"
+  deployer prod "$NOUVELLE" 0.2.0 --commit-donnees "$COMMIT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"instantané des données prêt : $service"* ]]
+  [ "$(cat "$service/contenu/page.md")" = "fichier d'exemple $SOUS_CONTENU/page.md" ]
+  [ "$(verifications)" = "$(verification contenu "$NOUVELLE" "$vise" "$service")" ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 $COMMIT" ]
+  # Un couple en service dont le commit n'est plus dans le clone : son instantané ne se refait pas.
+  absent="$(printf 'e%.0s' {1..40})"
+  printf '%s 0.2.0 %s\n' "$NOUVELLE" "$absent" >"$ETAT/deploye"
+  commit_de_donnees "$SOUS_CONTENU/page.md" "$SOUS_CONTENU/trois.md"
+  etat_fige
+  deployer prod "$SUIVANTE" 0.3.0 --commit-donnees "$COMMIT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"instantané en service introuvable : $(instantane_de prod "$absent")"* ]]
+  [ -z "$(verifications)" ]
+  rien_n_a_change "vérification des données impossible avant 0.3.0, rien n'a changé (voir le journal)"
+}
+
+# Relecture de la tâche 5, constat 4 : --retour refuse (64), sans rien toucher, le commit de données
+# de precedent que projet.env (plus aucune commande déclarée) ou le clone des données (commit absent)
+# refusent.
+@test "deployer : --retour refuse un commit que projet.env ou le clone refusent" {
+  local absent
+{%- if sauvegardes %}
+  horloge_qui_avance
+{%- endif %}
+  avec_donnees VERIFIER_CONTENU
+  commit_de_donnees "$SOUS_CONTENU/page.md"
+  deployer prod "$ANCIENNE" 0.1.0 --commit-donnees "$COMMIT"
+  [ "$status" -eq 0 ]
+  poser_donnees prod
+  deployer prod "$NOUVELLE" 0.2.0 --commit-donnees "$COMMIT"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$ETAT/precedent")" = "$ANCIENNE 0.1.0 $COMMIT" ]
+  projet_env_du_test
+  etat_fige
+  deployer prod --retour
+  [ "$status" -eq 64 ]
+  [[ "$output" == *"retour arrière impossible : commit de données $COMMIT, mais deploiement/projet.env ne déclare ni VERIFIER_CONFIG ni VERIFIER_CONTENU"* ]]
+  [ ! -s "$APPELS" ]
+  diff -r "$BATS_TEST_TMPDIR/etat-avant" "$ETAT"
+  avec_donnees VERIFIER_CONTENU
+  absent="$(printf 'f%.0s' {1..40})"
+  printf '%s 0.1.0 %s\n' "$ANCIENNE" "$absent" >"$ETAT/precedent"
+  etat_fige
+  deployer prod --retour
+  [ "$status" -eq 64 ]
+  [[ "$output" == *"retour arrière impossible : commit de données $absent introuvable dans $CLONE_DONNEES. Rien n'a changé"* ]]
+  [ ! -s "$APPELS" ]
+  diff -r "$BATS_TEST_TMPDIR/etat-avant" "$ETAT"
+}
+
+# P4 du lot 12 : sans --commit-donnees, un projet qui déclare une commande de l'instance refuse (64),
+# et un projet qui n'en déclare aucune prend « - ».
+@test "deployer : sans --commit-donnees" {
+  local commande
+  deja_en_service "$ANCIENNE" 0.1.0
+  for commande in VERIFIER_CONFIG VERIFIER_CONTENU; do
+    projet_env_du_test
+    avec_donnees "$commande"
+    etat_fige
+    deployer prod "$NOUVELLE" 0.2.0
+    [ "$status" -eq 64 ]
+    [[ "$output" == *"commit de données absent : deploiement/projet.env déclare $commande ; relancer avec --commit-donnees <sha>. Rien n'a changé"* ]]
+    [ ! -s "$APPELS" ]
+    diff -r "$BATS_TEST_TMPDIR/etat-avant" "$ETAT"
+  done
+  projet_env_du_test
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 0 ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 -" ]
+  # Sans commande, un commit n'a pas de sens : le couple d'un projet sans données a le commit « - ».
+  commit_de_donnees "$SOUS_CONFIG/profil.yml"
+  etat_fige
+  deployer prod "$SUIVANTE" 0.3.0 --commit-donnees "$COMMIT"
+  [ "$status" -eq 64 ]
+  [[ "$output" == *"commit de données $COMMIT, mais deploiement/projet.env ne déclare ni VERIFIER_CONFIG ni VERIFIER_CONTENU"* ]]
+  [ ! -s "$APPELS" ]
+  diff -r "$BATS_TEST_TMPDIR/etat-avant" "$ETAT"
+  # Un commit que le clone des données n'a pas : refus aussi.
+  avec_donnees VERIFIER_CONFIG
+  deployer prod "$SUIVANTE" 0.3.0 --commit-donnees "$(printf 'f%.0s' {1..40})"
+  [ "$status" -eq 64 ]
+  [[ "$output" == *"commit de données $(printf 'f%.0s' {1..40}) introuvable dans $CLONE_DONNEES. Rien n'a changé"* ]]
+  [ ! -s "$APPELS" ]
+  diff -r "$BATS_TEST_TMPDIR/etat-avant" "$ETAT"
+}
+
+# Review Focus 5 du lot 12 : le staging d'un projet qui déclare VERIFIER_CONFIG, dont les données
+# portent une configuration, ne monte jamais /config : ni dans compose.env, ni dans la vérification,
+# ni dans le contrôle des montages après le `up` ; sa santé doit dire exemple.
+@test "deployer : le staging ne monte jamais /config" {
+  local etat="${{ prefixe }}RACINE_ETAT/staging" vise cas raison
+{%- if sauvegardes %}
+  horloge_qui_avance
+{%- endif %}
+  preparer_secrets_de_test staging JETON=jeton-staging-7 HC_SONDE=https://hc.example/ping/sonde-staging
+  avec_donnees VERIFIER_CONFIG VERIFIER_CONTENU
+  commit_de_donnees "$SOUS_CONFIG/profil.yml" "$SOUS_CONTENU/page.md"
+  vise="$(instantane_de staging "$COMMIT")"
+  deployer staging "$NOUVELLE" main --commit-donnees "$COMMIT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"staging : VERIFIER_CONFIG n'est pas lancée, /config n'y est jamais monté"* ]]
+  [ "$(verifications)" = "$(verification contenu "$NOUVELLE" "$vise")" ]
+  [ ! -e "$vise/config" ]
+  aucune_ligne '^{{ prefixe }}CONFIG=' "$etat/compose.env"
+  grep -Fx "{{ prefixe }}CONTENU=$vise/contenu" "$etat/compose.env"
+  appels_de docker | grep -Fx "$(dc_de staging contenu) up -d --wait --wait-timeout 120 --remove-orphans"
+  [ -z "$(montage_de /config)" ]
+  [ "$(montage_de /contenu)" = "false $vise/contenu" ]
+  # la santé a dit exemple
+  [ "$(cat "$etat/deploye")" = "$NOUVELLE main $COMMIT" ]
+  # Une santé qui dit montee, ou un /config monté d'ailleurs (par compose.projet.yml) : échec.
+  poser_donnees staging
+  for cas in DOUBLE_CURL_CONFIGURATION=montee "DOUBLE_DOCKER_MONTAGES_EN_PLUS=/config:$CLONE_DONNEES/$SOUS_CONFIG"; do
+    : >"$APPELS"
+    export "${cas?}"
+    deployer staging "$SUIVANTE" main --commit-donnees "$COMMIT"
+    [ "$status" -eq 1 ]
+    raison="santé non conforme"
+    [[ "$cas" != DOUBLE_DOCKER_MONTAGES_EN_PLUS=* ]] || raison="montage des données non conforme"
+    [[ "$output" == *"échec du déploiement de main ($raison)"* ]]
+    [ "$(cat "$etat/echec")" = "$SUIVANTE $COMMIT" ]
+    [ "$(cat "$etat/deploye")" = "$NOUVELLE main $COMMIT" ]
+    unset "${cas%%=*}"
+    export DOUBLE_CURL_CONFIGURATION=auto
+  done
+  [[ "$output" == *"/config monté alors que le couple ne le monte pas : false $CLONE_DONNEES/$SOUS_CONFIG"* ]]
+}
+
+# Un projet qui ne déclare aucune commande de l'instance ne change pas de comportement : rien n'est
+# lu, vérifié, extrait ni monté, le champ configuration n'est pas lu, et son couple a le commit « - ».
+@test "deployer : un projet sans données écrit un couple en -" {
+{%- if sauvegardes %}
+  horloge_qui_avance
+{%- endif %}
+  deja_en_service "$ANCIENNE" 0.1.0
+  # des données dans le clone, une santé qui dit son champ configuration : rien n'y change
+  commit_de_donnees "$SOUS_CONFIG/profil.yml" "$SOUS_CONTENU/page.md"
+  export DOUBLE_CURL_CONFIGURATION=exemple
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 0 ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 -" ]
+  # precedent garde tel quel l'état d'avant la v0.7.0, qui se lit comme un couple en « - »
+  [ "$(cat "$ETAT/precedent")" = "$ANCIENNE 0.1.0" ]
+  [ "$(cat "$ETAT/compose.env")" = "$(contenu_compose_env prod "$NOUVELLE" 0.2.0)" ]
+  [ -z "$(verifications)" ]
+  aucune_ligne ' container inspect ' "$APPELS"
+  [ ! -e "$ETAT/instantanes" ]
+  [ "$(signaux)" = "$(signal 'déployé 0.2.0') $HC" ]
+  # un échec marque « <image> - »
+  export DOUBLE_CURL_SANTE_KO="$SUIVANTE"
+  deployer prod "$SUIVANTE" 0.3.0
+  [ "$status" -eq 1 ]
+  [ "$(cat "$ETAT/echec")" = "$SUIVANTE -" ]
+  # le retour arrière aussi, vers l'état d'avant la v0.7.0
+  unset DOUBLE_CURL_SANTE_KO
+  deployer prod --retour
+  [ "$status" -eq 0 ]
+  [ "$(cat "$ETAT/deploye")" = "$ANCIENNE 0.1.0 -" ]
+  [ "$(cat "$ETAT/echec")" = "$NOUVELLE -" ]
+}
 
 # --- compose : deux fichiers, orphelins ------------------------------------------------------
 
@@ -1386,7 +1996,7 @@ lier_donnees() {
   deja_en_service "$ANCIENNE" 0.1.0
   deployer prod "$NOUVELLE" 0.2.0
   [ "$status" -eq 0 ]
-  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 -" ]
   [ ! -e "$ETAT/echec" ]
   [ "$(nombre_de_lancements)" -eq 1 ]
   aucune_ligne ' --profile' "$APPELS"
@@ -1395,28 +2005,35 @@ lier_donnees() {
 }
 
 # Compose donne la priorité au shell sur --env-file (le double de docker aussi) : une image
-# exportée ferait relancer la nouvelle version par le retour arrière. deployer.sh refuse de partir.
+# exportée ferait relancer la nouvelle version par le retour arrière, et un montage exporté
+# monterait autre chose que l'instantané vérifié (la copie de travail du clone des données…).
+# deployer.sh refuse de partir, que la variable vienne du shell ou d'une ligne de l'env de
+# l'environnement (refuser_image_heritee, après charger_env et charger_secrets).
 @test "refuse_une_image_ou_une_version_posees_dans_l_environnement" {
   deja_en_service "$ANCIENNE" 0.1.0
   cp "$ETAT/compose.env" "$BATS_TEST_TMPDIR/compose.env.avant"
+  cp "$CLONE_DONNEES/$SOUS_ENV/prod.env" "$BATS_TEST_TMPDIR/prod.env.avant"
   export DOUBLE_CURL_SANTE_KO="$NOUVELLE"
-  local variable
-  for variable in {{ prefixe }}IMAGE {{ prefixe }}VERSION; do
-    : >"$APPELS"
-    if [ "$variable" = {{ prefixe }}IMAGE ]; then
-      export {{ prefixe }}IMAGE="$NOUVELLE"
-    else
-      unset {{ prefixe }}IMAGE
-      export {{ prefixe }}VERSION=0.2.0
-    fi
-    deployer prod "$NOUVELLE" 0.2.0
-    [ "$status" -eq 1 ]
-    [[ "$output" == *"$variable est posée dans l'environnement"* ]]
-    # rien n'a été tenté : ni instantané, ni lancement, ni état, ni signal
-    [ ! -s "$APPELS" ]
-    diff "$ETAT/compose.env" "$BATS_TEST_TMPDIR/compose.env.avant"
-    [ ! -e "$ETAT/echec" ]
-    grep -Fx "{{ prefixe }}IMAGE=$ANCIENNE" "$EN_SERVICE"
+  local variable origine
+  for variable in {{ prefixe }}IMAGE {{ prefixe }}VERSION {{ prefixe }}CONFIG {{ prefixe }}CONTENU; do
+    for origine in shell env; do
+      : >"$APPELS"
+      unset {{ prefixe }}IMAGE {{ prefixe }}VERSION {{ prefixe }}CONFIG {{ prefixe }}CONTENU
+      cp "$BATS_TEST_TMPDIR/prod.env.avant" "$CLONE_DONNEES/$SOUS_ENV/prod.env"
+      if [ "$origine" = shell ]; then
+        export "$variable=$CLONE_DONNEES/valeur-heritee"
+      else
+        echo "$variable=$CLONE_DONNEES/valeur-heritee" >>"$CLONE_DONNEES/$SOUS_ENV/prod.env"
+      fi
+      deployer prod "$NOUVELLE" 0.2.0
+      [ "$status" -eq 1 ]
+      [[ "$output" == *"$variable est posée dans l'environnement"* ]]
+      # rien n'a été tenté : ni instantané, ni lancement, ni état, ni signal
+      [ ! -s "$APPELS" ]
+      diff "$ETAT/compose.env" "$BATS_TEST_TMPDIR/compose.env.avant"
+      [ ! -e "$ETAT/echec" ]
+      grep -Fx "{{ prefixe }}IMAGE=$ANCIENNE" "$EN_SERVICE"
+    done
   done
 }
 
@@ -1441,7 +2058,7 @@ poser_url_publique() {
     : >"$APPELS"
     deployer prod "$NOUVELLE" 0.2.0
     [ "$status" -eq 1 ]
-    [[ "$output" == *"{{ prefixe }}URL_PUBLIQUE invalide"* ]]
+    [[ "$output" == *"{{ prefixe }}URL_PUBLIQUE invalide ou absente de $CLONE_DONNEES/$SOUS_ENV/prod.env "* ]]
     [[ "$output" == *"Rien n'a changé"* ]]
     # rien n'a été tenté : ni instantané, ni lancement, ni état, ni signal
     [ ! -s "$APPELS" ]
@@ -1521,7 +2138,7 @@ attendre_le_verrou() {
   run timeout 60 bash "$CLONE/deploiement/deployer.sh" prod "$NOUVELLE" 0.2.0
   exec 8>&-
   [ "$status" -eq 0 ]
-  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 -" ]
 }
 
 # --- ménage des images -----------------------------------------------------------------------
@@ -1576,7 +2193,7 @@ stock_a_nettoyer() {
   export DOUBLE_DOCKER_IMAGE_LS_ECHEC=1
   deployer prod "$NOUVELLE" 0.2.0
   [ "$status" -eq 0 ]
-  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 -" ]
   [[ "$output" == *"ménage des images en échec (code 1) : le déploiement reste réussi"* ]]
   [ "$(signaux)" = "$(signal 'déployé 0.2.0') $HC" ]
   aucune_ligne '/fail' "$APPELS.urls"
@@ -1616,7 +2233,7 @@ stock_a_nettoyer() {
   export DOUBLE_CURL_SIGNAL_CODE=6
   deployer prod "$NOUVELLE" 0.2.0
   [ "$status" -eq 0 ]
-  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0" ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 -" ]
   [ "$(signaux)" = "$(signal 'déployé 0.2.0') $HC" ]
 }
 
@@ -1634,6 +2251,15 @@ stock_a_nettoyer() {
     "prod --retourner"
     "--retour prod"
     "essai --retour"
+    "prod --retour --commit-donnees $(printf 'a%.0s' {1..40})"
+    "prod $NOUVELLE 0.2.0 --commit-donnees"
+    "prod $NOUVELLE 0.2.0 --commit-donnees -"
+    "prod $NOUVELLE 0.2.0 --commit-donnees $(printf 'a%.0s' {1..39})"
+    "prod $NOUVELLE 0.2.0 --commit-donnees $(printf 'A%.0s' {1..40})"
+    "prod $NOUVELLE 0.2.0 --commit-donnees $(printf 'a%.0s' {1..40}) --commit-donnees $(printf 'a%.0s' {1..40})"
+{%- if sauvegardes %}
+    "prod $NOUVELLE 0.2.0 --donnees-neuves --donnees-neuves"
+{%- endif %}
   )
   local arguments
   for arguments in "${cas[@]}"; do

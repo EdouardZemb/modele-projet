@@ -186,6 +186,17 @@ def exiger(*dependances):
             manque(dependance, f"{dependance} absent")
 
 
+def trouver_bash():
+    """bash de Git sous Windows (celui du PATH peut être celui de WSL), celui du PATH ailleurs."""
+    if sys.platform == "win32":
+        git_bash = Path(r"C:\Program Files\Git\bin\bash.exe")
+        if git_bash.exists():
+            return str(git_bash)
+    elif shutil.which("bash"):
+        return shutil.which("bash")
+    manque("bash", "bash absent")
+
+
 def faux_gh(dossier, sorties):
     """Un faux « gh » dans `dossier`. `sorties` : {"pr checks": (code, texte), "api": (code, texte)}.
 

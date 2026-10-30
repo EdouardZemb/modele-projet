@@ -4,17 +4,15 @@ fausse app qui en fait la preuve dans la CI du modèle (spec §10.3)."""
 import json
 import os
 import re
-import shutil
 import socket
 import subprocess
 import sys
 import time
 import urllib.error
 import urllib.request
-from pathlib import Path
 
 import yaml
-from conftest import RACINE, REPONSES_SERVEUR, git, manque
+from conftest import RACINE, REPONSES_SERVEUR, git, trouver_bash
 
 CI = ".github/workflows/ci.yml"
 VERSION = ".github/workflows/modele-version.yml"
@@ -48,17 +46,6 @@ def etape(etapes, nom):
 
 
 # --- Lancer une étape comme GitHub, avec un faux docker ----------------------------------------
-
-
-def trouver_bash():
-    """bash de Git sous Windows (celui du PATH peut être celui de WSL), celui du PATH ailleurs."""
-    if sys.platform == "win32":
-        git_bash = Path(r"C:\Program Files\Git\bin\bash.exe")
-        if git_bash.exists():
-            return str(git_bash)
-    elif shutil.which("bash"):
-        return shutil.which("bash")
-    manque("bash", "bash absent")
 
 
 # Faux docker : chaque appel est une ligne de $FAUX_JOURNAL, les arguments séparés par des

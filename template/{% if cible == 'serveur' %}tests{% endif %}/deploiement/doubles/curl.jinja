@@ -31,8 +31,15 @@
 #
 # Pilotage :
 #   DOUBLE_CURL_SANTE_KO           images (séparées par des espaces) dont la santé répond 503
+#   DOUBLE_CURL_SANTE_KO_AU_UP     la santé répond 503 tant que le dernier `compose up` noté dans
+#                                  $APPELS est le n-ième (un `up` en échec, puis un retour sain)
 #   DOUBLE_CURL_SANTE_VIDE         images dont la santé répond 200 avec un corps vide
 #   DOUBLE_CURL_REVISION_FAUSSE    images dont l'application annonce une autre révision
+#   DOUBLE_CURL_CONFIGURATION      le champ configuration de l'application en service (M-0003,
+#                                  amendé) : absent sans la variable (une application d'avant le
+#                                  contrat de /config) ; auto, montee si elle monte /config
+#                                  (MONTAGE=/config dans en-service.env), exemple sinon ; toute
+#                                  autre valeur, telle quelle
 {%- if sauvegardes %}
 #   DOUBLE_CURL_TEST_KO            le conteneur jetable répond 503
 #   DOUBLE_CURL_TEST_CORPS         le corps que répond le conteneur jetable (défaut : statut ok,
@@ -111,6 +118,10 @@ case "$adresse" in
         exit 22
         ;;
     esac
+    if [ -n "${DOUBLE_CURL_SANTE_KO_AU_UP:-}" ]       && [ "$(grep -c '^docker compose .* up -d ' "$APPELS" || true)" = "$DOUBLE_CURL_SANTE_KO_AU_UP" ]; then
+      echo "curl: (22) The requested URL returned error: 503" >&2
+      exit 22
+    fi
     case " ${DOUBLE_CURL_SANTE_VIDE:-} " in
       *" $image "*) exit 0 ;;
     esac
@@ -120,8 +131,16 @@ case "$adresse" in
     case " ${DOUBLE_CURL_REVISION_FAUSSE:-} " in
       *" $image "*) revision=0123456789abcdef0123456789abcdef01234567 ;;
     esac
-    printf '{"statut":"ok","environnement":"%s","version":"%s","revision":"%s"}\n' \
-      "$(valeur {{ prefixe }}ENV)" "$(valeur {{ prefixe }}VERSION)" "$revision"
+    configuration="${DOUBLE_CURL_CONFIGURATION:-}"
+    if [ "$configuration" = auto ]; then
+      configuration=exemple
+      if grep -q '^MONTAGE=/config ' "$EN_SERVICE"; then
+        configuration=montee
+      fi
+    fi
+    printf '{"statut":"ok","environnement":"%s","version":"%s","revision":"%s"%s}\n' \
+      "$(valeur {{ prefixe }}ENV)" "$(valeur {{ prefixe }}VERSION)" "$revision" \
+      "${configuration:+,\"configuration\":\"$configuration\"}"
     ;;
 
   https://*{{ chemin_sante }})

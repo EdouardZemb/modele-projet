@@ -22,6 +22,9 @@
 #                                        (code 1, « No such image », pour un identifiant absent)
 #   ps --all --no-trunc --quiet          l'identifiant de chaque conteneur
 #   container inspect --format {% raw %}'{{.Image}}'{% endraw %} <id…>  l'image de chaque conteneur
+#   container inspect --format {% raw %}'{{json .Mounts}}'{% endraw %} c0ffee
+#                                        les montages de l'application en service, un tableau JSON
+#                                        par conteneur, comme docker (voir plus bas)
 #   image rm <id>                        retire l'image du stock et écrit « Deleted: <id> »
 #   image rm <nom>                       retire ce nom (une étiquette) de l'image et écrit
 #                                        « Untagged: <nom> » ; comme docker, le dernier nom emporte
@@ -43,7 +46,14 @@
 # Comme compose, qui interpole le fichier à chaque sous-commande, il refuse (code 1) tout appel
 # `compose` sans {{ prefixe }}URL_PUBLIQUE, ni dans l'environnement ni dans le --env-file : la variable
 # est obligatoire dans compose.yml (`${ {{- prefixe }}URL_PUBLIQUE:?}`). Les autres variables
-# obligatoires ne sont pas contrôlées ici.
+# obligatoires ne sont pas contrôlées ici, sauf celles des fichiers de montage au `up`.
+#
+# Les montages de l'instance (M-0006, § 5) : un `compose up` qui reçoit `-f …/compose.config.yml`
+# monte {{ prefixe }}CONFIG sur /config, et `-f …/compose.contenu.yml` {{ prefixe }}CONTENU sur /contenu,
+# en lecture seule (la variable vide ou absente : code 1, comme `${…:?}`). en-service.env porte une
+# ligne « MONTAGE=<point> <écriture> <source> » par montage, que `container inspect` rend, après
+# celui de /donnees, dans la forme de son format : « <point> <false|true> <source> ». La source y est
+# nettoyée, sans « // » ni « / » final, comme docker la rend après compose.
 #
 # Pilotage :
 #   DOUBLE_DOCKER_PULL_ERREUR        `pull` échoue avec ce message (« manifest unknown »…)
@@ -76,6 +86,16 @@
 #                                    environnement porte, non vides, un par ligne ; jamais une valeur
 #   DOUBLE_DOCKER_START_ECHEC        `compose start` échoue
 #   DOUBLE_DOCKER_STOP_ECHEC         `compose stop` échoue
+#   DOUBLE_DOCKER_MONTAGES_GARDES    `compose up` ne recrée pas le conteneur : ses montages restent
+#                                    ceux de l'application en service avant lui
+#   DOUBLE_DOCKER_MONTAGES_GARDES_AU_UP  de même, pour le n-ième `compose up` noté dans $APPELS
+#                                    seulement (un retour arrière que compose ne recrée pas)
+#   DOUBLE_DOCKER_MONTAGES_EN_ECRITURE  les montages de l'instance sont en écriture (RW true)
+#   DOUBLE_DOCKER_MONTAGES_EN_PLUS   des montages de plus, « <point>:<source> » séparés par des
+#                                    espaces, comme en déclarerait compose.projet.yml
+#   DOUBLE_DOCKER_VERIFIER_REFUSE    images (séparées par des espaces) dont la vérification de
+#                                    l'instance rend 2 (non conforme)
+#   DOUBLE_DOCKER_VERIFIER_INSTANCE_CODE  code de la vérification de l'instance (défaut 0)
 {%- if sauvegardes %}
 #   DOUBLE_DOCKER_VERIFIER_CODE      code de `run --rm … <verifier> /donnees` (défaut 0 ; 2 = non conforme)
 #   DOUBLE_DOCKER_VERIFIER_SORTIE    sa sortie (défaut : rien)
@@ -115,13 +135,19 @@
 # suivi de courant.txt). Il écrit même s'il échoue : une commande en échec a pu commencer.
 {%- endif %}
 #
+# Vérification de l'instance (verifier_instantane, lib.sh) : `run --rm --network none … <image>
+# <commande…> /config`, ou `/contenu [/en-service]`, un conteneur jetable de l'image visée, sans
+# réseau ni port, chaque dossier, qui existe, monté en lecture seule sur /config, /contenu ou
+# /en-service. Il rend 2 (« non conforme ») pour une image de DOUBLE_DOCKER_VERIFIER_REFUSE, sinon
+# DOUBLE_DOCKER_VERIFIER_INSTANCE_CODE.
+#
 # Invariants vérifiés à chaque appel (code 125 sinon) : DOCKER_CONFIG est posé, `--config` n'est
 # jamais passé, et un `compose` reçoit un --env-file qui existe (comme le vrai docker compose).
 {%- if sauvegardes %}
-# Pour `run` : l'image est celle de `deploye`, un conteneur détaché a un nom et un autre est
-# jetable (--rm), le seul port publié est 127.0.0.1:<port>:{{ port_app }} hors du port de la prod, et le seul
-# volume est un dossier existant monté sur /donnees, jamais les données ni les sauvegardes de la
-# prod. Le report seul monte deux dossiers, ceux que dit son paragraphe, et jamais les données.
+# Pour les autres `run` : l'image est celle de `deploye`, un conteneur détaché a un nom et un autre
+# est jetable (--rm), le seul port publié est 127.0.0.1:<port>:{{ port_app }} hors du port de la prod, et le
+# seul volume est un dossier existant monté sur /donnees, jamais les données ni les sauvegardes de
+# la prod. Le report seul monte deux dossiers, ceux que dit son paragraphe, et jamais les données.
 {%- endif %}
 { printf '%s' docker; for argument in "$@"; do printf ' %s' "$argument"; done; printf '\n'; } >>"${APPELS:?APPELS non défini}"
 
@@ -361,12 +387,29 @@ case "${1:-}" in
     ;;
 
   container)
-    { [ "${2:-}" = inspect ] && [ "${3:-}" = --format ] && [ "${4:-}" = '{% raw %}{{.Image}}{% endraw %}' ] && [ "$#" -ge 5 ]; } \
-      || refuser "container : attendu « container inspect --format {% raw %}'{{.Image}}'{% endraw %} <id…> »"
+    { [ "${2:-}" = inspect ] && [ "${3:-}" = --format ] && [ "$#" -ge 5 ]; } \
+      || refuser "container : attendu « container inspect --format <format> <id…> »"
     if [ -n "${DOUBLE_DOCKER_CONTAINER_INSPECT_ECHEC:-}" ]; then
       echo "Error response from daemon: inspection impossible" >&2
       exit 1
     fi
+    if [ "$4" = '{% raw %}{{json .Mounts}}{% endraw %}' ]; then
+      # Les montages de l'application en service (compose ps -q app : c0ffee) : /donnees, puis ceux
+      # que son `up` a notés (« <point> <true|false> <source> »), en un tableau JSON sur une ligne,
+      # avec les champs de docker que deployer.sh lit.
+      for id in "${@:5}"; do
+        { [ "$id" = c0ffee ] && [ -f "$EN_SERVICE" ]; } || {
+          echo "Error: No such container: $id" >&2
+          exit 1
+        }
+        { printf '/donnees true %s\n' "$(sed -n 's/^{{ prefixe }}DONNEES=//p' "$EN_SERVICE")"
+          sed -n 's/^MONTAGE=//p' "$EN_SERVICE"; } \
+          | jq -Rcn '[inputs | capture("^(?<d>[^ ]+) (?<rw>true|false) (?<s>.*)$")
+              | {Type: "bind", Source: .s, Destination: .d, RW: (.rw == "true")}]'
+      done
+      exit 0
+    fi
+    [ "$4" = '{% raw %}{{.Image}}{% endraw %}' ] || refuser "container inspect : format inconnu $4"
     code=0
     for id in "${@:5}"; do
       image=""
@@ -391,9 +434,14 @@ case "${1:-}" in
   compose)
     shift
     fichier_env=""
+    fichiers_compose=()
     while [ "$#" -gt 0 ]; do
       case "$1" in
-        -p | -f) shift 2 ;;
+        -p) shift 2 ;;
+        -f)
+          fichiers_compose+=("$2")
+          shift 2
+          ;;
         --env-file)
           fichier_env="$2"
           shift 2
@@ -484,6 +532,38 @@ case "${1:-}" in
             printf '%s=%s\n' "$cle" "$(sed -n "s/^$cle=//p" "$fichier_env")"
           fi
         done >"$effective"
+        # Les montages de l'instance : ceux des fichiers de montage reçus, ou, si le conteneur n'est
+        # pas recréé, ceux de l'application en service ; puis ceux qu'ajouterait compose.projet.yml.
+        nieme="$(grep -c '^docker compose .* up -d ' "$APPELS" || true)"
+        if { [ -n "${DOUBLE_DOCKER_MONTAGES_GARDES:-}" ]           || [ "${DOUBLE_DOCKER_MONTAGES_GARDES_AU_UP:-}" = "$nieme" ]; } && [ -f "$EN_SERVICE" ]; then
+          grep '^MONTAGE=' "$EN_SERVICE" >>"$effective" || true
+        else
+          for fichier in "${fichiers_compose[@]}"; do
+            case "${fichier##*/}" in
+              compose.config.yml) cle={{ prefixe }}CONFIG point=/config ;;
+              compose.contenu.yml) cle={{ prefixe }}CONTENU point=/contenu ;;
+              *) continue ;;
+            esac
+            if [ -n "${!cle+x}" ]; then
+              origine="${!cle}"
+            else
+              origine="$(sed -n "s/^$cle=//p" "$fichier_env")"
+            fi
+            [ -n "$origine" ] || {
+              echo "required variable $cle is missing a value" >&2
+              exit 1
+            }
+            origine="$(printf '%s
+' "$origine" | tr -s /)"
+            [ "$origine" = / ] || origine="${origine%/}"
+            ecriture=false
+            [ -z "${DOUBLE_DOCKER_MONTAGES_EN_ECRITURE:-}" ] || ecriture=true
+            printf 'MONTAGE=%s %s %s\n' "$point" "$ecriture" "$origine" >>"$effective"
+          done
+        fi
+        for montage in ${DOUBLE_DOCKER_MONTAGES_EN_PLUS:-}; do
+          printf 'MONTAGE=%s false %s\n' "${montage%%:*}" "${montage#*:}" >>"$effective"
+        done
         image="$(sed -n 's/^{{ prefixe }}IMAGE=//p' "$effective")"
         if [ "$1" = up ] && [ -n "${DOUBLE_DOCKER_SECRETS:-}" ]; then
           for cle in $DOUBLE_DOCKER_SECRETS; do
@@ -508,16 +588,16 @@ case "${1:-}" in
       *) refuser "compose : sous-commande inattendue ${1:-}" ;;
     esac
     ;;
-{%- if sauvegardes %}
 
   run)
     shift
-    detache=0 jetable=0 nom="" ports=() volumes=()
+    detache=0 jetable=0 reseau="" nom="" ports=() volumes=()
     while [ "$#" -gt 0 ]; do
       case "$1" in
         -d) detache=1 && shift ;;
         --rm) jetable=1 && shift ;;
         --read-only) shift ;;
+        --network) reseau="$2" && shift 2 ;;
         --name) nom="$2" && shift 2 ;;
         -p) ports+=("$2") && shift 2 ;;
         -v) volumes+=("$2") && shift 2 ;;
@@ -529,6 +609,28 @@ case "${1:-}" in
     image="${1:-}"
     [ -n "$image" ] || refuser "run : image absente"
     shift
+    if [ -n "$reseau" ]; then
+      # La vérification de l'instance : l'image visée, qui n'est pas forcément celle de deploye.
+      { [ "$reseau" = none ] && [ "$jetable" -eq 1 ] && [ "$detache" -eq 0 ] && [ "{% raw %}${#ports[@]}{% endraw %}" -eq 0 ]; } \
+        || refuser "run : la vérification de l'instance est un conteneur jetable (--rm), sans réseau ni port"
+      [ "{% raw %}${#volumes[@]}{% endraw %}" -ge 1 ] || refuser "run : la vérification de l'instance monte au moins un dossier"
+      for volume in "${volumes[@]}"; do
+        case "$volume" in
+          *:/config:ro | *:/contenu:ro | *:/en-service:ro) ;;
+          *) refuser "run : volume inattendu pour la vérification de l'instance : $volume" ;;
+        esac
+        [ -d "${volume%:/*}" ] || refuser "run : dossier monté absent : ${volume%:/*}"
+      done
+      case " ${DOUBLE_DOCKER_VERIFIER_REFUSE:-} " in
+        *" $image "*)
+          echo "non conforme : $*"
+          exit 2
+          ;;
+      esac
+      echo "conforme : $*"
+      exit "${DOUBLE_DOCKER_VERIFIER_INSTANCE_CODE:-0}"
+    fi
+{%- if sauvegardes %}
     deployee=""
     { read -r deployee _ || true; } <"${ {{- prefixe }}ETAT:?}/deploye"
     [ "$image" = "$deployee" ] || refuser "run : l'image $image n'est pas celle de deploye ($deployee)"
@@ -624,7 +726,11 @@ case "${1:-}" in
     fi
     [ -z "${DOUBLE_DOCKER_VERIFIER_SORTIE+x}" ] || echo "$DOUBLE_DOCKER_VERIFIER_SORTIE"
     exit "${DOUBLE_DOCKER_VERIFIER_CODE:-0}"
+{%- else %}
+    refuser "run : commande inattendue $*"
+{%- endif %}
     ;;
+{%- if sauvegardes %}
 
   stop)
     # stop [-t <secondes>] <nom>

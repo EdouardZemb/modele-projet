@@ -4,7 +4,9 @@ import importlib.util
 import itertools
 import re
 import subprocess
+import warnings
 
+import copier
 import pytest
 import yaml
 from conftest import (
@@ -14,6 +16,7 @@ from conftest import (
     REPONSES_SERVEUR,
     REPONSES_SERVEUR_CODE,
     fichiers_texte,
+    trouver_bash,
 )
 
 # La forme d'une clé publique age : aucun rendu d'un dépôt de code n'en porte (M-0006, § 9).
@@ -443,6 +446,118 @@ def test_motifs_de_l_etat_definis_une_seule_fois(rendre, sauvegardes):
         assert "$MOTIF_REFERENCE" in texte, chemin
         assert re.search(r"^\s*(?:if )?lire_version ", texte, re.MULTILINE), chemin
     assert "$MOTIF_VERSION" in lire(rendu, "deploiement/deployer.sh")
+
+
+# Review Focus 2 du lot 12 (M-0004, amendé) : un retour par une étiquette du code vers une version
+# d'avant la v0.7.0 relit l'état que la v0.7.0 écrit. deploye et precedent y ont un troisième champ,
+# le commit de données, et echec un second : les scripts de la v0.6.0 n'en lisent que les premiers,
+# lib.sh (lire_version, lire_deploye), sonder.sh (deploye, echec) et nettoyer-images.sh (lire_etat).
+# Le rendu de la v0.6.0 porte de vraies clés publiques : aucun de ses fichiers n'est imprimé ni
+# comparé comme du texte ; seule la sortie des lectures, faite des valeurs du test, l'est.
+LECTURE_D_ECHEC = re.compile(
+    r'^\s*(\{ read -r en_echec _ \|\| true; \} <"\$etat/echec")$', re.MULTILINE
+)
+LECTURE_DE_DEPLOYE = re.compile(
+    r'^\s*(\{ read -r deployee version_deployee _ \|\| true; \} <"\$etat/deploye")$',
+    re.MULTILINE,
+)
+# nettoyer-images.sh lit deploye et precedent par lire_version, echec par `read -r image _`.
+LIRE_ETAT = re.compile(r"^(lire_etat\(\) \{\n.*?\n\})$", re.MULTILINE | re.DOTALL)
+
+
+def test_un_couple_se_lit_par_les_scripts_de_la_v0_6_0(tmp_path):
+    reponses = {
+        cle: valeur for cle, valeur in REPONSES_SERVEUR.items() if not cle.startswith("cle_")
+    }
+    rendu = tmp_path / "v0.6.0"
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=copier.errors.DirtyLocalWarning)
+        copier.run_copy(
+            str(RACINE), rendu, data=reponses, vcs_ref="v0.6.0", defaults=True, quiet=True
+        )
+    image = "ghcr.io/exemple/essai@sha256:" + "1" * 64
+    precedente = "ghcr.io/exemple/essai@sha256:" + "2" * 64
+    commit = "0123456789abcdef0123456789abcdef01234567"
+    etat = tmp_path / "etat"
+    etat.mkdir()
+    for nom, ligne in (
+        ("deploye", f"{image} 0.2.0 {commit}"),
+        ("precedent", f"{precedente} 0.1.0 -"),
+        ("echec", f"{image} {commit}"),
+    ):
+        (etat / nom).write_text(ligne + "\n", encoding="utf-8", newline="\n")
+    sonder = (rendu / "deploiement/sonder.sh").read_text(encoding="utf-8")
+    lecture = LECTURE_D_ECHEC.search(sonder)
+    assert lecture is not None, "sonder.sh de la v0.6.0 ne lit plus echec par read -r en_echec _"
+    lecture_deploye = LECTURE_DE_DEPLOYE.search(sonder)
+    assert lecture_deploye is not None, "sonder.sh de la v0.6.0 ne lit plus deploye par read -r"
+    nettoyer = (rendu / "deploiement/nettoyer-images.sh").read_text(encoding="utf-8")
+    lire_etat = LIRE_ETAT.search(nettoyer)
+    assert lire_etat is not None, "nettoyer-images.sh de la v0.6.0 n'a plus lire_etat"
+    script = "\n".join(
+        (
+            "set -euo pipefail",
+            ". deploiement/lib.sh",
+            'ESSAI_ETAT="$1"',
+            'lire_version "$ESSAI_ETAT/deploye"',
+            'echo "deploye $IMAGE_LUE $VERSION_LUE"',
+            'lire_version "$ESSAI_ETAT/precedent"',
+            'echo "precedent $IMAGE_LUE $VERSION_LUE"',
+            "lire_deploye",
+            'echo "lire_deploye $DEPLOYE_IMAGE $DEPLOYE_VERSION"',
+            'etat="$ESSAI_ETAT" en_echec=""',
+            lecture.group(1),
+            'echo "echec $en_echec"',
+            'deployee="" version_deployee=""',
+            lecture_deploye.group(1),
+            'echo "sonder $deployee $version_deployee"',
+            "declare -A NOMMEE=()",
+            'annuler() { echo "annuler $*"; exit 1; }',
+            lire_etat.group(1),
+            'lire_etat "$ESSAI_ETAT"',
+            'printf "nettoyer %s\\n" "${!NOMMEE[@]}" | sort',
+        )
+    )
+    r = subprocess.run(
+        [trouver_bash(), "--noprofile", "--norc", "-c", script, "bash", etat.as_posix()],
+        cwd=rendu,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.splitlines() == [
+        f"deploye {image} 0.2.0",
+        f"precedent {precedente} 0.1.0",
+        f"lire_deploye {image} 0.2.0",
+        f"echec {image}",
+        f"sonder {image} 0.2.0",
+        f"nettoyer {image}",
+        f"nettoyer {precedente}",
+    ]
+
+
+# Lot 12 (M-0006, § 6) : l'en-tête et les messages de deployer.sh disent où est l'env de
+# l'environnement dans chaque mode, et son usage dit le couple, l'option --commit-donnees.
+@pytest.mark.parametrize(
+    "reponses, env",
+    [
+        (REPONSES_SERVEUR_CODE, "env/<env>.env du clone des données"),
+        (REPONSES_SERVEUR, "deploiement/env/<env>.env"),
+    ],
+    ids=["deux-depots", "un-depot"],
+)
+def test_deployer_dit_l_env_de_son_mode_et_le_couple(rendre, reponses, env):
+    texte = lire(rendre(**reponses), "deploiement/deployer.sh")
+    entete = "\n".join(en_tete(texte))
+    assert env in entete
+    if reponses["nature"] == "code":
+        assert "deploiement/env/" not in texte
+    synopsis = "bash deploiement/deployer.sh <prod|staging> <image@sha256:…> <version>"
+    options = "[--commit-donnees <sha>] [--donnees-neuves]"
+    assert f"#   {synopsis} {options}" in entete
+    assert f'"usage : {synopsis} {options} | ' in texte
 
 
 # Les scripts de deploiement/ sont enregistrés exécutables (100755), comme deployer.sh : un projet
