@@ -26,7 +26,7 @@
 #   lire_projet_env <clé>              PROJET_MOTS : les mots de cette clé dans deploiement/projet.env
 #   lire_projet_env_facultatif <clé>   la même chose pour une clé facultative : absente, PROJET_MOTS vide
 #   donnees_declarees                  DECLARE_CONFIG, DECLARE_CONTENU : 1 si projet.env déclare VERIFIER_CONFIG, VERIFIER_CONTENU, sinon 0
-#   controler_paires <commit>          la règle des paires : chaque dossier de l'instance du commit avec sa commande, et l'inverse
+#   controler_paires <commit>          la règle des paires : chaque dossier de l'instance du commit avec sa commande, et l'inverse (son README.md seul ne compte pas)
 #   preparer_instantane <commit>       INSTANTANE : l'instantané en lecture seule des dossiers déclarés du commit de données
 #   verifier_instantane <env> <image> <instantané> [<instantané en service>]  VERIFIER_CONFIG et VERIFIER_CONTENU, en conteneur jetable
 #   jq_vaut <attendu> <doc> <filtre>   le filtre jq, appliqué au document, imprime exactement <attendu>
@@ -336,26 +336,42 @@ _exiger_commit() {
 }
 
 # controler_paires <commit> : la règle des paires sur le commit de données <commit> de
-# {{ prefixe }}CLONE_DONNEES, d'après `git ls-tree` (git ne connaît pas de dossier vide : un dossier
-# présent n'est pas vide). Un dossier de l'instance sans sa commande, ou une commande sans son
+# {{ prefixe }}CLONE_DONNEES, d'après `git ls-tree -r`. Un dossier de l'instance est présent quand il
+# porte, dans ce commit, au moins un fichier autre que le README.md de sa racine
+# (<dossier>/README.md, que sème le gabarit du dépôt de données) ; un README.md plus bas compte comme
+# un fichier. Un dossier qui ne porte que ce README.md compte comme absent, dans les deux sens de la
+# règle (décision 6 du lot 12). Un dossier présent sans sa commande, ou une commande sans son
 # dossier, refuse : code 1, et une ligne « <dossier> sans <commande> » ou « <commande> sans
 # <dossier> » au journal pour chaque paire en défaut. Code 1 aussi, journalisé, si projet.env ou le
 # commit ne se lit pas ; 0 sinon.
 controler_paires() {
-  local commit="${1:-}" paire dossier commande declaree sortie code=0
+  local commit="${1:-}" paire dossier commande declaree sortie chemin present code=0
   _exiger_commit "$commit" controler_paires
   donnees_declarees || return 1
   for paire in "$SOUS_DOSSIER_CONFIG VERIFIER_CONFIG $DECLARE_CONFIG" \
     "$SOUS_DOSSIER_CONTENU VERIFIER_CONTENU $DECLARE_CONTENU"; do
     read -r dossier commande declaree <<<"$paire"
-    if ! sortie="$(git -C "${{ prefixe }}CLONE_DONNEES" ls-tree -d --name-only "$commit" -- "$dossier" 2>&1)"; then
+    if ! sortie="$(git -C "${{ prefixe }}CLONE_DONNEES" ls-tree -r --name-only "$commit" -- "$dossier" 2>&1)"; then
       journal "commit de données illisible : $commit dans ${{ prefixe }}CLONE_DONNEES (${sortie//$'\n'/ })"
       return 1
     fi
-    if [ "$sortie" = "$dossier" ] && [ "$declaree" -eq 0 ]; then
+    # Un fichier sous <dossier>/, sauf <dossier>/README.md. git cite entre guillemets un nom hors de
+    # l'ASCII ordinaire ("<dossier>/été.yml") : il compte aussi. Un fichier qui porterait le nom du
+    # dossier lui-même n'est pas un dossier.
+    present=0
+    while IFS= read -r chemin; do
+      case "$chemin" in
+        "$dossier/README.md") ;;
+        "$dossier"/* | \""$dossier"/*)
+          present=1
+          break
+          ;;
+      esac
+    done <<<"$sortie"
+    if [ "$present" -eq 1 ] && [ "$declaree" -eq 0 ]; then
       journal "$dossier sans $commande (commit de données $commit)"
       code=1
-    elif [ "$sortie" != "$dossier" ] && [ "$declaree" -eq 1 ]; then
+    elif [ "$present" -eq 0 ] && [ "$declaree" -eq 1 ]; then
       journal "$commande sans $dossier (commit de données $commit)"
       code=1
     fi
