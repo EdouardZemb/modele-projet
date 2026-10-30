@@ -502,7 +502,7 @@ verifier_membres() {
 # contenu, en base64, pour que ses octets passent intacts, nuls compris, et IDENTITE_LUE ← 1.
 # Appelée par _sans_trace : sous bash -x, la clé ne paraît jamais dans la trace. Elle reste en
 # mémoire, jamais sur un disque ni dans un argument.
-# shellcheck disable=SC2329  # appelée par _sans_trace
+# shellcheck disable=SC2317,SC2329  # appelée par _sans_trace
 lire_identite() {
   [ ! -f "$CLE" ] || return 0
   IDENTITE="$(base64 -w0 -- "$CLE")" || return 1
@@ -512,7 +512,7 @@ lire_identite() {
 # dechiffrer <entrée> <sortie> : `age -d`, avec --cle elle-même si c'est un fichier ordinaire, sinon
 # avec l'identité que lire_identite a mise en mémoire, qu'age reçoit par un tube (une substitution
 # de processus), jamais par un fichier. Appelée par _sans_trace, pour la même raison.
-# shellcheck disable=SC2329  # appelée par _sans_trace
+# shellcheck disable=SC2317,SC2329  # appelée par _sans_trace
 dechiffrer() {
   if [ "$IDENTITE_LUE" -eq 1 ]; then
     age -d -i <(printf '%s' "$IDENTITE" | base64 -d) -o "$2" "$1"
@@ -524,7 +524,7 @@ dechiffrer() {
 # _dechiffrer_en_silence <entrée> <sortie> : dechiffrer, mais la première ligne de l'erreur d'age
 # va dans ERREUR_AGE, jamais sur la sortie d'erreur : restaurer.sh la dit dans la ligne du couple.
 # Appelée par _sans_trace : la trace de bash -x ne se mêle pas à l'erreur.
-# shellcheck disable=SC2329  # appelée par _sans_trace
+# shellcheck disable=SC2317,SC2329  # appelée par _sans_trace
 _dechiffrer_en_silence() {
   local code=0
   ERREUR_AGE="$(dechiffrer "$1" "$2" 2>&1 >/dev/null)" || code=$?
