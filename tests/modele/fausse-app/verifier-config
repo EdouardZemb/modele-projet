@@ -1,0 +1,58 @@
+#!/usr/bin/env python3
+"""verifier-config <dossier> : la configuration est-elle conforme ? 0 oui, 2 non, 64 erreur d'usage.
+
+La commande VERIFIER_CONFIG de deploiement/projet.env (M-0006, § 5). Sur le serveur, elle tourne
+dans un conteneur jetable, sans réseau, sur l'instantané de config/, monté en lecture seule sur
+/config ; la CI la lance sur exemple/. Elle ne modifie jamais son argument.
+
+Conforme, pour la fausse app : un dossier, pas un lien, qui porte `version`, la version de schéma,
+une que l'app connaît, et `titre`, une ligne de texte non vide. Tout le reste est non conforme.
+"""
+
+import sys
+from pathlib import Path
+
+# Les versions de schéma que l'app sait lire (app.py).
+VERSIONS_CONNUES = {"1"}
+
+
+def lire(fichier):
+    """Le texte d'un fichier ordinaire lisible en UTF-8, ou None."""
+    if fichier.is_symlink() or not fichier.is_file():
+        return None
+    try:
+        return fichier.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def defauts(dossier):
+    """Ce qui rend la configuration non conforme, une raison par élément."""
+    if dossier.is_symlink() or not dossier.is_dir():
+        return [f"{dossier} n'est pas un dossier"]
+    raisons = []
+    version = lire(dossier / "version")
+    if version is None:
+        raisons.append("version absente ou illisible")
+    elif version.strip() not in VERSIONS_CONNUES:
+        raisons.append(f"version de schéma inconnue : {version.strip()!r}")
+    titre = lire(dossier / "titre")
+    if titre is None or not titre.strip() or len(titre.strip().splitlines()) != 1:
+        raisons.append("titre absent, vide ou sur plusieurs lignes")
+    return raisons
+
+
+def main(arguments):
+    if len(arguments) != 1 or not arguments[0]:
+        print("usage : verifier-config <dossier>", file=sys.stderr)
+        return 64
+    raisons = defauts(Path(arguments[0]))
+    if raisons:
+        print(f"non conforme : {' ; '.join(raisons)}")
+        return 2
+    print("conforme")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

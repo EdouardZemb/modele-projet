@@ -100,7 +100,8 @@ jobs:
 
   # La fausse app (tests/modele/fausse-app/) dans un projet `serveur` rendu, par l'action
   # modele-image-construire du rendu, en vrai Docker : construction, santé, révision, sauvegarde,
-  # vérification (spec §10.3).
+  # vérification, l'exemple de l'instance (spec §10.3) ; puis deux épreuves sur le Docker du job :
+  # le ménage des images, et la chaîne à deux dépôts, de deployer.sh à la santé (M-0006, §§ 5-6).
   fausse-app:
     name: fausse-app
     runs-on: ubuntu-latest
@@ -114,26 +115,32 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements-dev.txt
-      # nature=donnees : le mode à un dépôt, qui porte son instance (env/, bloc de ports, domaine),
-      # tant que la fausse app ne sert pas la chaîne à deux dépôts (lot 12).
+      # nature=code : la chaîne à deux dépôts. L'instance (env/, secrets, config/, contenu/) vit
+      # dans un dépôt de données, que l'épreuve des données fabrique. projet.env déclare les deux
+      # commandes de l'instance : l'action les lance sur exemple/ et exemple-contenu/.
       - name: Rendre le projet fausse-app et y poser la fausse app
         run: |
           copier copy --vcs-ref HEAD --defaults --trust \
             --data nom=fausse-app --data "description=La fausse app du modèle" \
-            --data cible=serveur --data nature=donnees --data bloc_ports=4310 \
-            --data sauvegardes=true --data domaine=exemple.org . rendu
-          cp tests/modele/fausse-app/* rendu/
+            --data cible=serveur --data nature=code --data sauvegardes=true . rendu
+          cp -R tests/modele/fausse-app/. rendu/
+          printf '%s\n' VERIFIER_CONFIG=verifier-config VERIFIER_CONTENU=verifier-contenu \
+            >> rendu/deploiement/projet.env
       - uses: ./rendu/.github/actions/modele-image-construire
         with:
           dossier: rendu
       - name: Épreuve du ménage des images (vrai Docker, registre local)
         run: bash tests/modele/epreuve-menage.sh rendu
+      - name: Épreuve des données (vrai Docker, deux dépôts)
+        run: bash tests/modele/epreuve-donnees.sh rendu
       - name: Journal du conteneur
         if: failure()
         run: docker logs fausse-app || true
-      - name: Retirer le registre et les conteneurs de l'épreuve
+      - name: Retirer les registres et les conteneurs des épreuves
         if: always()
-        run: docker rm -f -v epreuve-registre epreuve-conteneur || true
+        run: >-
+          docker rm -f -v epreuve-registre epreuve-conteneur epreuve-donnees-registre
+          fausse-app-app-1 fausse-app-staging-app-1 || true
       - name: Supprimer le conteneur
         if: always()
         run: docker rm -f -v fausse-app

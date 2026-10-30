@@ -1,0 +1,85 @@
+#!/usr/bin/env python3
+"""verifier-contenu <dossier> [<en service>] : le contenu est-il conforme ? 0 oui, 2 non, 64 erreur
+d'usage.
+
+La commande VERIFIER_CONTENU de deploiement/projet.env (M-0006, § 5). Sur le serveur, elle tourne
+dans un conteneur jetable, sans réseau, sur l'instantané de contenu/, monté en lecture seule sur
+/contenu, et, s'il y en a un, sur le contenu en service, monté à part sur /en-service ; la CI la
+lance sur exemple-contenu/ seul. Elle ne modifie jamais ses arguments.
+
+Conforme, pour la fausse app : un dossier, pas un lien, qui porte `version`, la version de schéma,
+une que l'app connaît, et pages/, au moins une page : pages/<identifiant>.txt, un fichier de texte
+non vide. L'identifiant d'une page est définitif : une page du contenu en service qui manque au
+contenu visé le rend non conforme. Le contenu en service, quand il est donné, doit être un dossier :
+sinon, c'est une erreur d'usage.
+"""
+
+import sys
+from pathlib import Path
+
+# Les versions de schéma que l'app sait lire (app.py).
+VERSIONS_CONNUES = {"1"}
+
+
+def lire(fichier):
+    """Le texte d'un fichier ordinaire lisible en UTF-8, ou None."""
+    if fichier.is_symlink() or not fichier.is_file():
+        return None
+    try:
+        return fichier.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def pages(dossier):
+    """Les identifiants des pages de pages/ (les fichiers .txt), triés."""
+    racine = dossier / "pages"
+    if racine.is_symlink() or not racine.is_dir():
+        return []
+    return sorted(p.stem for p in racine.iterdir() if p.suffix == ".txt")
+
+
+def defauts(dossier, en_service):
+    """Ce qui rend le contenu non conforme, une raison par élément."""
+    if dossier.is_symlink() or not dossier.is_dir():
+        return [f"{dossier} n'est pas un dossier"]
+    raisons = []
+    version = lire(dossier / "version")
+    if version is None:
+        raisons.append("version absente ou illisible")
+    elif version.strip() not in VERSIONS_CONNUES:
+        raisons.append(f"version de schéma inconnue : {version.strip()!r}")
+    identifiants = pages(dossier)
+    if not identifiants:
+        raisons.append("aucune page dans pages/")
+    for identifiant in identifiants:
+        texte = lire(dossier / "pages" / f"{identifiant}.txt")
+        if texte is None or not texte.strip():
+            raisons.append(f"page {identifiant} vide ou illisible")
+    if en_service is not None:
+        disparues = sorted(set(pages(en_service)) - set(identifiants))
+        if disparues:
+            raisons.append(
+                f"pages en service disparues (identifiants définitifs) : {', '.join(disparues)}"
+            )
+    return raisons
+
+
+def main(arguments):
+    if len(arguments) not in (1, 2) or not all(arguments):
+        print("usage : verifier-contenu <dossier> [<en service>]", file=sys.stderr)
+        return 64
+    en_service = Path(arguments[1]) if len(arguments) == 2 else None
+    if en_service is not None and (en_service.is_symlink() or not en_service.is_dir()):
+        print(f"usage : le contenu en service {en_service} n'est pas un dossier", file=sys.stderr)
+        return 64
+    raisons = defauts(Path(arguments[0]), en_service)
+    if raisons:
+        print(f"non conforme : {' ; '.join(raisons)}")
+        return 2
+    print("conforme")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
