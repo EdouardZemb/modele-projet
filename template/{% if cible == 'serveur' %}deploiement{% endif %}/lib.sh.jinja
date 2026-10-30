@@ -89,17 +89,17 @@ MODE_DONNEES="{{ 'deux' if nature == 'code' else 'un' }}"
 # n'écrit ces chemins.
 # shellcheck disable=SC2034  # SOUS_DOSSIER_CLES est lu par sauvegarder.sh, qui source lib.sh
 if [ "$MODE_DONNEES" = deux ]; then
-  SOUS_DOSSIER_ENV=env
-  SOUS_DOSSIER_SECRETS=secrets
-  SOUS_DOSSIER_CLES=cles
-  SOUS_DOSSIER_CONFIG=config
-  SOUS_DOSSIER_CONTENU=contenu
+  SOUS_DOSSIER_ENV="env"
+  SOUS_DOSSIER_SECRETS="secrets"
+  SOUS_DOSSIER_CLES="cles"
+  SOUS_DOSSIER_CONFIG="config"
+  SOUS_DOSSIER_CONTENU="contenu"
 else
-  SOUS_DOSSIER_ENV=deploiement/env
-  SOUS_DOSSIER_SECRETS=deploiement/secrets
-  SOUS_DOSSIER_CLES=deploiement/cles
-  SOUS_DOSSIER_CONFIG=instance/config
-  SOUS_DOSSIER_CONTENU=instance/contenu
+  SOUS_DOSSIER_ENV="deploiement/env"
+  SOUS_DOSSIER_SECRETS="deploiement/secrets"
+  SOUS_DOSSIER_CLES="deploiement/cles"
+  SOUS_DOSSIER_CONFIG="instance/config"
+  SOUS_DOSSIER_CONTENU="instance/contenu"
 fi
 
 # La surcharge du clone des données (tests), lue une fois, au chargement : charger_env pose ensuite

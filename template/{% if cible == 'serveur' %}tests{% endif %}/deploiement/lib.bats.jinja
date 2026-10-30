@@ -572,7 +572,7 @@ messages_du_journal() {
   [ "$status" -eq 0 ]
   instantane="${{ prefixe }}RACINE_ETAT/staging/instantanes/$COMMIT"
   [ "${lines[-1]}" = "INSTANTANE=$instantane" ]
-  [ "$(ls -A "$instantane")" = contenu ]
+  [ "$(find "$instantane" -mindepth 1 -maxdepth 1 -printf '%f')" = contenu ]
   [ "$(cat "$instantane/contenu/page.md")" = "fichier d'exemple $SOUS_CONTENU/page.md" ]
   [ "$(cat "$instantane/contenu/sous/profond.md")" = "fichier d'exemple $SOUS_CONTENU/sous/profond.md" ]
   [ -z "$(find "$instantane" -perm /222)" ]
@@ -584,7 +584,7 @@ messages_du_journal() {
   avec_lib 'charger_env prod; preparer_instantane '"$COMMIT"
   [ "$status" -eq 0 ]
   instantane="${{ prefixe }}RACINE_ETAT/prod/instantanes/$COMMIT"
-  [ "$(ls -A "$instantane" | tr '\n' ' ')" = "config contenu " ]
+  [ "$(find "$instantane" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort | tr '\n' ' ')" = "config contenu " ]
   [ -z "$(find "$instantane" -perm /222)" ]
 }
 
@@ -944,15 +944,15 @@ messages_du_journal() {
 # données, et echec un second. Un état d'avant la v0.7.0, sans ce champ, se lit comme un couple dont
 # le commit vaut « - ».
 @test "couple : lire un état à deux, trois champs, et echec à un, deux champs" {
-  local image commit etat="${{ prefixe }}RACINE_ETAT/prod" cas contenu version commit_lu
+  local image sha etat="${{ prefixe }}RACINE_ETAT/prod" cas contenu version commit_lu
   image="ghcr.io/{{ compte | lower }}/{{ nom }}@sha256:$(printf 'a%.0s' {1..64})"
-  commit="$(printf 'c%.0s' {1..40})"
+  sha="$(printf 'c%.0s' {1..40})"
   mkdir -p "$etat"
   local lire='charger_env prod; lire_deploye; printf "%s\n" "$DEPLOYE_IMAGE" "$DEPLOYE_VERSION" "$DEPLOYE_COMMIT"
     lire_version "${{ prefixe }}ETAT/deploye"; printf "%s\n" "$IMAGE_LUE" "$VERSION_LUE" "$COMMIT_LU"'
   # <contenu de deploye>|<version lue>|<commit lu> ; un quatrième champ est ignoré, comme avant
-  for cas in "$image 1.2.3|1.2.3|-" "$image 1.2.3 $commit|1.2.3|$commit" "$image 1.2.3 -|1.2.3|-" \
-    "$image main $commit autre|main|$commit"; do
+  for cas in "$image 1.2.3|1.2.3|-" "$image 1.2.3 $sha|1.2.3|$sha" "$image 1.2.3 -|1.2.3|-" \
+    "$image main $sha autre|main|$sha"; do
     IFS='|' read -r contenu version commit_lu <<<"$cas"
     echo "$contenu" >"$etat/deploye"
     avec_lib "$lire"
@@ -960,7 +960,7 @@ messages_du_journal() {
     [ "${lines[*]}" = "$image $version $commit_lu $image $version $commit_lu" ]
   done
   # un commit d'une autre forme : l'état est illisible
-  for commit_lu in abc "$(printf 'C%.0s' {1..40})" "${commit}0" "--"; do
+  for commit_lu in abc "$(printf 'C%.0s' {1..40})" "${sha}0" "--"; do
     echo "$image 1.2.3 $commit_lu" >"$etat/deploye"
     avec_lib 'charger_env prod; lire_deploye'
     [ "$status" -eq 1 ]
@@ -975,14 +975,14 @@ messages_du_journal() {
   [ "$status" -eq 0 ]
   [ "$output" = "[] []" ]
   # <contenu de echec>|<commit lu>
-  for contenu in "$image|-" "$image $commit|$commit" "$image -|-"; do
+  for contenu in "$image|-" "$image $sha|$sha" "$image -|-"; do
     echo "${contenu%|*}" >"$etat/echec"
     avec_lib "$lecture_echec"
     [ "$status" -eq 0 ]
     [ "$output" = "[$image] [${contenu#*|}]" ]
   done
   # illisible : vide, une image d'une autre forme, un commit d'une autre forme
-  for contenu in "" "image-sans-condense" "image-sans-condense $commit" "$image abc"; do
+  for contenu in "" "image-sans-condense" "image-sans-condense $sha" "$image abc"; do
     echo "$contenu" >"$etat/echec"
     avec_lib 'charger_env prod; lire_echec || printf "illisible : [%s] [%s]\n" "$ECHEC_IMAGE" "$ECHEC_COMMIT"'
     [ "$status" -eq 0 ]

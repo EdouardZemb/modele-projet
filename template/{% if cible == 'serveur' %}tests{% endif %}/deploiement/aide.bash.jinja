@@ -59,7 +59,8 @@ preparer_environnement() {
   # valeurs d'exemple du rendu ; ni secret ni clé : chaque test fabrique les siens.
   CLONE_DONNEES="$BATS_TEST_TMPDIR/clone-donnees"
   export {{ prefixe }}CLONE_DONNEES="$CLONE_DONNEES"
-  SOUS_ENV=env SOUS_SECRETS=secrets SOUS_CLES=cles SOUS_CONFIG=config SOUS_CONTENU=contenu
+  # shellcheck disable=SC2034  # SOUS_ENV est lue par les fichiers .bats
+  SOUS_ENV="env" SOUS_SECRETS="secrets" SOUS_CLES="cles" SOUS_CONFIG="config" SOUS_CONTENU="contenu"
   mkdir -p "$CLONE_DONNEES/env"
   printf '%s\n' "{{ prefixe }}ENV=prod" "{{ prefixe }}PROJET={{ nom }}" "{{ prefixe }}PORT={{ bloc_ports }}" \
     "{{ prefixe }}URL_PUBLIQUE=https://{{ sous_domaine }}.{{ domaine }}" "{{ prefixe }}CANAL=etiquette" \
@@ -76,6 +77,7 @@ preparer_environnement() {
   # la surcharge du clone des données n'y a pas cours.
   CLONE_DONNEES="$CLONE"
   unset {{ prefixe }}CLONE_DONNEES
+  # shellcheck disable=SC2034  # SOUS_ENV est lue par les fichiers .bats
   SOUS_ENV=deploiement/env SOUS_SECRETS=deploiement/secrets SOUS_CLES=deploiement/cles
   SOUS_CONFIG=instance/config SOUS_CONTENU=instance/contenu
 {%- endif %}
@@ -101,6 +103,7 @@ commit_de_donnees() {
   done
   git_donnees add -A
   git_donnees commit -q --allow-empty -m "données de test"
+  # shellcheck disable=SC2034  # lue par les fichiers .bats
   COMMIT="$(git_donnees rev-parse HEAD)"
 }
 
