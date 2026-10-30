@@ -1,11 +1,13 @@
 {#- Gabarit Copier. `${ {{- prefixe }}X}` : l'espace et le tiret évitent `${{{`, que Jinja lit mal. -#}
+{%- set fichier_env = 'env/<env>.env du clone des données' if nature == 'code' else 'deploiement/env/<env>.env' -%}
 #!/usr/bin/env bash
-# Déploie une image d'{{ nom }}, contrôle sa santé, et revient à la version précédente si elle échoue.
+# Déploie un couple d'{{ nom }}, une image et un commit de données, contrôle sa santé, et revient au
+# couple précédent s'il échoue.
 #
 {%- if sauvegardes %}
-#   bash deploiement/deployer.sh <prod|staging> <image@sha256:…> <version> [--donnees-neuves]
+#   bash deploiement/deployer.sh <prod|staging> <image@sha256:…> <version> [--commit-donnees <sha>] [--donnees-neuves]
 {%- else %}
-#   bash deploiement/deployer.sh <prod|staging> <image@sha256:…> <version>
+#   bash deploiement/deployer.sh <prod|staging> <image@sha256:…> <version> [--commit-donnees <sha>]
 {%- endif %}
 #   bash deploiement/deployer.sh <prod|staging> --retour
 #
@@ -14,6 +16,15 @@
 # main pour un déploiement ou un retour arrière : il prend alors le verrou lui-même. Toujours par
 # `bash`, depuis le clone de l'environnement : un projet né sous Windows enregistre les scripts sans
 # bit d'exécution.
+#
+# Le couple (M-0004 et M-0006 § 5, amendés). <sha> est le commit de données : un commit du clone des
+# données de l'environnement (${{ prefixe }}CLONE_DONNEES, lib.sh), 40 caractères hexadécimaux, dont la
+# configuration et le contenu se montent sur /config et /contenu. Il va avec les commandes
+# VERIFIER_CONFIG et VERIFIER_CONTENU de deploiement/projet.env : un projet qui en déclare une exige
+# --commit-donnees, un projet qui n'en déclare aucune la refuse, et le commit de son couple vaut
+# « - » : rien n'est vérifié ni monté, et le champ configuration de la santé n'est pas lu, comme
+# avant le couple. Un commit que le clone des données n'a pas est refusé. Ces trois refus : code 64,
+# rien de touché.
 #
 # Déroulé :
 {%- if sauvegardes %}
@@ -33,6 +44,21 @@
 #      dossiers existent ; un ancien dossier disparu compte comme changé. Sans l'un ni l'autre, seul
 #      le vide est contrôlé, et le journal le dit. `--donnees-neuves` (déploiement seulement, à la
 #      main) lève les deux contrôles pour ce déploiement, et le journal le dit, même au premier ;
+{%- else %}
+#   1. verrou ${{ prefixe }}ETAT/verrou, partagé avec la sonde (600 s d'attente au plus), sauf si
+#      {{ prefixe }}VERROU_TENU=1 ;
+{%- endif %}
+#   1 ter. les données du couple visé, s'il a un commit de données : la règle des paires
+#      (controler_paires, lib.sh), l'instantané en lecture seule du commit,
+#      ${{ prefixe }}ETAT/instantanes/<sha> (preparer_instantane ; jamais config/ en staging), puis les
+#      commandes déclarées, dans un conteneur jetable de l'image visée, sur cet instantané :
+#      VERIFIER_CONFIG hors staging, et VERIFIER_CONTENU avec, sur /en-service, le contenu de
+#      l'instantané du couple en service, s'il en a un (verifier_instantane). Une règle des paires
+#      en défaut, un instantané impossible ou une vérification qui n'a pas eu lieu : code 1 signalé,
+#      rien de changé, rien de marqué en échec, et la sonde réessaiera. Des données non conformes
+#      (code 2) : echec ← "<image> <sha>", code 1 signalé, et rien d'autre ne change : le
+#      conteneur en service n'est pas touché ;
+{%- if sauvegardes %}
 #   2. si l'application tourne, et si la version en service monte /sauvegardes (son compose.env
 #      déclare {{ prefixe }}SAUVEGARDES ; sinon, les sauvegardes viennent d'être activées : pas
 #      d'instantané, et le journal le dit), instantané de ses données dans le dossier
@@ -46,26 +72,34 @@
 #      purgé des instantanés de plus de 30 jours, d'après leur nom ; une purge ou un retrait en
 #      échec n'arrête rien ;
 {%- else %}
-#   1. verrou ${{ prefixe }}ETAT/verrou, partagé avec la sonde (600 s d'attente au plus), sauf si
-#      {{ prefixe }}VERROU_TENU=1 ;
-#   2. pas d'instantané : le projet n'a pas de données à sauvegarder ;
+#   2. pas d'instantané de /donnees : le projet n'a pas de données à sauvegarder ;
 {%- endif %}
-#   3. nouveau compose.env ; l'ancien devient compose.env.precedent s'il est bien celui de la
-#      version déployée (un déploiement interrompu ne devient pas la cible du retour arrière). Il
-#      porte l'image, la version et les variables de deploiement/env/<env>.env que le compose exige,
-#      dont {{ prefixe }}URL_PUBLIQUE ;
+#   3. nouveau compose.env ; l'ancien devient compose.env.precedent s'il décrit bien le couple
+#      déployé, son image et les montages de son commit (un déploiement interrompu ne devient pas la
+#      cible du retour arrière). Il porte l'image, la version et les variables de l'env de
+#      l'environnement ({{ fichier_env }}) que le compose exige, dont
+#      {{ prefixe }}URL_PUBLIQUE ; avec un commit de données, {{ prefixe }}CONFIG=<instantané>/config
+#      (hors staging, si VERIFIER_CONFIG est déclarée) et {{ prefixe }}CONTENU=<instantané>/contenu (si
+#      VERIFIER_CONTENU l'est), que `dc` monte en lecture seule (compose.config.yml,
+#      compose.contenu.yml) ;
 #   4. `docker compose up -d --wait --remove-orphans` (un conteneur dont aucun des deux fichiers
-#      compose ne déclare plus le service est retiré), puis santé sur 127.0.0.1 : statut ok, la
-#      version attendue, et la révision du label org.opencontainers.image.revision de l'image ;
+#      compose ne déclare plus le service est retiré) ; avec un commit de données, les montages du
+#      conteneur app (`docker container inspect`) : sur /config et /contenu, l'instantané visé en
+#      lecture seule s'il les monte, rien sinon (jamais /config en staging) ; puis santé sur
+#      127.0.0.1 : statut ok, la version attendue, la révision du label
+#      org.opencontainers.image.revision de l'image et, avec un commit de données et
+#      VERIFIER_CONFIG déclarée, le champ configuration : exemple en staging, montee en prod ;
 {%- if sauvegardes %}
-#   5. succès : deploye ← "<image> <version>" (l'ancien dans precedent), donnees ← le chemin
+#   5. succès : deploye ← "<image> <version> <commit>" (l'ancien dans precedent), donnees ← le chemin
 #      canonique du dossier de données, echec effacé, signal ok ;
 {%- else %}
-#   5. succès : deploye ← "<image> <version>" (l'ancien dans precedent), echec effacé, signal ok ;
+#   5. succès : deploye ← "<image> <version> <commit>" (l'ancien dans precedent), echec effacé, signal
+#      ok ;
 {%- endif %}
-#   6. échec : echec ← <image> d'abord (la sonde ne la retentera pas, même si la suite est
-#      coupée), puis retour à compose.env.precedent et contrôle de sa santé ; sans version
-#      précédente (premier déploiement), la version en échec est arrêtée. Signal /fail ;
+#   6. échec : echec ← "<image> <commit>" d'abord (la sonde ne retentera pas ce couple, même si la
+#      suite est coupée), puis retour à compose.env.precedent et contrôle de sa santé (statut,
+#      version, révision) ; sans version précédente (premier déploiement), la version en échec est
+#      arrêtée. Signal /fail ;
 #   7. succès seulement (un déploiement ou un retour arrière réussi), après le signal ok :
 #      nettoyer-images.sh, sous le même verrou ({{ prefixe }}VERROU_TENU=1 : il ne l'attend pas). Son
 #      échec est journalisé et ne change pas le résultat.
@@ -75,47 +109,56 @@
 # échec : la sonde réessaiera, et alertera, à chaque passage.
 {%- endif %}
 #
-# Retour arrière manuel (`--retour`) : revient à l'image et à la version de `precedent`, par le même
-# déroulé et le même contrôle de santé qu'un déploiement. Ce que le retour change :
-#   - Refus, code 64 et rien de touché : pas de version en service (deploye), pas de version
-#     précédente (precedent absent ou illisible), ou précédente identique à la version en service.
-#   - La version quittée (premier champ de deploye) est écrite dans `echec` juste avant le premier
+# Retour arrière manuel (`--retour`) : revient au couple de `precedent`, son image, sa version et son
+# commit de données, par le même déroulé, vérification des données comprise, et le même contrôle de
+# santé qu'un déploiement. Un couple précédent sans commit (« - ») ne monte rien et ne lit pas le
+# champ configuration, même si projet.env déclare une commande : c'est celui d'une version d'avant
+# ses données. Ce que le retour change :
+#   - Refus, code 64 et rien de touché : pas de couple en service (deploye), pas de couple précédent
+#     (precedent absent ou illisible), précédent identique au couple en service, ou commit de
+#     données de precedent que projet.env ou le clone des données refusent (voir « Le couple »).
+#   - Le couple quitté (deploye) est écrit dans `echec` juste avant le premier changement d'état
 {%- if sauvegardes %}
-#     changement d'état (après l'instantané, avant compose.env), et reste dans `echec` quoi qu'il
-#     arrive : jamais effacée. Sans cela la sonde, qui vise la plus haute étiquette (ou :main), la
-#     redéploierait au passage suivant. Elle attend alors en silence une nouvelle version.
+#     (après l'instantané, avant compose.env), et reste dans `echec` quoi qu'il arrive : jamais
+#     effacé. Sans cela la sonde, qui vise la plus haute étiquette (ou :main), le redéploierait au
+#     passage suivant. Elle attend alors en silence un nouveau couple.
 {%- else %}
-#     changement d'état (avant compose.env), et reste dans `echec` quoi qu'il arrive : jamais
-#     effacée. Sans cela la sonde, qui vise la plus haute étiquette (ou :main), la redéploierait au
-#     passage suivant. Elle attend alors en silence une nouvelle version.
+#     (avant compose.env), et reste dans `echec` quoi qu'il arrive : jamais effacé. Sans cela la
+#     sonde, qui vise la plus haute étiquette (ou :main), le redéploierait au passage suivant. Elle
+#     attend alors en silence un nouveau couple.
 {%- endif %}
-#   - Succès : deploye ← la précédente, `precedent` supprimé (un second --retour ne rebascule pas
-#     vers la version en échec ; le prochain déploiement le recrée), signal ok « retour à <v>
+#   - Succès : deploye ← le précédent, `precedent` supprimé (un second --retour ne rebascule pas
+#     vers le couple en échec ; le prochain déploiement le recrée), signal ok « retour à <v>
 #     effectué (depuis <v>) ».
-#   - Santé de la précédente non conforme : comme pour tout déploiement raté, la version quittée est
-#     remise en service (compose.env.precedent, que l'étape 3 vient de remplir avec elle), signal
-#     /fail « échec du retour à <v>, <v quittée> remise en service ». deploye, precedent (pour une
-#     nouvelle tentative, la cause réglée) et echec ne changent pas. La version quittée, toujours en
-#     service et marquée en échec, n'envoie plus de signal ok (voir sonder.sh) ; la sonde alerte si
-#     elle ne répond pas non plus.
+#   - Santé du précédent non conforme : comme pour tout déploiement raté, le couple quitté est remis
+#     en service (compose.env.precedent, que l'étape 3 vient de remplir avec lui), signal /fail
+#     « échec du retour à <v>, <v quittée> remise en service ». deploye, precedent (pour une
+#     nouvelle tentative, la cause réglée) et echec ne changent pas. Le couple quitté, toujours en
+#     service et marqué en échec, n'envoie plus de signal ok (voir sonder.sh) ; la sonde alerte s'il
+#     ne répond pas non plus.
 #
 # État, dans ${{ prefixe }}ETAT (chaque fichier est remplacé d'un coup, jamais écrit à moitié) :
 #   compose.env             variables du compose en service, lues par `dc`
-#   compose.env.precedent   celui de la dernière version déployée avant celle-ci : cible du retour
-#   deploye                 "<image@sha256:…> <version>" de la version en service
+#   compose.env.precedent   celui du dernier couple déployé avant celui-ci : cible du retour
+#   deploye                 "<image@sha256:…> <version> <commit>" du couple en service ; <commit> est le
+#                           commit de données, ou « - » sans données montées
 #   precedent               le contenu précédent de deploye
-#   echec                   l'image du dernier déploiement en échec
+#   echec                   "<image@sha256:…> <commit>" du dernier couple en échec
+#   instantanes/<commit>/   l'instantané des données de ce commit, en lecture seule (lib.sh)
 {%- if sauvegardes %}
 #   donnees                 le chemin canonique (`realpath`) du dossier de données, écrit à chaque
 #                           succès, déploiement ou retour arrière, jamais par un refus ni un
 #                           échec : la référence de la garde (étape 1 bis)
 {%- endif %}
+# Un fichier d'avant la v0.7.0, sans le commit, se lit comme un couple en « - », et les scripts
+# d'avant la v0.7.0 ne lisent que les premiers champs d'un fichier de la v0.7.0 (`read -r a b _`).
 #
-# Codes de sortie : 0 déployé ; 1 échec (signalé{% if sauvegardes %}, y compris le refus de la garde du dossier de
-# données ; non signalé{% else %}, sauf{% endif %} avant toute action : {{ prefixe }}IMAGE ou
-# {{ prefixe }}VERSION posée dans l'environnement, {{ prefixe }}URL_PUBLIQUE invalide ou absente de
-# deploiement/env/<env>.env, verrou toujours pris après 600 s) ; 3 secrets absents ; 64 usage, ou
-# retour arrière impossible.
+# Codes de sortie : 0 déployé ; 1 échec (signalé, y compris{% if sauvegardes %} le refus de la garde du dossier de
+# données et{% endif %} des données du couple en défaut ; non signalé avant toute action :
+# {{ prefixe }}IMAGE, {{ prefixe }}VERSION, {{ prefixe }}CONFIG ou {{ prefixe }}CONTENU posée dans
+# l'environnement, {{ prefixe }}URL_PUBLIQUE invalide ou absente de {{ fichier_env }},
+# deploiement/projet.env illisible, verrou toujours pris après 600 s) ; 3 secrets absents ; 64 usage
+# (commit de données absent, de trop, invalide ou introuvable compris), ou retour arrière impossible.
 #
 # Variable de test : {{ prefixe }}SANTE_DELAI, secondes entre deux essais de santé (défaut 3).
 set -euo pipefail
@@ -126,12 +169,19 @@ set -euo pipefail
 NOM_ENV=""
 REFERENCE=""
 VERSION=""
-RETOUR=0         # 1 pour --retour
-ECHEC_IMAGE=""   # l'image que echec doit nommer si le lancement échoue : REFERENCE, ou en retour la version quittée
+COMMIT_DONNEES="-" # le commit de données du couple visé, ou « - » : aucune donnée montée
+OPTION_COMMIT=0    # 1 avec --commit-donnees
+RETOUR=0           # 1 pour --retour
+COUPLE_EN_ECHEC="" # "<image> <commit>" que echec nomme si le lancement échoue : le couple visé, ou en retour le couple quitté
 VERSION_QUITTEE="" # en retour : la version en service avant le retour
 {%- if sauvegardes %}
-DONNEES_NEUVES=0 # 1 avec --donnees-neuves : la garde du dossier de données est levée
+DONNEES_NEUVES=0   # 1 avec --donnees-neuves : la garde du dossier de données est levée
 {%- endif %}
+# Posées par preparer_couple et verifier_donnees, d'après le couple visé et deploiement/projet.env.
+INSTANTANE_VISE=""        # l'instantané des données du couple visé ; vide sans commit de données
+MONTER_CONFIG=0           # 1 : compose.env monte la configuration sur /config (jamais en staging)
+MONTER_CONTENU=0          # 1 : compose.env monte le contenu sur /contenu
+CONFIGURATION_ATTENDUE="" # le champ configuration que la santé doit dire, exemple ou montee ; vide : non lu
 
 # Ce qui s'écrit dans compose.env : une seule ligne chacune, sans surprise. L'image et la version
 # suivent MOTIF_REFERENCE et MOTIF_VERSION, définis dans lib.sh : ceux que lire_version et le ménage
@@ -178,19 +228,145 @@ lancer() {
   dc up -d --wait --wait-timeout 120 --remove-orphans
 }
 
-# sante_conforme <version> <révision> : sante_locale (lib.sh), 10 essais, à {{ prefixe }}SANTE_DELAI
-# secondes d'écart.
+# sante_conforme <version> <révision> [<configuration>] : sante_locale (lib.sh), 10 essais, à
+# {{ prefixe }}SANTE_DELAI secondes d'écart ; avec un troisième argument, le champ configuration aussi.
 sante_conforme() {
-  local version="$1" revision="$2" delai="${ {{- prefixe }}SANTE_DELAI:-3}" essai reponse=""
+  local version="$1" revision="$2" delai="${ {{- prefixe }}SANTE_DELAI:-3}" essai reponse="" attendu
+  attendu="statut ok, version $version, révision $revision${3:+, configuration $3}"
   for essai in 1 2 3 4 5 6 7 8 9 10; do
-    if reponse="$(sante_locale "$version" "$revision")"; then
-      journal "santé conforme (essai $essai) : version $version, révision $revision"
+    if reponse="$(sante_locale "$@")"; then
+      journal "santé conforme (essai $essai) : version $version, révision $revision${3:+, configuration $3}"
       return 0
     fi
     [ "$essai" -eq 10 ] || sleep "$delai"
   done
-  journal "santé non conforme après 10 essais (attendu : statut ok, version $version, révision $revision) ; dernière réponse : ${reponse//$'\n'/ }"
+  journal "santé non conforme après 10 essais (attendu : $attendu) ; dernière réponse : ${reponse//$'\n'/ }"
   return 1
+}
+
+# preparer_couple : d'après le commit du couple visé et deploiement/projet.env (DECLARE_CONFIG et
+# DECLARE_CONTENU, de donnees_declarees), ce que compose.env monte et ce que la santé doit dire. Sans
+# commit de données (« - »), rien n'est monté et le champ configuration n'est pas lu. Le staging ne
+# monte jamais /config : sa santé doit dire exemple.
+preparer_couple() {
+  MONTER_CONFIG=0 MONTER_CONTENU=0 CONFIGURATION_ATTENDUE=""
+  [ "$COMMIT_DONNEES" != - ] || return 0
+  if [ "$DECLARE_CONFIG" -eq 1 ]; then
+    if [ "$NOM_ENV" = prod ]; then
+      MONTER_CONFIG=1
+      CONFIGURATION_ATTENDUE=montee
+    else
+      CONFIGURATION_ATTENDUE=exemple
+    fi
+  fi
+  [ "$DECLARE_CONTENU" -eq 0 ] || MONTER_CONTENU=1
+}
+
+# controler_couple <début du message> : le commit de données du couple visé va avec projet.env et le
+# clone des données. Sans commande déclarée, pas de commit : le couple a « - ». Avec, le commit doit
+# exister dans ${{ prefixe }}CLONE_DONNEES. Code 64 sinon, rien de touché ; rien à contrôler pour « - ».
+controler_couple() {
+  local debut="$1"
+  [ "$COMMIT_DONNEES" != - ] || return 0
+  if [ "$DECLARE_CONFIG" -eq 0 ] && [ "$DECLARE_CONTENU" -eq 0 ]; then
+    arreter 64 "$debut : commit de données $COMMIT_DONNEES, mais deploiement/projet.env ne déclare ni VERIFIER_CONFIG ni VERIFIER_CONTENU (le couple d'un projet sans données montées a le commit « - »). Rien n'a changé"
+  fi
+  git -C "${{ prefixe }}CLONE_DONNEES" cat-file -e "$COMMIT_DONNEES^{commit}" 2>/dev/null \
+    || arreter 64 "$debut : commit de données $COMMIT_DONNEES introuvable dans ${{ prefixe }}CLONE_DONNEES. Rien n'a changé"
+}
+
+# verifier_donnees <quoi> <avant> <commit en service> : les données du couple visé, sous le verrou
+# et avant tout changement : la règle des paires (controler_paires), l'instantané du commit
+# (preparer_instantane), puis les commandes déclarées, dans un conteneur jetable de l'image visée,
+# sur cet instantané, avec, pour VERIFIER_CONTENU, l'instantané du couple en service, s'il a un
+# commit (verifier_instantane). <quoi> et <avant> sont ceux des messages de main. Rend 0 si le couple
+# peut se déployer. Des données non conformes (code 2) : echec ← "<image> <commit>", signal, code 1 ;
+# la sonde ne retentera pas ce couple. Une règle des paires en défaut, un instantané impossible, ou
+# une vérification qui n'a pas eu lieu : rien n'est marqué, signal, code 1, et la sonde réessaiera.
+# Dans tous les cas, ni compose.env ni le conteneur en service ne sont touchés.
+verifier_donnees() {
+  local quoi="$1" avant="$2" commit_service="$3" code=0
+  local -a en_service=()
+  if ! controler_paires "$COMMIT_DONNEES"; then
+    journal "$quoi annulé, rien n'a changé : les données du commit $COMMIT_DONNEES ne suivent pas la règle des paires"
+    signaler_sonde echec "données hors de la règle des paires avant $avant, rien n'a changé (voir le journal)"
+    return 1
+  fi
+  if ! preparer_instantane "$COMMIT_DONNEES"; then
+    journal "$quoi annulé, rien n'a changé"
+    signaler_sonde echec "instantané des données impossible avant $avant, rien n'a changé (voir le journal)"
+    return 1
+  fi
+  INSTANTANE_VISE="$INSTANTANE"
+  [ "$commit_service" = - ] || en_service=("${{ prefixe }}ETAT/instantanes/$commit_service")
+  verifier_instantane "$NOM_ENV" "$REFERENCE" "$INSTANTANE_VISE" "${en_service[@]}" || code=$?
+  case "$code" in
+    0) return 0 ;;
+    2)
+      ecrire_atomique "${{ prefixe }}ETAT/echec" "$REFERENCE $COMMIT_DONNEES"
+      journal "$quoi refusé : les données du commit $COMMIT_DONNEES ne sont pas conformes pour $REFERENCE ; ce couple est marqué en échec, rien d'autre n'a changé"
+      signaler_sonde echec "données non conformes avant $avant, couple marqué en échec (voir le journal)"
+      return 1
+      ;;
+    *)
+      journal "$quoi annulé, rien n'a changé : la vérification des données n'a pas eu lieu"
+      signaler_sonde echec "vérification des données impossible avant $avant, rien n'a changé (voir le journal)"
+      return 1
+      ;;
+  esac
+}
+
+# decrit_le_couple <compose.env> <image> <commit> : ce compose.env est celui de ce couple : son
+# image, et, pour montages, ceux de l'instantané de ce commit, aucun pour « - ».
+decrit_le_couple() {
+  local fichier="$1" image="$2" commit="$3" cle chemin
+  { [ -n "$image" ] && [ "$(valeur_de {{ prefixe }}IMAGE "$fichier")" = "$image" ]; } || return 1
+  for cle in {{ prefixe }}CONFIG {{ prefixe }}CONTENU; do
+    chemin="$(valeur_de "$cle" "$fichier")" || continue
+    if [ "$commit" = - ] || [[ "$chemin" != "${{ prefixe }}ETAT/instantanes/$commit/"* ]]; then
+      return 1
+    fi
+  done
+}
+
+# controler_montages : après le `up`, les montages du conteneur app, lus par `docker container
+# inspect`, sont ceux du couple visé : sur /config et /contenu, l'instantané visé en lecture seule
+# s'il les monte, et rien sinon (jamais /config en staging). Rien à contrôler sans commit de
+# données. Rend 0, ou 1 journalisé.
+controler_montages() {
+  local sortie point attendu vu destination ecriture chemin
+  local -a conteneurs=()
+  [ "$COMMIT_DONNEES" != - ] || return 0
+  if ! sortie="$(dc ps -q app)" || [ -z "$sortie" ]; then
+    journal "montages invérifiables : aucun conteneur app en service (docker compose ps)"
+    return 1
+  fi
+  mapfile -t conteneurs <<<"$sortie"
+  if ! sortie="$(docker container inspect --format '{% raw %}{{range .Mounts}}{{println .Destination .RW .Source}}{{end}}{% endraw %}' "${conteneurs[@]}")"; then
+    journal "montages invérifiables : docker container inspect ${conteneurs[*]} en échec"
+    return 1
+  fi
+  for point in config contenu; do
+    attendu=""
+    if [ "$point" = config ] && [ "$MONTER_CONFIG" -eq 1 ]; then
+      attendu="$INSTANTANE_VISE/config"
+    elif [ "$point" = contenu ] && [ "$MONTER_CONTENU" -eq 1 ]; then
+      attendu="$INSTANTANE_VISE/contenu"
+    fi
+    vu=""
+    while read -r destination ecriture chemin; do
+      [ "$destination" != "/$point" ] || vu="${vu:+$vu, }$ecriture $chemin"
+    done <<<"$sortie"
+    if [ -z "$attendu" ] && [ -n "$vu" ]; then
+      journal "/$point monté alors que le couple ne le monte pas : $vu"
+      return 1
+    fi
+    if [ -n "$attendu" ] && [ "$vu" != "false $attendu" ]; then
+      journal "/$point : attendu $attendu en lecture seule, monté : ${vu:-rien}"
+      return 1
+    fi
+  done
+  journal "montages conformes : l'instantané $INSTANTANE_VISE"
 }
 {%- if sauvegardes %}
 
@@ -329,36 +505,40 @@ controler_donnees() {
 }
 {%- endif %}
 
-# preparer_retour : sous le verrou, REFERENCE et VERSION ← la précédente (lire_version, lib.sh) ;
-# ECHEC_IMAGE et VERSION_QUITTEE ← la version en service. Code 64 et aucune écriture si le retour
-# est impossible.
+# preparer_retour : sous le verrou, REFERENCE, VERSION et COMMIT_DONNEES ← le couple de precedent
+# (lire_version, lib.sh) ; COUPLE_EN_ECHEC et VERSION_QUITTEE ← le couple en service. Code 64 et
+# aucune écriture si le retour est impossible : pas de couple en service ni précédent, le même
+# couple, ou un commit de données que projet.env ou le clone des données refusent (controler_couple).
 preparer_retour() {
-  local etat="${{ prefixe }}ETAT" image_quittee
+  local etat="${{ prefixe }}ETAT" image_quittee commit_quitte
   lire_version "$etat/deploye" \
     || arreter 64 "retour arrière impossible : aucune version en service ($etat/deploye absent ou illisible). Rien n'a changé"
   image_quittee="$IMAGE_LUE"
+  commit_quitte="$COMMIT_LU"
   VERSION_QUITTEE="$VERSION_LUE"
   [ -f "$etat/precedent" ] \
     || arreter 64 "retour arrière impossible : aucune version précédente ($etat/precedent absent : un seul déploiement, ou retour déjà fait). Rien n'a changé"
   lire_version "$etat/precedent" \
     || arreter 64 "retour arrière impossible : $etat/precedent illisible. Rien n'a changé"
-  [ "$IMAGE_LUE" != "$image_quittee" ] \
-    || arreter 64 "retour arrière impossible : la version précédente ($VERSION_LUE) est celle en service. Rien n'a changé"
+  { [ "$IMAGE_LUE" != "$image_quittee" ] || [ "$COMMIT_LU" != "$commit_quitte" ]; } \
+    || arreter 64 "retour arrière impossible : le couple précédent ($VERSION_LUE, données $COMMIT_LU) est celui en service. Rien n'a changé"
   REFERENCE="$IMAGE_LUE"
   VERSION="$VERSION_LUE"
-  ECHEC_IMAGE="$image_quittee"
+  COMMIT_DONNEES="$COMMIT_LU"
+  COUPLE_EN_ECHEC="$image_quittee $commit_quitte"
+  controler_couple "retour arrière impossible"
 }
 
-# echouer <raison> : la version est marquée en échec avant tout le reste, puis retour arrière. En
-# retour arrière manuel, la « version en échec » est celle qu'on quittait : echec la nomme déjà, et
-# la remettre en service est le comportement d'un déploiement raté.
+# echouer <raison> : le couple est marqué en échec avant tout le reste, puis retour arrière. En
+# retour arrière manuel, le « couple en échec » est celui qu'on quittait : echec le nomme déjà, et
+# le remettre en service est le comportement d'un déploiement raté.
 echouer() {
   local raison="$1" etat="${{ prefixe }}ETAT" retour=aucun image_prec version_prec revision_prec message
-  ecrire_atomique "$etat/echec" "$ECHEC_IMAGE"
+  ecrire_atomique "$etat/echec" "$COUPLE_EN_ECHEC"
   if [ "$RETOUR" -eq 1 ]; then
-    journal "échec du retour à $VERSION ($raison) : $ECHEC_IMAGE ($VERSION_QUITTEE) reste marquée en échec"
+    journal "échec du retour à $VERSION ($raison) : $COUPLE_EN_ECHEC ($VERSION_QUITTEE) reste marqué en échec"
   else
-    journal "échec du déploiement de $VERSION ($raison) : $REFERENCE marquée en échec"
+    journal "échec du déploiement de $VERSION ($raison) : $COUPLE_EN_ECHEC marqué en échec"
   fi
 
   if [ -f "$etat/compose.env.precedent" ]; then
@@ -400,36 +580,49 @@ echouer() {
 }
 
 main() {
-{%- if sauvegardes %}
-  local usage="usage : bash deploiement/deployer.sh <prod|staging> <image@sha256:…> <version> [--donnees-neuves] | bash deploiement/deployer.sh <prod|staging> --retour"
+  local usage="usage : bash deploiement/deployer.sh <prod|staging> <image@sha256:…> <version> [--commit-donnees <sha>]{% if sauvegardes %} [--donnees-neuves]{% endif %} | bash deploiement/deployer.sh <prod|staging> --retour"
   if [ "$#" -ge 2 ] && [ "$2" = --retour ]; then
-    # --retour ne prend aucune option : --donnees-neuves n'existe que pour un déploiement.
+    # --retour ne prend aucune option : le couple vient de precedent{% if sauvegardes %}, et --donnees-neuves
+    # n'existe que pour un déploiement{% endif %}.
     [ "$#" -eq 2 ] || arreter 64 "$usage"
     RETOUR=1
     NOM_ENV="$1"
-  elif [ "$#" -eq 3 ] || { [ "$#" -eq 4 ] && [ "$4" = --donnees-neuves ]; }; then
-    [ "$#" -eq 3 ] || DONNEES_NEUVES=1
-{%- else %}
-  if [ "$#" -eq 2 ] && [ "$2" = --retour ]; then
-    RETOUR=1
-    NOM_ENV="$1"
-  elif [ "$#" -eq 3 ]; then
-{%- endif %}
+  elif [ "$#" -ge 3 ]; then
     NOM_ENV="$1"
     REFERENCE="$2"
     VERSION="$3"
-    ECHEC_IMAGE="$REFERENCE"
-    # Validées avant d'être écrites dans compose.env.
+    shift 3
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --commit-donnees)
+          { [ "$#" -ge 2 ] && [ "$OPTION_COMMIT" -eq 0 ]; } || arreter 64 "$usage"
+          OPTION_COMMIT=1
+          COMMIT_DONNEES="$2"
+          shift 2
+          ;;
+{%- if sauvegardes %}
+        --donnees-neuves)
+          [ "$DONNEES_NEUVES" -eq 0 ] || arreter 64 "$usage"
+          DONNEES_NEUVES=1
+          shift
+          ;;
+{%- endif %}
+        *) arreter 64 "$usage" ;;
+      esac
+    done
+    # Validés avant d'être écrits dans compose.env et dans l'état. Le commit de données nomme aussi
+    # un dossier de l'état : jamais « - », qui s'écrit en omettant l'option.
     [[ "$REFERENCE" =~ $MOTIF_REFERENCE ]] \
       || arreter 64 "référence invalide : '$REFERENCE' (attendu : image@sha256:<64 caractères hexadécimaux>)"
     [[ "$VERSION" =~ $MOTIF_VERSION ]] \
       || arreter 64 "version invalide : '$VERSION' (attendu : main ou X.Y.Z)"
+    if [ "$OPTION_COMMIT" -eq 1 ]; then
+      { [[ "$COMMIT_DONNEES" =~ $MOTIF_COMMIT ]] && [ "$COMMIT_DONNEES" != - ]; } \
+        || arreter 64 "commit de données invalide : '$COMMIT_DONNEES' (attendu : 40 caractères hexadécimaux)"
+    fi
+    COUPLE_EN_ECHEC="$REFERENCE $COMMIT_DONNEES"
   else
-{%- if sauvegardes %}
     arreter 64 "$usage"
-{%- else %}
-    arreter 64 "usage : bash deploiement/deployer.sh <prod|staging> <image@sha256:…> <version> | bash deploiement/deployer.sh <prod|staging> --retour"
-{%- endif %}
   fi
 
   # Les secrets de cette version font foi : charger_secrets remplace ceux qu'hériteraient le shell
@@ -438,22 +631,32 @@ main() {
   unset HC_SONDE
   charger_env "$NOM_ENV"
   charger_secrets "$NOM_ENV"
-  local etat="${{ prefixe }}ETAT" deployee=""{% if sauvegardes %} conteneurs=""{% endif %} revision raison="" variable quoi{% if sauvegardes %} avant{% endif %}
+  local etat="${{ prefixe }}ETAT" deployee="" commit_deploye=-{% if sauvegardes %} conteneurs=""{% endif %} revision raison="" quoi avant declarees=""
+  local -a lignes=()
 
-  # L'image et la version ne viennent que de compose.env. Compose donne la priorité au shell sur
-  # --env-file : exportée, l'une d'elles l'emporterait, et le retour arrière relancerait la
-  # mauvaise version. Refus net plutôt qu'effacement silencieux : l'appelant a une erreur à voir.
-  for variable in {{ prefixe }}IMAGE {{ prefixe }}VERSION; do
-    if [ -n "${!variable+present}" ]; then
-      arreter 1 "$variable est posée dans l'environnement : elle prendrait le pas sur compose.env. Rien n'a changé ; relancer sans elle (unset $variable)"
-    fi
-  done
+  # L'image, la version et les montages ne viennent que de compose.env (refuser_image_heritee,
+  # lib.sh) : posée dans le shell ou par une ligne de l'env, l'une de ces variables l'emporterait,
+  # et le retour arrière relancerait la mauvaise version, ou monterait autre chose que l'instantané
+  # vérifié. Refus net plutôt qu'effacement silencieux : l'appelant a une erreur à voir.
+  refuser_image_heritee
 
-  # L'adresse publique vient de deploiement/env/<env>.env (charger_env) et s'écrit dans compose.env :
+  # L'adresse publique vient de l'env de l'environnement (charger_env) et s'écrit dans compose.env :
   # validée avant tout, comme la référence et la version. Le message ne reprend pas la valeur, qui
   # pourrait porter des identifiants.
   [[ "${ {{- prefixe }}URL_PUBLIQUE:-}" =~ $MOTIF_URL_PUBLIQUE ]] \
-    || arreter 1 "{{ prefixe }}URL_PUBLIQUE invalide ou absente de deploiement/env/$NOM_ENV.env (attendu : http(s)://hôte[:port], sans chemin ni requête). Rien n'a changé"
+    || arreter 1 "{{ prefixe }}URL_PUBLIQUE invalide ou absente de ${{ prefixe }}CLONE_DONNEES/$SOUS_DOSSIER_ENV/$NOM_ENV.env (attendu : http(s)://hôte[:port], sans chemin ni requête). Rien n'a changé"
+
+  # Les commandes de l'instance que déclare projet.env, et, pour un déploiement, le commit de données
+  # qui doit aller avec (P4 du lot 12) ; celui d'un retour arrière se lit sous le verrou.
+  donnees_declarees || arreter 1 "deploiement/projet.env illisible : rien n'a changé"
+  if [ "$RETOUR" -eq 0 ]; then
+    [ "$DECLARE_CONFIG" -eq 0 ] || declarees="VERIFIER_CONFIG"
+    [ "$DECLARE_CONTENU" -eq 0 ] || declarees="${declarees:+$declarees et }VERIFIER_CONTENU"
+    if [ "$OPTION_COMMIT" -eq 0 ] && [ -n "$declarees" ]; then
+      arreter 64 "commit de données absent : deploiement/projet.env déclare $declarees ; relancer avec --commit-donnees <sha>. Rien n'a changé"
+    fi
+    controler_couple "déploiement de $VERSION impossible"
+  fi
 
   # 1. Verrou.
   if [ "${ {{- prefixe }}VERROU_TENU:-}" != 1 ]; then
@@ -463,40 +666,39 @@ main() {
     flock -w 600 9 \
       || arreter 1 "verrou $etat/verrou toujours pris après 600 s : $quoi abandonné, rien n'a changé"
   fi
-  # La version précédente se lit sous le verrou : une sonde qui déploie en même temps l'aurait changée.
-{%- if sauvegardes %}
+  # Le couple précédent se lit sous le verrou : une sonde qui déploie en même temps l'aurait changé.
   # `quoi` et `avant` servent aux messages : « déploiement de 0.2.0 » / « avant 0.2.0 », ou
   # « retour à 0.1.0 » / « avant le retour à 0.1.0 ».
   if [ "$RETOUR" -eq 1 ]; then
     preparer_retour
     quoi="retour à $VERSION"
     avant="le retour à $VERSION"
-    journal "retour arrière en $NOM_ENV : $VERSION_QUITTEE ($ECHEC_IMAGE) → $VERSION ($REFERENCE)"
+    journal "retour arrière en $NOM_ENV : $VERSION_QUITTEE ($COUPLE_EN_ECHEC) → $VERSION ($REFERENCE $COMMIT_DONNEES)"
   else
     quoi="déploiement de $VERSION"
     avant="$VERSION"
-    journal "déploiement de $VERSION en $NOM_ENV : $REFERENCE"
+    journal "déploiement de $VERSION en $NOM_ENV : $REFERENCE, données $COMMIT_DONNEES"
   fi
+  preparer_couple
 
-  # 2. Instantané, si l'application tourne. Sans compose.env (premier déploiement), `dc` ne peut
-  # pas tourner et il n'y a rien à copier.
-{%- else %}
-  if [ "$RETOUR" -eq 1 ]; then
-    preparer_retour
-    journal "retour arrière en $NOM_ENV : $VERSION_QUITTEE ($ECHEC_IMAGE) → $VERSION ($REFERENCE)"
-  else
-    journal "déploiement de $VERSION en $NOM_ENV : $REFERENCE"
-  fi
-
-  # 2. Pas d'instantané : le projet n'a pas de données à sauvegarder. La version en service sert à
-  # l'étape 3.
-{%- endif %}
+  # Le couple en service : son image sert à l'étape 3{% if sauvegardes %} et à la garde{% endif %}, son commit à la
+  # vérification du contenu (« - » sans commit, ou pour un état d'avant la v0.7.0).
   if [ -f "$etat/deploye" ]; then
-    { read -r deployee _ || true; } <"$etat/deploye"
+    { read -r deployee _ commit_deploye _ || true; } <"$etat/deploye"
+    [[ "${commit_deploye:-}" =~ $MOTIF_COMMIT ]] || commit_deploye=-
   fi
 {%- if sauvegardes %}
   # 1 bis. La garde du dossier de données, avant toute lecture de l'application et tout changement.
   controler_donnees "$deployee" "$quoi" "$avant" || return 1
+{%- endif %}
+  # 1 ter. Les données du couple visé, avant toute lecture de l'application et tout changement.
+  if [ "$COMMIT_DONNEES" != - ]; then
+    verifier_donnees "$quoi" "$avant" "$commit_deploye" || return 1
+  fi
+{%- if sauvegardes %}
+
+  # 2. Instantané, si l'application tourne. Sans compose.env (premier déploiement), `dc` ne peut
+  # pas tourner et il n'y a rien à copier.
   if [ -f "$etat/compose.env" ]; then
     if ! conteneurs="$(dc ps -q app)"; then
       journal "état de l'application illisible (docker compose ps) : $quoi annulé, rien n'a changé"
@@ -513,38 +715,48 @@ main() {
   else
     journal "application arrêtée ou jamais déployée : pas d'instantané"
   fi
+{%- else %}
+
+  # 2. Pas d'instantané de /donnees : le projet n'a pas de données à sauvegarder.
 {%- endif %}
 
-  # 3. compose.env. Un retour arrière marque d'abord la version quittée : c'est le premier changement
-  # d'état, et la sonde ne doit jamais voir la précédente en service sans cette marque.
+  # 3. compose.env. Un retour arrière marque d'abord le couple quitté : c'est le premier changement
+  # d'état, et la sonde ne doit jamais voir le précédent en service sans cette marque.
   if [ "$RETOUR" -eq 1 ]; then
-    ecrire_atomique "$etat/echec" "$ECHEC_IMAGE"
-    journal "$VERSION_QUITTEE ($ECHEC_IMAGE) marquée en échec : la sonde ne la redéploiera pas"
+    ecrire_atomique "$etat/echec" "$COUPLE_EN_ECHEC"
+    journal "$VERSION_QUITTEE ($COUPLE_EN_ECHEC) marqué en échec : la sonde ne le redéploiera pas"
   fi
   if [ -f "$etat/compose.env" ]; then
-    if [ -n "$deployee" ] && [ "$(valeur_de {{ prefixe }}IMAGE "$etat/compose.env")" = "$deployee" ]; then
+    if decrit_le_couple "$etat/compose.env" "$deployee" "$commit_deploye"; then
       copier_atomique "$etat/compose.env" "$etat/compose.env.precedent"
     else
-      journal "compose.env ne décrit pas la version déployée (déploiement interrompu ?) : compose.env.precedent reste la cible du retour arrière"
+      journal "compose.env ne décrit pas le couple déployé (déploiement interrompu ?) : compose.env.precedent reste la cible du retour arrière"
     fi
   fi
-  ecrire_atomique "$etat/compose.env" \
-    "{{ prefixe }}IMAGE=$REFERENCE" \
-    "{{ prefixe }}VERSION=$VERSION" \
-    "{{ prefixe }}ENV=$NOM_ENV" \
-    "{{ prefixe }}PORT=${{ prefixe }}PORT" \
-    "{{ prefixe }}DONNEES=${{ prefixe }}DONNEES" \
+  lignes=(
+    "{{ prefixe }}IMAGE=$REFERENCE"
+    "{{ prefixe }}VERSION=$VERSION"
+    "{{ prefixe }}ENV=$NOM_ENV"
+    "{{ prefixe }}PORT=${{ prefixe }}PORT"
+    "{{ prefixe }}DONNEES=${{ prefixe }}DONNEES"
 {%- if sauvegardes %}
-    "{{ prefixe }}SAUVEGARDES=${{ prefixe }}SAUVEGARDES" \
+    "{{ prefixe }}SAUVEGARDES=${{ prefixe }}SAUVEGARDES"
 {%- endif %}
     "{{ prefixe }}URL_PUBLIQUE=${{ prefixe }}URL_PUBLIQUE"
+  )
+  # Les montages de l'instantané visé, que `dc` lit dans compose.env (jamais /config en staging).
+  [ "$MONTER_CONFIG" -eq 0 ] || lignes+=("{{ prefixe }}CONFIG=$INSTANTANE_VISE/config")
+  [ "$MONTER_CONTENU" -eq 0 ] || lignes+=("{{ prefixe }}CONTENU=$INSTANTANE_VISE/contenu")
+  ecrire_atomique "$etat/compose.env" "${lignes[@]}"
 
-  # 4. Lancement et santé.
+  # 4. Lancement, montages et santé.
   if ! lancer; then
     raison="docker compose up en échec"
+  elif ! controler_montages; then
+    raison="montage des données non conforme"
   elif ! revision="$(revision_de "$REFERENCE")"; then
     raison="révision de l'image illisible"
-  elif ! sante_conforme "$VERSION" "$revision"; then
+  elif ! sante_conforme "$VERSION" "$revision" ${CONFIGURATION_ATTENDUE:+"$CONFIGURATION_ATTENDUE"}; then
     raison="santé non conforme"
   fi
   if [ -n "$raison" ]; then
@@ -552,18 +764,18 @@ main() {
     return 1
   fi
 
-  # 5. Succès. Un retour arrière garde `echec` (la version quittée) et consomme `precedent`.
+  # 5. Succès. Un retour arrière garde `echec` (le couple quitté) et consomme `precedent`.
 {%- if sauvegardes %}
   # Juste après deploye, donnees : le chemin canonique du dossier de données, la référence de la
   # garde au déploiement suivant. Seul un succès l'écrit.
 {%- endif %}
   if [ "$RETOUR" -eq 1 ]; then
-    ecrire_atomique "$etat/deploye" "$REFERENCE $VERSION"
+    ecrire_atomique "$etat/deploye" "$REFERENCE $VERSION $COMMIT_DONNEES"
 {%- if sauvegardes %}
     ecrire_atomique "$etat/donnees" "$(realpath -- "${{ prefixe }}DONNEES")"
 {%- endif %}
     rm -f -- "$etat/precedent"
-    journal "retour effectué : $VERSION ($REFERENCE) ; $VERSION_QUITTEE reste marquée en échec"
+    journal "retour effectué : $VERSION ($REFERENCE, données $COMMIT_DONNEES) ; $VERSION_QUITTEE reste marquée en échec"
     signaler_sonde ok "retour à $VERSION effectué (depuis $VERSION_QUITTEE)"
     menage_des_images
     return 0
@@ -571,13 +783,17 @@ main() {
   if [ -f "$etat/deploye" ]; then
     copier_atomique "$etat/deploye" "$etat/precedent"
   fi
-  ecrire_atomique "$etat/deploye" "$REFERENCE $VERSION"
+  ecrire_atomique "$etat/deploye" "$REFERENCE $VERSION $COMMIT_DONNEES"
 {%- if sauvegardes %}
   ecrire_atomique "$etat/donnees" "$(realpath -- "${{ prefixe }}DONNEES")"
 {%- endif %}
   rm -f -- "$etat/echec"
-  journal "déployé : $VERSION ($REFERENCE)"
-  signaler_sonde ok "déployé $VERSION"
+  journal "déployé : $VERSION ($REFERENCE, données $COMMIT_DONNEES)"
+  if [ "$COMMIT_DONNEES" = - ]; then
+    signaler_sonde ok "déployé $VERSION"
+  else
+    signaler_sonde ok "déployé $VERSION, données ${COMMIT_DONNEES:0:12}"
+  fi
   menage_des_images
   return 0
 }
