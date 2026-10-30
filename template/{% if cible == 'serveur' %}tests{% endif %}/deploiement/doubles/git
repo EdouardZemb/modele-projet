@@ -1,10 +1,23 @@
 #!/usr/bin/env bash
 # Double de `git` pour les tests de la sonde : il note chaque appel dans $APPELS et simule le
-# clone (`-C <clone>` accepté devant la sous-commande). Aucun dépôt réel n'est lu ni modifié.
+# clone (`-C <clone>` accepté devant la sous-commande). Aucun dépôt réel n'est lu ni modifié, sauf
+# celui de DOUBLE_GIT_REEL_DANS.
 #
 # Pilotage :
+#   DOUBLE_GIT_REEL_DANS     un dossier, celui d'un vrai dépôt du test (le clone des données, à deux
+#                            dépôts) : un appel `-C <ce dossier> …` est noté, puis passé au vrai git,
+#                            et les autres variables n'y ont pas cours
 #   DOUBLE_GIT_STATUS        sortie de `status --porcelain` (défaut : vide, clone propre)
-#   DOUBLE_GIT_ECHEC         sous-commande qui échoue (fetch, merge, checkout ou tag)
+#   DOUBLE_GIT_ECHEC         sous-commande qui échoue (fetch, merge, checkout, tag, cat-file,
+#                            ls-tree ou show), avec un message sur stderr
+#   DOUBLE_GIT_TERM          sous-commande qui envoie SIGTERM à son parent (le script qui l'appelle)
+#                            avant de répondre, comme systemd qui arrête l'unité pendant cet appel
+#   DOUBLE_GIT_ARBRE         dossier qui tient lieu de l'arbre de toute révision du clone :
+#                            `show <rév>:<chemin>` imprime son fichier <chemin> (code 128 s'il n'y
+#                            est pas), `ls-tree --name-only <rév> -- <chemin>` imprime <chemin> s'il
+#                            y est, rien sinon (code 0, comme git). Défaut : la copie de travail du
+#                            clone (celui de `-C`). Tout objet de `cat-file -e` (un `<sha>^{commit}`)
+#                            existe.
 #   DOUBLE_GIT_ETIQUETTES    étiquettes du clone, séparées par des espaces, pour `tag --list`.
 #                            Avec --sort=-v:refname, elles sortent dans l'ordre de version
 #                            décroissant, comme le fait git (sort -rV : même ordre que git sur
@@ -45,14 +58,24 @@ mettre_a_jour_les_etiquettes() {
   fi
 }
 
+dossier=.
 if [ "${1:-}" = -C ]; then
+  if [ -n "${DOUBLE_GIT_REEL_DANS:-}" ] && [ "${2:-}" = "$DOUBLE_GIT_REEL_DANS" ]; then
+    # Le vrai git : le premier du PATH, hors du dossier des doubles.
+    exec "$(PATH="${PATH//"$(dirname "$0")":/}" command -v git)" "$@"
+  fi
+  dossier="$2"
   shift 2
 fi
+ARBRE="${DOUBLE_GIT_ARBRE:-$dossier}"
 sous_commande="${1:-}"
 
 if [ -n "${DOUBLE_GIT_ECHEC:-}" ] && [ "$DOUBLE_GIT_ECHEC" = "$sous_commande" ]; then
   echo "fatal: échec simulé de git $sous_commande" >&2
   exit 128
+fi
+if [ -n "${DOUBLE_GIT_TERM:-}" ] && [ "$DOUBLE_GIT_TERM" = "$sous_commande" ]; then
+  kill -TERM "$PPID"
 fi
 
 case "$sous_commande" in
@@ -70,6 +93,18 @@ case "$sous_commande" in
     else
       printf '%s\n' "$liste"
     fi
+    ;;
+  show)
+    objet="${2:-}"
+    if [[ "$objet" != *:* ]] || [ ! -f "$ARBRE/${objet#*:}" ]; then
+      echo "fatal: path '${objet#*:}' does not exist in '${objet%%:*}'" >&2
+      exit 128
+    fi
+    cat "$ARBRE/${objet#*:}"
+    ;;
+  ls-tree)
+    chemin="${!#}"
+    [ ! -f "$ARBRE/$chemin" ] || printf '%s\n' "$chemin"
     ;;
   merge | checkout)
     if [ -n "${DOUBLE_GIT_REECRIRE:-}" ]; then

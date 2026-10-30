@@ -1,10 +1,16 @@
 {#- Gabarit Copier. `${ {{- prefixe }}X}` : l'espace et le tiret évitent `${{{`, que Jinja lit mal. -#}
 #!/usr/bin/env bats
-# sonder.sh : verrou, clone, cible (main ou plus haute étiquette), image, état, déploiement.
+# sonder.sh : verrou, clones, cible (main ou plus haute étiquette), image, couple visé (l'image et
+# le commit de données), état, déploiement.
 #
 # git, docker et curl sont des doubles (tests/deploiement/doubles/). deployer.sh et
 # installer-unites.sh sont remplacés, dans le clone temporaire, par des doubles qui notent leur
 # appel ; un test de bout en bout garde le vrai deployer.sh.
+{%- if nature == 'code' %}
+# Deux dépôts : le clone des données est un vrai dépôt git, clone d'une origine du test (un dépôt nu)
+# où un autre clone, le « poste », pousse des commits et des étiquettes. Le double de git y passe
+# la main au vrai git (DOUBLE_GIT_REEL_DANS) : ses appels sont notés comme les autres.
+{%- endif %}
 
 # Chaque test tourne dans son propre processus : les `export DOUBLE_*` d'un test ne fuient pas
 # dans les autres, comme le veut le pilotage des doubles.
@@ -17,6 +23,19 @@ load aide
 setup() {
   preparer_environnement
   installer_doubles docker git curl
+  # Les commandes de l'instance que déclarerait le projet.env du projet ne sont pas celles du test :
+  # il part d'un projet qui n'en déclare aucune, et avec_donnees les ajoute.
+  sed -i '/^VERIFIER_CONFIG=/d; /^VERIFIER_CONTENU=/d' "$CLONE/deploiement/projet.env"
+{%- if nature == 'code' %}
+  # Le clone des données du test (aide.bash) devient le clone d'une origine. Les secrets et les clés
+  # que le test y fabrique n'y sont pas versionnés : ils ne le rendent pas modifié.
+  ORIGINE_DONNEES="$BATS_TEST_TMPDIR/origine-donnees.git"
+  "$GIT_REEL" clone -q --bare "$CLONE_DONNEES" "$ORIGINE_DONNEES"
+  git_donnees remote add origin "$ORIGINE_DONNEES"
+  git_donnees fetch -q origin
+  printf '%s\n' /secrets/ /cles/ /.sops.yaml >>"$CLONE_DONNEES/.git/info/exclude"
+  export DOUBLE_GIT_REEL_DANS="$CLONE_DONNEES"
+{%- endif %}
   # La référence que le double de docker donne par défaut à la cible, et une autre.
   EMPREINTE="ghcr.io/{{ compte | lower }}/{{ nom }}@sha256:$(printf 'a%.0s' {1..64})"
   AUTRE="ghcr.io/{{ compte | lower }}/{{ nom }}@sha256:$(printf 'b%.0s' {1..64})"
@@ -64,6 +83,67 @@ signal() {
   printf 'curl -fsS -m 10 --retry 3 --data-raw %s' "$1"
 }
 
+# avec_donnees <commande…> : deploiement/projet.env déclare aussi ces commandes de l'instance
+# (VERIFIER_CONFIG, VERIFIER_CONTENU) : le couple visé a un commit de données.
+avec_donnees() {
+  local commande
+  for commande in "$@"; do
+    printf '%s=outil %s\n' "$commande" "${commande,,}" >>"$CLONE/deploiement/projet.env"
+  done
+}
+
+# appels_git_dans <clone> : les appels de git qui visent ce clone (`git -C <clone> …`).
+appels_git_dans() {
+  appels_de git | grep -F "git -C $1 " || true
+}
+
+# arbre_vise [<commande…>] : l'arbre de l'étiquette visée du code, que le double de git sert à
+# `ls-tree` et à `show` (DOUBLE_GIT_ARBRE) : son deploiement/projet.env est celui de la copie
+# de travail, sans commande de l'instance, avec ces commandes.
+arbre_vise() {
+  local arbre="$BATS_TEST_TMPDIR/arbre-vise" commande
+  mkdir -p "$arbre/deploiement"
+  sed '/^VERIFIER_CONFIG=/d; /^VERIFIER_CONTENU=/d' "$CLONE/deploiement/projet.env" \
+    >"$arbre/deploiement/projet.env"
+  for commande in "$@"; do
+    printf '%s=outil %s\n' "$commande" "${commande,,}" >>"$arbre/deploiement/projet.env"
+  done
+  export DOUBLE_GIT_ARBRE="$arbre"
+}
+{%- if nature == 'code' %}
+
+# git_poste <args…> : le vrai git dans le poste, un autre clone de l'origine des données.
+git_poste() {
+  "$GIT_REEL" -C "$BATS_TEST_TMPDIR/poste-donnees" -c user.name=Essai -c user.email=essai@exemple.org "$@"
+}
+
+# pousser_des_donnees <chemin…> : un commit sur la branche des données de l'origine, fait depuis le
+# poste, avec un fichier d'exemple à chacun de ces chemins ; son sha dans COMMIT. Le clone des
+# données du test est alors en retard sur l'origine.
+pousser_des_donnees() {
+  local poste="$BATS_TEST_TMPDIR/poste-donnees" chemin
+  [ -d "$poste" ] || "$GIT_REEL" clone -q "$ORIGINE_DONNEES" "$poste"
+  for chemin in "$@"; do
+    mkdir -p "$(dirname "$poste/$chemin")"
+    echo "fichier d'exemple $chemin" >"$poste/$chemin"
+  done
+  git_poste add -A
+  git_poste commit -q --allow-empty -m "des données du poste"
+  git_poste push -q origin HEAD:{{ branche_principale }}
+  COMMIT="$(git_poste rev-parse HEAD)"
+}
+
+# etiqueter_les_donnees <étiquette…> : ces étiquettes sur le dernier commit du poste, envoyées à
+# l'origine.
+etiqueter_les_donnees() {
+  local etiquette
+  for etiquette in "$@"; do
+    git_poste tag "$etiquette"
+    git_poste push -q origin "refs/tags/$etiquette"
+  done
+}
+{%- endif %}
+
 # --- staging ---------------------------------------------------------------------------------
 
 @test "ne_fait_rien_si_deja_deploye" {
@@ -72,9 +152,18 @@ signal() {
   sonder staging
   [ "$status" -eq 0 ]
   # la sonde a suivi la branche principale (R22) et tiré :main…
-  [ "$(appels_de git)" = "$(printf '%s\n' "git -C $CLONE status --porcelain" \
+  [ "$(appels_git_dans "$CLONE")" = "$(printf '%s\n' "git -C $CLONE status --porcelain" \
     "git -C $CLONE fetch origin {{ branche_principale }}" \
     "git -C $CLONE merge --ff-only origin/{{ branche_principale }}")" ]
+{%- if nature == 'code' %}
+  # …et la branche des données, même sans commande déclarée : l'env et les secrets y vivent…
+  [ "$(appels_git_dans "$CLONE_DONNEES")" = "$(printf '%s\n' "git -C $CLONE_DONNEES status --porcelain" \
+    "git -C $CLONE_DONNEES fetch origin {{ branche_principale }}" \
+    "git -C $CLONE_DONNEES merge --ff-only origin/{{ branche_principale }}")" ]
+{%- else %}
+  # …un seul clone : celui du projet porte l'instance…
+  [ "$(appels_de git)" = "$(appels_git_dans "$CLONE")" ]
+{%- endif %}
   appels_de docker | grep -Fx 'docker pull -q ghcr.io/{{ compte | lower }}/{{ nom }}:main'
   # …puis, rien à déployer : l'adresse publique répond (corps lu, code HTTP vérifié), signal ok
   [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
@@ -237,7 +326,7 @@ signal() {
   echo "$EMPREINTE" >"$ETAT/echec"
   sonder staging
   [ "$status" -eq 0 ]
-  [[ "$output" == *"version en échec, attente d'une nouvelle"* ]]
+  [[ "$output" == *"couple en échec, attente d'un nouveau"* ]]
   [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
   # l'état laissé par le retour arrière est contrôlé sur place : santé locale de la version déployée
   appels_de docker | grep -Fx "docker image inspect -f {% raw %}{{index .Config.Labels \"org.opencontainers.image.revision\"}}{% endraw %} $AUTRE"
@@ -257,7 +346,7 @@ signal() {
   echo "$EMPREINTE" >"$ETAT/echec"
   sonder staging
   [ "$status" -eq 0 ]
-  [[ "$output" == *"version en échec, attente d'une nouvelle"* ]]
+  [[ "$output" == *"couple en échec, attente d'un nouveau"* ]]
   [ -z "$(signaux)" ]
   [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
   # l'adresse publique n'est pas contrôlée : l'état local seul compte tant que la version est en échec
@@ -308,7 +397,7 @@ signal() {
   echo "$EMPREINTE" >"$ETAT/echec"
   sonder staging
   [ "$status" -eq 0 ]
-  [[ "$output" == *"version en échec, attente d'une nouvelle"* ]]
+  [[ "$output" == *"couple en échec, attente d'un nouveau"* ]]
   [ "$(appels_de docker | grep -c ' ps ')" -eq 0 ]
   [ -z "$(signaux)" ]
 
@@ -560,6 +649,633 @@ signal() {
   done
 }
 
+# --- le couple visé : l'image et le commit de données -----------------------------------------
+#
+# Un projet qui déclare VERIFIER_CONFIG ou VERIFIER_CONTENU déploie un couple, une image et un
+# commit de données ; un projet qui n'en déclare aucune, l'image et « - ». L'état compare des
+# couples : deploye (premier et troisième champs), echec (premier et deuxième), « - » quand le
+# commit manque.
+
+# Review Focus 1 du lot 12 : au premier passage après la mise à jour, un état d'avant la v0.7.0
+# (deploye à deux champs, echec à un champ) se lit comme un couple sans données : un projet sans
+# données ne se redéploie pas, et rien n'est signalé en échec.
+@test "sonder : un état d'avant la v0.7.0 ne redéploie pas un projet sans données" {
+  local nom_env version
+  export DOUBLE_GIT_ETIQUETTES=v0.2.0
+{%- if nature == 'code' %}
+  # une version des données existe : sans commande déclarée, elle ne fait pas un nouveau couple
+  pousser_des_donnees contenu/page.md
+  etiqueter_les_donnees donnees-2026.11.03.1
+{%- endif %}
+  for nom_env in staging prod; do
+    version=main
+    [ "$nom_env" = staging ] || version=0.2.0
+    preparer "$nom_env"
+    # en service, avec un état d'avant la v0.7.0 ; une autre image en échec
+    : >"$APPELS"
+    en_service "$nom_env" "$EMPREINTE" "$version"
+    [ "$(cat "$ETAT/deploye")" = "$EMPREINTE $version" ]
+    echo "$AUTRE" >"$ETAT/echec"
+    sonder "$nom_env"
+    [ "$status" -eq 0 ]
+    [ "$(signaux)" = "$(signal "$version en service") $HC" ]
+    [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
+    [ "$(appels_de git | grep -c checkout)" -eq 0 ]
+
+    # l'image visée marquée en échec avant la v0.7.0 : attente en silence, sans relance
+    : >"$APPELS"
+    en_service "$nom_env" "$AUTRE" "$version"
+    echo "$EMPREINTE" >"$ETAT/echec"
+    sonder "$nom_env"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"couple en échec, attente d'un nouveau : $version ($EMPREINTE, données -)"* ]]
+    [ -z "$(signaux)" ]
+    [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
+  done
+}
+
+# M-0003, amendé : la santé d'une application qui déclare VERIFIER_CONFIG dit d'où vient sa
+# configuration, par l'adresse publique aussi : montee en prod, exemple en staging, qui ne monte
+# jamais /config. Sans VERIFIER_CONFIG, le champ n'est pas lu.
+@test "sonder : l'adresse publique doit dire montee en prod" {
+  local commit corps
+  export DOUBLE_GIT_ETIQUETTES=v0.2.0
+  avec_donnees VERIFIER_CONFIG
+{%- if nature == 'code' %}
+  pousser_des_donnees config/profil.yml
+  etiqueter_les_donnees donnees-2026.11.03.1
+  # la même tête pour la branche des données (staging) et pour l'étiquette (prod)
+  commit="$COMMIT"
+{%- else %}
+  # la révision que le double de docker donne à EMPREINTE
+  commit="$(printf 'a%.0s' {1..40})"
+{%- endif %}
+  preparer prod
+  echo "$EMPREINTE 0.2.0 $commit" >"$ETAT/deploye"
+  for corps in '{"statut":"ok","environnement":"prod"}' \
+    '{"statut":"ok","environnement":"prod","configuration":"exemple"}'; do
+    : >"$APPELS"
+    export DOUBLE_CURL_PUBLIC_CORPS="$corps"
+    sonder prod
+    [ "$status" -eq 1 ]
+    [ "$(signaux)" = "$(signal 'adresse publique : réponse inattendue (attendu : statut ok, environnement prod, configuration montee)') $HC/fail" ]
+    [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
+  done
+  : >"$APPELS"
+  export DOUBLE_CURL_PUBLIC_CORPS='{"statut":"ok","environnement":"prod","configuration":"montee"}'
+  sonder prod
+  [ "$status" -eq 0 ]
+  [ "$(signaux)" = "$(signal "0.2.0 en service, données ${commit:0:12}") $HC" ]
+
+  # staging : exemple
+  preparer staging
+  echo "$EMPREINTE main $commit" >"$ETAT/deploye"
+  : >"$APPELS"
+  export DOUBLE_CURL_PUBLIC_CORPS='{"statut":"ok","environnement":"staging","configuration":"montee"}'
+  sonder staging
+  [ "$status" -eq 1 ]
+  [ "$(signaux)" = "$(signal 'adresse publique : réponse inattendue (attendu : statut ok, environnement staging, configuration exemple)') $HC/fail" ]
+  : >"$APPELS"
+  export DOUBLE_CURL_PUBLIC_CORPS='{"statut":"ok","environnement":"staging","configuration":"exemple"}'
+  sonder staging
+  [ "$status" -eq 0 ]
+  [ "$(signaux)" = "$(signal "main en service, données ${commit:0:12}") $HC" ]
+
+  # VERIFIER_CONTENU seule : le champ configuration n'est pas lu
+  sed -i 's/^VERIFIER_CONFIG=/VERIFIER_CONTENU=/' "$CLONE/deploiement/projet.env"
+  unset DOUBLE_CURL_PUBLIC_CORPS
+  : >"$APPELS"
+  sonder staging
+  [ "$status" -eq 0 ]
+  [ "$(signaux)" = "$(signal "main en service, données ${commit:0:12}") $HC" ]
+}
+{%- if nature == 'code' %}
+
+# Review Focus 3 du lot 12 : la prod vise la plus haute étiquette de données de la forme
+# donnees-AAAA.MM.JJ.n (n sans zéro en tête), en ordre de version : .10 passe devant .9. Toute autre
+# forme est ignorée, même plus haute dans ce tri, et une étiquette retirée de l'origine disparaît du
+# clone (--prune-tags), comme pour le code. Le vrai git, sur un vrai clone.
+@test "sonder : la plus haute étiquette de données, et elle seule" {
+  local neuf dix
+  preparer prod
+  export DOUBLE_GIT_ETIQUETTES=v0.2.0
+  avec_donnees VERIFIER_CONTENU
+
+  # 1. des formes refusées seulement : aucune version des données, on attend, sans tirer l'image
+  pousser_des_donnees contenu/page.md
+  etiqueter_les_donnees donnees-2026.11.3.1 donnees-2026.11.03.0 v1.2.3
+  sonder prod
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"aucune version des données"* ]]
+  [ "$(signaux)" = "$(signal 'aucune version des données') $HC" ]
+  appels_de git | grep -Fx "git -C $CLONE_DONNEES fetch --prune --prune-tags --tags origin"
+  [ "$(nombre_d_appels docker)" -eq 0 ]
+  [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
+
+  # 2. .9 puis .10, chacune sur son commit : .10 passe devant .9, et devant donnees-2026.11.3.1, que
+  # git range plus haut
+  pousser_des_donnees contenu/page.md contenu/neuf.md
+  neuf="$COMMIT"
+  etiqueter_les_donnees donnees-2026.11.03.9
+  pousser_des_donnees contenu/page.md contenu/dix.md
+  dix="$COMMIT"
+  etiqueter_les_donnees donnees-2026.11.03.10
+  : >"$APPELS"
+  sonder prod
+  [ "$status" -eq 0 ]
+  [ "$(git_donnees tag --list 'donnees-*' --sort=-v:refname | head -n 1)" = donnees-2026.11.3.1 ]
+  [ "$(appels_de deployer.sh)" = "deployer.sh prod $EMPREINTE 0.2.0 --commit-donnees $dix" ]
+  # le clone des données passe sur l'étiquette avant les unités et le déploiement, pas avant
+  [ "$(ligne_de "git -C $CLONE_DONNEES checkout --quiet donnees-2026.11.03.10")" -lt "$(ligne_de installer-unites.sh)" ]
+  [ "$(ligne_de installer-unites.sh)" -lt "$(ligne_de 'deployer.sh prod')" ]
+  [ "$(git_donnees rev-parse HEAD)" = "$dix" ]
+
+  # 3. .10 retirée de l'origine : elle disparaît du clone, et la sonde vise .9
+  "$GIT_REEL" -C "$ORIGINE_DONNEES" tag -d donnees-2026.11.03.10 >/dev/null
+  : >"$APPELS"
+  sonder prod
+  [ "$status" -eq 0 ]
+  [ -z "$(git_donnees tag --list donnees-2026.11.03.10)" ]
+  [ "$(appels_de deployer.sh)" = "deployer.sh prod $EMPREINTE 0.2.0 --commit-donnees $neuf" ]
+}
+
+# Le couple change quand seules les données changent : la même image se redéploie avec le nouveau
+# commit, la tête de la branche des données en staging, la nouvelle étiquette en prod.
+@test "sonder : un nouveau commit de données redéploie la même image" {
+  local premier
+  avec_donnees VERIFIER_CONTENU
+
+  # staging : le couple en service, puis la branche des données avance
+  preparer staging
+  premier="$(git_donnees rev-parse HEAD)"
+  echo "$EMPREINTE main $premier" >"$ETAT/deploye"
+  sonder staging
+  [ "$status" -eq 0 ]
+  [ "$(signaux)" = "$(signal "main en service, données ${premier:0:12}") $HC" ]
+  [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
+  pousser_des_donnees contenu/page.md
+  : >"$APPELS"
+  sonder staging
+  [ "$status" -eq 0 ]
+  [ "$(appels_git_dans "$CLONE_DONNEES")" = "$(printf '%s\n' "git -C $CLONE_DONNEES status --porcelain" \
+    "git -C $CLONE_DONNEES fetch origin {{ branche_principale }}" \
+    "git -C $CLONE_DONNEES merge --ff-only origin/{{ branche_principale }}" \
+    "git -C $CLONE_DONNEES rev-parse HEAD")" ]
+  [ "$(appels_de deployer.sh)" = "deployer.sh staging $EMPREINTE main --commit-donnees $COMMIT" ]
+
+  # prod : le couple en service, puis une nouvelle étiquette des données
+  preparer prod
+  export DOUBLE_GIT_ETIQUETTES=v0.2.0
+  etiqueter_les_donnees donnees-2026.11.03.1
+  premier="$COMMIT"
+  echo "$EMPREINTE 0.2.0 $premier" >"$ETAT/deploye"
+  : >"$APPELS"
+  sonder prod
+  [ "$status" -eq 0 ]
+  [ "$(signaux)" = "$(signal "0.2.0 en service, données ${premier:0:12}") $HC" ]
+  [ "$(appels_de git | grep -c checkout)" -eq 0 ]
+  pousser_des_donnees contenu/page.md contenu/autre.md
+  etiqueter_les_donnees donnees-2026.11.04.1
+  : >"$APPELS"
+  sonder prod
+  [ "$status" -eq 0 ]
+  [ "$(appels_de deployer.sh)" = "deployer.sh prod $EMPREINTE 0.2.0 --commit-donnees $COMMIT" ]
+  # le code reste sur son étiquette, les données passent sur la leur, puis les unités et le déploiement
+  [ "$(ligne_de "git -C $CLONE checkout --quiet v0.2.0")" -lt "$(ligne_de installer-unites.sh)" ]
+  [ "$(ligne_de "git -C $CLONE_DONNEES checkout --quiet donnees-2026.11.04.1")" -lt "$(ligne_de installer-unites.sh)" ]
+  [ "$(ligne_de installer-unites.sh)" -lt "$(ligne_de 'deployer.sh prod')" ]
+}
+
+# Un couple en échec attend un autre couple : d'autres données pour la même image, une autre image
+# pour les mêmes données, ou la même image avec des données là où son échec n'en avait pas.
+@test "sonder : un couple en échec ne se rejoue pas, un autre se tente" {
+  local premier
+  avec_donnees VERIFIER_CONTENU
+  preparer staging
+  premier="$(git_donnees rev-parse HEAD)"
+  en_service staging "$AUTRE" main
+  echo "$AUTRE main $premier" >"$ETAT/deploye"
+  echo "$EMPREINTE $premier" >"$ETAT/echec"
+  sonder staging
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"couple en échec, attente d'un nouveau : main ($EMPREINTE, données $premier)"* ]]
+  [ -z "$(signaux)" ]
+  [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
+
+  # la même image, d'autres données
+  pousser_des_donnees contenu/page.md
+  : >"$APPELS"
+  sonder staging
+  [ "$status" -eq 0 ]
+  [ "$(appels_de deployer.sh)" = "deployer.sh staging $EMPREINTE main --commit-donnees $COMMIT" ]
+
+  # les mêmes données, une autre image en échec ; puis l'image visée en échec sans données
+  local echec
+  for echec in "$AUTRE $COMMIT" "$EMPREINTE -" "$EMPREINTE"; do
+    echo "$echec" >"$ETAT/echec"
+    : >"$APPELS"
+    sonder staging
+    [ "$status" -eq 0 ]
+    [ "$(appels_de deployer.sh)" = "deployer.sh staging $EMPREINTE main --commit-donnees $COMMIT" ]
+  done
+}
+
+# Deux dépôts : l'env et les secrets vivent dans le clone des données de l'environnement. Avant tout
+# déploiement, qu'un projet déclare une commande ou non, il doit exister, être propre et se mettre à
+# jour (staging : sa branche, {{ prefixe }}BRANCHE_DONNEES, sans défaut ; prod : ses étiquettes) ;
+# sinon, anomalie. Absent, il n'a ni env ni secrets : le signal ne peut pas partir, le code le dit.
+@test "sonder : clone des données absent, modifié, ou en retard" {
+  local nom_env cas valeur
+  export DOUBLE_GIT_ETIQUETTES=v0.2.0
+  for nom_env in staging prod; do
+    preparer "$nom_env"
+  done
+
+  # absent : rien n'est tenté
+  mv "$CLONE_DONNEES" "$BATS_TEST_TMPDIR/donnees-ailleurs"
+  for nom_env in staging prod; do
+    : >"$APPELS"
+    sonder "$nom_env"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"clone des données absent : $CLONE_DONNEES"* ]]
+    [[ "$output" == *"anomalie : clone des données absent"* ]]
+    [ ! -s "$APPELS" ]
+  done
+  mv "$BATS_TEST_TMPDIR/donnees-ailleurs" "$CLONE_DONNEES"
+
+  # modifié : un fichier suivi changé, ou un fichier de trop ; ni mise à jour, ni image
+  for cas in 'staging env/staging.env' 'prod de-trop'; do
+    nom_env="${cas% *}"
+    preparer "$nom_env"
+    : >"$APPELS"
+    echo '# modifié' >>"$CLONE_DONNEES/${cas#* }"
+    sonder "$nom_env"
+    [ "$status" -eq 1 ]
+    [ "$(signaux)" = "$(signal 'clone des données modifié') $HC/fail" ]
+    [[ "$output" == *"${cas#* }"* ]]
+    [ "$(appels_git_dans "$CLONE_DONNEES")" = "git -C $CLONE_DONNEES status --porcelain" ]
+    [ "$(nombre_d_appels docker)" -eq 0 ]
+    [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
+    git_donnees checkout -q -- .
+    rm -f "$CLONE_DONNEES/de-trop"
+  done
+
+  # en retard : il se met à jour avant le déploiement, sans commande déclarée aussi
+  pousser_des_donnees contenu/page.md
+  preparer staging
+  : >"$APPELS"
+  sonder staging
+  [ "$status" -eq 0 ]
+  [ "$(git_donnees rev-parse HEAD)" = "$COMMIT" ]
+  [ "$(appels_de deployer.sh)" = "deployer.sh staging $EMPREINTE main" ]
+  # en prod, le commit « - », mais le clone passe sur l'étiquette avant le déploiement : l'env et
+  # les secrets suivent la série
+  etiqueter_les_donnees donnees-2026.11.03.1
+  preparer prod
+  : >"$APPELS"
+  sonder prod
+  [ "$status" -eq 0 ]
+  [ "$(appels_de deployer.sh)" = "deployer.sh prod $EMPREINTE 0.2.0" ]
+  [ "$(ligne_de "git -C $CLONE_DONNEES checkout --quiet donnees-2026.11.03.1")" -lt "$(ligne_de 'deployer.sh prod')" ]
+
+  # mise à jour impossible : l'origine injoignable
+  git_donnees remote set-url origin "$BATS_TEST_TMPDIR/origine-absente.git"
+  for nom_env in staging prod; do
+    preparer "$nom_env"
+    : >"$APPELS"
+    sonder "$nom_env"
+    [ "$status" -eq 1 ]
+    [ "$(signaux)" = "$(signal 'mise à jour du clone des données impossible') $HC/fail" ]
+    [ "$(nombre_d_appels docker)" -eq 0 ]
+    [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
+  done
+  git_donnees remote set-url origin "$ORIGINE_DONNEES"
+
+  # mise à jour impossible : une histoire qui a divergé de l'origine
+  git_donnees checkout -q {{ branche_principale }}
+  git_donnees commit -q --allow-empty -m "un commit local, absent de l'origine"
+  pousser_des_donnees contenu/autre.md
+  preparer staging
+  : >"$APPELS"
+  sonder staging
+  [ "$status" -eq 1 ]
+  [ "$(signaux)" = "$(signal 'mise à jour du clone des données impossible') $HC/fail" ]
+  [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
+
+  # staging sans {{ prefixe }}BRANCHE_DONNEES, ou avec une valeur qui serait une option : aucune
+  # branche par défaut, rien n'est tiré
+  for valeur in '' '--upload-pack=touch'; do
+    git_donnees reset -q --hard origin/{{ branche_principale }}
+    sed -i "s/^{{ prefixe }}BRANCHE_DONNEES=.*/{{ prefixe }}BRANCHE_DONNEES=$valeur/" "$CLONE_DONNEES/env/staging.env"
+    git_donnees commit -q -am "une branche des données à essayer"
+    : >"$APPELS"
+    sonder staging
+    [ "$status" -eq 1 ]
+    [ "$(signaux)" = "$(signal '{{ prefixe }}BRANCHE_DONNEES absente ou invalide') $HC/fail" ]
+    [ "$(appels_git_dans "$CLONE_DONNEES")" = "git -C $CLONE_DONNEES status --porcelain" ]
+  done
+}
+
+# Ruling 17 du lot 12 : en prod, une version du code qui déclare une commande attend sa première
+# étiquette de données. Pendant l'attente, la sonde contrôle le couple en service comme quand rien
+# n'est nouveau (l'état après échec, les unités, l'adresse publique), puis dit l'attente par un
+# signal ok. Le champ configuration exigé suit le couple en service, pas la déclaration visée :
+# montee si son compose.env monte /config, rien sinon. Sans couple en service : « aucune version des
+# données », comme avant.
+@test "sonder : en prod, la version qui attend ses données contrôle le couple en service" {
+  local commit
+  commit="$(printf 'c%.0s' {1..40})"
+  preparer prod
+  export DOUBLE_GIT_ETIQUETTES='v0.1.0 v0.2.0'
+  arbre_vise VERIFIER_CONFIG
+
+  # aucun couple en service : l'attente seule
+  sonder prod
+  [ "$status" -eq 0 ]
+  [ "$(signaux)" = "$(signal 'aucune version des données') $HC" ]
+  [ "$(nombre_d_appels installer-unites.sh)" -eq 0 ]
+  [ -z "$(appels_de curl | grep -F '{{ domaine }}' || true)" ]
+  [ "$(nombre_d_appels docker)" -eq 0 ]
+
+  # 0.1.0 en service, sans /config : ses unités et son adresse publique, sans le champ
+  # configuration, que la version visée exigerait
+  en_service prod "$AUTRE" 0.1.0
+  : >"$APPELS"
+  sonder prod
+  [ "$status" -eq 0 ]
+  [ "$(signaux)" = "$(signal '0.2.0 attend une version des données') $HC" ]
+  [ "$(appels_de installer-unites.sh)" = 'installer-unites.sh --verifier' ]
+  appels_de curl | grep -Fx 'curl -sS -m 10 -w \n%{http_code} https://{{ sous_domaine }}.{{ domaine }}{{ chemin_sante }}'
+  [ "$(nombre_d_appels docker)" -eq 0 ]
+  [ "$(appels_de git | grep -c checkout)" -eq 0 ]
+  [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
+
+  # une panne du couple en service fait échouer la sonde : sa santé publique, ses unités
+  export DOUBLE_CURL_PUBLIC_HTTP=503
+  : >"$APPELS"
+  sonder prod
+  [ "$status" -eq 1 ]
+  [ "$(signaux)" = "$(signal 'adresse publique : réponse HTTP 503 au lieu de 200') $HC/fail" ]
+  [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
+  unset DOUBLE_CURL_PUBLIC_HTTP
+  export DOUBLE_UNITES_ECART=1
+  : >"$APPELS"
+  sonder prod
+  [ "$status" -eq 1 ]
+  [ "$(signaux)" = "$(signal 'unités divergentes') $HC/fail" ]
+  unset DOUBLE_UNITES_ECART
+
+  # le couple en service monte /config : montee est exigé
+  echo "$AUTRE 0.1.0 $commit" >"$ETAT/deploye"
+  echo "{{ prefixe }}CONFIG=$ETAT/instantanes/$commit/config" >>"$ETAT/compose.env"
+  : >"$APPELS"
+  sonder prod
+  [ "$status" -eq 1 ]
+  [ "$(signaux)" = "$(signal 'adresse publique : réponse inattendue (attendu : statut ok, environnement prod, configuration montee)') $HC/fail" ]
+  export DOUBLE_CURL_PUBLIC_CORPS='{"statut":"ok","environnement":"prod","configuration":"montee"}'
+  : >"$APPELS"
+  sonder prod
+  [ "$status" -eq 0 ]
+  [ "$(signaux)" = "$(signal '0.2.0 attend une version des données') $HC" ]
+
+  # le couple en service est aussi en échec (un retour arrière manuel qui n'a pas pu le quitter) :
+  # l'état après échec, contrôlé sur place, et le silence, comme quand rien n'est nouveau
+  echo "$AUTRE $commit" >"$ETAT/echec"
+  : >"$APPELS"
+  sonder prod
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"couple en échec, attente d'un nouveau : 0.1.0 ($AUTRE, données $commit)"* ]]
+  appels_de curl | grep -Fx 'curl -fsS -m 5 http://127.0.0.1:{{ bloc_ports }}{{ chemin_sante }}'
+  [ -z "$(signaux)" ]
+  [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
+}
+
+# Ruling 19 du lot 12 : pendant l'attente des données, un deploye présent mais illisible n'est pas
+# « aucune version des données » : rien ne dirait plus ce qui sert la prod. Anomalie, code 1, sans
+# signal ok, et rien n'est contrôlé ni déployé. Hors de l'attente, deployer.sh s'en charge.
+@test "sonder : pendant l'attente des données, un deploye illisible est une anomalie" {
+  local contenu
+  preparer prod
+  export DOUBLE_GIT_ETIQUETTES='v0.1.0 v0.2.0'
+  arbre_vise VERIFIER_CONFIG
+  en_service prod "$AUTRE" 0.1.0
+  # une image d'une autre forme, un commit invalide, un fichier vide
+  for contenu in 'pas-une-image 0.1.0' "$AUTRE 0.1.0 pas-un-commit" ''; do
+    printf '%s\n' "$contenu" >"$ETAT/deploye"
+    : >"$APPELS"
+    sonder prod
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"$ETAT/deploye illisible : "* ]]
+    [ "$(signaux)" = "$(signal "$ETAT/deploye illisible") $HC/fail" ]
+    [ "$(nombre_d_appels installer-unites.sh)" -eq 0 ]
+    [ -z "$(appels_de curl | grep -F '{{ domaine }}' || true)" ]
+    [ "$(nombre_d_appels docker)" -eq 0 ]
+    [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
+  done
+  # présent, mais pas un fichier : illisible aussi
+  rm "$ETAT/deploye"
+  mkdir "$ETAT/deploye"
+  : >"$APPELS"
+  sonder prod
+  [ "$status" -eq 1 ]
+  [ "$(signaux)" = "$(signal "$ETAT/deploye illisible") $HC/fail" ]
+  [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
+}
+{%- else %}
+
+# Un dépôt (P1 du lot 12) : l'instance est dans le clone du projet, et le commit des données est la
+# révision de l'image visée (son label org.opencontainers.image.revision), qui doit exister dans ce
+# clone. Pas d'autre clone à contrôler ni à mettre à jour.
+@test "sonder : en mode un dépôt, le commit est la révision de l'image" {
+  local revision
+  # la révision que le double de docker donne à EMPREINTE
+  revision="$(printf 'a%.0s' {1..40})"
+  avec_donnees VERIFIER_CONTENU
+  preparer staging
+  sonder staging
+  [ "$status" -eq 0 ]
+  [ "$(appels_de deployer.sh)" = "deployer.sh staging $EMPREINTE main --commit-donnees $revision" ]
+  appels_de docker | grep -Fx "docker image inspect -f {% raw %}{{index .Config.Labels \"org.opencontainers.image.revision\"}}{% endraw %} $EMPREINTE"
+  appels_de git | grep -Fx "git -C $CLONE cat-file -e $revision^{commit}"
+  # un seul clone
+  [ "$(appels_de git)" = "$(appels_git_dans "$CLONE")" ]
+
+  # le couple en service
+  echo "$EMPREINTE main $revision" >"$ETAT/deploye"
+  : >"$APPELS"
+  sonder staging
+  [ "$status" -eq 0 ]
+  [ "$(signaux)" = "$(signal "main en service, données ${revision:0:12}") $HC" ]
+
+  # le couple en échec attend ; la même image en échec sans données se tente avec elles
+  en_service staging "$AUTRE" main
+  echo "$EMPREINTE $revision" >"$ETAT/echec"
+  : >"$APPELS"
+  sonder staging
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"couple en échec, attente d'un nouveau : main ($EMPREINTE, données $revision)"* ]]
+  [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
+  echo "$EMPREINTE" >"$ETAT/echec"
+  : >"$APPELS"
+  sonder staging
+  [ "$status" -eq 0 ]
+  [ "$(appels_de deployer.sh)" = "deployer.sh staging $EMPREINTE main --commit-donnees $revision" ]
+
+  # la révision absente du clone : anomalie, rien n'est déployé
+  export DOUBLE_GIT_ECHEC=cat-file
+  : >"$APPELS"
+  sonder staging
+  [ "$status" -eq 1 ]
+  [ "$(signaux)" = "$(signal "révision de l'image absente du clone") $HC/fail" ]
+  [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
+  unset DOUBLE_GIT_ECHEC
+
+  # en prod aussi : la révision de l'image de la plus haute étiquette
+  preparer prod
+  export DOUBLE_GIT_ETIQUETTES=v0.2.0
+  : >"$APPELS"
+  sonder prod
+  [ "$status" -eq 0 ]
+  [ "$(appels_de deployer.sh)" = "deployer.sh prod $EMPREINTE 0.2.0 --commit-donnees $revision" ]
+
+  # sans commande déclarée : le commit « - », rien à chercher dans le clone
+  sed -i '/^VERIFIER_CONTENU=/d' "$CLONE/deploiement/projet.env"
+  : >"$APPELS"
+  sonder prod
+  [ "$status" -eq 0 ]
+  [ "$(appels_de deployer.sh)" = "deployer.sh prod $EMPREINTE 0.2.0" ]
+  [ "$(appels_de git | grep -cF '^{commit}')" -eq 0 ]
+}
+{%- endif %}
+
+# Ruling 13 du lot 12 : la déclaration qui fixe le commit du couple visé est celle de la version du
+# code visée, jamais celle qu'on quitte. En prod, le clone du code ne passe sur l'étiquette qu'avant
+# deployer.sh : la sonde lit le projet.env de l'étiquette sans checkout (le double de git le sert
+# depuis DOUBLE_GIT_ARBRE). Une version qui commence ou cesse de déclarer une commande se déploie
+# donc au premier passage, avec ou sans --commit-donnees, au lieu d'un refus de deployer.sh (64).
+@test "sonder : en prod, une étiquette qui se met à déclarer VERIFIER_CONFIG se déploie au premier passage" {
+  local commit
+  preparer prod
+  export DOUBLE_GIT_ETIQUETTES='v0.1.0 v0.2.0'
+  # 0.1.0 en service, sans commande : la copie de travail du clone est encore la sienne
+  en_service prod "$AUTRE" 0.1.0
+  arbre_vise VERIFIER_CONFIG
+{%- if nature == 'code' %}
+  # sans étiquette de données, la version qui se met à déclarer attend, sans rien tirer ni changer ;
+  # 0.1.0, en service, est contrôlée pendant ce temps (ruling 17 : voir plus haut)
+  sonder prod
+  [ "$status" -eq 0 ]
+  [ "$(signaux)" = "$(signal '0.2.0 attend une version des données') $HC" ]
+  [ "$(nombre_d_appels docker)" -eq 0 ]
+  [ "$(appels_de git | grep -c checkout)" -eq 0 ]
+  [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
+  pousser_des_donnees config/profil.yml
+  etiqueter_les_donnees donnees-2026.11.03.1
+  commit="$COMMIT"
+{%- else %}
+  # la révision que le double de docker donne à EMPREINTE
+  commit="$(printf 'a%.0s' {1..40})"
+{%- endif %}
+  : >"$APPELS"
+  sonder prod
+  [ "$status" -eq 0 ]
+  [ "$(appels_de deployer.sh)" = "deployer.sh prod $EMPREINTE 0.2.0 --commit-donnees $commit" ]
+  # le projet.env de l'étiquette, lu avant tout checkout
+  [ "$(ligne_de "git -C $CLONE show v0.2.0:deploiement/projet.env")" -lt "$(ligne_de "git -C $CLONE checkout --quiet v0.2.0")" ]
+
+  # le couple ainsi visé, en échec : il attend ; déployé : en service, configuration montee
+  echo "$EMPREINTE $commit" >"$ETAT/echec"
+  : >"$APPELS"
+  sonder prod
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"couple en échec, attente d'un nouveau : 0.2.0 ($EMPREINTE, données $commit)"* ]]
+  [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
+  rm "$ETAT/echec"
+  echo "$EMPREINTE 0.2.0 $commit" >"$ETAT/deploye"
+  export DOUBLE_CURL_PUBLIC_CORPS='{"statut":"ok","environnement":"prod","configuration":"montee"}'
+  : >"$APPELS"
+  sonder prod
+  [ "$status" -eq 0 ]
+  [ "$(signaux)" = "$(signal "0.2.0 en service, données ${commit:0:12}") $HC" ]
+  [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
+}
+
+@test "sonder : en prod, une étiquette qui cesse de déclarer se déploie au premier passage, sans l'option" {
+  preparer prod
+  export DOUBLE_GIT_ETIQUETTES='v0.1.0 v0.2.0'
+  # la copie de travail, celle de 0.1.0 en service, déclare VERIFIER_CONTENU ; l'étiquette, rien
+  avec_donnees VERIFIER_CONTENU
+{%- if nature == 'code' %}
+  pousser_des_donnees contenu/page.md
+  etiqueter_les_donnees donnees-2026.11.03.1
+  echo "$AUTRE 0.1.0 $COMMIT" >"$ETAT/deploye"
+{%- else %}
+  echo "$AUTRE 0.1.0 $(printf 'b%.0s' {1..40})" >"$ETAT/deploye"
+{%- endif %}
+  arbre_vise
+  sonder prod
+  [ "$status" -eq 0 ]
+  [ "$(appels_de deployer.sh)" = "deployer.sh prod $EMPREINTE 0.2.0" ]
+  # aucun commit de données cherché
+  [ "$(appels_de git | grep -cF '^{commit}')" -eq 0 ]
+{%- if nature == 'code' %}
+  # le clone des données passe quand même sur l'étiquette de données : l'env et les secrets
+  appels_de git | grep -Fx "git -C $CLONE_DONNEES checkout --quiet donnees-2026.11.03.1"
+{%- endif %}
+
+  # un projet.env absent de l'étiquette ne déclare rien, comme un clone sans projet.env : git ls-tree
+  # le dit, par une sortie vide et le code 0
+  rm "$DOUBLE_GIT_ARBRE/deploiement/projet.env"
+  : >"$APPELS"
+  sonder prod
+  [ "$status" -eq 0 ]
+  [ "$(appels_de deployer.sh)" = "deployer.sh prod $EMPREINTE 0.2.0" ]
+  appels_de git | grep -Fx "git -C $CLONE ls-tree --name-only v0.2.0 -- deploiement/projet.env"
+  [ "$(appels_de git | grep -c ' show ')" -eq 0 ]
+
+  # illisible (git ls-tree ou git show en échec, ou une ligne invalide) : anomalie, rien n'est
+  # tiré. Une erreur de git n'est pas une absence : son stderr va au journal.
+  local cas
+  for cas in ls-tree show ligne; do
+    arbre_vise
+    unset DOUBLE_GIT_ECHEC
+    if [ "$cas" = ligne ]; then
+      echo 'VERIFIER_CONTENU=outil;verifier' >>"$DOUBLE_GIT_ARBRE/deploiement/projet.env"
+    else
+      export DOUBLE_GIT_ECHEC="$cas"
+    fi
+    : >"$APPELS"
+    sonder prod
+    [ "$status" -eq 1 ]
+    [ "$(signaux)" = "$(signal 'deploiement/projet.env de v0.2.0 illisible') $HC/fail" ]
+    [ "$cas" = ligne ] || [[ "$output" == *"fatal: échec simulé de git $cas"* ]]
+    [ "$(nombre_d_appels docker)" -eq 0 ]
+    [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
+  done
+}
+
+# Le projet.env de l'étiquette se lit dans un fichier temporaire : il ne reste pas derrière la sonde,
+# ni à la fin d'un passage, ni quand un SIGTERM (systemd qui arrête l'unité) tombe pendant sa lecture.
+@test "sonder : le projet.env de l'étiquette ne laisse aucun fichier temporaire" {
+  preparer prod
+  export DOUBLE_GIT_ETIQUETTES=v0.2.0
+  arbre_vise
+  export TMPDIR="$BATS_TEST_TMPDIR/temporaires"
+  mkdir -p "$TMPDIR"
+  sonder prod
+  [ "$status" -eq 0 ]
+  appels_de git | grep -Fx "git -C $CLONE show v0.2.0:deploiement/projet.env"
+  [ -z "$(find "$TMPDIR" -mindepth 1)" ]
+
+  # le double de git envoie SIGTERM à la sonde pendant `git show`
+  export DOUBLE_GIT_TERM=show
+  : >"$APPELS"
+  sonder prod
+  [ "$status" -eq 143 ]
+  [ "$(nombre_d_appels docker)" -eq 0 ]
+  [ -z "$(find "$TMPDIR" -mindepth 1)" ]
+}
+
 # --- verrou, réécriture, secrets, usage ------------------------------------------------------
 
 @test "sort_sans_rien_faire_si_le_verrou_est_pris" {
@@ -613,6 +1329,20 @@ signal() {
   [[ "$(signaux)" == "$(signal 'canal inconnu')"*" $HC/fail" ]]
   [ "$(appels_de git)" = "git -C $CLONE status --porcelain" ]
   [ "$(nombre_d_appels docker)" -eq 0 ]
+}
+
+# La garde de lib.sh (refuser_image_heritee) : une image, une version ou un montage posés dans
+# l'environnement prendraient le pas sur compose.env dans `dc`. La sonde refuse avant d'agir.
+@test "sonder : refuse une image ou un montage hérités" {
+  local variable
+  preparer staging
+  for variable in {{ prefixe }}IMAGE {{ prefixe }}VERSION {{ prefixe }}CONFIG {{ prefixe }}CONTENU; do
+    : >"$APPELS"
+    run env "$variable=$CLONE_DONNEES/valeur-heritee" bash "$CLONE/deploiement/sonder.sh" staging
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"$variable est posée dans l'environnement"* ]]
+    [ ! -s "$APPELS" ]
+  done
 }
 
 @test "sonde_refuse_un_usage_invalide" {

@@ -228,6 +228,14 @@ lire_les_chemins='charger_env prod; charger_secrets prod
   avec_lib 'charger_env prod'
   [ "$status" -eq 1 ]
   [[ "$output" == *"fichier d'environnement absent : $HOME/{{ nom }}-donnees/env/prod.env"* ]]
+  # poser_clone_donnees, la même règle, sans rien lire : la sonde dit ainsi un clone absent
+  avec_lib 'poser_clone_donnees prod; echo "${{ prefixe }}CLONE_DONNEES"
+    poser_clone_donnees staging; echo "${{ prefixe }}CLONE_DONNEES"'
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "$HOME/{{ nom }}-donnees" ]
+  [ "${lines[1]}" = "$HOME/{{ nom }}-donnees-staging" ]
+  avec_lib 'poser_clone_donnees essai'
+  [ "$status" -eq 64 ]
 }
 {%- else %}
 
@@ -245,6 +253,8 @@ lire_les_chemins='charger_env prod; charger_secrets prod
   [ "${lines[1]}" = "{{ bloc_ports }}" ]
   [ "${lines[2]}" = jeton-du-clone ]
   [ "${lines[*]:3}" = "deploiement/env deploiement/secrets deploiement/cles instance/config instance/contenu" ]
+  avec_lib 'poser_clone_donnees staging; echo "${{ prefixe }}CLONE_DONNEES"'
+  [ "$output" = "$CLONE" ]
 }
 {%- endif %}
 
@@ -471,6 +481,31 @@ messages_du_journal() {
   for ligne in "${lines[@]}"; do
     printf '%s\n' "${ligne#* }"
   done
+}
+
+# donnees_declarees lit le projet.env du clone ; donnees_declarees_dans, le fichier qu'on lui donne :
+# sonder.sh y passe celui de l'étiquette visée du code, lu sans checkout (ruling 13 du lot 12). Un
+# fichier absent ne déclare rien ; le fichier donné se contrôle comme celui du clone. Un nom vide ou
+# manquant n'est pas le projet.env du clone : il arrête le script, sans rien lire.
+@test "donnees_declarees : le projet.env du clone, ou celui qu'on lui donne" {
+  local vise="$BATS_TEST_TMPDIR/projet-vise.env" appel
+  declarer VERIFIER_CONFIG
+  printf '%s\n' '# Réglages visés' 'VERIFIER_CONTENU=outil verifier_contenu' >"$vise"
+  avec_lib 'donnees_declarees; echo "$DECLARE_CONFIG $DECLARE_CONTENU"
+    donnees_declarees_dans '"$vise"'; echo "$DECLARE_CONFIG $DECLARE_CONTENU"
+    donnees_declarees_dans '"$BATS_TEST_TMPDIR/absent.env"'; echo "$DECLARE_CONFIG $DECLARE_CONTENU"'
+  [ "$status" -eq 0 ]
+  [ "$output" = $'1 0\n0 1\n0 0' ]
+  for appel in 'donnees_declarees_dans ""' donnees_declarees_dans; do
+    avec_lib "$appel"'; echo "lu : $DECLARE_CONFIG $DECLARE_CONTENU"'
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"donnees_declarees_dans : fichier manquant"* ]]
+    [[ "$output" != *"lu :"* ]]
+  done
+  printf '%s\n' 'VERIFIER_CONTENU=outil;verifier' >"$vise"
+  avec_lib 'donnees_declarees_dans '"$vise"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"réglages du projet illisibles : $vise, ligne 1 invalide"* ]]
 }
 
 # La règle des paires : un dossier de l'instance présent dans le commit (un fichier au moins, autre

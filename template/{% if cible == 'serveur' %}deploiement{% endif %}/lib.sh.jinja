@@ -15,6 +15,7 @@
 #   journal <message…>                 une ligne horodatée (UTC) sur stderr
 #   arreter <code> <message…>          journalise et quitte avec ce code
 #   valider_env <env>                  prod ou staging, sinon code 64
+#   poser_clone_donnees <env>          {{ prefixe }}CLONE_DONNEES, le clone des données de l'environnement, sans rien y lire
 #   charger_env <env>                  chemins (le clone des données compris), variables, PATH et dossiers de l'environnement
 #   prefixer_path                      ~/.local/bin en tête du PATH (une fois)
 #   charger_secrets <env>              secrets déchiffrés, exportés dans l'environnement
@@ -23,9 +24,10 @@
 #   signaler <variable> ok|echec [msg] signal de supervision (Healthchecks) ; l'adresse ne sort jamais
 #   dc <args…>                         docker compose du projet (compose.yml, compose.projet.yml, et les montages de compose.env)
 #   valeur_de <clé> <fichier>          la valeur d'une clé d'un fichier CLE=valeur (lu, jamais sourcé)
-#   lire_projet_env <clé>              PROJET_MOTS : les mots de cette clé dans deploiement/projet.env
-#   lire_projet_env_facultatif <clé>   la même chose pour une clé facultative : absente, PROJET_MOTS vide
+#   lire_projet_env <clé> [<fichier>]  PROJET_MOTS : les mots de cette clé dans deploiement/projet.env (ou ce fichier)
+#   lire_projet_env_facultatif <clé> [<fichier>]  la même chose pour une clé facultative : absente, PROJET_MOTS vide
 #   donnees_declarees                  DECLARE_CONFIG, DECLARE_CONTENU : 1 si projet.env déclare VERIFIER_CONFIG, VERIFIER_CONTENU, sinon 0
+#   donnees_declarees_dans <fichier>   la même chose, d'après ce fichier, le projet.env d'une autre version
 #   controler_paires <commit>          la règle des paires : chaque dossier de l'instance du commit avec sa commande, et l'inverse (son README.md seul ne compte pas)
 #   preparer_instantane <commit>       INSTANTANE : l'instantané en lecture seule des dossiers déclarés du commit de données (sans config/ en staging)
 #   _retirer_fige <chemin>             (privée) retire un dossier figé en lecture seule, comme un instantané : les droits d'abord, jamais à travers un lien
@@ -103,9 +105,9 @@ else
   SOUS_DOSSIER_CONTENU="instance/contenu"
 fi
 
-# La surcharge du clone des données (tests), lue une fois, au chargement : charger_env pose ensuite
-# la variable du même nom, et un second appel (prod puis staging) ne doit pas reprendre la valeur du
-# premier.
+# La surcharge du clone des données (tests), lue une fois, au chargement : poser_clone_donnees pose
+# ensuite la variable du même nom, et un second appel (prod puis staging) ne doit pas reprendre la
+# valeur du premier.
 _{{ prefixe }}CLONE_DONNEES_SURCHARGE="${ {{- prefixe }}CLONE_DONNEES:-}"
 
 # La forme d'une image, d'une version et d'un commit de données de l'état : ce que deployer.sh
@@ -153,9 +155,23 @@ _sourcer_en_exportant() {
   return "$code"
 }
 
-# charger_env <prod|staging> : pose {{ prefixe }}CLONE_DONNEES, le clone des données de l'environnement
-# (à deux dépôts, ~/{{ nom }}-donnees en prod et ~/{{ nom }}-donnees-staging en staging, sauf la
-# surcharge des tests ; à un dépôt, le clone qui lance le script), charge son
+# poser_clone_donnees <prod|staging> : {{ prefixe }}CLONE_DONNEES ← le clone des données de
+# l'environnement, sans rien y lire : à deux dépôts, ~/{{ nom }}-donnees en prod et
+# ~/{{ nom }}-donnees-staging en staging, sauf la surcharge des tests ; à un dépôt, le clone qui lance
+# le script. La seule règle de ce chemin : charger_env l'appelle, et sonder.sh aussi, avant lui, pour
+# dire un clone absent, là où charger_env s'arrêterait sans signal.
+poser_clone_donnees() {
+  valider_env "${1:-}"
+  if [ "$MODE_DONNEES" = deux ]; then
+    local clone_donnees="$HOME/{{ nom }}-donnees"
+    [ "$1" = prod ] || clone_donnees="$clone_donnees-staging"
+    {{ prefixe }}CLONE_DONNEES="${_{{ prefixe }}CLONE_DONNEES_SURCHARGE:-$clone_donnees}"
+  else
+    {{ prefixe }}CLONE_DONNEES="${{ prefixe }}CLONE"
+  fi
+}
+
+# charger_env <prod|staging> : pose {{ prefixe }}CLONE_DONNEES (poser_clone_donnees), charge son
 # <SOUS_DOSSIER_ENV>/<env>.env, fixe et exporte les chemins du
 {%- if sauvegardes %}
 # serveur ({{ prefixe }}CLONE, {{ prefixe }}ETAT, {{ prefixe }}DONNEES, {{ prefixe }}SAUVEGARDES, DOCKER_CONFIG),
@@ -170,14 +186,7 @@ _sourcer_en_exportant() {
 charger_env() {
   local nom_env="${1:-}"
   valider_env "$nom_env"
-
-  if [ "$MODE_DONNEES" = deux ]; then
-    local clone_donnees="$HOME/{{ nom }}-donnees"
-    [ "$nom_env" = prod ] || clone_donnees="$clone_donnees-staging"
-    {{ prefixe }}CLONE_DONNEES="${_{{ prefixe }}CLONE_DONNEES_SURCHARGE:-$clone_donnees}"
-  else
-    {{ prefixe }}CLONE_DONNEES="${{ prefixe }}CLONE"
-  fi
+  poser_clone_donnees "$nom_env"
 
   local fichier="${{ prefixe }}CLONE_DONNEES/$SOUS_DOSSIER_ENV/$nom_env.env"
   [ -f "$fichier" ] || arreter 1 "fichier d'environnement absent : $fichier"
@@ -250,14 +259,15 @@ valeur_de() {
   return 1
 }
 
-# lire_projet_env <CLÉ> : les mots de la valeur de cette clé dans deploiement/projet.env (les
-# réglages du projet, ses commandes de sauvegarde par exemple), dans le tableau PROJET_MOTS. Le
-# fichier est lu, jamais sourcé, et il est contrôlé en entier : chaque ligne qui n'est ni vide ni un
-# commentaire doit être de la forme CLE=mots, la clé en majuscules, les mots séparés par des
-# espaces et soumis à la règle de valeur_sure. Échec, journalisé et PROJET_MOTS vide, si le fichier
-# manque, si une ligne est invalide, ou si la clé est absente ou déclarée deux fois.
+# lire_projet_env <CLÉ> [<fichier>] : les mots de la valeur de cette clé dans deploiement/projet.env
+# (les réglages du projet, ses commandes de sauvegarde par exemple), ou dans <fichier>, une autre
+# version de lui, dans le tableau PROJET_MOTS. Le fichier est lu, jamais sourcé, et il est contrôlé
+# en entier : chaque ligne qui n'est ni vide ni un commentaire doit être de la forme CLE=mots, la
+# clé en majuscules, les mots séparés par des espaces et soumis à la règle de valeur_sure. Échec,
+# journalisé et PROJET_MOTS vide, si le fichier manque, si une ligne est invalide, ou si la clé est
+# absente ou déclarée deux fois.
 lire_projet_env() {
-  local cle="${1:-}" fichier="${{ prefixe }}CLONE/deploiement/projet.env" ligne nom valeur numero=0 trouvee=0
+  local cle="${1:-}" fichier="${2:-${{ prefixe }}CLONE/deploiement/projet.env}" ligne nom valeur numero=0 trouvee=0
   PROJET_MOTS=()
   [[ "$cle" =~ ^[A-Z][A-Z0-9_]*$ ]] || arreter 64 "lire_projet_env : clé invalide"
   if [ ! -f "$fichier" ]; then
@@ -291,22 +301,23 @@ lire_projet_env() {
   fi
 }
 
-# lire_projet_env_facultatif <CLÉ> : comme lire_projet_env, pour une clé que le projet peut ne pas
-# déclarer. Si aucune ligne de deploiement/projet.env ne commence par « CLÉ= » (ou si le fichier
-# manque), succès, PROJET_MOTS vide, et rien n'est lu ni journalisé : le script qui l'appelle se
-# comporte comme avant la clé, à l'octet près. Sinon, c'est lire_projet_env, avec le contrôle du
-# fichier entier.
+# lire_projet_env_facultatif <CLÉ> [<fichier>] : comme lire_projet_env, pour une clé que le projet
+# peut ne pas déclarer. Si aucune ligne de deploiement/projet.env (ou de <fichier>) ne commence par
+# « CLÉ= » (ou si le fichier manque), succès, PROJET_MOTS vide, et rien n'est lu ni journalisé : le
+# script qui l'appelle se comporte comme avant la clé, à l'octet près. Sinon, c'est
+# lire_projet_env, avec le contrôle du fichier entier.
 lire_projet_env_facultatif() {
-  local cle="${1:-}" fichier="${{ prefixe }}CLONE/deploiement/projet.env" ligne
+  local cle="${1:-}" fichier="${2:-${{ prefixe }}CLONE/deploiement/projet.env}" ligne declaree=0
   PROJET_MOTS=()
   [[ "$cle" =~ ^[A-Z][A-Z0-9_]*$ ]] || arreter 64 "lire_projet_env_facultatif : clé invalide"
   [ -f "$fichier" ] || return 0
   while IFS= read -r ligne || [ -n "$ligne" ]; do
     if [[ "$ligne" == "$cle="* ]]; then
-      lire_projet_env "$cle"
-      return
+      declaree=1
+      break
     fi
   done <"$fichier"
+  [ "$declaree" -eq 0 ] || lire_projet_env "$cle" "$fichier"
 }
 
 # Options des conteneurs jetables (`docker run`), les mêmes restrictions que le service de
@@ -323,10 +334,19 @@ lire_projet_env_facultatif() {
 # VERIFIER_CONFIG, VERIFIER_CONTENU (lire_projet_env_facultatif), à 0 sinon. Échec, journalisé, si
 # projet.env ne se lit pas.
 donnees_declarees() {
+  donnees_declarees_dans "${{ prefixe }}CLONE/deploiement/projet.env"
+}
+
+# donnees_declarees_dans <fichier> : la même chose, d'après <fichier>, le projet.env d'une autre
+# version du code (sonder.sh y passe celui de l'étiquette visée, lu sans checkout). Un fichier
+# absent ne déclare rien. Un nom vide ou manquant arrête le script : lire_projet_env_facultatif
+# lirait sinon le projet.env du clone, celui d'une autre version.
+donnees_declarees_dans() {
+  : "${1:?donnees_declarees_dans : fichier manquant}"
   DECLARE_CONFIG=0 DECLARE_CONTENU=0
-  lire_projet_env_facultatif VERIFIER_CONFIG || return 1
+  lire_projet_env_facultatif VERIFIER_CONFIG "$1" || return 1
   [ -z "${PROJET_MOTS[0]:-}" ] || DECLARE_CONFIG=1
-  lire_projet_env_facultatif VERIFIER_CONTENU || return 1
+  lire_projet_env_facultatif VERIFIER_CONTENU "$1" || return 1
   [ -z "${PROJET_MOTS[0]:-}" ] || DECLARE_CONTENU=1
 }
 
