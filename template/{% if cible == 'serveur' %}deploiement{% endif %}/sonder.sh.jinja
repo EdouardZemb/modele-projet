@@ -272,7 +272,11 @@ main() {
       rm -f -- "$projet_env_vise"
     fi
   fi
-  [ "$lu" -ne 0 ] || donnees_declarees ${projet_env_vise:+"$projet_env_vise"} || lu=1
+  if [ "$lu" -eq 0 ] && [ -n "$projet_env_vise" ]; then
+    donnees_declarees_dans "$projet_env_vise" || lu=1
+  elif [ "$lu" -eq 0 ]; then
+    donnees_declarees || lu=1
+  fi
   [ -z "$projet_env_vise" ] || rm -f -- "$projet_env_vise"
   if [ "$lu" -ne 0 ]; then
     anomalie "deploiement/projet.env${etiquette:+ de $etiquette} illisible"

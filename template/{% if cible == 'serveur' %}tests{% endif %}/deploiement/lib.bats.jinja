@@ -483,20 +483,20 @@ messages_du_journal() {
   done
 }
 
-# donnees_declarees lit le projet.env du clone, ou le fichier qu'on lui donne : sonder.sh y passe
-# celui de l'étiquette visée du code, lu sans checkout (ruling 13 du lot 12). Un fichier absent ne
-# déclare rien ; le fichier donné se contrôle comme celui du clone.
+# donnees_declarees lit le projet.env du clone ; donnees_declarees_dans, le fichier qu'on lui donne :
+# sonder.sh y passe celui de l'étiquette visée du code, lu sans checkout (ruling 13 du lot 12). Un
+# fichier absent ne déclare rien ; le fichier donné se contrôle comme celui du clone.
 @test "donnees_declarees : le projet.env du clone, ou celui qu'on lui donne" {
   local vise="$BATS_TEST_TMPDIR/projet-vise.env"
   declarer VERIFIER_CONFIG
   printf '%s\n' '# Réglages visés' 'VERIFIER_CONTENU=outil verifier_contenu' >"$vise"
   avec_lib 'donnees_declarees; echo "$DECLARE_CONFIG $DECLARE_CONTENU"
-    donnees_declarees '"$vise"'; echo "$DECLARE_CONFIG $DECLARE_CONTENU"
-    donnees_declarees '"$BATS_TEST_TMPDIR/absent.env"'; echo "$DECLARE_CONFIG $DECLARE_CONTENU"'
+    donnees_declarees_dans '"$vise"'; echo "$DECLARE_CONFIG $DECLARE_CONTENU"
+    donnees_declarees_dans '"$BATS_TEST_TMPDIR/absent.env"'; echo "$DECLARE_CONFIG $DECLARE_CONTENU"'
   [ "$status" -eq 0 ]
   [ "$output" = $'1 0\n0 1\n0 0' ]
   printf '%s\n' 'VERIFIER_CONTENU=outil;verifier' >"$vise"
-  avec_lib 'donnees_declarees '"$vise"
+  avec_lib 'donnees_declarees_dans '"$vise"
   [ "$status" -eq 1 ]
   [[ "$output" == *"réglages du projet illisibles : $vise, ligne 1 invalide"* ]]
 }
