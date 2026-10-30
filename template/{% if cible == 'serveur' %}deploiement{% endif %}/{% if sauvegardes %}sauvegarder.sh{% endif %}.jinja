@@ -36,9 +36,10 @@
 #      déploiement ou la sonde n'ont pas à attendre les quotas et les reprises du distant ;
 #   4. archive tar du dossier (`tar --hard-dereference -C quotidiennes -cf - <nom>` : tous ses
 #      membres sont sous <nom>/, et un lien physique y est un fichier ordinaire, que restaurer.sh
-#      accepte), chiffrée par `age -R deploiement/cles/hors-ligne.pub`, dans un dossier temporaire
-#      0700 ; l'en-tête age est contrôlé. La clé privée n'est pas sur le serveur : personne ici ne
-#      peut relire cette archive ;
+#      accepte), chiffrée par `age -R` pour la clé hors ligne du clone des données
+#      (<SOUS_DOSSIER_CLES>/hors-ligne.pub, lib.sh), dans un dossier temporaire 0700 ; l'en-tête age
+#      est contrôlé. La clé privée n'est pas sur le serveur : personne ici ne peut relire cette
+#      archive ;
 #   5. `rclone copy` vers ${ {{- prefixe }}DISTANT:-sauvegardes:{{ nom }}-sauvegardes}, puis `rclone lsf` :
 #      l'archive doit y figurer. sauvegardes: est l'alias que le serveur fait pointer vers son
 #      remote ;
@@ -147,7 +148,7 @@ main() {
 
   local etat="${{ prefixe }}ETAT" quotidiennes="${{ prefixe }}SAUVEGARDES/quotidiennes"
   local distant="${ {{- prefixe }}DISTANT:-sauvegardes:{{ nom }}-sauvegardes}"
-  local cle="${{ prefixe }}CLONE/deploiement/cles/hors-ligne.pub"
+  local cle="${{ prefixe }}CLONE_DONNEES/$SOUS_DOSSIER_CLES/hors-ligne.pub"
   local nom destination instantane partiel sortie code=0 nombre fichiers archive presents
 
   # 0. Contrôles qui précèdent tout effet.

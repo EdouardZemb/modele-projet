@@ -15,50 +15,54 @@
 #   journal <message…>                 une ligne horodatée (UTC) sur stderr
 #   arreter <code> <message…>          journalise et quitte avec ce code
 #   valider_env <env>                  prod ou staging, sinon code 64
-#   charger_env <env>                  chemins, variables, PATH et dossiers de l'environnement
+#   charger_env <env>                  chemins (le clone des données compris), variables, PATH et dossiers de l'environnement
 #   prefixer_path                      ~/.local/bin en tête du PATH (une fois)
 #   charger_secrets <env>              secrets déchiffrés, exportés dans l'environnement
 #   exporter_cle_sops                  l'identité age que sops utilise
 #   valeur_sure <valeur>               règle commune aux valeurs de secrets (écriture et lecture)
 #   signaler <variable> ok|echec [msg] signal de supervision (Healthchecks) ; l'adresse ne sort jamais
-#   dc <args…>                         docker compose du projet (compose.yml, compose.projet.yml), avec compose.env
+#   dc <args…>                         docker compose du projet (compose.yml, compose.projet.yml, et les montages de compose.env)
 #   valeur_de <clé> <fichier>          la valeur d'une clé d'un fichier CLE=valeur (lu, jamais sourcé)
 #   lire_projet_env <clé>              PROJET_MOTS : les mots de cette clé dans deploiement/projet.env
-{%- if sauvegardes %}
 #   lire_projet_env_facultatif <clé>   la même chose pour une clé facultative : absente, PROJET_MOTS vide
-{%- endif %}
+#   donnees_declarees                  DECLARE_CONFIG, DECLARE_CONTENU : 1 si projet.env déclare VERIFIER_CONFIG, VERIFIER_CONTENU, sinon 0
+#   controler_paires <commit>          la règle des paires : chaque dossier de l'instance du commit avec sa commande, et l'inverse
+#   preparer_instantane <commit>       INSTANTANE : l'instantané en lecture seule des dossiers déclarés du commit de données
+#   verifier_instantane <env> <image> <instantané> [<instantané en service>]  VERIFIER_CONFIG et VERIFIER_CONTENU, en conteneur jetable
 #   jq_vaut <attendu> <doc> <filtre>   le filtre jq, appliqué au document, imprime exactement <attendu>
 #   revision_de <image>                le label de révision (SHA du commit) de l'image
 #   sante_sur <port> <filtre> [opts]   un essai sur http://127.0.0.1:<port>{{ chemin_sante }}
-#   sante_locale <version> <révision>  un essai sur le port de l'environnement : statut, version, révision
+#   sante_locale <version> <révision> [<configuration>]  un essai sur le port de l'environnement : statut, version, révision (et configuration)
 #   attendre_sante <port> <filtre> …   jusqu'à 10 essais de sante_sur
 {%- if sauvegardes %}
 #   reserver_a_prod <env> <script>     code 64 hors prod (sauvegardes, restauration)
 {%- endif %}
 #   refuser_image_heritee              refus si {{ prefixe }}IMAGE ou {{ prefixe }}VERSION est dans l'environnement
 #   prendre_verrou                     le verrou de l'état, partagé, sur le descripteur 9
-#   lire_version <fichier>             IMAGE_LUE et VERSION_LUE, depuis deploye ou precedent
-#   lire_deploye                       DEPLOYE_IMAGE et DEPLOYE_VERSION, depuis le fichier deploye
+#   lire_version <fichier>             IMAGE_LUE, VERSION_LUE et COMMIT_LU, depuis deploye ou precedent
+#   lire_deploye                       DEPLOYE_IMAGE, DEPLOYE_VERSION et DEPLOYE_COMMIT, depuis le fichier deploye
+#   lire_echec                         ECHEC_IMAGE et ECHEC_COMMIT, depuis le fichier echec
 {%- if sauvegardes %}
 #   verifier_copie <image> <dossier>   contrôle d'un dossier qui a la forme de /donnees, par la commande VERIFIER
 #   purger_par_nom <dossier> <regex> <limite>  retire les dossiers dont le nom date d'avant <limite>
 #   retirer_partiels <dossier> <regex> retire les instantanés en échec (.partiel) avant un nouvel essai
 #   retirer_restes_de_restauration     retire, sous le verrou, ce qu'une restauration tuée a laissé
-# Variables posées : {{ prefixe }}CLONE (racine du clone qui lance le script), DEPOT_IMAGE (le dépôt
-# GHCR du projet), MODE_DONNEES (« un » ou « deux » dépôts, M-0006 § 6), MOTIF_REFERENCE et
-# MOTIF_VERSION (la forme de l'image et de la version dans l'état) et {{ prefixe }}OPTIONS_JETABLES
-# (options des conteneurs jetables).
-{%- else %}
-# Variables posées : {{ prefixe }}CLONE (racine du clone qui lance le script), DEPOT_IMAGE (le
-# dépôt GHCR du projet), MODE_DONNEES (« un » ou « deux » dépôts, M-0006 § 6), MOTIF_REFERENCE et
-# MOTIF_VERSION (la forme de l'image et de la version dans l'état).
 {%- endif %}
+# Variables posées : {{ prefixe }}CLONE (racine du clone qui lance le script), DEPOT_IMAGE (le dépôt
+# GHCR du projet), MODE_DONNEES (« un » ou « deux » dépôts, M-0006 § 6), SOUS_DOSSIER_ENV,
+# SOUS_DOSSIER_SECRETS, SOUS_DOSSIER_CLES, SOUS_DOSSIER_CONFIG et SOUS_DOSSIER_CONTENU (les chemins de
+# l'instance dans le clone des données), MOTIF_REFERENCE, MOTIF_VERSION et MOTIF_COMMIT (la forme de
+# l'image, de la version et du commit de données dans l'état) et {{ prefixe }}OPTIONS_JETABLES (options
+# des conteneurs jetables). charger_env pose en plus {{ prefixe }}CLONE_DONNEES, la racine du clone des
+# données de l'environnement.
 #
 # Codes de sortie : 64 = usage (environnement inconnu, argument invalide), 3 = secrets absents,
 # 1 = toute autre erreur.
 #
 # Variables de surcharge (pour les tests) :
 #   {{ prefixe }}RACINE_ETAT, {{ prefixe }}RACINE_DONNEES{% if sauvegardes %}, {{ prefixe }}RACINE_SAUVEGARDES{% endif %}  racines des dossiers
+#   {{ prefixe }}CLONE_DONNEES   à deux dépôts, le clone des données des deux environnements (défaut
+#                           ~/{{ nom }}-donnees en prod, ~/{{ nom }}-donnees-staging en staging), lue au chargement
 #   {{ prefixe }}DOCKER_CONFIG   configuration Docker du serveur (DOCKER_CONFIG du shell est ignoré)
 #   {{ prefixe }}SHM             dossier préféré des fichiers temporaires de secrets (défaut /dev/shm)
 #   SOPS_AGE_KEY_FILE       identité age (défaut ~/.config/sops/age/serveur.txt)
@@ -77,16 +81,42 @@ DEPOT_IMAGE=ghcr.io/{{ compte | lower }}/{{ nom }}
 # code, dont l'instance (env/, secrets, clés du parc, config/, contenu/) vit dans un second dépôt,
 # {{ nom }}-donnees ; « un » pour un dépôt de nature donnees, d'avant M-0006, qui la porte lui-même
 # jusqu'à sa scission. Défini ici seulement : aucun script ne le recalcule.
-# shellcheck disable=SC2034  # lu par les scripts qui sourcent lib.sh
 MODE_DONNEES="{{ 'deux' if nature == 'code' else 'un' }}"
 
-# La forme d'une image et d'une version de l'état : ce que deployer.sh accepte en argument et écrit
-# dans deploye, precedent et compose.env, et ce qu'exigent ceux qui les relisent (lire_version, pour
-# deployer.sh et nettoyer-images.sh ; lire_deploye, pour l'image). Définis ici seulement : une
-# forme nouvelle (une version X.Y.Z-rc.1…) vaut à la fois pour l'écriture et pour la lecture, et le
-# ménage des images ne s'annule pas, en silence, à chaque passage.
+# Les chemins de l'instance, relatifs à la racine du clone des données ({{ prefixe }}CLONE_DONNEES, que
+# pose charger_env) : à deux dépôts, à la racine du dépôt {{ nom }}-donnees ; à un dépôt, sous
+# deploiement/ et instance/ du clone unique (M-0006, § 6). Définis ici seulement : aucun autre script
+# n'écrit ces chemins.
+# shellcheck disable=SC2034  # SOUS_DOSSIER_CLES est lu par sauvegarder.sh, qui source lib.sh
+if [ "$MODE_DONNEES" = deux ]; then
+  SOUS_DOSSIER_ENV=env
+  SOUS_DOSSIER_SECRETS=secrets
+  SOUS_DOSSIER_CLES=cles
+  SOUS_DOSSIER_CONFIG=config
+  SOUS_DOSSIER_CONTENU=contenu
+else
+  SOUS_DOSSIER_ENV=deploiement/env
+  SOUS_DOSSIER_SECRETS=deploiement/secrets
+  SOUS_DOSSIER_CLES=deploiement/cles
+  SOUS_DOSSIER_CONFIG=instance/config
+  SOUS_DOSSIER_CONTENU=instance/contenu
+fi
+
+# La surcharge du clone des données (tests), lue une fois, au chargement : charger_env pose ensuite
+# la variable du même nom, et un second appel (prod puis staging) ne doit pas reprendre la valeur du
+# premier.
+_{{ prefixe }}CLONE_DONNEES_SURCHARGE="${ {{- prefixe }}CLONE_DONNEES:-}"
+
+# La forme d'une image, d'une version et d'un commit de données de l'état : ce que deployer.sh
+# accepte en argument et écrit dans deploye, precedent, echec et compose.env, et ce qu'exigent ceux
+# qui les relisent (lire_version, pour deployer.sh et nettoyer-images.sh ; lire_deploye et
+# lire_echec). Définis ici seulement : une forme nouvelle (une version X.Y.Z-rc.1…) vaut à la fois
+# pour l'écriture et pour la lecture, et le ménage des images ne s'annule pas, en silence, à chaque
+# passage. Le commit de données est un sha de 40 caractères, ou « - » pour un couple sans données
+# montées, et pour un état d'avant la v0.7.0, qui n'a pas ce champ (M-0004, amendé).
 MOTIF_REFERENCE='^[a-z0-9][a-z0-9._/:-]*@sha256:[0-9a-f]{64}$'
 MOTIF_VERSION='^(main|[0-9]+\.[0-9]+\.[0-9]+)$'
+MOTIF_COMMIT='^([0-9a-f]{40}|-)$'
 
 # journal <message…> : une ligne sur stderr, préfixée de l'heure ISO (UTC).
 journal() {
@@ -109,9 +139,9 @@ valider_env() {
   esac
 }
 
-# Source un fichier dotenv public (deploiement/env/<env>.env) en exportant ses variables, et laisse
-# `set -a` dans l'état où il l'a trouvé. Jamais pour des secrets : un fichier sourcé peut exécuter
-# du code et tuer le shell (voir charger_secrets).
+# Source un fichier dotenv public (l'env de l'environnement, dans le clone des données) en exportant
+# ses variables, et laisse `set -a` dans l'état où il l'a trouvé. Jamais pour des secrets : un
+# fichier sourcé peut exécuter du code et tuer le shell (voir charger_secrets).
 _sourcer_en_exportant() {
   local deja_actif=0 code=0
   case $- in *a*) deja_actif=1 ;; esac
@@ -122,7 +152,10 @@ _sourcer_en_exportant() {
   return "$code"
 }
 
-# charger_env <prod|staging> : charge deploiement/env/<env>.env, fixe et exporte les chemins du
+# charger_env <prod|staging> : pose {{ prefixe }}CLONE_DONNEES, le clone des données de l'environnement
+# (à deux dépôts, ~/{{ nom }}-donnees en prod et ~/{{ nom }}-donnees-staging en staging, sauf la
+# surcharge des tests ; à un dépôt, le clone qui lance le script), charge son
+# <SOUS_DOSSIER_ENV>/<env>.env, fixe et exporte les chemins du
 {%- if sauvegardes %}
 # serveur ({{ prefixe }}CLONE, {{ prefixe }}ETAT, {{ prefixe }}DONNEES, {{ prefixe }}SAUVEGARDES, DOCKER_CONFIG),
 # préfixe le PATH par ~/.local/bin et crée les dossiers de données, de sauvegardes et d'état. Créés
@@ -132,11 +165,20 @@ _sourcer_en_exportant() {
 {%- endif %}
 # ici, ils appartiennent à l'utilisateur (uid 1000 sur le serveur, comme le conteneur) ; créés par
 # Docker au premier `up`, ils appartiendraient à root et l'application n'y écrirait pas.
+# {{ prefixe }}CLONE_DONNEES n'est pas exportée : chaque script la pose par son propre charger_env.
 charger_env() {
   local nom_env="${1:-}"
   valider_env "$nom_env"
 
-  local fichier="${{ prefixe }}CLONE/deploiement/env/$nom_env.env"
+  if [ "$MODE_DONNEES" = deux ]; then
+    local clone_donnees="$HOME/{{ nom }}-donnees"
+    [ "$nom_env" = prod ] || clone_donnees="$clone_donnees-staging"
+    {{ prefixe }}CLONE_DONNEES="${_{{ prefixe }}CLONE_DONNEES_SURCHARGE:-$clone_donnees}"
+  else
+    {{ prefixe }}CLONE_DONNEES="${{ prefixe }}CLONE"
+  fi
+
+  local fichier="${{ prefixe }}CLONE_DONNEES/$SOUS_DOSSIER_ENV/$nom_env.env"
   [ -f "$fichier" ] || arreter 1 "fichier d'environnement absent : $fichier"
   _sourcer_en_exportant "$fichier" || arreter 1 "fichier d'environnement illisible : $fichier"
   [ "${ {{- prefixe }}ENV:-}" = "$nom_env" ] \
@@ -172,17 +214,24 @@ prefixer_path() {
 }
 
 # dc <args…> : docker compose pour le projet courant, sur compose.yml (géré par le modèle) et
-# compose.projet.yml (les ajouts du projet, que compose fusionne au premier). Le fichier compose.env
-# (écrit par le script de déploiement) porte toutes les variables `${…:?}` du compose : `dc down`,
-# `dc logs` ou `dc exec` fonctionnent donc aussi, pas seulement `dc up`. Compose lit le shell avant
-# --env-file : les variables de deploiement/env/<env>.env, que charger_env exporte, y ont la même
-# valeur, et c'est pourquoi refuser_image_heritee ne vise que l'image et la version, qui ne
-# viennent que de compose.env.
+# compose.projet.yml (les ajouts du projet, que compose fusionne au premier), puis, quand compose.env
+# les porte, les montages de l'instantané des données (M-0006, § 5) : compose.config.yml pour
+# {{ prefixe }}CONFIG, compose.contenu.yml pour {{ prefixe }}CONTENU, gérés, après les ajouts du projet. Le
+# fichier compose.env (écrit par le script de déploiement) porte toutes les variables `${…:?}` du
+# compose : `dc down`, `dc logs` ou `dc exec` fonctionnent donc aussi, pas seulement `dc up`. Compose
+# lit le shell avant --env-file : les variables de l'env de l'environnement, que charger_env
+# exporte, y ont la même valeur, et c'est pourquoi refuser_image_heritee ne vise que l'image et la
+# version, qui ne viennent que de compose.env.
 dc() {
   : "${ {{- prefixe }}PROJET:?dc : charger_env doit précéder dc}"
-  docker compose -p "${{ prefixe }}PROJET" -f "${{ prefixe }}CLONE/deploiement/compose.yml" \
-    -f "${{ prefixe }}CLONE/deploiement/compose.projet.yml" \
-    --env-file "${{ prefixe }}ETAT/compose.env" "$@"
+  local -a fichiers=(-f "${{ prefixe }}CLONE/deploiement/compose.yml" -f "${{ prefixe }}CLONE/deploiement/compose.projet.yml")
+  if valeur_de {{ prefixe }}CONFIG "${{ prefixe }}ETAT/compose.env" >/dev/null; then
+    fichiers+=(-f "${{ prefixe }}CLONE/deploiement/compose.config.yml")
+  fi
+  if valeur_de {{ prefixe }}CONTENU "${{ prefixe }}ETAT/compose.env" >/dev/null; then
+    fichiers+=(-f "${{ prefixe }}CLONE/deploiement/compose.contenu.yml")
+  fi
+  docker compose -p "${{ prefixe }}PROJET" "${fichiers[@]}" --env-file "${{ prefixe }}ETAT/compose.env" "$@"
 }
 
 # valeur_de <clé> <fichier> : la valeur de cette clé dans un fichier CLE=valeur écrit par les
@@ -239,7 +288,6 @@ lire_projet_env() {
     return 1
   fi
 }
-{%- if sauvegardes %}
 
 # lire_projet_env_facultatif <CLÉ> : comme lire_projet_env, pour une clé que le projet peut ne pas
 # déclarer. Si aucune ligne de deploiement/projet.env ne commence par « CLÉ= » (ou si le fichier
@@ -258,7 +306,211 @@ lire_projet_env_facultatif() {
     fi
   done <"$fichier"
 }
-{%- endif %}
+
+# Options des conteneurs jetables (`docker run`), les mêmes restrictions que le service de
+# deploiement/compose.yml : utilisateur 1000, système de fichiers en lecture seule, aucune capacité.
+{{ prefixe }}OPTIONS_JETABLES=(--user 1000:1000 --read-only --tmpfs /tmp --cap-drop ALL
+  --security-opt no-new-privileges:true --memory 384m)
+
+# --- L'instance : configuration et contenu, dans le clone des données (M-0006, § 5) ------------
+# Chaque dossier va avec sa commande de deploiement/projet.env : SOUS_DOSSIER_CONFIG (monté sur
+# /config) avec VERIFIER_CONFIG, SOUS_DOSSIER_CONTENU (monté sur /contenu) avec VERIFIER_CONTENU. Un
+# projet qui n'en déclare aucune ne monte rien.
+
+# donnees_declarees : DECLARE_CONFIG et DECLARE_CONTENU à 1 si deploiement/projet.env déclare
+# VERIFIER_CONFIG, VERIFIER_CONTENU (lire_projet_env_facultatif), à 0 sinon. Échec, journalisé, si
+# projet.env ne se lit pas.
+donnees_declarees() {
+  DECLARE_CONFIG=0 DECLARE_CONTENU=0
+  lire_projet_env_facultatif VERIFIER_CONFIG || return 1
+  [ -z "${PROJET_MOTS[0]:-}" ] || DECLARE_CONFIG=1
+  lire_projet_env_facultatif VERIFIER_CONTENU || return 1
+  [ -z "${PROJET_MOTS[0]:-}" ] || DECLARE_CONTENU=1
+}
+
+# _exiger_commit <commit> <fonction> : un commit de données, 40 caractères hexadécimaux, sinon code
+# 64 : il nomme un dossier de l'état.
+_exiger_commit() {
+  [[ "${1:-}" =~ ^[0-9a-f]{40}$ ]] \
+    || arreter 64 "$2 : commit de données invalide : '${1:-}' (attendu : 40 caractères hexadécimaux)"
+}
+
+# controler_paires <commit> : la règle des paires sur le commit de données <commit> de
+# {{ prefixe }}CLONE_DONNEES, d'après `git ls-tree` (git ne connaît pas de dossier vide : un dossier
+# présent n'est pas vide). Un dossier de l'instance sans sa commande, ou une commande sans son
+# dossier, refuse : code 1, et une ligne « <dossier> sans <commande> » ou « <commande> sans
+# <dossier> » au journal pour chaque paire en défaut. Code 1 aussi, journalisé, si projet.env ou le
+# commit ne se lit pas ; 0 sinon.
+controler_paires() {
+  local commit="${1:-}" paire dossier commande declaree sortie code=0
+  _exiger_commit "$commit" controler_paires
+  donnees_declarees || return 1
+  for paire in "$SOUS_DOSSIER_CONFIG VERIFIER_CONFIG $DECLARE_CONFIG" \
+    "$SOUS_DOSSIER_CONTENU VERIFIER_CONTENU $DECLARE_CONTENU"; do
+    read -r dossier commande declaree <<<"$paire"
+    if ! sortie="$(git -C "${{ prefixe }}CLONE_DONNEES" ls-tree -d --name-only "$commit" -- "$dossier" 2>&1)"; then
+      journal "commit de données illisible : $commit dans ${{ prefixe }}CLONE_DONNEES (${sortie//$'\n'/ })"
+      return 1
+    fi
+    if [ "$sortie" = "$dossier" ] && [ "$declaree" -eq 0 ]; then
+      journal "$dossier sans $commande (commit de données $commit)"
+      code=1
+    elif [ "$sortie" != "$dossier" ] && [ "$declaree" -eq 1 ]; then
+      journal "$commande sans $dossier (commit de données $commit)"
+      code=1
+    fi
+  done
+  return "$code"
+}
+
+# preparer_instantane <commit> : INSTANTANE ← ${{ prefixe }}ETAT/instantanes/<commit>, l'instantané des
+# dossiers déclarés du commit de données <commit>, chacun sous son nom final (config/, contenu/, quel
+# que soit le mode). Complet (il a chaque dossier déclaré), il se réutilise tel quel. Sinon, il se
+# fait sous <commit>.partiel : le .partiel d'un essai coupé est retiré, chaque dossier y est extrait
+# du commit (`git archive`, jamais de la copie de travail du clone), les droits passent en lecture
+# seule (a-w), puis le .partiel prend son nom. Rend 0, ou 1 journalisé ; un essai qui échoue laisse
+# son .partiel, pour le diagnostic, jusqu'au suivant, et un instantané incomplet n'est jamais
+# remplacé. À appeler sous le verrou de l'état.
+preparer_instantane() {
+  local commit="${1:-}" partiel source nom sortie
+  local -a dossiers=()
+  _exiger_commit "$commit" preparer_instantane
+  INSTANTANE="${{ prefixe }}ETAT/instantanes/$commit"
+  partiel="$INSTANTANE.partiel"
+  donnees_declarees || return 1
+  [ "$DECLARE_CONFIG" -eq 0 ] || dossiers+=("$SOUS_DOSSIER_CONFIG:config")
+  [ "$DECLARE_CONTENU" -eq 0 ] || dossiers+=("$SOUS_DOSSIER_CONTENU:contenu")
+
+  if [ -e "$INSTANTANE" ] || [ -L "$INSTANTANE" ]; then
+    if [ -L "$INSTANTANE" ] || [ ! -d "$INSTANTANE" ]; then
+      journal "instantané des données illisible : $INSTANTANE n'est pas un dossier ; rien n'est remplacé"
+      return 1
+    fi
+    for source in "${dossiers[@]}"; do
+      nom="${source##*:}"
+      if [ ! -d "$INSTANTANE/$nom" ] || [ -L "$INSTANTANE/$nom" ]; then
+        journal "instantané des données incomplet : $INSTANTANE (sans $nom) ; rien n'est remplacé"
+        return 1
+      fi
+    done
+    journal "instantané des données réutilisé : $INSTANTANE"
+    return 0
+  fi
+
+  # Le .partiel d'un essai coupé, peut-être déjà en lecture seule : les droits d'abord (jamais à
+  # travers un lien), puis le retrait.
+  if [ -e "$partiel" ] || [ -L "$partiel" ]; then
+    [ -L "$partiel" ] || [ ! -d "$partiel" ] || chmod -R u+w -- "$partiel" 2>/dev/null || true
+    rm -rf -- "$partiel" 2>/dev/null || true
+  fi
+  if [ -e "$partiel" ] || [ -L "$partiel" ]; then
+    journal "instantané des données impossible : $partiel, laissé par un essai coupé, ne se retire pas"
+    return 1
+  fi
+  if ! mkdir -p -- "${{ prefixe }}ETAT/instantanes" || ! mkdir -- "$partiel"; then
+    journal "instantané des données impossible : $partiel ne se crée pas"
+    return 1
+  fi
+  for source in "${dossiers[@]}"; do
+    nom="${source##*:}"
+    source="${source%:*}"
+    if ! sortie="$( (set -o pipefail
+      git -C "${{ prefixe }}CLONE_DONNEES" archive --format=tar --prefix="$nom/" "$commit:$source" \
+        | tar -x -f - -C "$partiel") 2>&1)"; then
+      journal "extraction impossible de $source du commit de données $commit : ${sortie//$'\n'/ }"
+      return 1
+    fi
+  done
+  if ! chmod -R a-w -- "$partiel" || ! mv -T -- "$partiel" "$INSTANTANE"; then
+    journal "instantané des données impossible : $partiel ne se fige pas ou ne prend pas son nom"
+    return 1
+  fi
+  journal "instantané des données prêt : $INSTANTANE"
+}
+
+# verifier_instantane <env> <image> <instantané> [<instantané en service>] : lance sur l'instantané
+# chaque commande déclarée, dans un conteneur jetable de <image> (--rm), sans réseau, avec les options
+# des conteneurs jetables, chaque dossier en lecture seule sur son point de montage :
+# `<VERIFIER_CONFIG…> /config` (jamais en staging, qui ne monte jamais /config), puis
+# `<VERIFIER_CONTENU…> /contenu`, suivi de /en-service, le contenu de l'instantané en service, s'il
+# en a un. Le contrat de l'image : 0 conforme, 2 non conforme, 64 usage. Seul le code fait foi ; la
+# sortie va au journal, jamais sur stdout. Rend 0 si tout est conforme, 2 dès qu'une commande dit
+# « non conforme », 1 si la vérification n'a pas eu lieu (projet.env illisible, un dossier à monter
+# absent, code 64 ou tout autre code). Aucun conteneur ne part si un dossier à monter manque.
+verifier_instantane() {
+  local nom_env="${1:-}" image="${2:-}" instantane="${3:-}" en_service="${4:-}"
+  local -a contenu=(-v "$instantane/contenu:/contenu:ro" -- /contenu)
+  valider_env "$nom_env"
+  { [[ "$image" =~ $MOTIF_REFERENCE ]] && [ -n "$instantane" ]; } \
+    || arreter 64 "usage : verifier_instantane <env> <image@sha256:…> <instantané> [<instantané en service>]"
+  donnees_declarees || return 1
+  [ "$nom_env" = prod ] || [ "$DECLARE_CONFIG" -eq 0 ] \
+    || journal "staging : VERIFIER_CONFIG n'est pas lancée, /config n'y est jamais monté"
+
+  # Tout ce qui sera monté existe, avant le premier conteneur : docker créerait un dossier absent.
+  if [ "$nom_env" = prod ] && [ "$DECLARE_CONFIG" -eq 1 ]; then
+    _exiger_dossier "$instantane/config" "instantané sans config" || return 1
+  fi
+  if [ "$DECLARE_CONTENU" -eq 1 ]; then
+    _exiger_dossier "$instantane/contenu" "instantané sans contenu" || return 1
+    if [ -n "$en_service" ]; then
+      _exiger_dossier "$en_service" "instantané en service introuvable" || return 1
+      if [ -d "$en_service/contenu" ]; then
+        contenu=(-v "$instantane/contenu:/contenu:ro" -v "$en_service/contenu:/en-service:ro" -- /contenu /en-service)
+      fi
+    fi
+  fi
+
+  if [ "$nom_env" = prod ] && [ "$DECLARE_CONFIG" -eq 1 ]; then
+    _verifier_par VERIFIER_CONFIG configuration "$image" -v "$instantane/config:/config:ro" -- /config || return
+  fi
+  if [ "$DECLARE_CONTENU" -eq 1 ]; then
+    _verifier_par VERIFIER_CONTENU contenu "$image" "${contenu[@]}" || return
+  fi
+}
+
+# _exiger_dossier <chemin> <message> : un dossier, et pas un lien ; sinon « <message> : <chemin> »
+# au journal, et échec.
+_exiger_dossier() {
+  { [ -d "$1" ] && [ ! -L "$1" ]; } && return 0
+  journal "$2 : $1"
+  return 1
+}
+
+# _verifier_par <CLÉ> <libellé> <image> <-v source:cible:ro…> -- <arguments…> : la commande <CLÉ> de
+# projet.env, dans un conteneur jetable de <image>, sans réseau, avec ces montages, suivie de ces
+# arguments. Rend 0, 2 ou 1, comme verifier_instantane.
+_verifier_par() {
+  local cle="$1" libelle="$2" image="$3" sortie code=0
+  local -a montages=()
+  shift 3
+  while [ "$#" -gt 0 ] && [ "$1" != -- ]; do
+    montages+=("$1")
+    shift
+  done
+  shift
+  lire_projet_env "$cle" || return 1
+  sortie="$(docker run --rm --network none "${ {{- prefixe }}OPTIONS_JETABLES[@]}" "${montages[@]}" "$image" \
+    "${PROJET_MOTS[@]}" "$@")" || code=$?
+  case "$code" in
+    0)
+      journal "$libelle conforme ($cle : code 0)${sortie:+ : ${sortie//$'\n'/ }}"
+      return 0
+      ;;
+    2)
+      journal "$libelle non conforme ($cle : code 2) : ${sortie//$'\n'/ }"
+      return 2
+      ;;
+    64)
+      journal "vérification impossible ($cle : code 64) : usage refusé, l'image ne connaît pas la commande $cle de projet.env : ${sortie//$'\n'/ }"
+      return 1
+      ;;
+    *)
+      journal "vérification impossible ($cle : code $code) : ${sortie//$'\n'/ }"
+      return 1
+      ;;
+  esac
+}
 
 # jq_vaut <attendu> <document> <filtre> [options jq…] : le filtre, appliqué au document, imprime
 # exactement <attendu>. Pas de `jq -e` : jq 1.6 rend 0 sur une entrée vide, et un corps vide
@@ -297,13 +549,20 @@ sante_sur() {
   jq_vaut true "$reponse" "$filtre" "$@"
 }
 
-# sante_locale <version> <révision> : un essai sur http://127.0.0.1:${{ prefixe }}PORT{{ chemin_sante }}.
-# Imprime la réponse (ou l'erreur de curl) ; succès si elle annonce statut ok, cette version et
-# cette révision.
+# sante_locale <version> <révision> [<configuration>] : un essai sur
+# http://127.0.0.1:${{ prefixe }}PORT{{ chemin_sante }}. Imprime la réponse (ou l'erreur de curl) ; succès si
+# elle annonce statut ok, cette version et cette révision, et, avec un troisième argument, ce champ
+# configuration (exemple ou montee, M-0003 amendé). Sans lui, le champ n'est pas lu.
 sante_locale() {
-  # shellcheck disable=SC2016  # $version et $revision sont des variables de jq (--arg)
-  sante_sur "${{ prefixe }}PORT" '.statut == "ok" and .version == $version and .revision == $revision' \
-    --arg version "$1" --arg revision "$2"
+  # shellcheck disable=SC2016  # $version, $revision et $configuration sont des variables de jq (--arg)
+  if [ "$#" -ge 3 ]; then
+    sante_sur "${{ prefixe }}PORT" \
+      '.statut == "ok" and .version == $version and .revision == $revision and .configuration == $configuration' \
+      --arg version "$1" --arg revision "$2" --arg configuration "$3"
+  else
+    sante_sur "${{ prefixe }}PORT" '.statut == "ok" and .version == $version and .revision == $revision' \
+      --arg version "$1" --arg revision "$2"
+  fi
 }
 
 # attendre_sante <port> <filtre jq> [options jq…] : jusqu'à 10 essais de sante_sur, à
@@ -353,40 +612,66 @@ prendre_verrou() {
   flock -w "${ {{- prefixe }}VERROU_ATTENTE:-600}" 9
 }
 
-# lire_version <fichier> : l'image et la version d'un fichier "<image@sha256:…> <version>" (deploye,
-# precedent), écrit par deployer.sh, dans IMAGE_LUE et VERSION_LUE. Échec, sans rien journaliser,
-# si le fichier manque, ne se lit pas, ou si l'une des deux n'a pas la forme que deployer.sh écrit
-# (MOTIF_REFERENCE, MOTIF_VERSION). Utilisée par deployer.sh (le retour arrière) et par
-# nettoyer-images.sh (l'état des deux environnements).
+# L'état en couple (M-0004, amendé) : deploye et precedent portent "<image@sha256:…> <version>
+# <commit>", echec "<image@sha256:…> <commit>", <commit> étant le commit de données ou « - ». Un
+# fichier d'avant la v0.7.0 n'a pas ce dernier champ : il se lit « - ». Un champ de plus est ignoré,
+# comme le faisaient les scripts d'avant, qui ne lisent que les premiers (`read -r a b _`).
+
+# lire_version <fichier> : l'image, la version et le commit de données d'un fichier deploye ou
+# precedent, écrit par deployer.sh, dans IMAGE_LUE, VERSION_LUE et COMMIT_LU. Échec, sans rien
+# journaliser et les trois vides, si le fichier manque, ne se lit pas, ou si l'un des champs n'a pas
+# la forme que deployer.sh écrit (MOTIF_REFERENCE, MOTIF_VERSION, MOTIF_COMMIT). Utilisée par
+# deployer.sh (le retour arrière) et par nettoyer-images.sh (l'état des deux environnements).
 lire_version() {
-  IMAGE_LUE="" VERSION_LUE=""
+  IMAGE_LUE="" VERSION_LUE="" COMMIT_LU=""
   [ -f "$1" ] || return 1
-  { read -r IMAGE_LUE VERSION_LUE _ || true; } <"$1" || return 1
-  [[ "$IMAGE_LUE" =~ $MOTIF_REFERENCE ]] && [[ "$VERSION_LUE" =~ $MOTIF_VERSION ]]
+  { read -r IMAGE_LUE VERSION_LUE COMMIT_LU _ || true; } <"$1" || return 1
+  COMMIT_LU="${COMMIT_LU:--}"
+  if [[ "$IMAGE_LUE" =~ $MOTIF_REFERENCE ]] && [[ "$VERSION_LUE" =~ $MOTIF_VERSION ]] \
+    && [[ "$COMMIT_LU" =~ $MOTIF_COMMIT ]]; then
+    return 0
+  fi
+  IMAGE_LUE="" VERSION_LUE="" COMMIT_LU=""
+  return 1
 }
 
-# lire_deploye : l'image et la version de ${{ prefixe }}ETAT/deploye ("<image@sha256:…> <version>", écrit
-# par deployer.sh) dans DEPLOYE_IMAGE et DEPLOYE_VERSION. Échec, journalisé, si le fichier manque
-# ou si l'image n'a pas la forme que deployer.sh écrit (MOTIF_REFERENCE) ; la version doit
-# seulement ne pas être vide.
+# lire_deploye : l'image, la version et le commit de données de ${{ prefixe }}ETAT/deploye, écrit par
+# deployer.sh, dans DEPLOYE_IMAGE, DEPLOYE_VERSION et DEPLOYE_COMMIT (« - » quand le champ manque).
+# Échec, journalisé, si le fichier manque, si l'image n'a pas la forme que deployer.sh écrit
+# (MOTIF_REFERENCE) ou le commit non plus (MOTIF_COMMIT) ; la version doit seulement ne pas être vide.
 lire_deploye() {
-  DEPLOYE_IMAGE="" DEPLOYE_VERSION=""
+  DEPLOYE_IMAGE="" DEPLOYE_VERSION="" DEPLOYE_COMMIT=""
   if [ ! -f "${{ prefixe }}ETAT/deploye" ]; then
     journal "aucune version déployée (${{ prefixe }}ETAT/deploye absent) : rien sur quoi s'appuyer"
     return 1
   fi
-  { read -r DEPLOYE_IMAGE DEPLOYE_VERSION _ || true; } <"${{ prefixe }}ETAT/deploye"
-  if ! [[ "$DEPLOYE_IMAGE" =~ $MOTIF_REFERENCE ]] || [ -z "$DEPLOYE_VERSION" ]; then
-    journal "${{ prefixe }}ETAT/deploye illisible : '$DEPLOYE_IMAGE' '$DEPLOYE_VERSION'"
+  { read -r DEPLOYE_IMAGE DEPLOYE_VERSION DEPLOYE_COMMIT _ || true; } <"${{ prefixe }}ETAT/deploye"
+  DEPLOYE_COMMIT="${DEPLOYE_COMMIT:--}"
+  if ! [[ "$DEPLOYE_IMAGE" =~ $MOTIF_REFERENCE ]] || [ -z "$DEPLOYE_VERSION" ] \
+    || ! [[ "$DEPLOYE_COMMIT" =~ $MOTIF_COMMIT ]]; then
+    journal "${{ prefixe }}ETAT/deploye illisible : '$DEPLOYE_IMAGE' '$DEPLOYE_VERSION' '$DEPLOYE_COMMIT'"
     return 1
   fi
 }
-{%- if sauvegardes %}
 
-# Options des conteneurs jetables (`docker run`), les mêmes restrictions que le service de
-# deploiement/compose.yml : utilisateur 1000, système de fichiers en lecture seule, aucune capacité.
-{{ prefixe }}OPTIONS_JETABLES=(--user 1000:1000 --read-only --tmpfs /tmp --cap-drop ALL
-  --security-opt no-new-privileges:true --memory 384m)
+# lire_echec : le couple en échec de ${{ prefixe }}ETAT/echec, écrit par deployer.sh, dans ECHEC_IMAGE et
+# ECHEC_COMMIT (« - » quand le champ manque). Sans fichier, succès, les deux vides : aucun couple
+# n'est en échec. Échec, sans rien journaliser et les deux vides, si le fichier ne se lit pas ou si
+# l'un des champs n'a pas la forme que deployer.sh écrit (MOTIF_REFERENCE, MOTIF_COMMIT).
+lire_echec() {
+  local fichier="${{ prefixe }}ETAT/echec"
+  ECHEC_IMAGE="" ECHEC_COMMIT=""
+  [ -e "$fichier" ] || [ -L "$fichier" ] || return 0
+  [ -f "$fichier" ] || return 1
+  { read -r ECHEC_IMAGE ECHEC_COMMIT _ || true; } <"$fichier" || return 1
+  ECHEC_COMMIT="${ECHEC_COMMIT:--}"
+  if [[ "$ECHEC_IMAGE" =~ $MOTIF_REFERENCE ]] && [[ "$ECHEC_COMMIT" =~ $MOTIF_COMMIT ]]; then
+    return 0
+  fi
+  ECHEC_IMAGE="" ECHEC_COMMIT=""
+  return 1
+}
+{%- if sauvegardes %}
 
 # verifier_copie <image> <dossier> : contrôle <dossier>, qui a la forme de /donnees (un instantané,
 # ou sa copie), par la commande VERIFIER de deploiement/projet.env (lu, jamais sourcé), dans un
@@ -567,7 +852,8 @@ _detruire_secrets_tmp() {
   _{{ prefixe }}SECRETS_TMP=""
 }
 
-# charger_secrets <env> : déchiffre deploiement/secrets/<env>.env.enc et exporte ses variables.
+# charger_secrets <env> : déchiffre <SOUS_DOSSIER_SECRETS>/<env>.env.enc du clone des données (que
+# pose charger_env, à appeler avant) et exporte ses variables.
 #
 # Le clair passe par un fichier temporaire de mode 600 (/dev/shm, sinon $TMPDIR). Il n'y reste que
 # le temps du déchiffrement et de la lecture : le fichier est détruit (`shred -u`) avant que la
@@ -587,7 +873,7 @@ _charger_secrets() {
   local nom_env="${1:-}"
   valider_env "$nom_env"
 
-  local chiffre="${{ prefixe }}CLONE/deploiement/secrets/$nom_env.env.enc"
+  local chiffre="${ {{- prefixe }}CLONE_DONNEES:?charger_secrets : charger_env doit précéder}/$SOUS_DOSSIER_SECRETS/$nom_env.env.enc"
   [ -f "$chiffre" ] || arreter 3 "secrets absents pour $nom_env"
   command -v sops >/dev/null 2>&1 || arreter 1 "sops est introuvable dans le PATH"
   exporter_cle_sops
