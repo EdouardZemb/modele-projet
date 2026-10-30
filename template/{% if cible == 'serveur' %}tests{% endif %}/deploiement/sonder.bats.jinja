@@ -114,7 +114,7 @@ signal() {
   export {{ prefixe }}VERROU_ATTENTE=1 {{ prefixe }}SANTE_DELAI=0
   sonder staging
   [ "$status" -eq 0 ]
-  [ "$(cat "$ETAT/deploye")" = "$EMPREINTE main" ]
+  [ "$(cat "$ETAT/deploye")" = "$EMPREINTE main -" ]
   appels_de docker | grep -Fx 'docker image ls --no-trunc --quiet'
   [[ "$output" != *"toujours pris"* ]]
   aucune_ligne "^$(image_de 9)\|" "$BATS_TEST_TMPDIR/images"
@@ -635,7 +635,7 @@ signal() {
   # 1. premier passage : déploiement de :main
   sonder staging
   [ "$status" -eq 0 ]
-  [ "$(cat "$ETAT/deploye")" = "$EMPREINTE main" ]
+  [ "$(cat "$ETAT/deploye")" = "$EMPREINTE main -" ]
   [ "$(signaux)" = "$(signal 'déployé main') $HC" ]
 
   # 2. passage suivant : rien à faire, l'adresse publique répond
@@ -663,6 +663,6 @@ signal() {
   [ "$status" -eq 0 ]
   [ "$(appels_de docker | grep -c ' exec ')" -eq 0 ]
 {%- endif %}
-  [ "$(cat "$ETAT/deploye")" = "$AUTRE main" ]
-  [ "$(cat "$ETAT/precedent")" = "$EMPREINTE main" ]
+  [ "$(cat "$ETAT/deploye")" = "$AUTRE main -" ]
+  [ "$(cat "$ETAT/precedent")" = "$EMPREINTE main -" ]
 }
