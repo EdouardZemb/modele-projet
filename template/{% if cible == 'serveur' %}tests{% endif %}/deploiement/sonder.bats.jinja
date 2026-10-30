@@ -1049,6 +1049,30 @@ etiqueter_les_donnees() {
   [ -z "$(signaux)" ]
   [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
 }
+
+# Ruling 19 du lot 12 : pendant l'attente des données, un deploye présent mais illisible n'est pas
+# « aucune version des données » : rien ne dirait plus ce qui sert la prod. Anomalie, code 1, sans
+# signal ok, et rien n'est contrôlé ni déployé. Hors de l'attente, deployer.sh s'en charge.
+@test "sonder : pendant l'attente des données, un deploye illisible est une anomalie" {
+  local contenu
+  preparer prod
+  export DOUBLE_GIT_ETIQUETTES='v0.1.0 v0.2.0'
+  arbre_vise VERIFIER_CONFIG
+  en_service prod "$AUTRE" 0.1.0
+  # une image d'une autre forme, un commit invalide, un fichier vide
+  for contenu in 'pas-une-image 0.1.0' "$AUTRE 0.1.0 pas-un-commit" ''; do
+    printf '%s\n' "$contenu" >"$ETAT/deploye"
+    : >"$APPELS"
+    sonder prod
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"$ETAT/deploye illisible : "* ]]
+    [ "$(signaux)" = "$(signal "$ETAT/deploye illisible") $HC/fail" ]
+    [ "$(nombre_d_appels installer-unites.sh)" -eq 0 ]
+    [ -z "$(appels_de curl | grep -F '{{ domaine }}' || true)" ]
+    [ "$(nombre_d_appels docker)" -eq 0 ]
+    [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
+  done
+}
 {%- else %}
 
 # Un dépôt (P1 du lot 12) : l'instance est dans le clone du projet, et le commit des données est la
