@@ -27,7 +27,8 @@
 #   lire_projet_env_facultatif <clé>   la même chose pour une clé facultative : absente, PROJET_MOTS vide
 #   donnees_declarees                  DECLARE_CONFIG, DECLARE_CONTENU : 1 si projet.env déclare VERIFIER_CONFIG, VERIFIER_CONTENU, sinon 0
 #   controler_paires <commit>          la règle des paires : chaque dossier de l'instance du commit avec sa commande, et l'inverse (son README.md seul ne compte pas)
-#   preparer_instantane <commit>       INSTANTANE : l'instantané en lecture seule des dossiers déclarés du commit de données
+#   preparer_instantane <commit>       INSTANTANE : l'instantané en lecture seule des dossiers déclarés du commit de données (sans config/ en staging)
+#   _retirer_fige <chemin>             (privée) retire un dossier figé en lecture seule, comme un instantané : les droits d'abord, jamais à travers un lien
 #   verifier_instantane <env> <image> <instantané> [<instantané en service>]  VERIFIER_CONFIG et VERIFIER_CONTENU, en conteneur jetable
 #   jq_vaut <attendu> <doc> <filtre>   le filtre jq, appliqué au document, imprime exactement <attendu>
 #   revision_de <image>                le label de révision (SHA du commit) de l'image
@@ -37,7 +38,7 @@
 {%- if sauvegardes %}
 #   reserver_a_prod <env> <script>     code 64 hors prod (sauvegardes, restauration)
 {%- endif %}
-#   refuser_image_heritee              refus si {{ prefixe }}IMAGE ou {{ prefixe }}VERSION est dans l'environnement
+#   refuser_image_heritee              refus si {{ prefixe }}IMAGE, {{ prefixe }}VERSION, {{ prefixe }}CONFIG ou {{ prefixe }}CONTENU est dans l'environnement
 #   prendre_verrou                     le verrou de l'état, partagé, sur le descripteur 9
 #   lire_version <fichier>             IMAGE_LUE, VERSION_LUE et COMMIT_LU, depuis deploye ou precedent
 #   lire_deploye                       DEPLOYE_IMAGE, DEPLOYE_VERSION et DEPLOYE_COMMIT, depuis le fichier deploye
@@ -219,9 +220,10 @@ prefixer_path() {
 # {{ prefixe }}CONFIG, compose.contenu.yml pour {{ prefixe }}CONTENU, gérés, après les ajouts du projet. Le
 # fichier compose.env (écrit par le script de déploiement) porte toutes les variables `${…:?}` du
 # compose : `dc down`, `dc logs` ou `dc exec` fonctionnent donc aussi, pas seulement `dc up`. Compose
-# lit le shell avant --env-file : les variables de l'env de l'environnement, que charger_env
-# exporte, y ont la même valeur, et c'est pourquoi refuser_image_heritee ne vise que l'image et la
-# version, qui ne viennent que de compose.env.
+# lit le shell avant --env-file. Les variables de l'env de l'environnement, que charger_env exporte,
+# y ont la même valeur. L'image, la version et les montages de l'instantané ({{ prefixe }}IMAGE,
+# {{ prefixe }}VERSION, {{ prefixe }}CONFIG, {{ prefixe }}CONTENU) ne viennent que de compose.env : posés dans le shell, ou par
+# une ligne de l'env, ils l'emporteraient, et refuser_image_heritee les refuse.
 dc() {
   : "${ {{- prefixe }}PROJET:?dc : charger_env doit précéder dc}"
   local -a fichiers=(-f "${{ prefixe }}CLONE/deploiement/compose.yml" -f "${{ prefixe }}CLONE/deploiement/compose.projet.yml")
@@ -381,12 +383,14 @@ controler_paires() {
 
 # preparer_instantane <commit> : INSTANTANE ← ${{ prefixe }}ETAT/instantanes/<commit>, l'instantané des
 # dossiers déclarés du commit de données <commit>, chacun sous son nom final (config/, contenu/, quel
-# que soit le mode). Complet (il a chaque dossier déclaré), il se réutilise tel quel. Sinon, il se
-# fait sous <commit>.partiel : le .partiel d'un essai coupé est retiré, chaque dossier y est extrait
-# du commit (`git archive`, jamais de la copie de travail du clone), les droits passent en lecture
-# seule (a-w), puis le .partiel prend son nom. Rend 0, ou 1 journalisé ; un essai qui échoue laisse
-# son .partiel, pour le diagnostic, jusqu'au suivant, et un instantané incomplet n'est jamais
-# remplacé. À appeler sous le verrou de l'état.
+# que soit le mode). En staging, config/ n'est jamais extrait, même quand VERIFIER_CONFIG est
+# déclarée : le staging ne monte ni ne vérifie jamais /config (décision 7 du lot 12). Complet (il a
+# chaque dossier à extraire, selon la même règle), il se réutilise tel quel. Sinon, il se fait sous
+# <commit>.partiel : le .partiel d'un essai coupé est retiré (_retirer_fige), chaque dossier y est
+# extrait du commit (`git archive`, jamais de la copie de travail du clone), les droits passent en
+# lecture seule (a-w), puis le .partiel prend son nom. Rend 0, ou 1 journalisé ; un essai qui échoue
+# laisse son .partiel, pour le diagnostic, jusqu'au suivant, et un instantané incomplet n'est jamais
+# remplacé. À appeler après charger_env, sous le verrou de l'état.
 preparer_instantane() {
   local commit="${1:-}" partiel source nom sortie
   local -a dossiers=()
@@ -394,7 +398,9 @@ preparer_instantane() {
   INSTANTANE="${{ prefixe }}ETAT/instantanes/$commit"
   partiel="$INSTANTANE.partiel"
   donnees_declarees || return 1
-  [ "$DECLARE_CONFIG" -eq 0 ] || dossiers+=("$SOUS_DOSSIER_CONFIG:config")
+  if [ "$DECLARE_CONFIG" -eq 1 ] && [ "${ {{- prefixe }}ENV:?preparer_instantane : charger_env doit précéder}" != staging ]; then
+    dossiers+=("$SOUS_DOSSIER_CONFIG:config")
+  fi
   [ "$DECLARE_CONTENU" -eq 0 ] || dossiers+=("$SOUS_DOSSIER_CONTENU:contenu")
 
   if [ -e "$INSTANTANE" ] || [ -L "$INSTANTANE" ]; then
@@ -413,13 +419,8 @@ preparer_instantane() {
     return 0
   fi
 
-  # Le .partiel d'un essai coupé, peut-être déjà en lecture seule : les droits d'abord (jamais à
-  # travers un lien), puis le retrait.
-  if [ -e "$partiel" ] || [ -L "$partiel" ]; then
-    [ -L "$partiel" ] || [ ! -d "$partiel" ] || chmod -R u+w -- "$partiel" 2>/dev/null || true
-    rm -rf -- "$partiel" 2>/dev/null || true
-  fi
-  if [ -e "$partiel" ] || [ -L "$partiel" ]; then
+  # Le .partiel d'un essai coupé, peut-être déjà en lecture seule.
+  if ! _retirer_fige "$partiel"; then
     journal "instantané des données impossible : $partiel, laissé par un essai coupé, ne se retire pas"
     return 1
   fi
@@ -442,6 +443,22 @@ preparer_instantane() {
     return 1
   fi
   journal "instantané des données prêt : $INSTANTANE"
+}
+
+# _retirer_fige <chemin> : retire <chemin>, un dossier peut-être figé en lecture seule (a-w), comme
+# un instantané des données ou le .partiel d'un essai coupé après chmod. Les droits d'écriture du
+# propriétaire d'abord, jamais à travers un lien : un lien à la place de <chemin> est retiré sans
+# toucher à sa cible, et `chmod -R` ne suit pas les liens qu'il rencontre. Puis le retrait. Rend 0 si
+# <chemin> n'existe plus (absent dès le départ compris), 1 sinon, sans rien journaliser : à
+# l'appelant de le dire. Il ne touche pas aux droits du dossier parent.
+_retirer_fige() {
+  local chemin="${1:-}"
+  [ -n "$chemin" ] || arreter 64 "_retirer_fige : chemin manquant"
+  if [ -e "$chemin" ] || [ -L "$chemin" ]; then
+    [ -L "$chemin" ] || [ ! -d "$chemin" ] || chmod -R u+w -- "$chemin" 2>/dev/null || true
+    rm -rf -- "$chemin" 2>/dev/null || true
+  fi
+  [ ! -e "$chemin" ] && [ ! -L "$chemin" ]
 }
 
 # verifier_instantane <env> <image> <instantané> [<instantané en service>] : lance sur l'instantané
@@ -607,13 +624,16 @@ reserver_a_prod() {
 }
 {%- endif %}
 
-# refuser_image_heritee : {{ prefixe }}IMAGE ou {{ prefixe }}VERSION posée dans l'environnement ferait lire à
-# `dc` autre chose que compose.env (compose donne la priorité au shell sur --env-file). Refus net
-# (code 1) plutôt qu'effacement silencieux : l'appelant a une erreur à voir. À appeler avant toute
-# action.
+# refuser_image_heritee : {{ prefixe }}IMAGE, {{ prefixe }}VERSION, {{ prefixe }}CONFIG ou {{ prefixe }}CONTENU posée dans
+# l'environnement ferait lire à `dc` autre chose que compose.env (compose donne la priorité au shell
+# sur --env-file) : une autre image, ou, pour les deux derniers, un autre dossier monté que
+# l'instantané vérifié, la copie de travail du clone des données par exemple (M-0006, § 5). Refus
+# net (code 1) plutôt qu'effacement silencieux : l'appelant a une erreur à voir. Une ligne de l'env
+# de l'environnement ou des secrets, que charger_env et charger_secrets exportent, compte aussi : à
+# appeler après eux, avant toute action. Le nom est resté celui d'avant les montages.
 refuser_image_heritee() {
   local variable
-  for variable in {{ prefixe }}IMAGE {{ prefixe }}VERSION; do
+  for variable in {{ prefixe }}IMAGE {{ prefixe }}VERSION {{ prefixe }}CONFIG {{ prefixe }}CONTENU; do
     if [ -n "${!variable+present}" ]; then
       arreter 1 "$variable est posée dans l'environnement : elle prendrait le pas sur compose.env. Rien n'a changé ; relancer sans elle (unset $variable)"
     fi
