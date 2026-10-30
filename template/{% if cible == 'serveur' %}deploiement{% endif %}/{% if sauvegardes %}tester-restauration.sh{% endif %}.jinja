@@ -8,8 +8,12 @@
 #
 # Lancé chaque dimanche par {{ nom }}-test-restauration.timer. Réservé à la prod (code 64).
 #
+# Le port de l'essai est celui de la prod plus 9, le dernier du bloc de dix du projet :
+# ${{ prefixe }}PORT, lu dans l'env de la prod par charger_env, et non un port écrit au rendu (un dépôt
+# de code n'a pas de bloc de ports, M-0006 § 4). Un port de la prod illisible est un échec.
+#
 # Déroulé :
-#   1. un verrou privé (${{ prefixe }}ETAT/verrou-test-restauration, sans attente) : le port {{ bloc_ports + 9 }} et le
+#   1. un verrou privé (${{ prefixe }}ETAT/verrou-test-restauration, sans attente) : le port de l'essai et le
 #      nom du conteneur n'ont qu'un propriétaire à la fois ; si un autre test tourne, « occupé »,
 #      code 0. Sous ce verrou, les ${TMPDIR:-/tmp}/{{ nom }}-test-restauration.* de l'utilisateur,
 #      à la racine seulement, sont des copies en clair des données laissées par une exécution tuée
@@ -22,14 +26,14 @@
 #      (sauvegarder.sh ne la renomme qu'une fois contrôlée) : elle n'est jamais prise ;
 #   4. contrôle : `docker run --rm … -v <copie>:/donnees <image> <VERIFIER…> /donnees`, la commande
 #      VERIFIER de deploiement/projet.env, doit rendre 0 (conforme ; 2 = non conforme) ;
-#   5. `docker run -d --name {{ nom }}-test-restauration -p 127.0.0.1:{{ bloc_ports + 9 }}:{{ port_app }} -v <copie>:/donnees` :
+#   5. `docker run -d --name {{ nom }}-test-restauration -p 127.0.0.1:<port de l'essai>:{{ port_app }} -v <copie>:/donnees` :
 #      l'application démarre sur la copie ; {{ chemin_sante }} doit répondre statut ok ;
 #   6. arrêt et suppression du conteneur, destruction du dossier temporaire ;
 #   7. signal HC_TEST_RESTAURATION ok « <nom> restaurée : <N> fichiers », ou /fail à la première
 #      erreur.
 #
 # Ce que ce test ne touche jamais : les données et les sauvegardes de la prod (il ne lit qu'un
-# instantané fermé, et n'écrit que dans sa copie), le port {{ bloc_ports }}, le projet compose. C'est pourquoi il
+# instantané fermé, et n'écrit que dans sa copie), le port de la prod, le projet compose. C'est pourquoi il
 # n'a pas besoin du verrou partagé avec la sonde, le déploiement, la sauvegarde et la restauration.
 # La copie chiffrée du distant n'est pas testée ici : la clé hors ligne ne vient jamais sur le
 # serveur (M-0005) ; elle l'est sur le poste, à la main, chaque trimestre. Le report de
@@ -48,12 +52,12 @@ set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 CONTENEUR="{{ nom }}-test-restauration"
-PORT_TEST={{ bloc_ports + 9 }}
 
 # Posées par main.
 ARME=0 # 1 dès que les secrets sont chargés : une sortie en erreur est alors signalée
 RAISON=""
 TMP=""
+PORT_TEST="" # le port de la prod plus 9
 CONTENEUR_LANCE=0 # 1 dès que `docker run -d` a été tenté : le trap retire le conteneur
 
 # echouer <raison…> : journalise et quitte avec le code 1 ; le trap de sortie signale l'échec.
@@ -112,7 +116,12 @@ main() {
   trap 'exit 129' HUP
   ARME=1
 
-  local origine nom nombre fichiers code=0
+  local origine nom nombre fichiers code=0 port_prod="${ {{- prefixe }}PORT:-}"
+
+  # Le port de l'essai : celui de la prod plus 9, qui doit rester un port.
+  { [[ "$port_prod" =~ ^[1-9][0-9]{0,4}$ ]] && [ "$port_prod" -le 65526 ]; } \
+    || echouer "port de la prod illisible : {{ prefixe }}PORT='$port_prod'"
+  PORT_TEST=$((port_prod + 9))
 
   # 1. Verrou privé : un seul test à la fois.
   exec 8>"${{ prefixe }}ETAT/verrou-test-restauration"

@@ -22,6 +22,15 @@ _skip_if_exists:
   - deploiement/compose.projet.yml
   - deploiement/secrets/prod.cles
   - deploiement/secrets/staging.cles
+  # L'instance : semée, un projet à un dépôt garde ses clés, son .sops.yaml et le dépôt de données
+  # ses env/ (M-0006, § 9). Les env/ d'un projet à un dépôt restent gérés.
+  - .sops.yaml
+  - deploiement/cles/serveur.pub
+  - deploiement/cles/hors-ligne.pub
+  - cles/serveur.pub
+  - cles/hors-ligne.pub
+  - env/prod.env
+  - env/staging.env
 nom:
   type: str
   help: Nom du projet, qui est aussi celui du dépôt
@@ -36,6 +45,12 @@ cible:
   choices: [aucune, serveur, donnees]
   default: aucune
   validator: "{% if cible == 'donnees' and not (nom | regex_search('-donnees$')) %}un dépôt de données se nomme <nom>-donnees{% endif %}"
+cible_code:
+  type: str
+  help: La cible du dépôt de code dont ce dépôt porte les données ; serveur, il porte aussi l'instance (env/, .sops.yaml, les clés du parc)
+  choices: [aucune, serveur]
+  default: aucune
+  when: "{{ cible == 'donnees' }}"
 nature:
   type: str
   help: code pour tout projet né après M-0006 ; donnees pour un dépôt de données, ou un dépôt d'avant M-0006 jusqu'à sa scission
@@ -57,16 +72,26 @@ compte:
   help: Compte GitHub qui porte le dépôt et les images du projet
   default: EdouardZemb
   validator: "{% if not (compte | regex_search('^[A-Za-z0-9](-?[A-Za-z0-9])*$')) %}un compte GitHub{% endif %}"
+# L'instance (le domaine, le sous-domaine, le bloc de ports, les clés du parc) n'est posée que là où
+# elle vit : un projet `serveur` à un dépôt, de nature donnees, ou le dépôt de données d'un projet
+# `serveur`. Un dépôt de code rend ses tests et ses scripts avec des valeurs d'exemple, qui n'entrent
+# pas dans ses réponses ; ses scripts lisent les vraies dans env/ (M-0006, § 4).
+porte_instance:
+  type: bool
+  default: "{{ (cible == 'serveur' and nature == 'donnees') or (cible == 'donnees' and cible_code == 'serveur') }}"
+  when: false
 domaine:
   type: str
   help: Domaine public sous lequel le projet est servi
-  when: "{{ cible == 'serveur' }}"
+  # Demandé, il n'a pas de défaut : un projet qui porte son instance ne naît pas sur l'exemple.
+  default: "{{ UNSET if porte_instance else 'exemple.org' }}"
+  when: "{{ porte_instance }}"
   validator: "{% if not (domaine | regex_search('^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$')) %}un nom de domaine en minuscules{% endif %}"
 sous_domaine:
   type: str
   help: Sous-domaine du projet (la préproduction ajoute -staging)
-  default: "{{ nom }}"
-  when: "{{ cible == 'serveur' }}"
+  default: "{{ nom[:-8] if cible == 'donnees' else nom }}"
+  when: "{{ porte_instance }}"
   validator: "{% if not (sous_domaine | regex_search('^[a-z0-9]([a-z0-9-]*[a-z0-9])?$')) %}sous-domaine non vide, en minuscules, chiffres et tirets{% endif %}"
 port_app:
   type: int
@@ -83,14 +108,30 @@ chemin_sante:
 bloc_ports:
   type: int
   help: Premier port du bloc de dix réservé au projet sur le serveur (multiple de 10, de 4310 à 4990)
-  when: "{{ cible == 'serveur' }}"
+  default: "{{ UNSET if porte_instance else 4310 }}"
+  when: "{{ porte_instance }}"
   validator: "{% if bloc_ports % 10 != 0 or bloc_ports < 4310 or bloc_ports > 4990 %}bloc de ports : multiple de 10, de 4310 à 4990{% endif %}"
 sauvegardes:
   type: bool
   help: Le projet a-t-il des données à sauvegarder ?
   default: true
   when: "{{ cible == 'serveur' }}"
+# Les clés publiques age du parc, destinataires des secrets. Exigées d'un dépôt de données ; vides,
+# un projet à un dépôt garde ses deploiement/cles/*.pub et son .sops.yaml, semés.
+cle_serveur:
+  type: str
+  help: Clé publique age du serveur (age1…), qui déchiffre les secrets au déploiement
+  default: ""
+  when: "{{ porte_instance }}"
+  validator: "{% if (cle_serveur or cible == 'donnees') and not (cle_serveur | regex_search('^age1[0-9a-z]{58}$')) %}une clé publique age (age1 et 58 caractères){% if cible == 'donnees' %}, exigée pour un dépôt de données{% else %}, ou rien pour garder la sienne{% endif %}{% endif %}"
+cle_hors_ligne:
+  type: str
+  help: Clé publique age hors ligne du propriétaire (age1…), qui relit les secrets et les sauvegardes si le serveur est perdu
+  default: ""
+  when: "{{ porte_instance }}"
+  validator: "{% if (cle_hors_ligne or cible == 'donnees') and not (cle_hors_ligne | regex_search('^age1[0-9a-z]{58}$')) %}une clé publique age (age1 et 58 caractères){% if cible == 'donnees' %}, exigée pour un dépôt de données{% else %}, ou rien pour garder la sienne{% endif %}{% endif %}"
+# Le préfixe des variables : celui du projet, dans son dépôt de code comme dans ses données.
 prefixe:
   type: str
-  default: "{{ nom | upper | replace('-', '_') }}_"
+  default: "{{ ((nom[:-8]) if cible == 'donnees' else nom) | upper | replace('-', '_') }}_"
   when: false

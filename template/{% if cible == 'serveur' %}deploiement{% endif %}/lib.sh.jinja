@@ -45,12 +45,13 @@
 #   retirer_partiels <dossier> <regex> retire les instantanés en échec (.partiel) avant un nouvel essai
 #   retirer_restes_de_restauration     retire, sous le verrou, ce qu'une restauration tuée a laissé
 # Variables posées : {{ prefixe }}CLONE (racine du clone qui lance le script), DEPOT_IMAGE (le dépôt
-# GHCR du projet), MOTIF_REFERENCE et MOTIF_VERSION (la forme de l'image et de la version dans
-# l'état) et {{ prefixe }}OPTIONS_JETABLES (options des conteneurs jetables).
+# GHCR du projet), MODE_DONNEES (« un » ou « deux » dépôts, M-0006 § 6), MOTIF_REFERENCE et
+# MOTIF_VERSION (la forme de l'image et de la version dans l'état) et {{ prefixe }}OPTIONS_JETABLES
+# (options des conteneurs jetables).
 {%- else %}
 # Variables posées : {{ prefixe }}CLONE (racine du clone qui lance le script), DEPOT_IMAGE (le
-# dépôt GHCR du projet), MOTIF_REFERENCE et MOTIF_VERSION (la forme de l'image et de la version
-# dans l'état).
+# dépôt GHCR du projet), MODE_DONNEES (« un » ou « deux » dépôts, M-0006 § 6), MOTIF_REFERENCE et
+# MOTIF_VERSION (la forme de l'image et de la version dans l'état).
 {%- endif %}
 #
 # Codes de sortie : 64 = usage (environnement inconnu, argument invalide), 3 = secrets absents,
@@ -71,6 +72,13 @@
 # Défini ici seulement.
 # shellcheck disable=SC2034  # lue par sonder.sh et nettoyer-images.sh, qui sourcent lib.sh
 DEPOT_IMAGE=ghcr.io/{{ compte | lower }}/{{ nom }}
+
+# Le mode des données (M-0006, § 6), rendu d'après la nature du dépôt : « deux » pour un dépôt de
+# code, dont l'instance (env/, secrets, clés du parc, config/, contenu/) vit dans un second dépôt,
+# {{ nom }}-donnees ; « un » pour un dépôt de nature donnees, d'avant M-0006, qui la porte lui-même
+# jusqu'à sa scission. Défini ici seulement : aucun script ne le recalcule.
+# shellcheck disable=SC2034  # lu par les scripts qui sourcent lib.sh
+MODE_DONNEES="{{ 'deux' if nature == 'code' else 'un' }}"
 
 # La forme d'une image et d'une version de l'état : ce que deployer.sh accepte en argument et écrit
 # dans deploye, precedent et compose.env, et ce qu'exigent ceux qui les relisent (lire_version, pour
