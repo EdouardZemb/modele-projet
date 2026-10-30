@@ -4,7 +4,7 @@ import re
 
 import pytest
 import yaml
-from conftest import RACINE, REGISTRE_ENTETE, REPONSES_SERVEUR
+from conftest import RACINE, REGISTRE_ENTETE, REPONSES_SERVEUR, REPONSES_SERVEUR_CODE
 
 TEMPLATE = RACINE / "template"
 METHODE = TEMPLATE / "docs/modele/methode.md"
@@ -344,10 +344,13 @@ def test_m0003_et_m0005_disent_le_report(rendre, sauvegardes):
 
 @pytest.mark.parametrize("sauvegardes", [True, False])
 def test_m0004_ne_renvoie_a_m0005_qu_avec_sauvegardes(rendre, sauvegardes):
-    """R24 : sans sauvegardes, M-0005 n'est pas rendu, et M-0004 n'y renvoie pas."""
+    """R24 : sans sauvegardes, M-0005 n'est pas rendu, et M-0004 n'y renvoie pas. L'instantané
+    des données, celui que la chaîne monte sur /config et /contenu, existe dans les deux cas ;
+    seul celui de /donnees suit les sauvegardes."""
     texte = adr_rendu(rendre, "M-0004-chaine-de-livraison.md", sauvegardes=sauvegardes)
     assert ("M-0005" in texte) is sauvegardes
-    assert ("instantané" in texte) is sauvegardes
+    assert ("instantané de `/donnees`" in texte) is sauvegardes
+    assert ("instantané de /donnees" in texte) is False
 
 
 def test_m0002_amende():
@@ -371,7 +374,7 @@ def test_m0002_amende():
     assert "étiquette" in texte
     # les amendements, dans l'ordre chronologique
     dates = re.findall(r"^- \*\*Amendé\*\* le (\S+),", texte, flags=re.MULTILINE)
-    assert dates == ["2026-10-17", "2026-10-18", "2026-10-27", "2026-10-29"]
+    assert dates == ["2026-10-17", "2026-10-18", "2026-10-27", "2026-10-29", "2026-10-29"]
     assert (
         "- **Amendé** le 2026-10-29, avec le lot 11 : la porte suit la nature du dépôt, de code ou "
         "de données (M-0006)"
@@ -421,3 +424,157 @@ def test_signaux_n_affichent_pas_ce_qu_un_fork_ecrit(chemin):
     )
     assert "que tout le monde peut écrire" not in texte
     assert "que n'importe qui peut écrire sur un dépôt public" not in texte
+
+
+# --- lot 12 : le contrat de /config et la chaîne à deux dépôts (M-0006, §§ 4 à 6) ---
+
+AMENDE_LOT_12 = "- **Amendé** le 2026-10-29, avec le lot 12 :"
+# Les numéros du plan ne vivent que dans le plan, qui disparaît à la clôture du lot.
+RENVOI_AU_PLAN = re.compile(r"\b(?:Ruling|ruling) \d|\bP[1-8]\b|\btâche \d|\bdécision \d du lot")
+
+
+@pytest.mark.parametrize("sauvegardes", [True, False])
+def test_m0003_dit_le_contrat_de_l_instance(rendre, sauvegardes):
+    """M-0003, amendé : /config, /contenu, les deux commandes, le champ configuration, la règle
+    des paires et l'exemple, tels que lib.sh, deployer.sh et ci/verifier-image.sh les font."""
+    texte = adr_rendu(rendre, "M-0003-contrat-de-l-image.md", sauvegardes=sauvegardes)
+    assert AMENDE_LOT_12 in texte
+    for fragment in (
+        "### 6. L'instance : `/config` et `/contenu`",
+        "`VERIFIER_CONFIG=<mots>` : lancée en `<mots> /config`",
+        "`<mots> /contenu /en-service`",
+        "Codes : 0 conforme, 2 non conforme, 64 usage ; tout autre code refuse.",
+        "sans réseau (`--network none`)",
+        "**Ils vont par paires**",
+        "au moins un fichier autre que le `README.md` de sa racine",
+        "**La santé dit quelle configuration sert**",
+        "`exemple` en staging et `montee` en prod",
+        "**Le staging ne monte jamais `/config`**",
+        "**La prod ne se replie pas sur l'exemple**",
+        "vers un couple précédent sans commit de données",
+        "une commande déclarée sans son dossier d'exemple refuse",
+        "un dossier d'exemple sans sa commande n'est pas vérifié, et le journal le dit",
+        "**Un projet qui ne déclare ni l'une ni l'autre ne voit aucun changement**",
+    ):
+        assert fragment in texte, fragment
+    # La route de santé du § 2 annonce le champ, et la CI prouve la clause de l'ENTRYPOINT pour
+    # les deux commandes de l'instance, qu'elle lance par docker run.
+    assert "le champ `configuration` (§ 6)" in texte
+    assert (
+        "**La CI prouve la clause de l'`ENTRYPOINT` pour `VERIFIER_CONFIG` et `VERIFIER_CONTENU`**"
+        in texte
+    )
+    assert not RENVOI_AU_PLAN.search(texte)
+
+
+@pytest.mark.parametrize(
+    ("reponses", "mode"),
+    [(REPONSES_SERVEUR, "un"), (REPONSES_SERVEUR_CODE, "deux")],
+    ids=["un-depot", "deux-depots"],
+)
+def test_m0004_dit_le_couple_et_les_deux_modes(rendre, reponses, mode):
+    """M-0004, amendé : les deux modes, le couple, l'instantané monté, les étiquettes de données,
+    les déclencheurs et le retour arrière, avec les limites que la sonde et deployer.sh tiennent."""
+    texte = " ".join(
+        (rendre(**reponses) / "docs/modele/decisions/M-0004-chaine-de-livraison.md")
+        .read_text(encoding="utf-8")
+        .split()
+    )
+    assert AMENDE_LOT_12 in texte
+    for fragment in (
+        "### 8. Le couple et les deux modes",
+        "| | À deux dépôts | À un dépôt |",
+        "`deploye` et `precedent` portent `<image@sha256:…> <version> <commit>`",
+        "`echec` porte `<image@sha256:…> <commit>`",
+        "`read -r image version _`",
+        "`donnees-AAAA.MM.JJ.n`",
+        # le mode un : le commit du couple est la révision de l'image
+        "la révision de l'image visée",
+        "le commit que la `vX.Y.Z` désigne",
+        # la déclaration qui compte : celle de la version du code visée
+        "la déclaration de la version du code visée, jamais celle qu'on quitte",
+        # un projet sans commande, et la limite de l'env et des secrets
+        "qu'avant l'appel de `deployer.sh`",
+        "**La limite d'un projet sans commande.**",
+        # l'attente d'une étiquette de données
+        "« aucune version des données »",
+        # une commande ajoutée ou retirée
+        "Dans l'intervalle, la CI des données refuse",
+        # le retour arrière et ses deux cas de transition
+        "ne monte ni ne vérifie rien, même si `projet.env` déclare une commande",
+        "pas de retour arrière après une version qui retire ses commandes",
+        "forme un couple nouveau : l'ancienne image et le commit de données en service",
+        # les clones des données
+        "« clone des données absent »",
+        "seule l'absence du signal ok avertit",
+        "« clone des données modifié »",
+        "« mise à jour du clone des données impossible »",
+        # le ménage des instantanés
+        "le ménage des instantanés",
+    ):
+        assert fragment in texte, fragment
+    # Les clés du parc se lisent dans le clone des données, selon le mode.
+    assert "`deploiement/cles/serveur.pub` et `hors-ligne.pub`" not in texte
+    assert "`cles/` à deux dépôts, `deploiement/cles/` à un dépôt" in texte
+    # Ce projet-ci : son mode, dit en une phrase.
+    phrase = {"un": "Ce projet est à un dépôt", "deux": "Ce projet est à deux dépôts"}
+    assert phrase[mode] in texte
+    autre = "deux" if mode == "un" else "un"
+    assert phrase[autre] not in texte
+    assert not RENVOI_AU_PLAN.search(texte)
+
+
+def test_m0005_dit_le_couple_de_l_instantane(rendre):
+    """M-0005, amendé : le .couple voisin, son chiffrement, son envoi, et la restauration qui le
+    dit ; la clé hors ligne se lit dans le clone des données."""
+    texte = adr_rendu(rendre, "M-0005-sauvegardes-et-restauration.md")
+    assert AMENDE_LOT_12 in texte
+    for fragment in (
+        "**Le couple de l'instantané.**",
+        "`<nom>-<horodatage>.couple`",
+        "celui de `deploye` à cet instant",
+        "pour `pre-deploiement/`, le couple que le déploiement quitte",
+        "`<nom>-<horodatage>.couple.age`",
+        "l'archive part quand même, et la nuit est en échec",
+        "« couple de l'instantané inconnu »",
+        "Le couple ne décide de rien",
+        "demande la phrase deux fois",
+    ):
+        assert fragment in texte, fragment
+    assert "deploiement/cles/" not in texte
+    assert "en 4e position" not in texte
+    assert not RENVOI_AU_PLAN.search(texte)
+
+
+def test_m0002_amende_par_le_lot_12():
+    """La porte d'un dépôt de code suit le premier segment du chemin, et le motif age ; le garde
+    refuse l'envoi d'une étiquette de données."""
+    texte = " ".join(lire(DECISIONS / "M-0002-garde-fous-et-confidentialite.md").split())
+    assert AMENDE_LOT_12 in texte
+    for fragment in (
+        "**Dans un dépôt de code, la porte suit aussi les chemins**",
+        "un fichier dont le premier segment du chemin est `instance/`, `config/` ou `contenu/`",
+        "un `src/config/` reste du code",
+        "un fichier nommé `*.enc` ou `.sops.yaml`, et un `*.pub` dans un dossier `cles/`, à toute profondeur",
+        "une clé publique `age` (`age1…`), où qu'elle soit écrite",
+        "Un gabarit `….jinja` n'est pas le fichier qu'il rend",
+        "`.github/constats-acceptes.txt`",
+        "`donnees-AAAA.MM.JJ.n`",
+    ):
+        assert fragment in texte, fragment
+    assert not RENVOI_AU_PLAN.search(texte)
+
+
+def test_m0006_dit_le_choix_des_deux_modes():
+    """M-0006 : son § 6 dit le choix fait (les deux modes sont gardés) ; son § 3 dit la règle des
+    chemins telle que la porte la tient (le premier segment)."""
+    texte = " ".join(lire(DECISIONS / "M-0006-code-et-donnees.md").split())
+    assert AMENDE_LOT_12 in texte
+    assert "Le lot de la chaîne a gardé les deux modes" in texte
+    assert "`instance/config/` et `instance/contenu/`" in texte
+    assert "tout `contenu/`, à n'importe quelle profondeur" not in texte
+    assert (
+        "tout fichier sous un dossier de premier niveau `instance/`, `config/` ou `contenu/`"
+        in texte
+    )
+    assert not RENVOI_AU_PLAN.search(texte)

@@ -3,6 +3,9 @@
 - **Statut** : accepté le 2026-10-18
 - **Amendé** le 2026-10-28, avec le lot 10 : avant un déploiement ou un retour arrière, la garde
   du dossier de données refuse un dossier vide ou changé (§ 3)
+- **Amendé** le 2026-10-29, avec le lot 12 : chaque instantané de `/donnees` note le couple en
+  service dans un fichier voisin, chiffré et envoyé avec l'archive, et la restauration le dit
+  (§ 2, § 3 et § 6, M-0004 § 8)
 - **Contexte amont** : les sauvegardes d'`ancrage` (son ADR-0007, §4 et §5), dont la mécanique
   est extraite ; M-0003 (le contrat de l'instantané) ; M-0004 (la chaîne de livraison)
 
@@ -29,15 +32,27 @@ Le staging n'a que des données factices (M-0001). `sauvegarder.sh`, `tester-res
   dans le conteneur en service `quotidiennes/<nom>-<horodatage>.partiel`. Le dossier est contrôlé
   (code 0, un dossier non vide, rien que des fichiers et des dossiers), puis renommé par `mv -T`.
   Cette copie en clair reste 30 jours dans `~/backups/<nom>/`, sur le disque des données.
-- **La copie distante** est `tar --hard-dereference … | age -R deploiement/cles/hors-ligne.pub` :
-  un lien physique y entre comme un fichier ordinaire, et tous les membres sont sous un seul
-  dossier, `<nom>-<horodatage>/`. Elle part par `rclone copy` vers `sauvegardes:<nom>-sauvegardes`
-  (`sauvegardes:` est l'alias que le serveur fait pointer vers son stockage), contrôlée par
-  `rclone lsf`, et reste 90 jours.
+- **La copie distante** est `tar --hard-dereference … | age -R …/hors-ligne.pub`, pour la clé
+  publique hors ligne, lue dans les clés du parc du clone des données (M-0004, § 4 ; amendement du
+  2026-10-29) : un lien physique y entre comme un fichier ordinaire, et tous les membres sont sous
+  un seul dossier, `<nom>-<horodatage>/`. Elle part par `rclone copy` vers
+  `sauvegardes:<nom>-sauvegardes` (`sauvegardes:` est l'alias que le serveur fait pointer vers son
+  stockage), contrôlée par `rclone lsf`, et reste 90 jours.
+- **Le couple de l'instantané.** Amendement du 2026-10-29 (M-0004, § 8). Juste après l'instantané,
+  toujours sous le verrou, la mécanique écrit à côté de lui, jamais dedans,
+  `<nom>-<horodatage>.couple` : une ligne `<image> <version> <commit>`, le couple en service, celui
+  de `deploye` à cet instant. Le contenu de l'instantané et les membres de son archive ne changent
+  pas. Sans `deploye`, ou s'il ne se lit pas, il n'y a pas de `.couple`, et la sauvegarde continue.
+  Le `.couple` est chiffré pour la même clé, `<nom>-<horodatage>.couple.age`, à la date de
+  l'archive, puis envoyé après elle ; `rclone lsf` doit voir les deux. Les données passent avant
+  leur couple : si le couple ne se chiffre pas ou ne part pas, l'archive part quand même, et la nuit
+  est en échec.
 - **La rétention**, après un envoi contrôlé seulement. En local, l'âge se lit dans le nom de
   l'instantané, jamais dans la date du dossier : 30 jours pour `quotidiennes/`, `pre-deploiement/`
-  et `avant-restauration-*`, `.partiel` compris ; un nom d'une autre forme n'est jamais retiré. À
-  distance, seules les archives `<nom>-*.tar.age` de plus de 90 jours, sans corbeille.
+  et `avant-restauration-*`, `.partiel` compris ; un nom d'une autre forme n'est jamais retiré. Le
+  `.couple` d'un instantané part avec lui. À distance, seules les archives `<nom>-*.tar.age` de plus
+  de 90 jours, et leurs couples `<nom>-*.couple.age`, qui ont leur date : le même appel les retire
+  ensemble, sans corbeille.
 - Le signal `HC_SAUVEGARDE` porte un résumé, jamais la sortie de la commande : Healthchecks est un
   tiers, et la sortie peut décrire les données.
 
@@ -47,8 +62,11 @@ En prod comme en staging, `deployer.sh` prend un instantané, de même forme, da
 `pre-deploiement/<horodatage>` de l'environnement, si l'app tourne. Il crée d'abord
 `pre-deploiement/` s'il manque, et le ramène à 700 avec le dossier des sauvegardes. S'il échoue,
 le déploiement n'a pas lieu et rien ne change ; la sonde réessaie, et alerte, à chaque passage.
-Après un instantané réussi, il purge `pre-deploiement/` de ce qui a plus de 30 jours, d'après le
-nom : la sauvegarde de la nuit ne tourne qu'en prod, et le staging n'aurait sinon aucune purge.
+Après un instantané réussi, il note à côté de lui son couple, comme la sauvegarde de la nuit
+(§ 2) : pour `pre-deploiement/`, le couple que le déploiement quitte (amendement du 2026-10-29).
+Puis il purge `pre-deploiement/` de ce qui a plus de 30 jours, d'après le nom, chaque instantané
+avec son `.couple` : la sauvegarde de la nuit ne tourne qu'en prod, et le staging n'aurait sinon
+aucune purge.
 
 **La garde du dossier de données.** Quand une version est déployée (`deploye` existe), un
 déploiement comme un retour arrière refuse, avant l'instantané et sans rien changer, un dossier de
@@ -58,8 +76,9 @@ canonique du jour doit être exactement celui-là, et un lien repointé sur plac
 d'avant la `v0.5.0` du modèle, sans ce fichier, se rabat sur le dossier que décrit le `compose.env`
 de la version déployée ; sans l'un ni l'autre, seul le vide est contrôlé. Le refus rend 1 : le
 journal porte les chemins, le signal d'échec n'en porte aucun, et la sonde réessaie et alerte.
-L'option `--donnees-neuves`, en 4e position, à la main, lève les deux contrôles pour un
-déploiement ; elle est refusée avec `--retour` (code 64). **La limite** : une racine de l'état
+L'option `--donnees-neuves`, après l'image et la version, à la main, lève les deux contrôles pour
+un déploiement ; elle est refusée avec `--retour` (code 64). Un couple qui a des données la prend
+avec `--commit-donnees <sha>`, dans l'ordre qu'on veut (M-0004, § 8 ; amendement du 2026-10-29). **La limite** : une racine de l'état
 déplacée elle aussi emporte `deploye` et `donnees`, et le déploiement passe pour un premier, sans
 contrôle.
 
@@ -84,6 +103,17 @@ sauvegardes. Signal `HC_TEST_RESTAURATION`.
   dans `avant-restauration-<horodatage>/`, jamais supprimé ; l'instantané à sa place ; le
   redémarrage et la santé. Si quelque chose échoue en chemin, l'ancien contenu revient, ou le
   message dit où est chaque chose.
+- **Le couple de l'instantané** (amendement du 2026-10-29). Après `VERIFIER`, la restauration lit
+  le couple dans le fichier voisin de la source : `<dossier>.couple`, ou, à côté d'une archive,
+  `<nom>-<horodatage>.couple.age`, déchiffré avec la même clé. Elle le dit quand il diffère du
+  couple déployé, et ne dit rien quand c'est le même. Sans fichier voisin (un instantané d'avant la
+  `v0.7.0` du modèle, ou pris sans couple en service), elle dit « couple de l'instantané inconnu » ;
+  un fichier qui ne se lit pas (un lien, jamais suivi, une autre clé, une autre forme) est dit
+  illisible, sur la même ligne. **Le couple ne décide de rien** : les données reviennent sous le
+  couple déployé, que l'invariant 4 rend capable de les lire, et une configuration changée depuis
+  n'est pas défaite (M-0006, § 6). Une identité age chiffrée par une phrase de passe, dans un
+  fichier, demande la phrase deux fois, pour l'archive puis pour son couple : age relit le fichier
+  à chaque fois. C'est accepté ; une clé passée par l'entrée standard, elle, n'est lue qu'une fois.
 - **Le report.** Restaurer une sauvegarde défait tout ce qui a changé depuis, y compris ce qui ne
   devait pas l'être : un compte supprimé avant la restauration reviendrait. Un projet qui garde un
   tel état (un registre de suppressions, par exemple) déclare `REPORTER` dans

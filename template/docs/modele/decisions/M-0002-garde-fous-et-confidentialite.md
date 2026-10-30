@@ -9,6 +9,9 @@
   `.gitignore` du projet masque (LE-23), et un hook `SessionStart` affiche ce qui est rouge sur
   GitHub
 - **Amendé** le 2026-10-29, avec le lot 11 : la porte suit la nature du dépôt, de code ou de données (M-0006)
+- **Amendé** le 2026-10-29, avec le lot 12 : dans un dépôt de code, la porte refuse aussi les
+  fichiers de l'instance, lus sur leur chemin, et toute clé publique `age` ; le garde refuse l'envoi
+  d'une étiquette de données (M-0006, § 3 et § 6)
 - **Contexte amont** : M-0001 (les garde-fous de qualité comme condition d'entrée)
 
 ## Contexte
@@ -55,6 +58,20 @@ pas de la discipline de celui qui travaille ?
   jeton de tunnel, adresse de ping) refuse partout, au `pre-commit` comme en CI : une clé ne part
   jamais sur le dépôt distant avec un simple avertissement. gitleaks les cherche aussi, en CI, donc
   après l'envoi. Les erreurs d'usage et l'absence de la liste privée exigée refusent toujours.
+- **Dans un dépôt de code, la porte suit aussi les chemins** (amendement du 2026-10-29, avec le
+  lot 12, M-0006 § 3). Un dépôt de code ne porte rien de l'instance. La porte y refuse, au hook comme
+  en CI, les fichiers de l'instance, lus sur leur seul chemin :
+  - un fichier nommé `*.enc` ou `.sops.yaml`, et un `*.pub` dans un dossier `cles/`, à toute
+    profondeur ;
+  - un fichier dont le premier segment du chemin est `instance/`, `config/` ou `contenu/` : un
+    `src/config/` reste du code.
+
+  Elle y refuse aussi une clé publique `age` (`age1…`), où qu'elle soit écrite. Un gabarit
+  `….jinja` n'est pas le fichier qu'il rend : `.sops.yaml.jinja` ou `serveur.pub.jinja` ne refusent
+  pas. Dans un dépôt de données, ces fichiers sont chez eux, et ces règles ne donnent aucun
+  constat. Le dépôt modèle passe sa propre porte : les clés du parc sont sorties de son arbre et sont
+  devenues des réponses (`cle_serveur`, `cle_hors_ligne`), et les commits anciens qui les portent
+  sont nommés dans son `.github/constats-acceptes.txt`.
 - **En CI, la nature ne se lit pas dans la PR.** La visibilité réelle du dépôt
   (`github.event.repository.private`) l'emporte : un dépôt public est toujours un dépôt de code. Un
   dépôt privé prend la nature écrite sur sa branche par défaut, jamais celle de la PR, qui pourrait
@@ -77,7 +94,10 @@ pas de la discipline de celui qui travaille ?
 - **Les étiquettes et les publications sont à Edouard**, dans les deux modes (amendement du
   2026-10-18) : une étiquette `vX.Y.Z` met un projet `serveur` en production. Le garde refuse
   l'envoi d'une étiquette et toute écriture de publication (`gh release` en écriture, l'API
-  `…/releases`) ; une session peut préparer l'étiquette en local.
+  `…/releases`) ; une session peut préparer l'étiquette en local. Une étiquette de données
+  `donnees-AAAA.MM.JJ.n` met en production une configuration ou un contenu (M-0006, § 6) : le garde
+  refuse son envoi de même, par `git push origin donnees-…` comme par un refspec qui la nomme
+  (amendement du 2026-10-29).
 - **Un fichier du modèle que le `.gitignore` du projet masque fait refuser le commit** (amendement
   du 2026-10-27). Copier écrit sur le disque un fichier géré que le `.gitignore` ignore, sans rien
   en dire : il n'entre alors dans aucun commit, et le projet n'a pas ce que le modèle lui a donné
