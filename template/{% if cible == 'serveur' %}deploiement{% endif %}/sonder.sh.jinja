@@ -36,7 +36,10 @@
 #        locale, et la sonde viserait encore une version retirée) ; plus haute étiquette vX.Y.Z (tri
 #        -v:refname, les autres formes comme v1.0.0-rc1 sont ignorées) ; image :X.Y.Z, version
 #        X.Y.Z. Sans étiquette : « aucune version », signal ok ;
-#   4. les commandes de l'instance que déclare deploiement/projet.env (donnees_declarees, lib.sh) ;
+#   4. les commandes de l'instance que déclare deploiement/projet.env (donnees_declarees, lib.sh),
+#      celui de la version visée du code, jamais celui de la version qu'on quitte : en staging, la
+#      copie de travail, qui vient de fusionner ; en prod, celui de l'étiquette, lu sans checkout
+#      (`git show <étiquette>:deploiement/projet.env`), qui ne déclare rien s'il en est absent ;
 #      puis, à deux dépôts, le clone des données, qu'un projet déclare une commande ou non (il porte
 #      l'env et les secrets) : propre, sinon alerte « clone des données modifié » ; à jour, selon le
 #      même canal, sinon alerte « mise à jour du clone des données impossible » :
@@ -188,7 +191,7 @@ main() {
   refuser_image_heritee
   local etat="${{ prefixe }}ETAT" clone="${{ prefixe }}CLONE" donnees="${{ prefixe }}CLONE_DONNEES"
   local modifications etiquettes etiquette="" ligne version cible sortie code=0 reference raison
-  local branche_donnees etiquette_donnees="" commit=- declaree=0 configuration=""
+  local branche_donnees etiquette_donnees="" commit=- declaree=0 configuration="" projet_env_vise lu=0
   local -a option_commit=()
 
   # 1. Verrou, gardé jusqu'à la fin de la sonde (deployer.sh compris).
@@ -252,10 +255,27 @@ main() {
   esac
   cible="$DEPOT_IMAGE:$version"
 
-  # 4. Les données. Les commandes de l'instance que déclare projet.env, lu dans le clone du code tel
-  # qu'il est : en staging, la tête de la branche principale ; en prod, la version d'où l'on part.
-  if ! donnees_declarees; then
-    anomalie "deploiement/projet.env illisible"
+  # 4. Les données. Les commandes de l'instance que déclare le projet.env de la version visée du
+  # code, jamais celle qu'on quitte : deployer.sh, lancé depuis elle, refuserait sinon le couple (64).
+  # En staging, le clone vient de fusionner la branche principale : sa copie de travail est la
+  # version visée. En prod, il ne passe sur l'étiquette qu'avant deployer.sh : son projet.env se lit
+  # sans checkout. Absent de l'étiquette, il ne déclare rien, comme un clone sans projet.env.
+  projet_env_vise=""
+  if [ -n "$etiquette" ]; then
+    if ! projet_env_vise="$(mktemp)"; then
+      anomalie "fichier temporaire impossible pour deploiement/projet.env de $etiquette"
+      return 1
+    fi
+    if git -C "$clone" cat-file -e "$etiquette:deploiement/projet.env" 2>/dev/null; then
+      git -C "$clone" show "$etiquette:deploiement/projet.env" >"$projet_env_vise" || lu=1
+    else
+      rm -f -- "$projet_env_vise"
+    fi
+  fi
+  [ "$lu" -ne 0 ] || donnees_declarees ${projet_env_vise:+"$projet_env_vise"} || lu=1
+  [ -z "$projet_env_vise" ] || rm -f -- "$projet_env_vise"
+  if [ "$lu" -ne 0 ]; then
+    anomalie "deploiement/projet.env${etiquette:+ de $etiquette} illisible"
     return 1
   fi
   [ "$DECLARE_CONFIG" -eq 0 ] && [ "$DECLARE_CONTENU" -eq 0 ] || declaree=1

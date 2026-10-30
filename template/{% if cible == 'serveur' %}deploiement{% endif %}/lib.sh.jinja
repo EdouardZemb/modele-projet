@@ -24,9 +24,9 @@
 #   signaler <variable> ok|echec [msg] signal de supervision (Healthchecks) ; l'adresse ne sort jamais
 #   dc <args…>                         docker compose du projet (compose.yml, compose.projet.yml, et les montages de compose.env)
 #   valeur_de <clé> <fichier>          la valeur d'une clé d'un fichier CLE=valeur (lu, jamais sourcé)
-#   lire_projet_env <clé>              PROJET_MOTS : les mots de cette clé dans deploiement/projet.env
-#   lire_projet_env_facultatif <clé>   la même chose pour une clé facultative : absente, PROJET_MOTS vide
-#   donnees_declarees                  DECLARE_CONFIG, DECLARE_CONTENU : 1 si projet.env déclare VERIFIER_CONFIG, VERIFIER_CONTENU, sinon 0
+#   lire_projet_env <clé> [<fichier>]  PROJET_MOTS : les mots de cette clé dans deploiement/projet.env (ou ce fichier)
+#   lire_projet_env_facultatif <clé> [<fichier>]  la même chose pour une clé facultative : absente, PROJET_MOTS vide
+#   donnees_declarees [<fichier>]      DECLARE_CONFIG, DECLARE_CONTENU : 1 si projet.env (ou ce fichier) déclare VERIFIER_CONFIG, VERIFIER_CONTENU, sinon 0
 #   controler_paires <commit>          la règle des paires : chaque dossier de l'instance du commit avec sa commande, et l'inverse (son README.md seul ne compte pas)
 #   preparer_instantane <commit>       INSTANTANE : l'instantané en lecture seule des dossiers déclarés du commit de données (sans config/ en staging)
 #   _retirer_fige <chemin>             (privée) retire un dossier figé en lecture seule, comme un instantané : les droits d'abord, jamais à travers un lien
@@ -258,14 +258,15 @@ valeur_de() {
   return 1
 }
 
-# lire_projet_env <CLÉ> : les mots de la valeur de cette clé dans deploiement/projet.env (les
-# réglages du projet, ses commandes de sauvegarde par exemple), dans le tableau PROJET_MOTS. Le
-# fichier est lu, jamais sourcé, et il est contrôlé en entier : chaque ligne qui n'est ni vide ni un
-# commentaire doit être de la forme CLE=mots, la clé en majuscules, les mots séparés par des
-# espaces et soumis à la règle de valeur_sure. Échec, journalisé et PROJET_MOTS vide, si le fichier
-# manque, si une ligne est invalide, ou si la clé est absente ou déclarée deux fois.
+# lire_projet_env <CLÉ> [<fichier>] : les mots de la valeur de cette clé dans deploiement/projet.env
+# (les réglages du projet, ses commandes de sauvegarde par exemple), ou dans <fichier>, une autre
+# version de lui, dans le tableau PROJET_MOTS. Le fichier est lu, jamais sourcé, et il est contrôlé
+# en entier : chaque ligne qui n'est ni vide ni un commentaire doit être de la forme CLE=mots, la
+# clé en majuscules, les mots séparés par des espaces et soumis à la règle de valeur_sure. Échec,
+# journalisé et PROJET_MOTS vide, si le fichier manque, si une ligne est invalide, ou si la clé est
+# absente ou déclarée deux fois.
 lire_projet_env() {
-  local cle="${1:-}" fichier="${{ prefixe }}CLONE/deploiement/projet.env" ligne nom valeur numero=0 trouvee=0
+  local cle="${1:-}" fichier="${2:-${{ prefixe }}CLONE/deploiement/projet.env}" ligne nom valeur numero=0 trouvee=0
   PROJET_MOTS=()
   [[ "$cle" =~ ^[A-Z][A-Z0-9_]*$ ]] || arreter 64 "lire_projet_env : clé invalide"
   if [ ! -f "$fichier" ]; then
@@ -299,19 +300,19 @@ lire_projet_env() {
   fi
 }
 
-# lire_projet_env_facultatif <CLÉ> : comme lire_projet_env, pour une clé que le projet peut ne pas
-# déclarer. Si aucune ligne de deploiement/projet.env ne commence par « CLÉ= » (ou si le fichier
-# manque), succès, PROJET_MOTS vide, et rien n'est lu ni journalisé : le script qui l'appelle se
-# comporte comme avant la clé, à l'octet près. Sinon, c'est lire_projet_env, avec le contrôle du
-# fichier entier.
+# lire_projet_env_facultatif <CLÉ> [<fichier>] : comme lire_projet_env, pour une clé que le projet
+# peut ne pas déclarer. Si aucune ligne de deploiement/projet.env (ou de <fichier>) ne commence par
+# « CLÉ= » (ou si le fichier manque), succès, PROJET_MOTS vide, et rien n'est lu ni journalisé : le
+# script qui l'appelle se comporte comme avant la clé, à l'octet près. Sinon, c'est
+# lire_projet_env, avec le contrôle du fichier entier.
 lire_projet_env_facultatif() {
-  local cle="${1:-}" fichier="${{ prefixe }}CLONE/deploiement/projet.env" ligne
+  local cle="${1:-}" fichier="${2:-${{ prefixe }}CLONE/deploiement/projet.env}" ligne
   PROJET_MOTS=()
   [[ "$cle" =~ ^[A-Z][A-Z0-9_]*$ ]] || arreter 64 "lire_projet_env_facultatif : clé invalide"
   [ -f "$fichier" ] || return 0
   while IFS= read -r ligne || [ -n "$ligne" ]; do
     if [[ "$ligne" == "$cle="* ]]; then
-      lire_projet_env "$cle"
+      lire_projet_env "$cle" "$fichier"
       return
     fi
   done <"$fichier"
@@ -327,14 +328,15 @@ lire_projet_env_facultatif() {
 # /config) avec VERIFIER_CONFIG, SOUS_DOSSIER_CONTENU (monté sur /contenu) avec VERIFIER_CONTENU. Un
 # projet qui n'en déclare aucune ne monte rien.
 
-# donnees_declarees : DECLARE_CONFIG et DECLARE_CONTENU à 1 si deploiement/projet.env déclare
-# VERIFIER_CONFIG, VERIFIER_CONTENU (lire_projet_env_facultatif), à 0 sinon. Échec, journalisé, si
-# projet.env ne se lit pas.
+# donnees_declarees [<fichier>] : DECLARE_CONFIG et DECLARE_CONTENU à 1 si deploiement/projet.env
+# (ou <fichier>, le projet.env d'une autre version : sonder.sh y passe celui de l'étiquette visée)
+# déclare VERIFIER_CONFIG, VERIFIER_CONTENU (lire_projet_env_facultatif), à 0 sinon. Échec,
+# journalisé, si le fichier ne se lit pas.
 donnees_declarees() {
   DECLARE_CONFIG=0 DECLARE_CONTENU=0
-  lire_projet_env_facultatif VERIFIER_CONFIG || return 1
+  lire_projet_env_facultatif VERIFIER_CONFIG "$@" || return 1
   [ -z "${PROJET_MOTS[0]:-}" ] || DECLARE_CONFIG=1
-  lire_projet_env_facultatif VERIFIER_CONTENU || return 1
+  lire_projet_env_facultatif VERIFIER_CONTENU "$@" || return 1
   [ -z "${PROJET_MOTS[0]:-}" ] || DECLARE_CONTENU=1
 }
 
