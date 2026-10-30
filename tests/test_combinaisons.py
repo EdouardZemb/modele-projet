@@ -1,19 +1,30 @@
-"""Les seize combinaisons du rendu : cible (quatre) x nature x fusion."""
+"""Les vingt combinaisons du rendu : cible (cinq) x nature x fusion."""
 
 import shutil
 import subprocess
 import sys
 
 import pytest
-from conftest import REPONSES_SERVEUR, exiger, fichiers_texte
+from conftest import INSTANCE_DE_TEST, REPONSES_DONNEES_SERVEUR, exiger, fichiers_texte
 from test_rendu import RESTE_DE_JINJA
 
 CIBLES = {
     "aucune": {},
-    "serveur-avec-sauvegardes": REPONSES_SERVEUR,
-    "serveur-sans-sauvegardes": {**REPONSES_SERVEUR, "sauvegardes": False},
+    "serveur-avec-sauvegardes": {"cible": "serveur", "sauvegardes": True},
+    "serveur-sans-sauvegardes": {"cible": "serveur", "sauvegardes": False},
     "donnees": {"nom": "essai-donnees", "cible": "donnees"},
+    "donnees-serveur": REPONSES_DONNEES_SERVEUR,
 }
+
+
+def reponses(cible, nature, fusion):
+    """Les réponses d'une combinaison. En `serveur`, l'instance n'est donnée qu'au mode à un dépôt
+    (nature `donnees`) : un dépôt de code naît sans elle (M-0006, § 4). Un dépôt de données est
+    toujours de nature `donnees`, quoi qu'on passe."""
+    resultat = {**CIBLES[cible], "nature": nature, "fusion": fusion}
+    if cible.startswith("serveur") and nature == "donnees":
+        resultat.update(INSTANCE_DE_TEST)
+    return resultat
 
 
 def lancer(commande, rendu, env=None):
@@ -32,7 +43,7 @@ def lancer(commande, rendu, env=None):
 @pytest.mark.parametrize("nature", ["code", "donnees"])
 @pytest.mark.parametrize("cible", list(CIBLES))
 def test_combinaison(rendre, env_isole, cible, nature, fusion):
-    rendu = rendre(**{**CIBLES[cible], "nature": nature, "fusion": fusion})
+    rendu = rendre(**reponses(cible, nature, fusion))
     fichiers = fichiers_texte(rendu)
     assert fichiers
     for chemin in fichiers:
@@ -45,7 +56,8 @@ def test_combinaison(rendre, env_isole, cible, nature, fusion):
 
     env = env_isole()
     commande = [sys.executable, "scripts/modele/confidentialite.py", "--fichiers", *[str(f) for f in fichiers]]
-    if nature == "code":
+    # --public force le régime `code`, celui d'un dépôt de code ; un dépôt de données n'en est jamais un.
+    if nature == "code" and not cible.startswith("donnees"):
         commande.append("--public")
     r = lancer(commande, rendu, env)
     assert r.returncode == 0, r.stderr
@@ -76,7 +88,7 @@ def scripts_shell(rendu):
 @pytest.mark.parametrize("nature", ["code", "donnees"])
 @pytest.mark.parametrize("cible", list(CIBLES))
 def test_combinaison_shellcheck(rendre, cible, nature, fusion):
-    rendu = rendre(**{**CIBLES[cible], "nature": nature, "fusion": fusion})
+    rendu = rendre(**reponses(cible, nature, fusion))
     scripts = scripts_shell(rendu)
     assert bool(scripts) == cible.startswith("serveur"), scripts
     if not scripts:

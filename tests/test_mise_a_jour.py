@@ -1,5 +1,6 @@
 """La mise à jour par Copier propage le géré et préserve le semé (spec §8, critère 3)."""
 
+import hashlib
 import shutil
 import subprocess
 from pathlib import Path
@@ -138,13 +139,7 @@ def test_passage_en_cible_serveur(tmp_path, env_isole):
 
     copier.run_update(
         str(projet),
-        data={
-            "cible": "serveur",
-            "bloc_ports": 4310,
-            "sauvegardes": True,
-            "fusion": "session",
-            "domaine": "exemple.org",
-        },
+        data={"cible": "serveur", "sauvegardes": True, "fusion": "session"},
         defaults=True,
         overwrite=True,
         vcs_ref="v0.0.2",
@@ -153,7 +148,9 @@ def test_passage_en_cible_serveur(tmp_path, env_isole):
 
     assert (projet / "deploiement/lib.sh").is_file()
     assert (projet / "deploiement/projet.env").is_file()
-    assert (projet / ".sops.yaml").is_file()
+    # Un projet de code passe en `serveur` à deux dépôts : son instance vivra dans ses données.
+    assert not (projet / ".sops.yaml").exists()
+    assert not (projet / "deploiement/env").exists()
     assert (projet / "docs/modele/decisions/M-0003-contrat-de-l-image.md").is_file()
     assert (projet / "CLAUDE.md").read_bytes() == claude
     assert (projet / "docs/registre.md").read_bytes() == registre
@@ -162,7 +159,8 @@ def test_passage_en_cible_serveur(tmp_path, env_isole):
     _sans_conflit(projet)
     reponses = yaml.safe_load((projet / ".copier-answers.yml").read_text(encoding="utf-8"))
     assert reponses["cible"] == "serveur"
-    assert reponses["bloc_ports"] == 4310
+    assert reponses["nature"] == "code"
+    assert "bloc_ports" not in reponses
 
 
 def test_retour_en_cible_aucune(tmp_path, env_isole):
@@ -267,13 +265,13 @@ def test_mise_a_jour_refuse_un_fichier_masque(tmp_path, env_isole):
     assert "outil_secret.py" in suivis.stdout
 
 
-def _modele_depuis_v0_5_0(tmp_path, env):
-    """Un modèle de test : la v0.5.0 du dépôt (v0.0.1), puis l'arbre de travail actuel (v0.0.2)."""
+def _modele_depuis(tmp_path, env, version):
+    """Un modèle de test : la `version` du dépôt (v0.0.1), puis l'arbre de travail actuel (v0.0.2)."""
     modele = tmp_path / "modele"
     modele.mkdir()
-    archive = tmp_path / "v0.5.0.tar"
+    archive = tmp_path / f"{version}.tar"
     subprocess.run(
-        ["git", "archive", "--format=tar", "-o", str(archive), "v0.5.0"],
+        ["git", "archive", "--format=tar", "-o", str(archive), version],
         check=True,
         cwd=RACINE,
         env=env,
@@ -284,7 +282,7 @@ def _modele_depuis_v0_5_0(tmp_path, env):
     git(modele, env, "add", "-A")
     git(modele, env, "commit", "-q", "-m", "v0.0.1")
     git(modele, env, "tag", "v0.0.1")
-    # L'arbre est vidé avant la copie : un fichier retiré depuis la v0.5.0 doit l'être vraiment.
+    # L'arbre est vidé avant la copie : un fichier retiré depuis cette version doit l'être vraiment.
     for chemin in modele.iterdir():
         if chemin.name != ".git":
             shutil.rmtree(chemin) if chemin.is_dir() else chemin.unlink()
@@ -295,8 +293,9 @@ def _modele_depuis_v0_5_0(tmp_path, env):
     return modele
 
 
-def _mettre_a_jour_depuis_v0_5_0(tmp_path, env, reponses, **update):
-    modele = _modele_depuis_v0_5_0(tmp_path, env)
+def _projet_depuis(tmp_path, env, version, reponses):
+    """Un projet rendu par la `version` du dépôt (la v0.0.1 du modèle de test), commité."""
+    modele = _modele_depuis(tmp_path, env, version)
     projet = tmp_path / "projet"
     copier.run_copy(
         str(modele), str(projet), data=reponses, defaults=True, vcs_ref="v0.0.1", quiet=True
@@ -305,9 +304,19 @@ def _mettre_a_jour_depuis_v0_5_0(tmp_path, env, reponses, **update):
     git(projet, env, "config", "core.autocrlf", "false")
     git(projet, env, "add", "-A")
     git(projet, env, "commit", "-q", "-m", "etat initial")
+    return projet
+
+
+def _mettre_a_jour(projet, **update):
+    """La mise à jour vers l'arbre de travail actuel (la v0.0.2 du modèle de test)."""
     copier.run_update(
         str(projet), defaults=True, overwrite=True, vcs_ref="v0.0.2", quiet=True, **update
     )
+
+
+def _mettre_a_jour_depuis_v0_5_0(tmp_path, env, reponses, **update):
+    projet = _projet_depuis(tmp_path, env, "v0.5.0", reponses)
+    _mettre_a_jour(projet, **update)
     return projet
 
 
@@ -335,4 +344,53 @@ def test_mise_a_jour_d_un_projet_public_passe_en_code(tmp_path, env_isole):
     assert "VISIBILITE" not in reglages
     reponses_finales = yaml.safe_load((projet / ".copier-answers.yml").read_text(encoding="utf-8"))
     assert reponses_finales["nature"] == "code"
+    _sans_conflit(projet)
+
+
+# Lot 12 (M-0006, § 9) : les clés du parc sortent du modèle, et les fichiers de l'instance d'un
+# projet à un dépôt sont semés. Rendu en v0.6.0, un tel projet monte de version sans --data : ses
+# clés, son .sops.yaml et ses env/ restent tels quels, au caractère près. On compare des
+# empreintes : les fichiers de la v0.6.0 portent des clés réelles, qu'aucun échec ne doit imprimer.
+INSTANCE_A_UN_DEPOT = (
+    ".sops.yaml",
+    "deploiement/cles/serveur.pub",
+    "deploiement/cles/hors-ligne.pub",
+    "deploiement/env/prod.env",
+    "deploiement/env/staging.env",
+)
+
+
+def _empreintes(projet, chemins):
+    return {
+        chemin: hashlib.sha256((projet / chemin).read_bytes()).hexdigest()
+        if (projet / chemin).is_file()
+        else None
+        for chemin in chemins
+    }
+
+
+def test_mise_a_jour_d_un_projet_a_un_depot_garde_ses_cles(tmp_path, env_isole):
+    env = env_isole()
+    # Les réponses d'un projet de la v0.6.0, qui ne connaissait pas les clés du parc.
+    reponses = {
+        cle: valeur for cle, valeur in REPONSES_SERVEUR.items() if not cle.startswith("cle_")
+    }
+    projet = _projet_depuis(tmp_path, env, "v0.6.0", reponses)
+    avant = _empreintes(projet, INSTANCE_A_UN_DEPOT)
+    assert None not in avant.values(), [chemin for chemin, e in avant.items() if e is None]
+
+    _mettre_a_jour(projet)
+
+    assert _empreintes(projet, INSTANCE_A_UN_DEPOT) == avant
+    finales = yaml.safe_load((projet / ".copier-answers.yml").read_text(encoding="utf-8"))
+    assert finales["_commit"] == "v0.0.2"
+    assert finales["nature"] == "donnees"
+    assert (finales["domaine"], finales["sous_domaine"], finales["bloc_ports"]) == (
+        "exemple.org",
+        "essai",
+        4310,
+    )
+    assert (finales["cle_serveur"], finales["cle_hors_ligne"]) == ("", "")
+    lib = (projet / "deploiement/lib.sh").read_text(encoding="utf-8")
+    assert 'MODE_DONNEES="un"' in lib.splitlines()
     _sans_conflit(projet)

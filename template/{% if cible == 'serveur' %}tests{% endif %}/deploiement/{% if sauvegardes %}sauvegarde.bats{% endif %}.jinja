@@ -11,8 +11,8 @@
 # les instantanés que la commande de l'image écrirait, le double de rclone tient un « distant »
 # dans un dossier du test, et age (le vrai) chiffre pour la clé hors ligne de test. Les doubles
 # refusent ce qu'un de ces scripts ne doit jamais faire (code 125) : toucher aux données de la prod
-# depuis le test de restauration, publier un autre port que 127.0.0.1:{{ bloc_ports + 9 }}, effacer hors du dossier
-# du remote.
+# depuis le test de restauration, publier le port de la prod ou hors de 127.0.0.1, effacer hors
+# du dossier du remote.
 
 # Chaque test tourne dans son propre processus : les `export DOUBLE_*` d'un test ne fuient pas
 # dans les autres, comme le veut le pilotage des doubles.
@@ -975,6 +975,35 @@ aucune_copie_jetable() {
   # résultat
   [ "$(envois_ok "$HC_TEST")" = "curl -fsS -m 10 --retry 3 --data-raw $SNAPSHOT restaurée : 3 fichiers $HC_TEST" ]
   [ -z "$(envois_echec "$HC_TEST")" ]
+}
+
+# Le port de l'essai est celui de la prod plus 9, lu dans son env au moment de l'essai : un dépôt de
+# code rend ce script sans bloc de ports (M-0006, § 4). 5000 est hors des blocs : aucun port rendu.
+@test "test_restauration_publie_le_port_de_la_prod_plus_9" {
+  sed -i 's/^{{ prefixe }}PORT=.*$/{{ prefixe }}PORT=5000/' "$CLONE/deploiement/env/prod.env"
+  grep -Fx '{{ prefixe }}PORT=5000' "$CLONE/deploiement/env/prod.env"
+  instantane "$SNAPSHOT" 1
+  tester prod
+  [ "$status" -eq 0 ]
+  appels_de docker | grep -E "^docker run -d --name {{ nom }}-test-restauration -p 127\.0\.0\.1:5009:{{ port_app }} "
+  appels_de curl | grep -Fx 'curl -fsS -m 5 http://127.0.0.1:5009{{ chemin_sante }}'
+  aucune_ligne ':(5000|{{ bloc_ports + 9 }})([^0-9]|$)' "$APPELS"
+  [ "$(envois_ok "$HC_TEST" | wc -l)" -eq 1 ]
+}
+
+# Un port de la prod illisible : l'essai n'a pas de port, il échoue avant tout conteneur, et le dit.
+@test "test_restauration_refuse_un_port_de_la_prod_illisible" {
+  instantane "$SNAPSHOT" 1
+  local port
+  for port in 43x0 0 04310 65527; do
+    sed -i "s/^{{ prefixe }}PORT=.*\$/{{ prefixe }}PORT=$port/" "$CLONE/deploiement/env/prod.env"
+    tester prod
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"port de la prod illisible : {{ prefixe }}PORT='$port'"* ]]
+  done
+  [ -z "$(appels_de docker | grep -F 'docker run' || true)" ]
+  [ "$(envois_echec "$HC_TEST" | wc -l)" -eq 4 ]
+  [ -z "$(envois_ok "$HC_TEST")" ]
 }
 
 # VERIFIER rend 2 : la copie n'est pas conforme. Le test échoue avant de lancer l'application, et la

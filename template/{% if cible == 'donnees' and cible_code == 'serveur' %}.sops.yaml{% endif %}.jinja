@@ -1,0 +1,9 @@
+# Chaque secret de secrets/ est chiffré pour deux identités age :
+# - le serveur (cles/serveur.pub), qui le déchiffre au déploiement ;
+# - la clé hors ligne du propriétaire (cles/hors-ligne.pub), qui le relit si le serveur est perdu.
+# `[\\/]` : sops compare le chemin tel que le système le donne. Sous Windows c'est avec des
+# antislashs, et un motif écrit avec `/` seul ne chiffrerait alors pour personne.
+creation_rules:
+  - path_regex: ^secrets[\\/][a-z]+\.env\.enc$
+    age: >-
+      {{ cle_serveur }},{{ cle_hors_ligne }}

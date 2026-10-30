@@ -3,7 +3,7 @@
 import re
 
 import yaml
-from conftest import RACINE, REGISTRE_ENTETE, REPONSES_SERVEUR
+from conftest import RACINE, REGISTRE_ENTETE, REPONSES_DONNEES_SERVEUR, REPONSES_SERVEUR
 
 
 def lire(rendu, chemin):
@@ -53,7 +53,29 @@ def test_gabarits_docs(rendre):
 def test_semes_declares(rendre):
     copier_yml = yaml.safe_load((RACINE / "copier.yml").read_text(encoding="utf-8"))
     rendus = set()
-    for reponses in ({}, REPONSES_SERVEUR, {"nom": "essai-donnees", "cible": "donnees"}):
+    for reponses in (
+        {},
+        REPONSES_SERVEUR,
+        {"nom": "essai-donnees", "cible": "donnees"},
+        REPONSES_DONNEES_SERVEUR,
+    ):
         rendu = rendre(**reponses)
         rendus |= {p.relative_to(rendu).as_posix() for p in rendu.rglob("*") if p.is_file()}
     assert set(copier_yml["_skip_if_exists"]) <= rendus
+
+
+# Lot 12 (M-0006, § 9) : les fichiers de l'instance sont semés. Un projet à un dépôt garde ses clés,
+# son .sops.yaml et ses env/ à chaque mise à jour, et le dépôt de données les siens.
+def test_instance_semee():
+    semes = set(
+        yaml.safe_load((RACINE / "copier.yml").read_text(encoding="utf-8"))["_skip_if_exists"]
+    )
+    assert {
+        ".sops.yaml",
+        "deploiement/cles/serveur.pub",
+        "deploiement/cles/hors-ligne.pub",
+        "cles/serveur.pub",
+        "cles/hors-ligne.pub",
+        "env/prod.env",
+        "env/staging.env",
+    } <= semes

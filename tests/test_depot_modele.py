@@ -72,6 +72,8 @@ def test_mecanique_et_fausse_app_dans_la_ci_du_depot_modele():
         "copier copy --vcs-ref HEAD --defaults --trust",
         "--data nom=fausse-app",
         "--data cible=serveur",
+        # le mode à un dépôt, que la fausse app sert jusqu'à ce que la chaîne à deux dépôts l'atteigne
+        "--data nature=donnees",
         "--data bloc_ports=4310",
         # explicite : la preuve de la sauvegarde ne dépend pas d'un défaut de copier.yml (R20)
         "--data sauvegardes=true",

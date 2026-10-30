@@ -1,7 +1,11 @@
 """La cible `donnees` : un dépôt de données, le socle et la méthode, rien de l'application (M-0006)."""
 
+import importlib.util
+import re
+
 import pytest
 import yaml
+from conftest import CLE_HORS_LIGNE_DE_TEST, CLE_SERVEUR_DE_TEST, REPONSES_DONNEES_SERVEUR
 
 DONNEES = {"nom": "essai-donnees", "cible": "donnees"}
 
@@ -47,6 +51,8 @@ def test_ne_rend_rien_de_l_application(rendre):
         "tests",
         "Dockerfile",
         ".sops.yaml",
+        "env",
+        "cles",
         "docs/cadrage.md",
         "docs/00-brief-initial.md",
         "docs/pistes.md",
@@ -62,6 +68,82 @@ def test_ne_rend_rien_de_l_application(rendre):
         assert not (rendu / chemin).exists(), chemin
     # Git ne suit pas un dossier vide : ce qui compte est qu'aucun fichier de skill n'y soit.
     assert not [p for p in (rendu / ".claude").rglob("SKILL.md")]
+
+
+def lire(rendu, chemin):
+    return (rendu / chemin).read_text(encoding="utf-8")
+
+
+# Lot 12 : le dépôt de données d'un projet `serveur` porte son instance (M-0006, § 2), rendue depuis
+# ses réponses, au nom du projet (`nom` sans `-donnees`) : env/, .sops.yaml et les clés du parc.
+def test_depot_de_donnees_d_un_projet_serveur(rendre):
+    rendu = rendre(**REPONSES_DONNEES_SERVEUR)
+    assert lire(rendu, "env/prod.env").splitlines() == [
+        "ESSAI_ENV=prod",
+        "ESSAI_PROJET=essai",
+        "ESSAI_PORT=4310",
+        "ESSAI_URL_PUBLIQUE=https://essai.exemple.org",
+        "ESSAI_CANAL=etiquette",
+    ]
+    assert lire(rendu, "env/staging.env").splitlines() == [
+        "ESSAI_ENV=staging",
+        "ESSAI_PROJET=essai-staging",
+        "ESSAI_PORT=4311",
+        "ESSAI_URL_PUBLIQUE=https://essai-staging.exemple.org",
+        "ESSAI_CANAL=main",
+        "ESSAI_BRANCHE_DONNEES=main",
+    ]
+    assert lire(rendu, "cles/serveur.pub") == CLE_SERVEUR_DE_TEST + "\n"
+    assert lire(rendu, "cles/hors-ligne.pub") == CLE_HORS_LIGNE_DE_TEST + "\n"
+    texte = lire(rendu, ".sops.yaml")
+    assert re.findall(r"age1[0-9a-z]{58}", texte) == [CLE_SERVEUR_DE_TEST, CLE_HORS_LIGNE_DE_TEST]
+    (regle,) = yaml.safe_load(texte)["creation_rules"]
+    assert regle["path_regex"] == r"^secrets[\\/][a-z]+\.env\.enc$"
+    assert re.search(regle["path_regex"], "secrets/prod.env.enc")
+    assert re.search(regle["path_regex"], "secrets\\staging.env.enc")
+    assert not re.search(regle["path_regex"], "deploiement/secrets/prod.env.enc")
+    assert "deploiement/" not in texte
+    assert not (rendu / "deploiement").exists()
+    spec = importlib.util.spec_from_file_location(
+        "reglages_donnees", rendu / "scripts/modele/reglages.py"
+    )
+    reglages = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(reglages)
+    assert reglages.DEPOT_CODE == "essai"
+    assert reglages.NATURE == "donnees"
+    reponses = yaml.safe_load(lire(rendu, ".copier-answers.yml"))
+    assert reponses["cible_code"] == "serveur"
+    assert reponses["sous_domaine"] == "essai"
+    assert reponses["bloc_ports"] == 4310
+    assert reponses["cle_serveur"] == CLE_SERVEUR_DE_TEST
+    assert "prefixe" not in reponses
+
+
+# P5 : le staging suit la branche principale du dépôt de données, celle de ses réponses.
+def test_depot_de_donnees_suit_sa_branche(rendre):
+    rendu = rendre(**{**REPONSES_DONNEES_SERVEUR, "branche_principale": "principal"})
+    assert lire(rendu, "env/staging.env").splitlines()[-1] == "ESSAI_BRANCHE_DONNEES=principal"
+
+
+# Sans ses clés, le dépôt de données d'un projet `serveur` ne naît pas.
+@pytest.mark.parametrize("question", ["cle_serveur", "cle_hors_ligne"])
+@pytest.mark.parametrize("valeur", [None, ""])
+def test_depot_de_donnees_sans_cle_refuse(rendre, question, valeur):
+    reponses = {cle: v for cle, v in REPONSES_DONNEES_SERVEUR.items() if cle != question}
+    if valeur is not None:
+        reponses[question] = valeur
+    with pytest.raises(Exception, match="clé publique age"):
+        rendre(**reponses)
+
+
+# Sans `cible_code`, un dépôt de données n'a rien de l'instance à donner ; il connaît son code.
+def test_depot_de_donnees_sans_cible_code(rendre):
+    rendu = rendre(**DONNEES)
+    reponses = yaml.safe_load(lire(rendu, ".copier-answers.yml"))
+    assert reponses["cible_code"] == "aucune"
+    for question in ("domaine", "sous_domaine", "bloc_ports", "cle_serveur", "cle_hors_ligne"):
+        assert question not in reponses, question
+    assert 'DEPOT_CODE = "essai"' in lire(rendu, "scripts/modele/reglages.py")
 
 
 def test_nom_sans_suffixe_refuse(rendre):

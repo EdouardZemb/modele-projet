@@ -1,6 +1,8 @@
 """Banc d'essai : rend le modèle Copier dans un dossier temporaire."""
 
 import os
+import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -26,12 +28,57 @@ REPONSES_PAR_DEFAUT = {
     "fusion": "session",
 }
 
+ALPHABET_BECH32 = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
+
+
+def cle_age_de_test() -> str:
+    """Une clé publique age fabriquée au moment du test, jamais une clé du parc (M-0006, § 9).
+
+    Par `age-keygen` s'il est là (l'identité privée n'est pas gardée), sinon `age1` et 58
+    caractères tirés au hasard dans l'alphabet bech32 : la forme suffit au rendu."""
+    age_keygen = shutil.which("age-keygen")
+    if age_keygen:
+        r = subprocess.run([age_keygen], capture_output=True, text=True, check=False)
+        trouvee = re.search(r"^# public key: (age1[0-9a-z]{58})$", r.stdout, re.MULTILINE)
+        if r.returncode == 0 and trouvee:
+            return trouvee.group(1)
+    return "age1" + "".join(secrets.choice(ALPHABET_BECH32) for _ in range(58))
+
+
+CLE_SERVEUR_DE_TEST = cle_age_de_test()
+CLE_HORS_LIGNE_DE_TEST = cle_age_de_test()
+INSTANCE_DE_TEST = {
+    "bloc_ports": 4310,
+    "domaine": "exemple.org",
+    "cle_serveur": CLE_SERVEUR_DE_TEST,
+    "cle_hors_ligne": CLE_HORS_LIGNE_DE_TEST,
+}
+
+# Le mode à un dépôt : un projet `serveur` de nature `donnees` (d'avant M-0006) porte son instance,
+# le domaine, le bloc de ports et les clés du parc.
 REPONSES_SERVEUR = {
     **REPONSES_PAR_DEFAUT,
     "cible": "serveur",
-    "bloc_ports": 4310,
+    "nature": "donnees",
     "sauvegardes": True,
-    "domaine": "exemple.org",
+    **INSTANCE_DE_TEST,
+}
+
+# Le mode à deux dépôts : un dépôt de code `serveur` n'a rien de l'instance (M-0006, § 4).
+REPONSES_SERVEUR_CODE = {
+    **REPONSES_PAR_DEFAUT,
+    "cible": "serveur",
+    "nature": "code",
+    "sauvegardes": True,
+}
+
+# Le dépôt de données d'un projet `serveur` : il porte l'instance du projet `essai`.
+REPONSES_DONNEES_SERVEUR = {
+    **REPONSES_PAR_DEFAUT,
+    "nom": "essai-donnees",
+    "cible": "donnees",
+    "cible_code": "serveur",
+    **INSTANCE_DE_TEST,
 }
 
 

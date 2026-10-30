@@ -7,10 +7,18 @@ import subprocess
 
 import pytest
 import yaml
-from conftest import RACINE, REPONSES_SERVEUR, fichiers_texte
+from conftest import (
+    CLE_HORS_LIGNE_DE_TEST,
+    CLE_SERVEUR_DE_TEST,
+    RACINE,
+    REPONSES_SERVEUR,
+    REPONSES_SERVEUR_CODE,
+    fichiers_texte,
+)
 
-CLE_SERVEUR = "age1a6ksgqxdj66j5h4f4t6wnhzzghnwc9mdy3q0lresn20sgamnyqus9ksnyg"
-CLE_HORS_LIGNE = "age1km9nay02cl0lxfex0qw3al6aa6zqqelg9cv0k39j90lux0h82ysqzjc0ue"
+# La forme d'une clé publique age : aucun rendu d'un dépôt de code n'en porte (M-0006, § 9).
+CLE_AGE = re.compile(r"age1[0-9a-z]{58}")
+QUESTIONS_DE_L_INSTANCE = ("domaine", "sous_domaine", "bloc_ports", "cle_serveur", "cle_hors_ligne")
 
 
 def lire(rendu, chemin):
@@ -27,13 +35,115 @@ def test_questions_serveur_enregistrees(rendre):
     assert reponses["chemin_sante"] == "/api/sante"
     assert reponses["bloc_ports"] == 4310
     assert reponses["sauvegardes"] is True
+    assert reponses["cle_serveur"] == CLE_SERVEUR_DE_TEST
+    assert reponses["cle_hors_ligne"] == CLE_HORS_LIGNE_DE_TEST
     assert "prefixe" not in reponses
+    assert "cible_code" not in reponses
 
 
 def test_questions_absentes_en_cible_aucune(rendre):
     reponses = yaml.safe_load(lire(rendre(), ".copier-answers.yml"))
-    for question in ("domaine", "sous_domaine", "port_app", "chemin_sante", "bloc_ports", "sauvegardes", "prefixe"):
+    for question in (
+        "domaine",
+        "sous_domaine",
+        "port_app",
+        "chemin_sante",
+        "bloc_ports",
+        "sauvegardes",
+        "prefixe",
+        "cible_code",
+        "cle_serveur",
+        "cle_hors_ligne",
+    ):
         assert question not in reponses
+
+
+# Lot 12 (M-0006, § 4 et 9) : un dépôt de code `serveur` ne porte rien de l'instance. Ses tests et
+# ses scripts gérés sont rendus avec des valeurs d'exemple, qui n'entrent pas dans ses réponses ;
+# des clés passées par erreur n'y entrent pas non plus, ni dans aucun fichier.
+@pytest.mark.parametrize("sauvegardes", [True, False])
+def test_depot_de_code_serveur_sans_instance(rendre, sauvegardes):
+    rendu = rendre(
+        **{
+            **REPONSES_SERVEUR_CODE,
+            "sauvegardes": sauvegardes,
+            "cle_serveur": CLE_SERVEUR_DE_TEST,
+            "cle_hors_ligne": CLE_HORS_LIGNE_DE_TEST,
+        }
+    )
+    reponses = yaml.safe_load(lire(rendu, ".copier-answers.yml"))
+    assert reponses["nature"] == "code"
+    for question in (*QUESTIONS_DE_L_INSTANCE, "cible_code", "prefixe"):
+        assert question not in reponses, question
+    for chemin in ("deploiement/env", ".sops.yaml", "deploiement/cles"):
+        assert not (rendu / chemin).exists(), chemin
+    assert (rendu / "deploiement/lib.sh").is_file()
+    assert re.findall(r"^MODE_DONNEES=.*$", lire(rendu, "deploiement/lib.sh"), re.MULTILINE) == [
+        'MODE_DONNEES="deux"'
+    ]
+    # Les valeurs d'exemple du rendu : le domaine, le sous-domaine et le bloc de ports.
+    banc = lire(rendu, "tests/deploiement/lib.bats")
+    assert "https://essai.exemple.org" in banc
+    assert '"4310"' in banc
+    porteurs = [
+        chemin.relative_to(rendu).as_posix()
+        for chemin in fichiers_texte(rendu)
+        if CLE_AGE.search(chemin.read_bytes().decode("utf-8", errors="replace"))
+    ]
+    assert porteurs == []
+
+
+# Le mode à un dépôt : un projet de nature `donnees` garde son instance, rendue depuis ses réponses.
+def test_depot_a_un_depot_garde_son_instance(rendre):
+    rendu = rendre(**REPONSES_SERVEUR)
+    assert lire(rendu, "deploiement/env/prod.env").splitlines() == [
+        "ESSAI_ENV=prod",
+        "ESSAI_PROJET=essai",
+        "ESSAI_PORT=4310",
+        "ESSAI_URL_PUBLIQUE=https://essai.exemple.org",
+        "ESSAI_CANAL=etiquette",
+    ]
+    assert "ESSAI_PORT=4311" in lire(rendu, "deploiement/env/staging.env").splitlines()
+    assert lire(rendu, "deploiement/cles/serveur.pub") == CLE_SERVEUR_DE_TEST + "\n"
+    assert lire(rendu, "deploiement/cles/hors-ligne.pub") == CLE_HORS_LIGNE_DE_TEST + "\n"
+    assert CLE_AGE.findall(lire(rendu, ".sops.yaml")) == [
+        CLE_SERVEUR_DE_TEST,
+        CLE_HORS_LIGNE_DE_TEST,
+    ]
+    assert re.findall(r"^MODE_DONNEES=.*$", lire(rendu, "deploiement/lib.sh"), re.MULTILINE) == [
+        'MODE_DONNEES="un"'
+    ]
+
+
+# Les clés du parc d'un projet à un dépôt : une clé publique age, ou rien (le projet garde alors les
+# siennes, semées). Une autre forme est refusée.
+@pytest.mark.parametrize("question", ["cle_serveur", "cle_hors_ligne"])
+@pytest.mark.parametrize(
+    "cle", ["age1abc", "AGE1" + "q" * 58, "age1" + "q" * 59, "ssh-ed25519 AAAA"]
+)
+def test_cle_du_parc_invalide_refusee(rendre, question, cle):
+    with pytest.raises(Exception, match="clé publique age"):
+        rendre(**{**REPONSES_SERVEUR, question: cle})
+
+
+def test_cles_du_parc_vides_permises_a_un_depot(rendre):
+    rendu = rendre(**{**REPONSES_SERVEUR, "cle_serveur": "", "cle_hors_ligne": ""})
+    reponses = yaml.safe_load(lire(rendu, ".copier-answers.yml"))
+    assert reponses["cle_serveur"] == "" and reponses["cle_hors_ligne"] == ""
+    assert (rendu / ".sops.yaml").is_file()
+    assert (rendu / "deploiement/cles/serveur.pub").is_file()
+
+
+# Le test de restauration lit le port de la prod dans son env : un dépôt de code le rend sans bloc.
+def test_test_de_restauration_sans_bloc_rendu(rendre):
+    script = lire(rendre(**REPONSES_SERVEUR_CODE), "deploiement/tester-restauration.sh")
+    assert "4310" not in script
+    assert "4319" not in script
+    gabarit = RACINE / (
+        "template/{% if cible == 'serveur' %}deploiement{% endif %}"
+        "/{% if sauvegardes %}tester-restauration.sh{% endif %}.jinja"
+    )
+    assert "bloc_ports" not in gabarit.read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("bloc", [4300, 4315, 5000])
@@ -77,7 +187,7 @@ def test_arborescence(rendre, sauvegardes):
         "secrets/staging.cles",
     ):
         assert (rendu / "deploiement" / chemin).is_file(), chemin
-    assert lire(rendu, "deploiement/cles/hors-ligne.pub").strip() == CLE_HORS_LIGNE
+    assert lire(rendu, "deploiement/cles/hors-ligne.pub").strip() == CLE_HORS_LIGNE_DE_TEST
 
 
 def test_pas_de_deploiement_en_cible_aucune(rendre):
@@ -295,7 +405,7 @@ def test_sops_yaml_destinataires(rendre):
     rendu = rendre(**REPONSES_SERVEUR)
     texte = lire(rendu, ".sops.yaml")
     cles_pub = {lire(rendu, f"deploiement/cles/{n}.pub").strip() for n in ("serveur", "hors-ligne")}
-    assert cles_pub == {CLE_SERVEUR, CLE_HORS_LIGNE}
+    assert cles_pub == {CLE_SERVEUR_DE_TEST, CLE_HORS_LIGNE_DE_TEST}
     assert set(re.findall(r"age1[0-9a-z]{58}", texte)) == cles_pub
     (regle,) = yaml.safe_load(texte)["creation_rules"]
     assert regle["path_regex"] == r"^deploiement[\\/]secrets[\\/][a-z]+\.env\.enc$"

@@ -6,7 +6,7 @@ import re
 import garde_claude
 import pytest
 import yaml
-from conftest import RACINE, REPONSES_SERVEUR, fichiers_texte
+from conftest import RACINE, REPONSES_DONNEES_SERVEUR, REPONSES_SERVEUR, fichiers_texte
 
 
 def test_reponses_enregistrees(rendre):
@@ -40,9 +40,15 @@ def test_visibilite_passee_en_donnee_ne_fait_pas_un_depot_de_donnees(rendre):
     assert reponses["nature"] == "code"
 
 
-def test_domaine_sans_defaut():
-    copier_yml = yaml.safe_load((RACINE / "copier.yml").read_text(encoding="utf-8"))
-    assert "default" not in copier_yml["domaine"]
+# Le domaine et le bloc de ports n'ont de défaut que là où l'instance n'est pas posée, dans un dépôt
+# de code (M-0006, § 4) : un projet qui porte son instance ne naît jamais sur les valeurs d'exemple.
+@pytest.mark.parametrize("question", ["domaine", "bloc_ports"])
+@pytest.mark.parametrize(
+    "reponses", [REPONSES_SERVEUR, REPONSES_DONNEES_SERVEUR], ids=["un-depot", "donnees"]
+)
+def test_domaine_sans_defaut(rendre, reponses, question):
+    with pytest.raises(Exception, match=question):
+        rendre(**{cle: valeur for cle, valeur in reponses.items() if cle != question})
 
 
 def test_exploitation_sans_visibilite():
