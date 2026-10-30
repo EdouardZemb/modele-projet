@@ -222,8 +222,11 @@ def verifier(racine: Path, exiges: dict[str, list[str]], cles: Path | None = Non
     noms_enc = {p.name for p in enc}
     for chemin in cles_fichiers:
         voisin = chemin.with_name(chemin.name[: -len(SUFFIXE_CLES)] + SUFFIXE_ENC)
-        # avec --cles, le .enc est dans le dépôt de données, sous le même nom
-        if (voisin.name not in noms_enc) if cles is not None else not voisin.is_file():
+        if cles is None:
+            sans_enc = not voisin.is_file()
+        else:  # le .enc est dans le dépôt de données, sous le même nom
+            sans_enc = voisin.name not in noms_enc
+        if sans_enc:
             constats.append(
                 Constat("avertissement", _relatif(racine, chemin), f"pas de {voisin.name} : secrets pas encore posés")
             )
