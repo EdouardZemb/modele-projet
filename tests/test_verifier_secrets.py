@@ -381,6 +381,34 @@ def test_destinataires_compares_aux_cles_du_parc(tmp_path):
     assert "refus : .sops.yaml : destinataire sans clé dans cles/ : age1bbbb…" in sortie(r)
 
 
+def test_cles_seuls_les_secrets_de_la_racine(tmp_path):
+    """Avec --cles, seuls les secrets/*.env.enc de la racine du dépôt de données sont lus : ni un
+    .enc du clone code/, ni un .enc d'ailleurs dans le dépôt."""
+    d, code = monter_donnees(tmp_path)
+    for ailleurs in (
+        "code/deploiement/secrets/prod.env.enc",
+        "code/secrets/prod.env.enc",
+        "secrets/sous/prod.env.enc",
+        "config/autre.env.enc",
+    ):
+        (d / ailleurs).parent.mkdir(parents=True, exist_ok=True)
+        (d / ailleurs).write_text("TOKEN=en clair\n", encoding="utf-8")
+    r = lancer_cles(d, code)
+    assert r.returncode == 0, sortie(r)
+    attendu = (
+        "avertissement : code/deploiement/secrets/staging.cles : "
+        "pas de staging.env.enc : secrets pas encore posés"
+    )
+    assert sortie(r).splitlines() == [attendu]
+    # un .enc du code au nom d'un .cles ne fait pas croire que ses secrets sont posés
+    (d / "code/deploiement/secrets/staging.env.enc").write_text(
+        enc(("HC_SONDE",), (DEST_A, DEST_B)), encoding="utf-8"
+    )
+    r = lancer_cles(d, code)
+    assert r.returncode == 0, sortie(r)
+    assert sortie(r).splitlines() == [attendu]
+
+
 def test_cles_absent_usage(tmp_path):
     d, _code = monter_donnees(tmp_path)
     r = lancer_cles(d, tmp_path / "absent")
@@ -388,16 +416,27 @@ def test_cles_absent_usage(tmp_path):
     assert "Traceback" not in sortie(r)
 
 
-def copier_avec_reglages(tmp_path, reglages):
+MODELE_DONNEES_YML = ".github/workflows/modele-donnees.yml"
+
+
+def copier_avec_reglages(tmp_path, reglages, *, workflow=True):
     """Le dépôt de données, le script dans son scripts/modele/, à côté d'un reglages.py, comme dans
     un projet rendu : il y lit DEPOT_CODE et SECRETS_EXIGES. secrets/prod.env.enc n'a pas de .cles
-    voisin : le contrôle ordinaire le refuse."""
+    voisin : le contrôle ordinaire le refuse. `workflow` : le dépôt porte modele-donnees.yml, comme
+    le dépôt de données d'un projet `serveur`."""
     d, code = monter_donnees(tmp_path)
+    poser_le_script(d, reglages, workflow=workflow)
+    return d, code
+
+
+def poser_le_script(d, reglages, *, workflow):
     modele = d / "scripts/modele"
     modele.mkdir(parents=True)
     shutil.copy(SCRIPT, modele / SCRIPT.name)
     (modele / "reglages.py").write_text(reglages, encoding="utf-8")
-    return d, code
+    if workflow:
+        (d / MODELE_DONNEES_YML).parent.mkdir(parents=True)
+        (d / MODELE_DONNEES_YML).write_text("name: donnees\n", encoding="utf-8")
 
 
 def lancer_dans(d, *arguments):
@@ -428,6 +467,25 @@ def test_depot_de_donnees_controle_par_modele_donnees(tmp_path):
     r = lancer_dans(d, "--cles", "code/deploiement/secrets")
     assert r.returncode == 1
     assert "refus : secrets/prod.env.enc : clés en trop : TOKEN" in sortie(r)
+
+
+def test_depot_de_donnees_sans_modele_donnees_controle_ordinaire(tmp_path):
+    """Le dépôt de données d'un projet sans serveur porte DEPOT_CODE, mais pas modele-donnees.yml :
+    rien d'autre ne contrôlerait ses secrets, le contrôle ordinaire tourne."""
+    reglages = 'NATURE = "donnees"\nDEPOT_CODE = "essai"\nSECRETS_EXIGES = {}\n'
+    # sans fichier chiffré, ce qu'il est d'ordinaire : rien à dire
+    d = tmp_path / "sans-serveur"
+    d.mkdir()
+    poser_le_script(d, reglages, workflow=False)
+    r = lancer_dans(d)
+    assert r.returncode == 0, sortie(r)
+    assert sortie(r) == ""
+    # un .enc s'y contrôle comme ailleurs : sans son .cles voisin, il refuse
+    d, _code = copier_avec_reglages(tmp_path / "avec-enc", reglages, workflow=False)
+    r = lancer_dans(d)
+    assert r.returncode == 1
+    assert MESSAGE_DONNEES not in sortie(r)
+    assert "refus : secrets/prod.env.enc : pas de secrets/prod.cles" in sortie(r)
 
 
 def test_sans_depot_code_controle_ordinaire(tmp_path):

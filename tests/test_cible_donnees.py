@@ -264,6 +264,16 @@ def test_modele_donnees_yml(rendre):
         == "python scripts/modele/verifier_secrets.py --cles code/deploiement/secrets"
     )
     assert verification["run"] == "python scripts/modele/verifier_donnees.py --code code"
+    # les données se vérifient même quand les secrets refusent : tout ce qui refuse se dit dans la
+    # même exécution, pourvu que les deux dépôts soient là et le nom du code lu
+    assert "if" not in secrets
+    assert (donnees["id"], code["id"]) == ("donnees", "clone")
+    assert verification["if"] == (
+        "${{ !cancelled() && steps.donnees.outcome == 'success' "
+        "&& steps.code.outcome == 'success' && steps.clone.outcome == 'success' }}"
+    )
+    ids = {etape.get("id") for etape in job["steps"]}
+    assert set(re.findall(r"steps\.([a-z]+)\.outcome", verification["if"])) <= ids
 
     # ci.yml l'appelle, à côté du socle
     ci = yaml.safe_load((rendu / ".github/workflows/ci.yml").read_text(encoding="utf-8"))

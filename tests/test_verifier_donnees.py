@@ -10,8 +10,10 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
+import tarfile
 
 import pytest
 import verifier_donnees
@@ -26,13 +28,24 @@ JETABLES = [
 ]  # fmt: skip
 
 # Le faux docker : chaque appel est une ligne JSON de `journal.jsonl` ; un `run` y note aussi son
-# image, sa commande et, pour chaque montage, son mode et les fichiers de sa source à ce moment-là.
-# `reglages.json` dit les images absentes du registre, et le code et la sortie de chaque commande,
-# par « <image> <premier mot de la commande> ».
+# image, sa commande et, pour chaque montage, son mode, les fichiers de sa source à ce moment-là, et
+# les droits (st_mode) de la source, de ce qu'elle porte et de ses dossiers parents jusqu'au dossier
+# temporaire du script. `reglages.json` dit les images absentes du registre, et le code et la
+# sortie de chaque commande, par « <image> <premier mot de la commande> ».
 FAUX_DOCKER = r"""
 import json
 import sys
 from pathlib import Path
+
+
+def parents(source):
+    droits = []
+    for parent in source.parents:
+        droits.append(parent.stat().st_mode)
+        if parent.name.startswith("verifier-donnees-"):
+            break
+    return droits
+
 
 ici = Path(__file__).parent
 reglages = json.loads((ici / "reglages.json").read_text(encoding="utf-8"))
@@ -58,6 +71,13 @@ if args[:1] == ["run"]:
                         if p.is_file()
                     },
                     "source": source,
+                    "droits": {
+                        p.relative_to(racine).as_posix(): p.lstat().st_mode
+                        for p in [racine, *sorted(racine.rglob("*"))]
+                    }
+                    if racine.is_dir()
+                    else {},
+                    "parents": parents(racine),
                 }
             i += 2
         else:
@@ -159,9 +179,9 @@ class Banc:
         reglages = {"absentes": list(absentes), "codes": codes or {}, "sorties": sorties or {}}
         (self.binaires / "reglages.json").write_text(json.dumps(reglages), encoding="utf-8")
 
-    def lancer(self, *arguments, env=None):
+    def lancer(self, *arguments, env=None, umask=None):
         """`python scripts/modele/verifier_donnees.py …` à la racine du dépôt de données, comme
-        modele-donnees.yml ; le journal du faux docker repart de zéro."""
+        modele-donnees.yml, sous `umask` s'il est donné ; le journal du faux docker repart de zéro."""
         (self.binaires / "journal.jsonl").write_text("", encoding="utf-8")
         return subprocess.run(
             [sys.executable, "scripts/modele/verifier_donnees.py", *arguments],
@@ -171,7 +191,18 @@ class Banc:
             text=True,
             encoding="utf-8",
             check=False,
+            preexec_fn=None if umask is None else (lambda: os.umask(umask)),
         )
+
+    def lien_des_donnees(self, chemin, cible):
+        """Un commit des données qui ajoute le lien symbolique `chemin` vers `cible`, posé dans
+        l'index seul : la copie de travail n'en a pas besoin (git archive lit le commit)."""
+        texte = self.donnees.parent / "cible-du-lien"
+        texte.write_bytes(cible.encode("utf-8"))
+        objet = git(self.donnees, self.env, "hash-object", "-w", str(texte)).strip()
+        cache = f"120000,{objet},{chemin}"
+        git(self.donnees, self.env, "update-index", "--add", "--cacheinfo", cache)
+        git(self.donnees, self.env, "commit", "-q", "-m", "feat: un lien")
 
     def appels(self):
         texte = (self.binaires / "journal.jsonl").read_text(encoding="utf-8")
@@ -465,6 +496,21 @@ def test_en_service_le_contenu_de_la_plus_haute_etiquette(banc):
     assert "donnees-2026.11.03.10" in r.stdout
 
 
+def test_en_service_lu_par_refs_tags(banc):
+    """Le contenu en service se lit par refs/tags/<étiquette> : une autre référence du même nom, qui
+    passerait avant l'étiquette, n'y entre pas."""
+    banc.commit_du_code("VERIFIER_CONTENU=verifier-contenu\n")
+    banc.commit_des_donnees({"contenu/page.md": "leurre\n"})
+    leurre = git(banc.donnees, banc.env, "rev-parse", "HEAD").strip()
+    banc.commit_des_donnees({"contenu/page.md": "en service\n"}, "donnees-2026.11.03.1")
+    git(banc.donnees, banc.env, "update-ref", "refs/donnees-2026.11.03.1", leurre)
+    banc.commit_des_donnees({"contenu/page.md": "visée\n"})
+    r = banc.lancer("--code", "code", "--compte", COMPTE)
+    assert r.returncode == 0, sortie(r)
+    (appel,) = banc.lances()
+    assert montages_de(appel)["/en-service"] == ("ro", {"page.md": "en service\n"})
+
+
 def test_sans_contenu_en_service_seul_contenu(banc):
     banc.commit_du_code("VERIFIER_CONTENU=verifier-contenu\n")
     # aucune étiquette de données
@@ -521,6 +567,65 @@ def test_une_image_absente_refuse(banc):
     assert "not found" in r.stdout
     assert banc.tires() == [f"{BASE}:main", f"{BASE}:1.0.0"]
     assert {a["image"] for a in banc.lances()} == {f"{BASE}:main"}
+
+
+# --- L'extraction ---------------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(not hasattr(tarfile, "data_filter"), reason="un Python sans le filtre data")
+def test_un_lien_qui_sort_du_dossier_refuse_sans_trace(banc):
+    """Le filtre `data` refuse un lien qui sort du dossier extrait : un refus nommé, jamais une trace
+    d'appel, et aucun conteneur ne part."""
+    banc.commit_du_code("VERIFIER_CONFIG=verifier-config\n")
+    banc.commit_des_donnees({"config/profil.yml": "version: 1\n"})
+    banc.lien_des_donnees("config/dehors", "../../hors-du-dossier")
+    r = banc.lancer("--code", "code", "--compte", COMPTE)
+    assert r.returncode == 1, sortie(r)
+    assert "Traceback" not in sortie(r)
+    assert "refus : config/ de HEAD ne s'extrait pas : " in r.stdout
+    assert banc.lances() == []
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="l'umask et les droits POSIX")
+def test_l_extrait_se_lit_par_le_conteneur_sous_tout_umask(banc):
+    """Le conteneur tourne sous 1000:1000, un autre utilisateur que celui du script : sous un umask
+    077, tout ce qu'il lit reste lisible par lui, dossiers 0755 et fichiers 0644, jusqu'au dossier
+    temporaire."""
+    banc.commit_du_code(DEUX_COMMANDES)
+    fichiers = {"config/profil.yml": "v: 1\n", "config/sous/a.yml": "a\n", "contenu/page.md": "p\n"}
+    banc.commit_des_donnees(fichiers, "donnees-2026.11.03.1")
+    banc.commit_des_donnees({**fichiers, "contenu/page.md": "p2\n"})
+    r = banc.lancer("--code", "code", "--compte", COMPTE, umask=0o077)
+    assert r.returncode == 0, sortie(r)
+    montages = [m for appel in banc.lances() for m in appel["montages"].values()]
+    assert len(montages) == 3  # /config, /contenu, /en-service
+    for montage in montages:
+        assert montage["droits"], montage["source"]
+        for chemin, droits in montage["droits"].items():
+            attendus = 0o755 if stat.S_ISDIR(droits) else 0o644
+            assert stat.S_IMODE(droits) == attendus, (montage["source"], chemin, oct(droits))
+        assert montage["parents"], montage["source"]
+        for droits in montage["parents"]:
+            assert stat.S_IMODE(droits) & 0o005 == 0o005, (montage["source"], oct(droits))
+
+
+def test_docker_introuvable_refuse(banc, monkeypatch, capsys):
+    """Sans docker, aucune image ne se vérifie : un refus, pas une trace d'appel."""
+    banc.commit_du_code("")
+    banc.commit_des_donnees({})
+    monkeypatch.chdir(banc.donnees)
+    which = shutil.which
+    monkeypatch.setattr(
+        verifier_donnees.shutil,
+        "which",
+        lambda nom, *a, **k: None if nom == "docker" else which(nom, *a, **k),
+    )
+    code = verifier_donnees.main(["--code", "code", "--images", "registre.exemple.org/un/essai:1"])
+    assert code == 1
+    assert (
+        "refus : docker introuvable : les images ne peuvent pas être vérifiées"
+        in capsys.readouterr().out
+    )
 
 
 # --- L'usage --------------------------------------------------------------------------------------

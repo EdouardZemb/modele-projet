@@ -315,22 +315,19 @@ $contenu" ]
   [ -z "$(lances_par_docker)" ]
 }
 
-# La règle des paires sur l'exemple, celle du serveur : un dossier d'exemple sans sa commande, ou une
-# commande sans son dossier, refuse, avant tout conteneur. Un dossier qui ne porte que son README.md
-# compte comme absent ; un README.md plus bas compte.
-@test "ci : un exemple sans sa commande refuse" {
+# Une commande déclarée sans son dossier d'exemple refuse, avant tout conteneur : la CI ne peut pas
+# la prouver. Un dossier qui ne porte que son README.md compte comme absent.
+@test "ci : une commande sans son exemple refuse" {
   local cas fichiers commandes attendus message
   local -a messages
-  # <fichiers des exemples>|<commandes déclarées>|<messages attendus, séparés par des virgules>
+  # <fichiers des exemples>|<commandes déclarées>|<messages attendus, séparés par des points-virgules>
   for cas in \
-    "exemple/profil.yml||exemple/ sans VERIFIER_CONFIG" \
     "|VERIFIER_CONFIG|VERIFIER_CONFIG sans exemple/" \
-    "exemple-contenu/page.md||exemple-contenu/ sans VERIFIER_CONTENU" \
     "|VERIFIER_CONTENU|VERIFIER_CONTENU sans exemple-contenu/" \
+    "|VERIFIER_CONFIG VERIFIER_CONTENU|VERIFIER_CONFIG sans exemple/;VERIFIER_CONTENU sans exemple-contenu/" \
     "exemple/README.md|VERIFIER_CONFIG|VERIFIER_CONFIG sans exemple/" \
-    "exemple/sous/README.md||exemple/ sans VERIFIER_CONFIG" \
-    "exemple/profil.yml exemple-contenu/page.md|VERIFIER_CONFIG|exemple-contenu/ sans VERIFIER_CONTENU" \
-    "exemple/profil.yml|VERIFIER_CONTENU|exemple/ sans VERIFIER_CONFIG,VERIFIER_CONTENU sans exemple-contenu/"; do
+    "exemple-contenu/page.md|VERIFIER_CONFIG VERIFIER_CONTENU|VERIFIER_CONFIG sans exemple/" \
+    "exemple/profil.yml|VERIFIER_CONTENU|VERIFIER_CONTENU sans exemple-contenu/;exemple/ présent, sans VERIFIER_CONFIG : non vérifié"; do
     IFS='|' read -r fichiers commandes attendus <<<"$cas"
     # shellcheck disable=SC2086  # listes séparées par des espaces, voulues
     exemple_de $fichiers
@@ -339,19 +336,56 @@ $contenu" ]
     : >"$APPELS"
     verifier_image {{ nom }} "$REVISION"
     [ "$status" -eq 1 ]
-    IFS=',' read -r -a messages <<<"$attendus"
+    IFS=';' read -r -a messages <<<"$attendus"
     for message in "${messages[@]}"; do
       [[ "$output" == *"$message"* ]]
     done
-    [[ "$output" == *"exemple non conforme : un dossier d'exemple va avec sa commande de deploiement/projet.env, et une commande avec son dossier"* ]]
-    # aucune commande de l'instance n'est lancée tant qu'une paire est en défaut
+    [[ "$output" == *"exemple non conforme : chaque commande déclarée dans deploiement/projet.env va avec son dossier d'exemple"* ]]
+    # aucune commande de l'instance n'est lancée tant qu'une commande n'a pas son dossier
     [ -z "$(lances_par_docker)" ]
+  done
+}
+
+# Un dossier d'exemple sans sa commande ne refuse pas : rien ne le vérifie, et le journal le dit. Un
+# projet qui ne déclare encore aucune commande de l'instance garde sa CI. Un dossier qui ne porte que
+# son README.md compte comme absent ; un README.md plus bas compte.
+@test "ci : un exemple sans sa commande n'est pas vérifié" {
+  local cas fichiers commandes attendus lance message
+  local -a messages
+  local config="docker run --rm --network none $JETABLES -v $CLONE/exemple:/config:ro {{ nom }}:ci outil verifier_config /config"
+  # <fichiers>|<commandes déclarées>|<messages attendus, séparés par des points-virgules>|<lancé>
+  for cas in \
+    "exemple/profil.yml||exemple/ présent, sans VERIFIER_CONFIG : non vérifié|" \
+    "exemple-contenu/page.md||exemple-contenu/ présent, sans VERIFIER_CONTENU : non vérifié|" \
+    "exemple/sous/README.md||exemple/ présent, sans VERIFIER_CONFIG : non vérifié|" \
+    "exemple/profil.yml exemple-contenu/page.md||exemple/ présent, sans VERIFIER_CONFIG : non vérifié;exemple-contenu/ présent, sans VERIFIER_CONTENU : non vérifié|" \
+    "exemple/profil.yml exemple-contenu/page.md|VERIFIER_CONFIG|exemple-contenu/ présent, sans VERIFIER_CONTENU : non vérifié|config"; do
+    IFS='|' read -r fichiers commandes attendus lance <<<"$cas"
+    # shellcheck disable=SC2086  # listes séparées par des espaces, voulues
+    exemple_de $fichiers
+    # shellcheck disable=SC2086
+    declarer_commandes $commandes
+    : >"$APPELS"
+    verifier_image {{ nom }} "$REVISION"
+    [ "$status" -eq 0 ]
+    IFS=';' read -r -a messages <<<"$attendus"
+    for message in "${messages[@]}"; do
+      [[ "$output" == *"$message"* ]]
+    done
+    [[ "$output" == *"image conforme"* ]]
+    # seule une commande déclarée, sur son dossier, lance un conteneur
+    if [ "$lance" = config ]; then
+      [ "$(lances_par_docker)" = "$config" ]
+    else
+      [ -z "$(lances_par_docker)" ]
+    fi
   done
   # un dossier qui ne porte que son README.md, sans commande : rien à dire
   exemple_de exemple/README.md exemple-contenu/README.md
   declarer_commandes
+  : >"$APPELS"
   verifier_image {{ nom }} "$REVISION"
   [ "$status" -eq 0 ]
-  [[ "$output" != *"sans VERIFIER_"* ]]
+  [[ "$output" != *"non vérifié"* ]]
   [ -z "$(lances_par_docker)" ]
 }

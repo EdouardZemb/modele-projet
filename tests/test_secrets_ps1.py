@@ -330,10 +330,11 @@ def test_remplacement_qui_echoue(tmp_path, env_isole):
 REGLE_DONNEES = r"^secrets[\\/][a-z]+\.env\.enc$"
 
 
-def monter_donnees(tmp_path, env, *, cles_code="HC_SONDE\nAUTRE\n"):
+def monter_donnees(tmp_path, env, *, cles_code="HC_SONDE\nAUTRE\n", clone=True):
     """Un dépôt de données `essai-donnees` (DEPOT_CODE dans scripts/modele/reglages.py), ses secrets
     dans secrets/, et le clone voisin de son dépôt de code, `essai`, qui porte la liste des clés
-    (M-0006, § 8). `cles_code` à None : le clone voisin n'a pas de .cles."""
+    (M-0006, § 8). `cles_code` à None : le clone voisin n'a pas de .cles ; `clone` à False : il n'y a
+    pas de clone voisin."""
     exiger("sops", "age-keygen")
     clones = tmp_path / "clones"
     d = clones / "essai-donnees"
@@ -357,9 +358,10 @@ def monter_donnees(tmp_path, env, *, cles_code="HC_SONDE\nAUTRE\n"):
     git(d, env, "add", "-A")
     git(d, env, "commit", "-q", "-m", "chore: décor")
     code = clones / "essai/deploiement/secrets"
-    code.mkdir(parents=True)
-    if cles_code is not None:
-        (code / "prod.cles").write_text(cles_code, encoding="utf-8")
+    if clone:
+        code.mkdir(parents=True)
+        if cles_code is not None:
+            (code / "prod.cles").write_text(cles_code, encoding="utf-8")
     return d, cle, d / "secrets/prod.env.enc"
 
 
@@ -380,10 +382,25 @@ def test_refaire_dans_un_depot_de_donnees(tmp_path, env_isole):
 
 
 def test_refaire_dans_un_depot_de_donnees_sans_le_clone_du_code(tmp_path, env_isole):
+    """Sans le clone voisin du dépôt de code, le message dit où le cloner."""
+    env = env_isole()
+    d, _cle, enc = monter_donnees(tmp_path, env, clone=False)
+    code, sortie, erreur = appeler(tmp_path, d, env, {"HC_SONDE": VALEUR_1, "LOCALE": "x"}, enc)
+    assert code == 64, sortie + erreur
+    attendu = os.path.join(str(tmp_path / "clones"), "essai", "deploiement", "secrets", "prod.cles")
+    assert f"le fichier des clés est absent : {attendu}" in sortie
+    clone = os.path.join(str(tmp_path / "clones"), "essai")
+    assert f"clone le dépôt de code essai à côté du dépôt de données : {clone}" in sortie
+    assert enc.read_bytes() == b"ancien contenu\n"
+
+
+def test_refaire_dans_un_depot_de_donnees_sans_le_cles_du_code(tmp_path, env_isole):
+    """Le clone voisin est là, sans le .cles : le message le dit, sans demander de cloner."""
     env = env_isole()
     d, _cle, enc = monter_donnees(tmp_path, env, cles_code=None)
     code, sortie, erreur = appeler(tmp_path, d, env, {"HC_SONDE": VALEUR_1, "LOCALE": "x"}, enc)
     assert code == 64, sortie + erreur
     attendu = os.path.join(str(tmp_path / "clones"), "essai", "deploiement", "secrets", "prod.cles")
     assert f"le fichier des clés est absent : {attendu}" in sortie
+    assert "clone le dépôt de code" not in sortie
     assert enc.read_bytes() == b"ancien contenu\n"
