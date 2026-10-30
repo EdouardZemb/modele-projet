@@ -150,7 +150,7 @@ class Banc:
         for chemin, texte in fichiers.items():
             (self.donnees / chemin).parent.mkdir(parents=True, exist_ok=True)
             (self.donnees / chemin).write_text(texte, encoding="utf-8", newline="\n")
-        git(self.donnees, self.env, "add", "-A", "--", "scripts", "config", "contenu")
+        git(self.donnees, self.env, "add", "-A", "--", ".", ":(exclude)code")
         git(self.donnees, self.env, "commit", "-q", "--allow-empty", "-m", "feat: données")
         for etiquette in etiquettes:
             git(self.donnees, self.env, "tag", etiquette)
@@ -542,6 +542,20 @@ def test_usage(banc, tmp_path):
         assert r.returncode == 64, (arguments, sortie(r))
         assert "Traceback" not in sortie(r)
         assert banc.appels() == []
+    # ailleurs qu'à la racine du dépôt de données : les chemins de config/ et contenu/ y seraient
+    # relatifs au dossier courant
+    r = subprocess.run(
+        [sys.executable, "verifier_donnees.py", "--code", "../../code", "--compte", COMPTE],
+        cwd=banc.donnees / "scripts/modele",
+        env=banc.env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert r.returncode == 64, sortie(r)
+    assert "à lancer à la racine du dépôt de données" in sortie(r)
+    assert banc.appels() == []
 
 
 def test_sans_depot_code_usage(tmp_path, env_isole):

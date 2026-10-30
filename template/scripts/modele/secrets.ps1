@@ -2,8 +2,11 @@
 #
 # Usage : powershell -NoProfile -File scripts/modele/secrets.ps1 refaire <fichier.env.enc>
 #
-# Les cles viennent du .cles voisin du fichier ; chaque valeur est saisie en masque et
-# n'est jamais affichee (seule sa longueur l'est, pour qu'une valeur tronquee se voie).
+# Les cles viennent du .cles voisin du fichier. Dans un depot de donnees (DEPOT_CODE dans
+# scripts/modele/reglages.py), elles viennent du .cles du depot de code, dans son clone voisin :
+# ..\<DEPOT_CODE>\deploiement\secrets\<env>.cles (M-0006, § 8), et le .enc s'ecrit dans secrets/.
+# Chaque valeur est saisie en masque et n'est jamais affichee (seule sa longueur l'est, pour
+# qu'une valeur tronquee se voie).
 # Retour : 0 reussite, 1 sops a echoue, 64 usage ou valeur refusee.
 # Tourne sous Windows PowerShell 5.1 comme sous pwsh. Fichier en UTF-8 avec BOM, en LF.
 
@@ -45,6 +48,17 @@ function Lire-Cles([string]$Chemin) {
         $cles.Add($ligne)
     }
     return , ($cles.ToArray())
+}
+
+function Get-DepotCode([string]$Racine) {
+    # Le depot de code d'un depot de donnees : DEPOT_CODE de scripts/modele/reglages.py, lu sans
+    # l'executer ; $null hors d'un depot de donnees (pas de fichier, pas de ligne lisible).
+    $chemin = Join-Path $Racine 'scripts/modele/reglages.py'
+    if (-not (Test-Path -LiteralPath $chemin -PathType Leaf)) { return $null }
+    $texte = [System.IO.File]::ReadAllText($chemin, [System.Text.Encoding]::UTF8)
+    $trouve = [regex]::Match($texte, '(?m)^DEPOT_CODE = "([a-z][a-z0-9-]*)"\r?$')
+    if ($trouve.Success) { return $trouve.Groups[1].Value }
+    return $null
 }
 
 function Test-ValeurSure([string]$Valeur) {
@@ -164,7 +178,16 @@ function Invoke-RefaireInterne([string]$Fichier, [scriptblock]$LireValeur) {
         Write-Host ".sops.yaml est absent à la racine du dépôt ($racineDepot)."
         return $script:EXIT_USAGE
     }
-    $fichierCles = Join-Path $dossier ([System.IO.Path]::GetFileName($complet).Replace('.env.enc', '') + '.cles')
+    $nomCles = [System.IO.Path]::GetFileName($complet).Replace('.env.enc', '') + '.cles'
+    $depotCode = Get-DepotCode $racineDepot
+    if ($null -ne $depotCode) {
+        # Un depot de donnees : la liste des cles est celle du depot de code, dans son clone voisin.
+        $voisins = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($racineDepot))
+        $fichierCles = [System.IO.Path]::Combine([string[]]@($voisins, $depotCode, 'deploiement', 'secrets', $nomCles))
+    }
+    else {
+        $fichierCles = Join-Path $dossier $nomCles
+    }
     if (-not (Test-Path -LiteralPath $fichierCles -PathType Leaf)) {
         Write-Host "le fichier des clés est absent : $fichierCles"
         return $script:EXIT_USAGE

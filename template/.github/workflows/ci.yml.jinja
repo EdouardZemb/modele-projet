@@ -82,6 +82,15 @@ jobs:
         run: docker rm -f -v {{ nom }}
 
 # Ce fichier est au projet : `copier update` n'y touche plus.
+{%- elif cible == 'donnees' and cible_code == 'serveur' %}
+
+  # Les secrets chiffrés, contre le .cles du dépôt de code, et les données, contre les images du
+  # code (modele-donnees.yml, M-0006 § 8).
+  donnees:
+    uses: ./.github/workflows/modele-donnees.yml
+
+# Les vérifications propres au projet (tests, lint, construction) s'ajoutent ici, dans un job `verifier`.
+# Ce fichier est au projet : `copier update` n'y touche plus.
 {%- else %}
 
 # Les vérifications propres au projet (tests, lint, construction) s'ajoutent ici, dans un job `verifier`.
