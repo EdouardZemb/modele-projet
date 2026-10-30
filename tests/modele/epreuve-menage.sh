@@ -9,6 +9,10 @@
 # `docker image rm <identifiant>` pour une image à plusieurs étiquettes), et que les images
 # gardées sont encore là.
 #
+# À deux dépôts (nature code), charger_env lit l'env de l'environnement dans le clone des données :
+# l'épreuve en pose un, factice, qui ne porte que ses env/, par FAUSSE_APP_CLONE_DONNEES. À un
+# dépôt, cette surcharge est sans effet : l'env est celui du rendu.
+#
 # Déroulé : un registre local, onze images du dépôt localhost:5000/edouardzemb/fausse-app (m0 à
 # m10, de la plus ancienne à la plus récente), des images hors du dépôt, un conteneur jamais lancé,
 # un état de prod et de staging. Puis trois lancements de deploiement/nettoyer-images.sh staging :
@@ -28,10 +32,10 @@
 # son registre, son conteneur et ses images, et rien d'autre (ni prune, ni -f hors d'elle).
 set -euo pipefail
 
-[ "$#" -eq 1 ] && [ -d "$1" ] || {
+if [ "$#" -ne 1 ] || [ ! -d "$1" ]; then
   echo "usage : bash tests/modele/epreuve-menage.sh <rendu>" >&2
   exit 64
-}
+fi
 RENDU="$(cd "$1" && pwd)"
 SCRIPT="$RENDU/deploiement/nettoyer-images.sh"
 [ -f "$SCRIPT" ] || {
@@ -111,6 +115,7 @@ empreinte() {
 lancer() {
   CODE=0
   FAUSSE_APP_DEPOT_IMAGE="$DEPOT" \
+    FAUSSE_APP_CLONE_DONNEES="$TRAVAIL/clone-donnees" \
     FAUSSE_APP_RACINE_ETAT="$TRAVAIL/etat" \
     FAUSSE_APP_RACINE_DONNEES="$TRAVAIL/donnees" \
     FAUSSE_APP_RACINE_SAUVEGARDES="$TRAVAIL/sauvegardes" \
@@ -133,7 +138,7 @@ fi
 echo "== le registre et les images"
 mkdir -p "$TRAVAIL/docker"
 docker rm -f -v "$REGISTRE" >/dev/null 2>&1 || true
-docker run -d -p 5000:5000 --name "$REGISTRE" "$REGISTRE_IMAGE" >/dev/null
+docker run -d -p 127.0.0.1:5000:5000 --name "$REGISTRE" "$REGISTRE_IMAGE" >/dev/null
 
 # m0 : seule sous son étiquette 0.0.0, avec son empreinte (retirée par son identifiant). Son envoi
 # attend que le registre réponde.
@@ -199,7 +204,14 @@ for n in m4 m6 m10; do
     exit 1
   }
 done
-mkdir -p "$TRAVAIL/etat/prod" "$TRAVAIL/etat/staging"
+mkdir -p "$TRAVAIL/etat/prod" "$TRAVAIL/etat/staging" "$TRAVAIL/clone-donnees/env"
+# Le clone des données factice, à deux dépôts : les env/ que charger_env lit, rien d'autre.
+printf '%s\n' FAUSSE_APP_ENV=prod FAUSSE_APP_PROJET=fausse-app FAUSSE_APP_PORT=4310 \
+  FAUSSE_APP_URL_PUBLIQUE=https://fausse-app.exemple.org FAUSSE_APP_CANAL=etiquette \
+  >"$TRAVAIL/clone-donnees/env/prod.env"
+printf '%s\n' FAUSSE_APP_ENV=staging FAUSSE_APP_PROJET=fausse-app-staging FAUSSE_APP_PORT=4311 \
+  FAUSSE_APP_URL_PUBLIQUE=https://fausse-app-staging.exemple.org FAUSSE_APP_CANAL=main \
+  FAUSSE_APP_BRANCHE_DONNEES=main >"$TRAVAIL/clone-donnees/env/staging.env"
 printf '%s 0.1.0\n' "$(empreinte m6)" >"$TRAVAIL/etat/prod/deploye"
 printf '%s 0.0.9\n' "$(empreinte m4)" >"$TRAVAIL/etat/prod/precedent"
 printf '%s main\n' "$(empreinte m10)" >"$TRAVAIL/etat/staging/deploye"

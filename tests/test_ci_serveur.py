@@ -519,11 +519,25 @@ def test_fausse_app_dockerfile():
     assert "printf 'fausse-app\\n' >/donnees/MARQUE" in texte  # ce que verifier attend
     assert "chown -R 1000:1000 /donnees" in texte
     assert re.search(
-        r"^COPY --chmod=0755 sauvegarder verifier /usr/local/bin/$", texte, re.MULTILINE
+        r"^COPY --chmod=0755 sauvegarder verifier verifier-config verifier-contenu /usr/local/bin/$",
+        texte,
+        re.MULTILINE,
     )
+    # L'image embarque son exemple (M-0006, § 5), qu'elle sert quand /config ou /contenu manque.
+    assert re.search(r"^COPY exemple /app/exemple$", texte, re.MULTILINE)
+    assert re.search(r"^COPY exemple-contenu /app/exemple-contenu$", texte, re.MULTILINE)
     fichiers = {p.name for p in FAUSSE_APP.iterdir()}
-    assert fichiers == {"Dockerfile", "app.py", "sauvegarder", "verifier"}
-    for script in ("sauvegarder", "verifier"):
+    assert fichiers == {
+        "Dockerfile",
+        "app.py",
+        "sauvegarder",
+        "verifier",
+        "verifier-config",
+        "verifier-contenu",
+        "exemple",
+        "exemple-contenu",
+    }
+    for script in ("sauvegarder", "verifier", "verifier-config", "verifier-contenu"):
         assert (
             (FAUSSE_APP / script).read_text(encoding="utf-8").startswith("#!/usr/bin/env python3\n")
         )
@@ -584,50 +598,228 @@ def obtenir(adresse):
         return erreur.code, erreur.read()
 
 
-def test_fausse_app_sante(tmp_path):
+def env_de_l_app(tmp_path, **variables):
+    """L'environnement de la fausse app : ses données semées, /config et /contenu redirigés vers
+    deux chemins de tmp_path (absents tant que le test ne les crée pas), puis ces variables."""
     donnees = tmp_path / "donnees"
-    semer(donnees)
-    port = port_libre()
-    env = {
+    if not donnees.exists():
+        semer(donnees)
+    return {
         **os.environ,
         "HOST": "127.0.0.1",
-        "PORT": str(port),
         "FAUSSE_APP_DONNEES": str(donnees),
+        "FAUSSE_APP_CONFIG": str(tmp_path / "config"),
+        "FAUSSE_APP_CONTENU": str(tmp_path / "contenu"),
         "FAUSSE_APP_ENV": "ci",
         "FAUSSE_APP_VERSION": "1.2.3",
         "FAUSSE_APP_REVISION": SHA,
+        **variables,
     }
-    app = subprocess.Popen(
-        [sys.executable, str(FAUSSE_APP / "app.py")],
-        env=env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    try:
-        adresse = f"http://127.0.0.1:{port}/api/sante"
+
+
+class AppLancee:
+    """La fausse app, lancée sur un port libre, jusqu'à la sortie du bloc `with`."""
+
+    def __init__(self, env):
+        self.port = port_libre()
+        self.env = {**env, "PORT": str(self.port)}
+
+    def __enter__(self):
+        self.app = subprocess.Popen(
+            [sys.executable, str(FAUSSE_APP / "app.py")],
+            env=self.env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        # Une attente qui échoue n'atteint pas __exit__ : l'app est arrêtée ici, avant que l'erreur
+        # ne remonte.
+        try:
+            self.attendre()
+        except BaseException:
+            self.__exit__()
+            raise
+        return self
+
+    def attendre(self):
         limite = time.monotonic() + 15
         while True:
             try:
-                code, corps = obtenir(adresse)
-                break
+                obtenir(self.adresse())
+                return
             except OSError:
-                assert app.poll() is None, "la fausse app s'est arrêtée"
+                assert self.app.poll() is None, "la fausse app s'est arrêtée"
                 assert time.monotonic() < limite, "la fausse app ne répond pas"
                 time.sleep(0.1)
+
+    def __exit__(self, *_):
+        self.app.terminate()
+        self.app.wait(timeout=10)
+
+    def adresse(self, chemin="/api/sante"):
+        return f"http://127.0.0.1:{self.port}{chemin}"
+
+    def sante(self):
+        code, corps = obtenir(self.adresse())
+        return code, json.loads(corps)
+
+
+def demarrage_refuse(env):
+    """La fausse app refuse de démarrer : elle sort d'elle-même, code 1 ; son message d'erreur."""
+    r = subprocess.run(
+        [sys.executable, str(FAUSSE_APP / "app.py")],
+        env={**env, "PORT": str(port_libre()), "PYTHONUTF8": "1"},
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=15,
+        check=False,
+    )
+    assert r.returncode == 1, r.stdout + r.stderr
+    return r.stderr
+
+
+def ecrire_config(dossier, version="1\n", titre="Une instance d'essai\n"):
+    """Une configuration de la fausse app : sa version de schéma et son titre (None : absent)."""
+    dossier.mkdir(parents=True)
+    for nom, texte in (("version", version), ("titre", titre)):
+        if texte is not None:
+            (dossier / nom).write_text(texte, encoding="utf-8", newline="\n")
+
+
+def ecrire_contenu(dossier, version="1\n", pages=None):
+    """Un contenu de la fausse app : sa version de schéma et ses pages, pages/<identifiant>.txt."""
+    dossier.mkdir(parents=True)
+    if version is not None:
+        (dossier / "version").write_text(version, encoding="utf-8", newline="\n")
+    (dossier / "pages").mkdir()
+    for identifiant, texte in (pages if pages is not None else {"accueil": "Bienvenue\n"}).items():
+        (dossier / "pages" / f"{identifiant}.txt").write_text(texte, encoding="utf-8", newline="\n")
+
+
+def test_fausse_app_sante(tmp_path):
+    """Sans /config ni /contenu, hors prod, l'app sert son exemple, et le dit."""
+    with AppLancee(env_de_l_app(tmp_path)) as app:
+        code, document = app.sante()
         assert code == 200
-        assert json.loads(corps) == {
+        assert document == {
             "statut": "ok",
             "environnement": "ci",
             "version": "1.2.3",
             "revision": SHA,
+            "configuration": "exemple",
         }
         # sans ses données, la santé dit ko, en 503
-        (donnees / "MARQUE").unlink()
-        code, corps = obtenir(adresse)
-        assert code == 503
-        assert json.loads(corps) == {"statut": "ko"}
-        code, _ = obtenir(f"http://127.0.0.1:{port}/ailleurs")
+        (tmp_path / "donnees/MARQUE").unlink()
+        assert app.sante() == (503, {"statut": "ko"})
+        code, _ = obtenir(app.adresse("/ailleurs"))
         assert code == 404
-    finally:
-        app.terminate()
-        app.wait(timeout=10)
+
+
+def test_fausse_app_configuration_montee(tmp_path):
+    """/config monté et non vide : `montee`, en prod comme ailleurs ; vide, c'est l'exemple."""
+    (tmp_path / "config").mkdir()
+    with AppLancee(env_de_l_app(tmp_path)) as app:
+        assert app.sante()[1]["configuration"] == "exemple"
+    (tmp_path / "config").rmdir()
+    ecrire_config(tmp_path / "config")
+    with AppLancee(env_de_l_app(tmp_path, FAUSSE_APP_ENV="staging")) as app:
+        assert app.sante()[1]["configuration"] == "montee"
+    ecrire_contenu(tmp_path / "contenu")
+    with AppLancee(env_de_l_app(tmp_path, FAUSSE_APP_ENV="prod")) as app:
+        code, document = app.sante()
+        assert code == 200
+        assert document["environnement"] == "prod"
+        assert document["configuration"] == "montee"
+
+
+def test_fausse_app_refuse_la_prod_sans_ses_donnees(tmp_path):
+    """M-0006, § 5 : pas de repli sur l'exemple en prod, ni sans /config ni sans /contenu."""
+    assert "/config" in demarrage_refuse(env_de_l_app(tmp_path, FAUSSE_APP_ENV="prod"))
+    ecrire_config(tmp_path / "config")
+    assert "/contenu" in demarrage_refuse(env_de_l_app(tmp_path, FAUSSE_APP_ENV="prod"))
+    (tmp_path / "contenu").mkdir()
+    assert "/contenu" in demarrage_refuse(env_de_l_app(tmp_path, FAUSSE_APP_ENV="prod"))
+
+
+def test_fausse_app_refuse_une_version_inconnue(tmp_path):
+    """La configuration et le contenu portent leur version de schéma : une inconnue, l'app refuse."""
+    ecrire_config(tmp_path / "config", version="2\n")
+    assert "version de configuration inconnue" in demarrage_refuse(env_de_l_app(tmp_path))
+    ecrire_config(tmp_path / "autre-config")
+    ecrire_contenu(tmp_path / "contenu", version="2\n")
+    env = env_de_l_app(tmp_path, FAUSSE_APP_CONFIG=str(tmp_path / "autre-config"))
+    assert "version de contenu inconnue" in demarrage_refuse(env)
+
+
+def test_fausse_app_exemple_conforme():
+    """L'exemple que l'image embarque, et que la CI vérifie (verifier-image.sh), est conforme."""
+    r = lancer_python("verifier-config", str(FAUSSE_APP / "exemple"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "conforme" in r.stdout
+    r = lancer_python("verifier-contenu", str(FAUSSE_APP / "exemple-contenu"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "conforme" in r.stdout
+
+
+def test_fausse_app_verifier_config(tmp_path):
+    """verifier-config <dossier> : 0 conforme, 2 non conforme, 64 usage."""
+
+    def code(dossier):
+        return lancer_python("verifier-config", str(dossier)).returncode
+
+    ecrire_config(tmp_path / "bonne")
+    assert code(tmp_path / "bonne") == 0
+    ecrire_config(tmp_path / "version-inconnue", version="99\n")
+    r = lancer_python("verifier-config", str(tmp_path / "version-inconnue"))
+    assert r.returncode == 2
+    assert "non conforme" in r.stdout
+    assert "99" in r.stdout
+    ecrire_config(tmp_path / "sans-version", version=None)
+    assert code(tmp_path / "sans-version") == 2
+    ecrire_config(tmp_path / "sans-titre", titre=None)
+    assert code(tmp_path / "sans-titre") == 2
+    ecrire_config(tmp_path / "titre-vide", titre="\n")
+    assert code(tmp_path / "titre-vide") == 2
+    assert code(tmp_path / "absent") == 2
+    assert code(tmp_path / "bonne/titre") == 2
+    assert lancer_python("verifier-config").returncode == 64
+    assert lancer_python("verifier-config", "a", "b").returncode == 64
+
+
+def test_fausse_app_verifier_contenu(tmp_path):
+    """verifier-contenu <dossier> [<en service>] : 0, 2, 64. Le contenu en service sert à refuser
+    un changement qui défait un identifiant définitif : une page en service ne disparaît pas."""
+
+    def lancer(*dossiers):
+        return lancer_python("verifier-contenu", *(str(d) for d in dossiers))
+
+    ecrire_contenu(tmp_path / "en-service", pages={"accueil": "Bienvenue\n", "aide": "Aide\n"})
+    ecrire_contenu(
+        tmp_path / "plus",
+        pages={"accueil": "Bonjour\n", "aide": "Aide\n", "nouvelle": "Nouvelle page\n"},
+    )
+    r = lancer(tmp_path / "plus")
+    assert r.returncode == 0
+    assert "contenu en service" not in r.stdout
+    r = lancer(tmp_path / "plus", tmp_path / "en-service")
+    assert r.returncode == 0
+    # La sortie, que deployer.sh relaie au journal, dit que le contenu en service a été comparé.
+    assert r.stdout.strip() == "conforme, contenu en service comparé : 2 pages, aucune disparue"
+    ecrire_contenu(tmp_path / "moins", pages={"accueil": "Bienvenue\n"})
+    assert lancer(tmp_path / "moins").returncode == 0
+    r = lancer(tmp_path / "moins", tmp_path / "en-service")
+    assert r.returncode == 2
+    assert "aide" in r.stdout
+    ecrire_contenu(tmp_path / "version-inconnue", version="99\n")
+    assert lancer(tmp_path / "version-inconnue").returncode == 2
+    ecrire_contenu(tmp_path / "sans-version", version=None)
+    assert lancer(tmp_path / "sans-version").returncode == 2
+    ecrire_contenu(tmp_path / "sans-page", pages={})
+    assert lancer(tmp_path / "sans-page").returncode == 2
+    ecrire_contenu(tmp_path / "page-vide", pages={"accueil": ""})
+    assert lancer(tmp_path / "page-vide").returncode == 2
+    assert lancer(tmp_path / "absent").returncode == 2
+    # usage : le contenu en service est un dossier que la mécanique monte, sinon rien
+    assert lancer(tmp_path / "plus", tmp_path / "absent").returncode == 64
+    assert lancer_python("verifier-contenu").returncode == 64
+    assert lancer(tmp_path / "plus", tmp_path / "en-service", tmp_path / "moins").returncode == 64
