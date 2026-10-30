@@ -447,7 +447,9 @@ def test_aucune_cible_sans_fichiers_serveur(rendre):
 
 
 def test_verifier_image_lit_projet_env_sans_le_sourcer(rendre):
-    """R11 : les commandes viennent de lire_projet_env, jamais d'un `source` de projet.env."""
+    """R11 : les commandes viennent de lire_projet_env, jamais d'un `source` de projet.env. Celles
+    de l'instance, sur l'exemple, passent par les fonctions du serveur (lib.sh), avec ou sans
+    sauvegardes : donnees_declarees, puis _verifier_par."""
     avec = lire(rendre(**REPONSES_SERVEUR), VERIFIER_IMAGE)
     assert "lire_projet_env SAUVEGARDER" in avec
     assert "lire_projet_env VERIFIER" in avec
@@ -456,6 +458,21 @@ def test_verifier_image_lit_projet_env_sans_le_sourcer(rendre):
     for texte in (avec, sans):
         assert not re.search(r"^\s*(?:\.|source)\s+\S*projet\.env", texte, re.MULTILINE)
         assert texte.rstrip().endswith('main "$@"; exit $?')
+        assert "donnees_declarees ||" in texte
+        assert '_verifier_par "$cle"' in texte
+        # aucun `docker run` à lui : celui de lib.sh, que le serveur lance sur un instantané
+        assert not re.search(r"^[^#\n]*docker run", texte, re.MULTILINE)
+
+
+def test_l_exemple_se_verifie_sur_l_image_construite(rendre):
+    """verifier-image.sh lance les commandes de l'exemple sur l'image que l'action vient de
+    construire et de lancer : le même nom des deux côtés."""
+    rendu = rendre(**{**REPONSES_SERVEUR, "nom": "autre-nom"})
+    construire = charger(rendu, CONSTRUIRE)["runs"]["steps"]
+    construction = 'docker build --build-arg REVISION="$GITHUB_SHA" -t autre-nom:ci .'
+    assert construire[0]["run"] == construction
+    assert "autre-nom:ci" in construire[1]["run"]
+    assert re.search(r"^IMAGE=autre-nom:ci$", lire(rendu, VERIFIER_IMAGE), re.MULTILINE)
 
 
 # --- La fausse app ------------------------------------------------------------------------------

@@ -325,3 +325,65 @@ def test_remplacement_qui_echoue(tmp_path, env_isole):
     assert "réécrit" not in sortie
     assert enc.read_bytes() == avant
     assert not list(enc.parent.glob("*.tmp-*"))
+
+
+REGLE_DONNEES = r"^secrets[\\/][a-z]+\.env\.enc$"
+
+
+def monter_donnees(tmp_path, env, *, cles_code="HC_SONDE\nAUTRE\n"):
+    """Un dépôt de données `essai-donnees` (DEPOT_CODE dans scripts/modele/reglages.py), ses secrets
+    dans secrets/, et le clone voisin de son dépôt de code, `essai`, qui porte la liste des clés
+    (M-0006, § 8). `cles_code` à None : le clone voisin n'a pas de .cles."""
+    exiger("sops", "age-keygen")
+    clones = tmp_path / "clones"
+    d = clones / "essai-donnees"
+    d.mkdir(parents=True)
+    git(d, env, "init", "-q", "-b", "main")
+    git(d, env, "config", "core.autocrlf", "false")
+    cle = tmp_path / "jetable.txt"
+    subprocess.run(["age-keygen", "-o", str(cle)], check=True, capture_output=True)
+    pub = subprocess.run(
+        ["age-keygen", "-y", str(cle)], check=True, capture_output=True, text=True
+    ).stdout.strip()
+    (d / "scripts/modele").mkdir(parents=True)
+    (d / "scripts/modele/reglages.py").write_text(
+        'BRANCHE_PRINCIPALE = "main"\nNATURE = "donnees"\nDEPOT_CODE = "essai"\n', encoding="utf-8"
+    )
+    (d / ".sops.yaml").write_text(SOPS_YAML.format(regle=REGLE_DONNEES, pub=pub), encoding="utf-8")
+    (d / "secrets").mkdir()
+    (d / "secrets/prod.env.enc").write_bytes(b"ancien contenu\n")
+    # un .cles laissé dans le dépôt de données ne compte pas : la liste est celle du code
+    (d / "secrets/prod.cles").write_text("LOCALE\n", encoding="utf-8")
+    git(d, env, "add", "-A")
+    git(d, env, "commit", "-q", "-m", "chore: décor")
+    code = clones / "essai/deploiement/secrets"
+    code.mkdir(parents=True)
+    if cles_code is not None:
+        (code / "prod.cles").write_text(cles_code, encoding="utf-8")
+    return d, cle, d / "secrets/prod.env.enc"
+
+
+def test_refaire_dans_un_depot_de_donnees(tmp_path, env_isole):
+    """Dans un dépôt de données, les clés viennent du .cles du dépôt de code, dans son clone voisin :
+    ..\\essai\\deploiement\\secrets\\prod.cles ; le .enc s'écrit dans secrets/."""
+    env = env_isole()
+    d, cle, enc = monter_donnees(tmp_path, env)
+    code, sortie, erreur = appeler(
+        tmp_path, d, env, {"HC_SONDE": VALEUR_1, "AUTRE": VALEUR_2, "LOCALE": "x"}, enc
+    )
+    assert code == 0, sortie + erreur
+    assert dechiffrer(enc, cle, env) == f"HC_SONDE={VALEUR_1}\nAUTRE={VALEUR_2}\n".encode()
+    assert "LOCALE" not in sortie
+    assert "(2 clés)" in sortie
+    statut = git(d, env, "status", "--porcelain").splitlines()
+    assert [ligne[3:] for ligne in statut] == ["secrets/prod.env.enc"]
+
+
+def test_refaire_dans_un_depot_de_donnees_sans_le_clone_du_code(tmp_path, env_isole):
+    env = env_isole()
+    d, _cle, enc = monter_donnees(tmp_path, env, cles_code=None)
+    code, sortie, erreur = appeler(tmp_path, d, env, {"HC_SONDE": VALEUR_1, "LOCALE": "x"}, enc)
+    assert code == 64, sortie + erreur
+    attendu = os.path.join(str(tmp_path / "clones"), "essai", "deploiement", "secrets", "prod.cles")
+    assert f"le fichier des clés est absent : {attendu}" in sortie
+    assert enc.read_bytes() == b"ancien contenu\n"
