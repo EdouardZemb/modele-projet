@@ -3,13 +3,23 @@
 Bibliothèque standard seule, Python 3.10 ou plus.
 
 Usage :
-    verifier_secrets.py [--racine DIR]
+    verifier_secrets.py [--racine DIR] [--cles DIR]
 
 Pour chaque `*.env.enc` (hors `.git/`), on compare :
   - ses clés à celles de son `.cles` (même nom, suffixe `.env.enc` remplacé par `.cles`) ;
   - ses destinataires age à ceux de `.sops.yaml`.
 Un `.cles` sans `.enc` avertit seulement : un projet neuf n'a pas encore ses secrets.
 `reglages.SECRETS_EXIGES` (chemin du `.cles` -> clés exigées) ajoute les clés dont la mécanique a besoin.
+
+Le dépôt de données d'un projet `serveur` (M-0006, § 8) porte ses `secrets/<env>.env.enc`, mais la
+liste de leurs clés est dans le dépôt de code (`deploiement/secrets/<env>.cles`). Avec `--cles DIR`,
+seuls les `secrets/*.env.enc` de la racine sont lus (jamais un `.enc` du clone du code, ni
+d'ailleurs), le `.cles` d'un `<env>.env.enc` est `DIR/<env>.cles`, seuls les `.cles` de DIR sont
+lus, et les destinataires de `.sops.yaml` doivent en plus être exactement les clés age de
+`cles/*.pub`. Sans `--cles`, dans un dépôt dont `reglages.DEPOT_CODE` nomme le dépôt de code et qui
+porte `.github/workflows/modele-donnees.yml`, le contrôle passe en le disant : modele-donnees.yml le
+fait, le dépôt de code cloné à côté. Sans ce workflow (le dépôt de données d'un projet sans
+serveur), le contrôle ordinaire tourne.
 
 Les messages nomment des chemins, des numéros de ligne et des noms de clé, jamais une valeur.
 
@@ -35,6 +45,10 @@ REGEX_AGE = re.compile(r"age1[0-9a-z]{58}")
 BOM_UTF8 = b"\xef\xbb\xbf"
 SUFFIXE_ENC = ".env.enc"
 SUFFIXE_CLES = ".cles"
+DOSSIER_PUB = "cles"
+DOSSIER_SECRETS = "secrets"
+WORKFLOW_DONNEES = ".github/workflows/modele-donnees.yml"
+MESSAGE_DONNEES = "secrets : contrôlés par modele-donnees.yml, contre le .cles du dépôt de code"
 
 
 class Illisible(Exception):
@@ -109,7 +123,13 @@ def _fichiers(racine: Path, motif: str) -> list[Path]:
 
 
 def _relatif(racine: Path, chemin: Path) -> str:
-    return chemin.relative_to(racine).as_posix()
+    # Un .cles de --cles peut être donné autrement que la racine (absolu, ou hors du dépôt).
+    for base, cible in ((racine, chemin), (racine.resolve(), chemin.resolve())):
+        try:
+            return cible.relative_to(base).as_posix()
+        except ValueError:
+            pass
+    return chemin.as_posix()
 
 
 def _court(destinataire: str) -> str:
@@ -120,30 +140,65 @@ def _noms(cles) -> str:
     return ", ".join(sorted(cles))
 
 
-def verifier(racine: Path, exiges: dict[str, list[str]]) -> list[Constat]:
+def _comparer_au_parc(racine: Path, attendus: set[str]) -> list[Constat]:
+    """Les destinataires de .sops.yaml sont exactement les clés age de cles/*.pub : une clé du parc
+    absente de .sops.yaml, ou un destinataire sans sa clé dans cles/, refuse (en abrégé)."""
+    constats: list[Constat] = []
+    parc: set[str] = set()
+    dossier = racine / DOSSIER_PUB
+    for chemin in sorted(dossier.glob("*.pub")) if dossier.is_dir() else []:
+        rel = _relatif(racine, chemin)
+        try:
+            cles = set(REGEX_AGE.findall(lire_texte(chemin)))
+        except Illisible as e:
+            constats.append(Constat("refus", f"{rel}:{e.ligne}", e.raison))
+            continue
+        if not cles:
+            constats.append(Constat("refus", rel, "aucune clé age"))
+        for cle in sorted(cles - attendus):
+            constats.append(Constat("refus", rel, f"clé absente de .sops.yaml : {_court(cle)}"))
+        parc |= cles
+    for cle in sorted(attendus - parc):
+        message = f"destinataire sans clé dans {DOSSIER_PUB}/ : {_court(cle)}"
+        constats.append(Constat("refus", ".sops.yaml", message))
+    return constats
+
+
+def verifier(racine: Path, exiges: dict[str, list[str]], cles: Path | None = None) -> list[Constat]:
+    """Les constats sur les secrets de <racine>. Avec <cles>, le dossier des .cles du dépôt de code :
+    seuls les secrets/*.env.enc de <racine> et les .cles de <cles> sont lus, et .sops.yaml se
+    compare aussi aux clés de cles/*.pub."""
     racine = Path(racine)
     constats: list[Constat] = []
-    enc = _fichiers(racine, "*" + SUFFIXE_ENC)
-    cles_fichiers = _fichiers(racine, "*" + SUFFIXE_CLES)
+    if cles is None:
+        enc = _fichiers(racine, "*" + SUFFIXE_ENC)
+        cles_fichiers = _fichiers(racine, "*" + SUFFIXE_CLES)
+    else:
+        enc = sorted(p for p in (racine / DOSSIER_SECRETS).glob("*" + SUFFIXE_ENC) if p.is_file())
+        cles_fichiers = sorted(p for p in Path(cles).glob("*" + SUFFIXE_CLES) if p.is_file())
 
     sops_yaml = racine / ".sops.yaml"
     attendus: set[str] | None = None
-    if enc:
+    if enc or cles is not None:
         if not sops_yaml.is_file():
-            constats.append(Constat("refus", ".sops.yaml", "absent : les destinataires ne peuvent pas être contrôlés"))
+            message = "absent : les destinataires ne peuvent pas être contrôlés"
+            constats.append(Constat("refus", ".sops.yaml", message))
         else:
             try:
                 attendus = destinataires_sops_yaml(racine)
             except Illisible as e:
                 constats.append(Constat("refus", f".sops.yaml:{e.ligne}", e.raison))
             else:
+                if cles is not None:
+                    constats += _comparer_au_parc(racine, attendus)
                 if not attendus:
                     constats.append(Constat("refus", ".sops.yaml", "aucun destinataire age"))
                     attendus = None
 
     for chemin in enc:
         rel = _relatif(racine, chemin)
-        voisin = chemin.with_name(chemin.name[: -len(SUFFIXE_ENC)] + SUFFIXE_CLES)
+        nom_cles = chemin.name[: -len(SUFFIXE_ENC)] + SUFFIXE_CLES
+        voisin = chemin.with_name(nom_cles) if cles is None else Path(cles) / nom_cles
         try:
             cles_chiffrees, destinataires = lire_chiffre(chemin)
         except Illisible as e:
@@ -171,9 +226,14 @@ def verifier(racine: Path, exiges: dict[str, list[str]]) -> list[Constat]:
         elif not destinataires:
             constats.append(Constat("refus", rel, "aucun destinataire age"))
 
+    noms_enc = {p.name for p in enc}
     for chemin in cles_fichiers:
         voisin = chemin.with_name(chemin.name[: -len(SUFFIXE_CLES)] + SUFFIXE_ENC)
-        if not voisin.is_file():
+        if cles is None:
+            sans_enc = not voisin.is_file()
+        else:  # le .enc est dans le dépôt de données, sous le même nom
+            sans_enc = voisin.name not in noms_enc
+        if sans_enc:
             constats.append(
                 Constat("avertissement", _relatif(racine, chemin), f"pas de {voisin.name} : secrets pas encore posés")
             )
@@ -195,17 +255,25 @@ def verifier(racine: Path, exiges: dict[str, list[str]]) -> list[Constat]:
     return constats
 
 
-def _exiges_des_reglages() -> dict[str, list[str]]:
+def _reglages():
+    """Le reglages.py voisin du script, celui du projet ; None sans lui (le dépôt modèle)."""
     try:
         import reglages  # type: ignore[import-not-found]
     except ImportError:
-        return {}
-    return dict(getattr(reglages, "SECRETS_EXIGES", {}))
+        return None
+    return reglages
+
+
+def _exiges_des_reglages() -> dict[str, list[str]]:
+    return dict(getattr(_reglages(), "SECRETS_EXIGES", {}))
 
 
 def main(argv: list[str] | None = None, exiges: dict[str, list[str]] | None = None) -> int:
     analyseur = argparse.ArgumentParser(description="Contrôle des secrets chiffrés par sops, sans déchiffrer.")
     analyseur.add_argument("--racine", default=".", help="racine du dépôt (défaut : le dossier courant)")
+    analyseur.add_argument(
+        "--cles", help="le dossier des .cles, celui du dépôt de code pour un dépôt de données"
+    )
     try:
         args = analyseur.parse_args(argv)
     except SystemExit as e:
@@ -214,9 +282,20 @@ def main(argv: list[str] | None = None, exiges: dict[str, list[str]] | None = No
     if not racine.is_dir():
         print(f"racine introuvable : {racine}", file=sys.stderr)
         return EXIT_USAGE
+    cles = None
+    if args.cles is not None:
+        cles = Path(args.cles)
+        if not cles.is_dir():
+            print(f"dossier des .cles introuvable : {cles}", file=sys.stderr)
+            return EXIT_USAGE
+    elif getattr(_reglages(), "DEPOT_CODE", None) and (racine / WORKFLOW_DONNEES).is_file():
+        # Le dépôt de données d'un projet serveur : la liste des clés est dans le dépôt de code, et
+        # modele-donnees.yml les compare (M-0006, § 8).
+        print(MESSAGE_DONNEES)
+        return 0
     if exiges is None:
         exiges = _exiges_des_reglages()
-    constats = verifier(racine, exiges)
+    constats = verifier(racine, exiges, cles)
     for c in constats:
         print(f"{c.niveau} : {c.chemin} : {c.message}")
     return EXIT_REFUS if any(c.niveau == "refus" for c in constats) else 0

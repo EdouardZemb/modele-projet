@@ -2,12 +2,20 @@
 
 import importlib.util
 import re
+import subprocess
 
 import pytest
 import yaml
-from conftest import CLE_HORS_LIGNE_DE_TEST, CLE_SERVEUR_DE_TEST, REPONSES_DONNEES_SERVEUR
+from conftest import (
+    CLE_HORS_LIGNE_DE_TEST,
+    CLE_SERVEUR_DE_TEST,
+    RACINE,
+    REPONSES_DONNEES_SERVEUR,
+    trouver_bash,
+)
 
 DONNEES = {"nom": "essai-donnees", "cible": "donnees"}
+MODELE_DONNEES = ".github/workflows/modele-donnees.yml"
 
 
 def aplati(chemin):
@@ -202,6 +210,117 @@ def test_ci_du_depot_de_donnees(rendre):
     assert ci["jobs"]["socle"]["uses"] == "./.github/workflows/modele-socle.yml"
     dependabot = yaml.safe_load((rendu / ".github/dependabot.yml").read_text(encoding="utf-8"))
     assert [u["package-ecosystem"] for u in dependabot["updates"]] == ["github-actions"]
+
+
+def actions_du_socle():
+    """{action: sha} des actions qu'épingle modele-socle.yml : la référence des autres workflows."""
+    texte = (RACINE / "template/.github/workflows/modele-socle.yml").read_text(encoding="utf-8")
+    return dict(re.findall(r"uses:\s*([^@\s]+)@([0-9a-f]{40})", texte))
+
+
+# M-0006, § 8 : le dépôt de données d'un projet `serveur` vérifie ses secrets contre le .cles du
+# dépôt de code, et ses données contre les images du code.
+def test_modele_donnees_yml(rendre):
+    (gabarit,) = (RACINE / "template/.github/workflows").glob("*modele-donnees.yml*")
+    # il porte des expressions de GitHub : il n'est pas un gabarit Jinja (seul son nom l'est)
+    assert gabarit.name.endswith("modele-donnees.yml{% endif %}"), gabarit.name
+    texte_gabarit = gabarit.read_text(encoding="utf-8")
+    assert "${{" in texte_gabarit
+    assert "{%" not in texte_gabarit and "{#" not in texte_gabarit
+
+    rendu = rendre(**REPONSES_DONNEES_SERVEUR)
+    texte = (rendu / MODELE_DONNEES).read_text(encoding="utf-8")
+    assert texte == texte_gabarit
+    assert texte.startswith("# Géré par le modèle — ne pas modifier ici (docs/modele/methode.md).")
+    doc = yaml.safe_load(texte)
+    assert set(doc.get("on", doc.get(True))) == {"workflow_call"}
+    assert doc["permissions"] == {"contents": "read"}
+    (job,) = doc["jobs"].values()
+    assert job["name"] == "donnees"
+    assert job["runs-on"] == "ubuntu-latest"
+
+    # chaque action épinglée par SHA, celui du socle
+    socle = actions_du_socle()
+    for uses in re.findall(r"^\s*(?:-\s*)?uses:\s*(\S+)", texte, re.MULTILINE):
+        action, _, sha = uses.partition("@")
+        assert re.fullmatch(r"[0-9a-f]{40}", sha), uses
+        assert socle.get(action) == sha, uses
+
+    donnees, python, depot, code, secrets, verification = job["steps"]
+    assert donnees["uses"].startswith("actions/checkout@")
+    assert donnees["with"] == {"fetch-depth": 0, "persist-credentials": False}
+    assert python["uses"].startswith("actions/setup-python@")
+    assert depot["id"] == "code"
+    # le dépôt de code : public, cloné sans jeton gardé, avec ses étiquettes, dans code/
+    assert code["uses"].startswith("actions/checkout@")
+    assert code["with"] == {
+        "repository": "${{ github.repository_owner }}/${{ steps.code.outputs.depot }}",
+        "path": "code",
+        "fetch-depth": 0,
+        "persist-credentials": False,
+    }
+    assert (
+        secrets["run"]
+        == "python scripts/modele/verifier_secrets.py --cles code/deploiement/secrets"
+    )
+    assert verification["run"] == "python scripts/modele/verifier_donnees.py --code code"
+    # les données se vérifient même quand les secrets refusent : tout ce qui refuse se dit dans la
+    # même exécution, pourvu que les deux dépôts soient là et le nom du code lu
+    assert "if" not in secrets
+    assert (donnees["id"], code["id"]) == ("donnees", "clone")
+    assert verification["if"] == (
+        "${{ !cancelled() && steps.donnees.outcome == 'success' "
+        "&& steps.code.outcome == 'success' && steps.clone.outcome == 'success' }}"
+    )
+    ids = {etape.get("id") for etape in job["steps"]}
+    assert set(re.findall(r"steps\.([a-z]+)\.outcome", verification["if"])) <= ids
+
+    # ci.yml l'appelle, à côté du socle
+    ci = yaml.safe_load((rendu / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+    assert set(ci["jobs"]) == {"socle", "donnees"}
+    assert ci["jobs"]["donnees"] == {"uses": "./.github/workflows/modele-donnees.yml"}
+
+    # le dépôt de données d'un projet sans serveur ne l'a pas
+    sans = rendre(**DONNEES)
+    assert not (sans / MODELE_DONNEES).exists()
+    ci = yaml.safe_load((sans / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+    assert set(ci["jobs"]) == {"socle"}
+
+
+def test_modele_donnees_lit_le_depot_de_code_dans_les_reglages(rendre, env_isole, tmp_path):
+    """Le nom du dépôt de code n'a qu'une source, DEPOT_CODE de scripts/modele/reglages.py : l'étape
+    l'y lit, et refuse un nom qui n'en est pas un."""
+    rendu = rendre(**REPONSES_DONNEES_SERVEUR)
+    doc = yaml.safe_load((rendu / MODELE_DONNEES).read_text(encoding="utf-8"))
+    (job,) = doc["jobs"].values()
+    etape = next(e for e in job["steps"] if e.get("id") == "code")
+    sortie = tmp_path / "github-output"
+
+    def lancer():
+        sortie.write_text("", encoding="utf-8")
+        return subprocess.run(
+            [trouver_bash(), "--noprofile", "--norc", "-e", "-c", etape["run"]],
+            cwd=rendu,
+            env={**env_isole(), "GITHUB_OUTPUT": str(sortie).replace("\\", "/")},
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+
+    r = lancer()
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert sortie.read_text(encoding="utf-8").splitlines() == ["depot=essai"]
+    reglages = rendu / "scripts/modele/reglages.py"
+    for invalide in ('DEPOT_CODE = "../autre"', 'DEPOT_CODE = "essai x"', "DEPOT_CODE = None"):
+        texte = re.sub(
+            r"^DEPOT_CODE = .*$", invalide, reglages.read_text(encoding="utf-8"), flags=re.MULTILINE
+        )
+        reglages.write_text(texte, encoding="utf-8")
+        r = lancer()
+        assert r.returncode != 0, invalide
+        assert "DEPOT_CODE" in r.stdout + r.stderr, invalide
+        assert sortie.read_text(encoding="utf-8") == "", invalide
 
 
 @pytest.mark.parametrize(

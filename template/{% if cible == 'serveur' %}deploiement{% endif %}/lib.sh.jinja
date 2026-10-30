@@ -32,6 +32,7 @@
 #   preparer_instantane <commit>       INSTANTANE : l'instantané en lecture seule des dossiers déclarés du commit de données (sans config/ en staging)
 #   _retirer_fige <chemin>             (privée) retire un dossier figé en lecture seule, comme un instantané : les droits d'abord, jamais à travers un lien ; le ménage des instantanés (nettoyer-images.sh) s'en sert aussi
 #   verifier_instantane <env> <image> <instantané> [<instantané en service>]  VERIFIER_CONFIG et VERIFIER_CONTENU, en conteneur jetable
+#   _verifier_par <CLÉ> <libellé> <image> <-v …> -- <arguments…>  (privée) une commande de projet.env en conteneur jetable, sans réseau ; ci/verifier-image.sh s'en sert aussi, sur l'exemple du dépôt
 #   jq_vaut <attendu> <doc> <filtre>   le filtre jq, appliqué au document, imprime exactement <attendu>
 #   revision_de <image>                le label de révision (SHA du commit) de l'image
 #   sante_sur <port> <filtre> [opts]   un essai sur http://127.0.0.1:<port>{{ chemin_sante }}

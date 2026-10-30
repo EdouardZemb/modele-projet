@@ -1,0 +1,56 @@
+# Géré par le modèle — ne pas modifier ici (docs/modele/methode.md).
+#
+# Le dépôt de données d'un projet `serveur` (M-0006, § 8), contre son dépôt de code, public, cloné
+# sans jeton gardé dans code/, sur sa branche par défaut, avec ses étiquettes :
+#   - ses secrets chiffrés, contre le .cles du dépôt de code, et les destinataires de .sops.yaml,
+#     contre les clés de cles/*.pub (verifier_secrets.py --cles) ;
+#   - ses données, contre les images du code, :main et celle de la plus haute vX.Y.Z, chacune avec
+#     la déclaration de sa version : la règle des paires, puis VERIFIER_CONFIG et VERIFIER_CONTENU,
+#     comme le serveur les lance (verifier_donnees.py). Les images sont publiques : une image qui ne
+#     se tire pas refuse.
+# Le nom du dépôt de code n'a qu'une source : DEPOT_CODE, dans scripts/modele/reglages.py.
+name: donnees
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  donnees:
+    name: donnees
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - id: donnees
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Le dépôt de code (DEPOT_CODE, dans scripts/modele/reglages.py)
+        id: code
+        run: |
+          depot="$(python -c 'import sys; sys.path.insert(0, "scripts/modele"); import reglages; sys.stdout.write(str(reglages.DEPOT_CODE))')" || depot=""
+          if ! [[ "$depot" =~ ^[a-z][a-z0-9-]*$ ]]; then
+            echo "::error::DEPOT_CODE absent ou invalide dans scripts/modele/reglages.py (attendu : le nom du dépôt de code)"
+            exit 1
+          fi
+          echo "depot=$depot" >> "$GITHUB_OUTPUT"
+      - id: clone
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.repository_owner }}/${{ steps.code.outputs.depot }}
+          path: code
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Secrets chiffrés, contre le .cles du dépôt de code
+        run: python scripts/modele/verifier_secrets.py --cles code/deploiement/secrets
+      # Les données se vérifient même quand les secrets refusent : tout ce qui refuse se dit dans
+      # la même exécution, pourvu que les deux dépôts soient là et le nom du code lu.
+      - name: Données, contre les images du code
+        if: ${{ !cancelled() && steps.donnees.outcome == 'success' && steps.code.outcome == 'success' && steps.clone.outcome == 'success' }}
+        run: python scripts/modele/verifier_donnees.py --code code

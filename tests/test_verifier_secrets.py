@@ -1,6 +1,7 @@
 """verifier_secrets.py : les secrets chiffrés par sops, contrôlés sans être déchiffrés."""
 
 import os
+import shutil
 import subprocess
 import sys
 
@@ -247,3 +248,250 @@ def test_vrai_fichier_sops(tmp_path):
     assert cles == {"HC_SONDE", "TOKEN"}
     assert destinataires == {publique}
     assert verifier_secrets.main(["--racine", str(d)], {}) == 0
+
+
+# --- Le dépôt de données d'un projet `serveur` (M-0006, § 8) -------------------------------------
+# Ses secrets chiffrés sont dans secrets/, la liste de leurs clés dans le dépôt de code
+# (deploiement/secrets/<env>.cles), que modele-donnees.yml clone dans code/ ; ses destinataires,
+# dans .sops.yaml et cles/*.pub.
+
+MESSAGE_DONNEES = "secrets : contrôlés par modele-donnees.yml, contre le .cles du dépôt de code"
+
+
+def monter_donnees(
+    tmp_path, *, cles_code=None, chiffres=None, pubs=None, sops_yaml=(DEST_A, DEST_B)
+):
+    """Un dépôt de données et son dépôt de code dans code/. `cles_code` : {env: clés} du code ;
+    `chiffres` : {env: (clés, destinataires)} de secrets/ ; `pubs` : {nom: texte} de cles/."""
+    d = tmp_path / "donnees"
+    (d / "secrets").mkdir(parents=True)
+    (d / "cles").mkdir()
+    code = d / "code/deploiement/secrets"
+    code.mkdir(parents=True)
+    if sops_yaml is not None:
+        (d / ".sops.yaml").write_text(
+            "creation_rules:\n  - path_regex: ^secrets[\\\\/][a-z]+\\.env\\.enc$\n    age: >-\n"
+            "      " + ",".join(sops_yaml) + "\n",
+            encoding="utf-8",
+        )
+    if pubs is None:
+        pubs = {"serveur.pub": DEST_A + "\n", "hors-ligne.pub": DEST_B + "\n"}
+    for nom, texte in pubs.items():
+        (d / "cles" / nom).write_text(texte, encoding="utf-8")
+    if cles_code is None:
+        cles_code = {"prod": ("HC_SONDE", "TOKEN"), "staging": ("HC_SONDE",)}
+    for env, cles in cles_code.items():
+        (code / f"{env}.cles").write_text("\n".join(cles) + "\n", encoding="utf-8")
+    if chiffres is None:
+        chiffres = {"prod": (("HC_SONDE", "TOKEN"), (DEST_A, DEST_B))}
+    for env, (cles, destinataires) in chiffres.items():
+        (d / "secrets" / f"{env}.env.enc").write_text(enc(cles, destinataires), encoding="utf-8")
+    return d, code
+
+
+def lancer_cles(racine, cles):
+    return subprocess.run(
+        [sys.executable, str(SCRIPT), "--racine", str(racine), "--cles", str(cles)],
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+
+
+def test_cles_du_depot_de_code(tmp_path):
+    d, code = monter_donnees(tmp_path)
+    # un .cles laissé dans le dépôt de données ne compte pas : la liste est celle du code
+    (d / "secrets/prod.cles").write_text("AUTRE\n", encoding="utf-8")
+    r = lancer_cles(d, code)
+    assert r.returncode == 0, sortie(r)
+    # staging.cles, du code, n'a pas encore son .enc ; le .cles du dépôt de données n'est pas lu
+    attendu = (
+        "avertissement : code/deploiement/secrets/staging.cles : "
+        "pas de staging.env.enc : secrets pas encore posés"
+    )
+    assert sortie(r).splitlines() == [attendu]
+
+
+def test_cles_du_depot_de_code_comparees(tmp_path):
+    # une clé du code que le chiffré n'a pas, une clé chiffrée que le code ne déclare plus
+    d, code = monter_donnees(tmp_path, cles_code={"prod": ("HC_SONDE", "TOKEN", "NOUVELLE")})
+    r = lancer_cles(d, code)
+    assert r.returncode == 1
+    assert "refus : secrets/prod.env.enc : clés manquantes : NOUVELLE" in sortie(r)
+    d, code = monter_donnees(tmp_path / "b", cles_code={"prod": ("HC_SONDE",)})
+    r = lancer_cles(d, code)
+    assert r.returncode == 1
+    assert "refus : secrets/prod.env.enc : clés en trop : TOKEN" in sortie(r)
+    # un chiffré sans .cles dans le dépôt de code
+    d, code = monter_donnees(tmp_path / "c", cles_code={})
+    r = lancer_cles(d, code)
+    assert r.returncode == 1
+    assert "refus : secrets/prod.env.enc : pas de code/deploiement/secrets/prod.cles" in sortie(r)
+
+
+def test_destinataires_compares_aux_cles_du_parc(tmp_path):
+    """Les destinataires de .sops.yaml sont exactement les clés de cles/*.pub ; un écart se dit par
+    le fichier et la clé abrégée, jamais la clé entière."""
+    dest_c = "age1" + "c" * 58
+    cas = [
+        # une clé du parc que .sops.yaml n'a pas, et l'inverse
+        (
+            {"pubs": {"serveur.pub": DEST_A + "\n", "hors-ligne.pub": dest_c + "\n"}},
+            [
+                "refus : cles/hors-ligne.pub : clé absente de .sops.yaml : age1cccc…",
+                "refus : .sops.yaml : destinataire sans clé dans cles/ : age1bbbb…",
+            ],
+        ),
+        # un destinataire de .sops.yaml sans sa clé dans cles/
+        (
+            {"pubs": {"serveur.pub": DEST_A + "\n"}},
+            ["refus : .sops.yaml : destinataire sans clé dans cles/ : age1bbbb…"],
+        ),
+        # un fichier de cles/ sans clé age
+        (
+            {
+                "pubs": {
+                    "serveur.pub": DEST_A + "\n",
+                    "hors-ligne.pub": DEST_B + "\n",
+                    "vide.pub": "\n",
+                }
+            },
+            ["refus : cles/vide.pub : aucune clé age"],
+        ),
+    ]
+    for i, (options, attendus) in enumerate(cas):
+        d, code = monter_donnees(tmp_path / str(i), **options)
+        r = lancer_cles(d, code)
+        assert r.returncode == 1, (options, sortie(r))
+        for attendu in attendus:
+            assert attendu in sortie(r).splitlines(), (attendu, sortie(r))
+        for cle in (DEST_A, DEST_B, dest_c):
+            assert cle not in sortie(r)
+    # sans .sops.yaml : rien ne se compare
+    d, code = monter_donnees(tmp_path / "sans", sops_yaml=None)
+    r = lancer_cles(d, code)
+    assert r.returncode == 1
+    absent = "refus : .sops.yaml : absent : les destinataires ne peuvent pas être contrôlés"
+    assert absent in sortie(r)
+    # sans aucun secret encore chiffré, la comparaison a lieu quand même
+    d, code = monter_donnees(tmp_path / "neuf", chiffres={}, pubs={"serveur.pub": DEST_A + "\n"})
+    r = lancer_cles(d, code)
+    assert r.returncode == 1
+    assert "refus : .sops.yaml : destinataire sans clé dans cles/ : age1bbbb…" in sortie(r)
+
+
+def test_cles_seuls_les_secrets_de_la_racine(tmp_path):
+    """Avec --cles, seuls les secrets/*.env.enc de la racine du dépôt de données sont lus : ni un
+    .enc du clone code/, ni un .enc d'ailleurs dans le dépôt."""
+    d, code = monter_donnees(tmp_path)
+    for ailleurs in (
+        "code/deploiement/secrets/prod.env.enc",
+        "code/secrets/prod.env.enc",
+        "secrets/sous/prod.env.enc",
+        "config/autre.env.enc",
+    ):
+        (d / ailleurs).parent.mkdir(parents=True, exist_ok=True)
+        (d / ailleurs).write_text("TOKEN=en clair\n", encoding="utf-8")
+    r = lancer_cles(d, code)
+    assert r.returncode == 0, sortie(r)
+    attendu = (
+        "avertissement : code/deploiement/secrets/staging.cles : "
+        "pas de staging.env.enc : secrets pas encore posés"
+    )
+    assert sortie(r).splitlines() == [attendu]
+    # un .enc du code au nom d'un .cles ne fait pas croire que ses secrets sont posés
+    (d / "code/deploiement/secrets/staging.env.enc").write_text(
+        enc(("HC_SONDE",), (DEST_A, DEST_B)), encoding="utf-8"
+    )
+    r = lancer_cles(d, code)
+    assert r.returncode == 0, sortie(r)
+    assert sortie(r).splitlines() == [attendu]
+
+
+def test_cles_absent_usage(tmp_path):
+    d, _code = monter_donnees(tmp_path)
+    r = lancer_cles(d, tmp_path / "absent")
+    assert r.returncode == 64
+    assert "Traceback" not in sortie(r)
+
+
+MODELE_DONNEES_YML = ".github/workflows/modele-donnees.yml"
+
+
+def copier_avec_reglages(tmp_path, reglages, *, workflow=True):
+    """Le dépôt de données, le script dans son scripts/modele/, à côté d'un reglages.py, comme dans
+    un projet rendu : il y lit DEPOT_CODE et SECRETS_EXIGES. secrets/prod.env.enc n'a pas de .cles
+    voisin : le contrôle ordinaire le refuse. `workflow` : le dépôt porte modele-donnees.yml, comme
+    le dépôt de données d'un projet `serveur`."""
+    d, code = monter_donnees(tmp_path)
+    poser_le_script(d, reglages, workflow=workflow)
+    return d, code
+
+
+def poser_le_script(d, reglages, *, workflow):
+    modele = d / "scripts/modele"
+    modele.mkdir(parents=True)
+    shutil.copy(SCRIPT, modele / SCRIPT.name)
+    (modele / "reglages.py").write_text(reglages, encoding="utf-8")
+    if workflow:
+        (d / MODELE_DONNEES_YML).parent.mkdir(parents=True)
+        (d / MODELE_DONNEES_YML).write_text("name: donnees\n", encoding="utf-8")
+
+
+def lancer_dans(d, *arguments):
+    return subprocess.run(
+        [sys.executable, "scripts/modele/verifier_secrets.py", *arguments],
+        cwd=d,
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+
+
+def test_depot_de_donnees_controle_par_modele_donnees(tmp_path):
+    """Le socle lance le script sans argument dans tout dépôt : dans un dépôt de données, la liste des
+    clés est dans le dépôt de code, et modele-donnees.yml la contrôle."""
+    reglages = 'NATURE = "donnees"\nDEPOT_CODE = "essai"\nSECRETS_EXIGES = {}\n'
+    d, code = copier_avec_reglages(tmp_path, reglages)
+    r = lancer_dans(d)
+    assert r.returncode == 0, sortie(r)
+    assert r.stdout == MESSAGE_DONNEES + "\n"
+    assert r.stderr == ""
+    # avec --cles, le contrôle a lieu
+    r = lancer_dans(d, "--cles", "code/deploiement/secrets")
+    assert r.returncode == 0, sortie(r)
+    assert MESSAGE_DONNEES not in sortie(r)
+    (code / "prod.cles").write_text("HC_SONDE\n", encoding="utf-8")
+    r = lancer_dans(d, "--cles", "code/deploiement/secrets")
+    assert r.returncode == 1
+    assert "refus : secrets/prod.env.enc : clés en trop : TOKEN" in sortie(r)
+
+
+def test_depot_de_donnees_sans_modele_donnees_controle_ordinaire(tmp_path):
+    """Le dépôt de données d'un projet sans serveur porte DEPOT_CODE, mais pas modele-donnees.yml :
+    rien d'autre ne contrôlerait ses secrets, le contrôle ordinaire tourne."""
+    reglages = 'NATURE = "donnees"\nDEPOT_CODE = "essai"\nSECRETS_EXIGES = {}\n'
+    # sans fichier chiffré, ce qu'il est d'ordinaire : rien à dire
+    d = tmp_path / "sans-serveur"
+    d.mkdir()
+    poser_le_script(d, reglages, workflow=False)
+    r = lancer_dans(d)
+    assert r.returncode == 0, sortie(r)
+    assert sortie(r) == ""
+    # un .enc s'y contrôle comme ailleurs : sans son .cles voisin, il refuse
+    d, _code = copier_avec_reglages(tmp_path / "avec-enc", reglages, workflow=False)
+    r = lancer_dans(d)
+    assert r.returncode == 1
+    assert MESSAGE_DONNEES not in sortie(r)
+    assert "refus : secrets/prod.env.enc : pas de secrets/prod.cles" in sortie(r)
+
+
+def test_sans_depot_code_controle_ordinaire(tmp_path):
+    """Sans DEPOT_CODE, le contrôle ordinaire : le .enc de secrets/ n'a pas de .cles voisin."""
+    d, _code = copier_avec_reglages(tmp_path, 'NATURE = "code"\nSECRETS_EXIGES = {}\n')
+    r = lancer_dans(d)
+    assert r.returncode == 1
+    assert MESSAGE_DONNEES not in sortie(r)
+    assert "refus : secrets/prod.env.enc : pas de secrets/prod.cles" in sortie(r)
