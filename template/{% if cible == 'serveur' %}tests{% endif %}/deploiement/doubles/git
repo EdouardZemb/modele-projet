@@ -8,12 +8,16 @@
 #                            dépôts) : un appel `-C <ce dossier> …` est noté, puis passé au vrai git,
 #                            et les autres variables n'y ont pas cours
 #   DOUBLE_GIT_STATUS        sortie de `status --porcelain` (défaut : vide, clone propre)
-#   DOUBLE_GIT_ECHEC         sous-commande qui échoue (fetch, merge, checkout, tag, cat-file ou show)
+#   DOUBLE_GIT_ECHEC         sous-commande qui échoue (fetch, merge, checkout, tag, cat-file,
+#                            ls-tree ou show), avec un message sur stderr
+#   DOUBLE_GIT_TERM          sous-commande qui envoie SIGTERM à son parent (le script qui l'appelle)
+#                            avant de répondre, comme systemd qui arrête l'unité pendant cet appel
 #   DOUBLE_GIT_ARBRE         dossier qui tient lieu de l'arbre de toute révision du clone :
 #                            `show <rév>:<chemin>` imprime son fichier <chemin> (code 128 s'il n'y
-#                            est pas), et `cat-file -e <rév>:<chemin>` dit s'il y est. Défaut : la
-#                            copie de travail du clone (celui de `-C`). Tout autre objet de
-#                            `cat-file -e` (un `<sha>^{commit}`) existe.
+#                            est pas), `ls-tree --name-only <rév> -- <chemin>` imprime <chemin> s'il
+#                            y est, rien sinon (code 0, comme git), et `cat-file -e <rév>:<chemin>`
+#                            dit s'il y est. Défaut : la copie de travail du clone (celui de `-C`).
+#                            Tout autre objet de `cat-file -e` (un `<sha>^{commit}`) existe.
 #   DOUBLE_GIT_ETIQUETTES    étiquettes du clone, séparées par des espaces, pour `tag --list`.
 #                            Avec --sort=-v:refname, elles sortent dans l'ordre de version
 #                            décroissant, comme le fait git (sort -rV : même ordre que git sur
@@ -70,6 +74,9 @@ if [ -n "${DOUBLE_GIT_ECHEC:-}" ] && [ "$DOUBLE_GIT_ECHEC" = "$sous_commande" ];
   echo "fatal: échec simulé de git $sous_commande" >&2
   exit 128
 fi
+if [ -n "${DOUBLE_GIT_TERM:-}" ] && [ "$DOUBLE_GIT_TERM" = "$sous_commande" ]; then
+  kill -TERM "$PPID"
+fi
 
 case "$sous_commande" in
   status) [ -z "${DOUBLE_GIT_STATUS:-}" ] || printf '%s\n' "$DOUBLE_GIT_STATUS" ;;
@@ -94,6 +101,11 @@ case "$sous_commande" in
       exit 128
     fi
     cat "$ARBRE/${objet#*:}"
+    ;;
+  ls-tree)
+    chemin="${!#}"
+    [ ! -f "$ARBRE/$chemin" ] || printf '%s
+' "$chemin"
     ;;
   cat-file)
     objet="${!#}"

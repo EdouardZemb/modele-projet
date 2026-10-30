@@ -975,6 +975,80 @@ etiqueter_les_donnees() {
     [ "$(appels_git_dans "$CLONE_DONNEES")" = "git -C $CLONE_DONNEES status --porcelain" ]
   done
 }
+
+# Ruling 17 du lot 12 : en prod, une version du code qui déclare une commande attend sa première
+# étiquette de données. Pendant l'attente, la sonde contrôle le couple en service comme quand rien
+# n'est nouveau (l'état après échec, les unités, l'adresse publique), puis dit l'attente par un
+# signal ok. Le champ configuration exigé suit le couple en service, pas la déclaration visée :
+# montee si son compose.env monte /config, rien sinon. Sans couple en service : « aucune version des
+# données », comme avant.
+@test "sonder : en prod, la version qui attend ses données contrôle le couple en service" {
+  local commit
+  commit="$(printf 'c%.0s' {1..40})"
+  preparer prod
+  export DOUBLE_GIT_ETIQUETTES='v0.1.0 v0.2.0'
+  arbre_vise VERIFIER_CONFIG
+
+  # aucun couple en service : l'attente seule
+  sonder prod
+  [ "$status" -eq 0 ]
+  [ "$(signaux)" = "$(signal 'aucune version des données') $HC" ]
+  [ "$(nombre_d_appels installer-unites.sh)" -eq 0 ]
+  [ -z "$(appels_de curl | grep -F '{{ domaine }}' || true)" ]
+  [ "$(nombre_d_appels docker)" -eq 0 ]
+
+  # 0.1.0 en service, sans /config : ses unités et son adresse publique, sans le champ
+  # configuration, que la version visée exigerait
+  en_service prod "$AUTRE" 0.1.0
+  : >"$APPELS"
+  sonder prod
+  [ "$status" -eq 0 ]
+  [ "$(signaux)" = "$(signal '0.2.0 attend une version des données') $HC" ]
+  [ "$(appels_de installer-unites.sh)" = 'installer-unites.sh --verifier' ]
+  appels_de curl | grep -Fx 'curl -sS -m 10 -w \n%{http_code} https://{{ sous_domaine }}.{{ domaine }}{{ chemin_sante }}'
+  [ "$(nombre_d_appels docker)" -eq 0 ]
+  [ "$(appels_de git | grep -c checkout)" -eq 0 ]
+  [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
+
+  # une panne du couple en service fait échouer la sonde : sa santé publique, ses unités
+  export DOUBLE_CURL_PUBLIC_HTTP=503
+  : >"$APPELS"
+  sonder prod
+  [ "$status" -eq 1 ]
+  [ "$(signaux)" = "$(signal 'adresse publique : réponse HTTP 503 au lieu de 200') $HC/fail" ]
+  [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
+  unset DOUBLE_CURL_PUBLIC_HTTP
+  export DOUBLE_UNITES_ECART=1
+  : >"$APPELS"
+  sonder prod
+  [ "$status" -eq 1 ]
+  [ "$(signaux)" = "$(signal 'unités divergentes') $HC/fail" ]
+  unset DOUBLE_UNITES_ECART
+
+  # le couple en service monte /config : montee est exigé
+  echo "$AUTRE 0.1.0 $commit" >"$ETAT/deploye"
+  echo "{{ prefixe }}CONFIG=$ETAT/instantanes/$commit/config" >>"$ETAT/compose.env"
+  : >"$APPELS"
+  sonder prod
+  [ "$status" -eq 1 ]
+  [ "$(signaux)" = "$(signal 'adresse publique : réponse inattendue (attendu : statut ok, environnement prod, configuration montee)') $HC/fail" ]
+  export DOUBLE_CURL_PUBLIC_CORPS='{"statut":"ok","environnement":"prod","configuration":"montee"}'
+  : >"$APPELS"
+  sonder prod
+  [ "$status" -eq 0 ]
+  [ "$(signaux)" = "$(signal '0.2.0 attend une version des données') $HC" ]
+
+  # le couple en service est aussi en échec (un retour arrière manuel qui n'a pas pu le quitter) :
+  # l'état après échec, contrôlé sur place, et le silence, comme quand rien n'est nouveau
+  echo "$AUTRE $commit" >"$ETAT/echec"
+  : >"$APPELS"
+  sonder prod
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"couple en échec, attente d'un nouveau : 0.1.0 ($AUTRE, données $commit)"* ]]
+  appels_de curl | grep -Fx 'curl -fsS -m 5 http://127.0.0.1:{{ bloc_ports }}{{ chemin_sante }}'
+  [ -z "$(signaux)" ]
+  [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
+}
 {%- else %}
 
 # Un dépôt (P1 du lot 12) : l'instance est dans le clone du projet, et le commit des données est la
@@ -1055,10 +1129,11 @@ etiqueter_les_donnees() {
   en_service prod "$AUTRE" 0.1.0
   arbre_vise VERIFIER_CONFIG
 {%- if nature == 'code' %}
-  # sans étiquette de données, la version qui se met à déclarer attend, sans rien tirer ni changer
+  # sans étiquette de données, la version qui se met à déclarer attend, sans rien tirer ni changer ;
+  # 0.1.0, en service, est contrôlée pendant ce temps (ruling 17 : voir plus haut)
   sonder prod
   [ "$status" -eq 0 ]
-  [ "$(signaux)" = "$(signal 'aucune version des données') $HC" ]
+  [ "$(signaux)" = "$(signal '0.2.0 attend une version des données') $HC" ]
   [ "$(nombre_d_appels docker)" -eq 0 ]
   [ "$(appels_de git | grep -c checkout)" -eq 0 ]
   [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
@@ -1116,31 +1191,57 @@ etiqueter_les_donnees() {
   appels_de git | grep -Fx "git -C $CLONE_DONNEES checkout --quiet donnees-2026.11.03.1"
 {%- endif %}
 
-  # un projet.env absent de l'étiquette ne déclare rien, comme un clone sans projet.env
+  # un projet.env absent de l'étiquette ne déclare rien, comme un clone sans projet.env : git ls-tree
+  # le dit, par une sortie vide et le code 0
   rm "$DOUBLE_GIT_ARBRE/deploiement/projet.env"
   : >"$APPELS"
   sonder prod
   [ "$status" -eq 0 ]
   [ "$(appels_de deployer.sh)" = "deployer.sh prod $EMPREINTE 0.2.0" ]
+  appels_de git | grep -Fx "git -C $CLONE ls-tree --name-only v0.2.0 -- deploiement/projet.env"
   [ "$(appels_de git | grep -c ' show ')" -eq 0 ]
 
-  # illisible (git show en échec, ou une ligne invalide) : anomalie, rien n'est tiré
+  # illisible (git ls-tree ou git show en échec, ou une ligne invalide) : anomalie, rien n'est
+  # tiré. Une erreur de git n'est pas une absence : son stderr va au journal.
   local cas
-  for cas in show ligne; do
+  for cas in ls-tree show ligne; do
     arbre_vise
     unset DOUBLE_GIT_ECHEC
-    if [ "$cas" = show ]; then
-      export DOUBLE_GIT_ECHEC=show
-    else
+    if [ "$cas" = ligne ]; then
       echo 'VERIFIER_CONTENU=outil;verifier' >>"$DOUBLE_GIT_ARBRE/deploiement/projet.env"
+    else
+      export DOUBLE_GIT_ECHEC="$cas"
     fi
     : >"$APPELS"
     sonder prod
     [ "$status" -eq 1 ]
     [ "$(signaux)" = "$(signal 'deploiement/projet.env de v0.2.0 illisible') $HC/fail" ]
+    [ "$cas" = ligne ] || [[ "$output" == *"fatal: échec simulé de git $cas"* ]]
     [ "$(nombre_d_appels docker)" -eq 0 ]
     [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
   done
+}
+
+# Le projet.env de l'étiquette se lit dans un fichier temporaire : il ne reste pas derrière la sonde,
+# ni à la fin d'un passage, ni quand un SIGTERM (systemd qui arrête l'unité) tombe pendant sa lecture.
+@test "sonder : le projet.env de l'étiquette ne laisse aucun fichier temporaire" {
+  preparer prod
+  export DOUBLE_GIT_ETIQUETTES=v0.2.0
+  arbre_vise
+  export TMPDIR="$BATS_TEST_TMPDIR/temporaires"
+  mkdir -p "$TMPDIR"
+  sonder prod
+  [ "$status" -eq 0 ]
+  appels_de git | grep -Fx "git -C $CLONE show v0.2.0:deploiement/projet.env"
+  [ -z "$(find "$TMPDIR" -mindepth 1)" ]
+
+  # le double de git envoie SIGTERM à la sonde pendant `git show`
+  export DOUBLE_GIT_TERM=show
+  : >"$APPELS"
+  sonder prod
+  [ "$status" -eq 143 ]
+  [ "$(nombre_d_appels docker)" -eq 0 ]
+  [ -z "$(find "$TMPDIR" -mindepth 1)" ]
 }
 
 # --- verrou, réécriture, secrets, usage ------------------------------------------------------

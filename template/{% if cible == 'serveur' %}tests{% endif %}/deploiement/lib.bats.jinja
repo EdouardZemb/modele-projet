@@ -485,9 +485,10 @@ messages_du_journal() {
 
 # donnees_declarees lit le projet.env du clone ; donnees_declarees_dans, le fichier qu'on lui donne :
 # sonder.sh y passe celui de l'étiquette visée du code, lu sans checkout (ruling 13 du lot 12). Un
-# fichier absent ne déclare rien ; le fichier donné se contrôle comme celui du clone.
+# fichier absent ne déclare rien ; le fichier donné se contrôle comme celui du clone. Un nom vide ou
+# manquant n'est pas le projet.env du clone : il arrête le script, sans rien lire.
 @test "donnees_declarees : le projet.env du clone, ou celui qu'on lui donne" {
-  local vise="$BATS_TEST_TMPDIR/projet-vise.env"
+  local vise="$BATS_TEST_TMPDIR/projet-vise.env" appel
   declarer VERIFIER_CONFIG
   printf '%s\n' '# Réglages visés' 'VERIFIER_CONTENU=outil verifier_contenu' >"$vise"
   avec_lib 'donnees_declarees; echo "$DECLARE_CONFIG $DECLARE_CONTENU"
@@ -495,6 +496,12 @@ messages_du_journal() {
     donnees_declarees_dans '"$BATS_TEST_TMPDIR/absent.env"'; echo "$DECLARE_CONFIG $DECLARE_CONTENU"'
   [ "$status" -eq 0 ]
   [ "$output" = $'1 0\n0 1\n0 0' ]
+  for appel in 'donnees_declarees_dans ""' donnees_declarees_dans; do
+    avec_lib "$appel"'; echo "lu : $DECLARE_CONFIG $DECLARE_CONTENU"'
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"donnees_declarees_dans : fichier manquant"* ]]
+    [[ "$output" != *"lu :"* ]]
+  done
   printf '%s\n' 'VERIFIER_CONTENU=outil;verifier' >"$vise"
   avec_lib 'donnees_declarees_dans '"$vise"
   [ "$status" -eq 1 ]
