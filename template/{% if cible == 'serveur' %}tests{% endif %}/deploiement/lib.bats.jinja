@@ -289,10 +289,13 @@ lire_les_chemins='charger_env prod; charger_secrets prod
     [ "$status" -eq 0 ]
     [ "$(appels_de docker | tail -n 1)" = "docker compose -p {{ nom }} $attendus --env-file $etat/compose.env ps -q app" ]
   done
-  # sans compose.env : les fichiers du projet seulement
+  # sans compose.env : un seul appel, sur les fichiers du projet seulement
   rm "$etat/compose.env"
+  : >"$APPELS"
   avec_lib 'charger_env prod; dc ps -q app'
-  [ "$(appels_de docker | tail -n 1)" = "docker compose -p {{ nom }} $fichiers --env-file $etat/compose.env ps -q app" ]
+  [ "$status" -eq 0 ]
+  [ "$(nombre_d_appels docker)" -eq 1 ]
+  [ "$(appels_de docker)" = "docker compose -p {{ nom }} $fichiers --env-file $etat/compose.env ps -q app" ]
 }
 
 # --- deploiement/projet.env : les réglages du projet, lus et jamais sourcés ----------------------
@@ -622,6 +625,24 @@ messages_du_journal() {
   instantane="${{ prefixe }}RACINE_ETAT/prod/instantanes/$COMMIT"
   [ "$(find "$instantane" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort | tr '\n' ' ')" = "config contenu " ]
   [ -z "$(find "$instantane" -perm /222)" ]
+  # décision 7 : le staging ne monte ni ne vérifie jamais /config, et son instantané n'en porte pas
+  # de copie, même quand VERIFIER_CONFIG est déclarée ; complet sans lui, il se réutilise
+  avec_lib 'charger_env staging; preparer_instantane '"$COMMIT"
+  [ "$status" -eq 0 ]
+  instantane="${{ prefixe }}RACINE_ETAT/staging/instantanes/$COMMIT"
+  [ "$(find "$instantane" -mindepth 1 -maxdepth 1 -printf '%f')" = contenu ]
+  [[ "$output" == *"instantané des données prêt : $instantane"* ]]
+  avec_lib 'charger_env staging; preparer_instantane '"$COMMIT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"instantané des données réutilisé : $instantane"* ]]
+  # VERIFIER_CONFIG seule, en staging : rien à extraire
+  declarer VERIFIER_CONFIG
+  commit_de_donnees "$SOUS_CONFIG/profil.yml"
+  avec_lib 'charger_env staging; preparer_instantane '"$COMMIT"
+  [ "$status" -eq 0 ]
+  instantane="${{ prefixe }}RACINE_ETAT/staging/instantanes/$COMMIT"
+  [ -d "$instantane" ]
+  [ -z "$(find "$instantane" -mindepth 1)" ]
 }
 
 # Les commandes de vérification : chacune dans un conteneur jetable de l'image visée, sans réseau,
@@ -937,6 +958,72 @@ messages_du_journal() {
   {{ prefixe }}VERSION="" avec_lib 'refuser_image_heritee'
   [ "$status" -eq 1 ]
   [[ "$output" == *"{{ prefixe }}VERSION est posée dans l'environnement"* ]]
+}
+
+# Les montages de l'instantané aussi : compose prend {{ prefixe }}CONFIG et {{ prefixe }}CONTENU du shell avant
+# compose.env, et la prod monterait un autre dossier que l'instantané vérifié (M-0006, § 5). Une
+# valeur venue de l'env de l'environnement, que charger_env source et exporte, est refusée de même.
+@test "refuser_image_heritee : la configuration et le contenu, du shell ou de l'env" {
+  local variable env_prod="$CLONE_DONNEES/$SOUS_ENV/prod.env"
+  cp "$env_prod" "$BATS_TEST_TMPDIR/prod.env.origine"
+  for variable in {{ prefixe }}CONFIG {{ prefixe }}CONTENU; do
+    echo "cas : $variable du shell"
+    export "$variable=$CLONE_DONNEES/$SOUS_CONFIG"
+    avec_lib 'charger_env prod; refuser_image_heritee; echo pas de refus'
+    unset "$variable"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"$variable est posée dans l'environnement : elle prendrait le pas sur compose.env"* ]]
+    [[ "$output" != *"pas de refus"* ]]
+
+    echo "cas : $variable de l'env de prod"
+    cp "$BATS_TEST_TMPDIR/prod.env.origine" "$env_prod"
+    echo "$variable=$CLONE_DONNEES/$SOUS_CONTENU" >>"$env_prod"
+    avec_lib 'charger_env prod; refuser_image_heritee; echo pas de refus'
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"$variable est posée dans l'environnement"* ]]
+    [[ "$output" != *"pas de refus"* ]]
+    cp "$BATS_TEST_TMPDIR/prod.env.origine" "$env_prod"
+  done
+  # un nom voisin n'est pas visé
+  {{ prefixe }}CONFIGURATION=x {{ prefixe }}CONTENUS=x avec_lib 'charger_env prod; refuser_image_heritee; echo pas de refus'
+  [ "$status" -eq 0 ]
+  [ "${lines[-1]}" = "pas de refus" ]
+}
+
+# _retirer_fige : un dossier figé (a-w, comme un instantané) se retire, sous-dossiers figés compris ;
+# un lien est retiré sans que sa cible perde rien, ni ses droits ; un chemin absent n'est pas une
+# erreur.
+@test "_retirer_fige : un dossier en lecture seule, jamais à travers un lien" {
+  local fige="$BATS_TEST_TMPDIR/fige" cible="$BATS_TEST_TMPDIR/cible"
+  mkdir -p "$fige/sous" "$cible"
+  echo garde >"$cible/fichier"
+  echo x >"$fige/sous/fichier"
+  ln -s "$cible" "$fige/lien"
+  chmod -R a-w "$fige" "$cible"
+  avec_lib '_retirer_fige "'"$fige"'"'
+  [ "$status" -eq 0 ]
+  [ ! -e "$fige" ]
+  [ "$(cat "$cible/fichier")" = garde ]
+  [ -z "$(find "$cible" -perm /222)" ]
+  # un lien à la place du dossier : le lien s'en va, la cible reste, en lecture seule
+  ln -s "$cible" "$fige"
+  avec_lib '_retirer_fige "'"$fige"'"'
+  [ "$status" -eq 0 ]
+  [ ! -L "$fige" ]
+  [ -d "$cible" ]
+  [ -z "$(find "$cible" -perm /222)" ]
+  # absent : rien à faire
+  avec_lib '_retirer_fige "'"$fige"'"'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  # un dossier qui ne se retire pas (son parent est figé, et _retirer_fige ne remonte pas) : échec,
+  # sans rien journaliser, et il reste
+  mkdir -p "$BATS_TEST_TMPDIR/parent/fige"
+  chmod a-w "$BATS_TEST_TMPDIR/parent"
+  avec_lib '_retirer_fige "'"$BATS_TEST_TMPDIR/parent/fige"'"'
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  [ -d "$BATS_TEST_TMPDIR/parent/fige" ]
 }
 
 @test "prendre_verrou_est_le_verrou_de_l_etat_et_attend_le_delai" {

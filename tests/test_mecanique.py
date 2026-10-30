@@ -3,8 +3,8 @@
 Le projet est rendu dans les deux modes des données (M-0006, § 6 : un dépôt de code, à deux dépôts ;
 un dépôt de nature `donnees`, à un dépôt), avec et sans sauvegardes, puis
 `sh tests/deploiement/lancer.sh` construit l'image de test (age et sops aux versions du serveur) et
-y lance bats, comme le fera la CI du projet. Il faut Docker avec un serveur Linux : sans lui, le test saute, sauf si
-MODELE_TESTS_SANS_SAUT nomme docker (LE-16).
+y lance bats, comme le fera la CI du projet. Il faut Docker avec un serveur Linux : sans lui, le
+test saute, sauf si MODELE_TESTS_SANS_SAUT nomme docker (LE-16).
 """
 
 import re
