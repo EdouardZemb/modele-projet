@@ -519,11 +519,11 @@ aucune_copie_jetable() {
   nom="$(basename "${envoyes[0]}" .tar.age)"
   [[ "$output" == *"couple noté : $q/$nom.couple ($IMAGE 0.1.0 $commit)"* ]]
   # en local : l'instantané et son couple, rien d'autre ; l'instantané a la forme de /donnees
-  [ "$(ls -A "$q" | LC_ALL=C sort)" = "$(printf '%s\n' "$nom" "$nom.couple")" ]
+  [ "$(find "$q" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)" = "$(printf '%s\n' "$nom" "$nom.couple")" ]
   [ "$(cat "$q/$nom.couple")" = "$IMAGE 0.1.0 $commit" ]
   [ "$(cd "$q/$nom" && find . -mindepth 1 | LC_ALL=C sort)" = "$(printf '%s\n' ./.cachee ./donnees.txt ./sous ./sous/profond.txt)" ]
   # au distant : l'archive et son couple chiffré, à la même date, et rien d'autre
-  [ "$(ls -A "$DISTANT" | LC_ALL=C sort)" = "$(printf '%s\n' "$nom.couple.age" "$nom.tar.age")" ]
+  [ "$(find "$DISTANT" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)" = "$(printf '%s\n' "$nom.couple.age" "$nom.tar.age")" ]
   [ "$(head -c 21 "$DISTANT/$nom.couple.age")" = age-encryption.org/v1 ]
   [ "$(age -d -i "$AGE_IDENTITE_HORS_LIGNE" "$DISTANT/$nom.couple.age")" = "$IMAGE 0.1.0 $commit" ]
   [ "$(stat -c %y "$DISTANT/$nom.couple.age")" = "$(stat -c %y "$DISTANT/$nom.tar.age")" ]

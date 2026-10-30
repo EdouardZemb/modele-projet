@@ -30,7 +30,7 @@
 #   donnees_declarees_dans <fichier>   la même chose, d'après ce fichier, le projet.env d'une autre version
 #   controler_paires <commit>          la règle des paires : chaque dossier de l'instance du commit avec sa commande, et l'inverse (son README.md seul ne compte pas)
 #   preparer_instantane <commit>       INSTANTANE : l'instantané en lecture seule des dossiers déclarés du commit de données (sans config/ en staging)
-#   _retirer_fige <chemin>             (privée) retire un dossier figé en lecture seule, comme un instantané : les droits d'abord, jamais à travers un lien
+#   _retirer_fige <chemin>             (privée) retire un dossier figé en lecture seule, comme un instantané : les droits d'abord, jamais à travers un lien ; le ménage des instantanés (nettoyer-images.sh) s'en sert aussi
 #   verifier_instantane <env> <image> <instantané> [<instantané en service>]  VERIFIER_CONFIG et VERIFIER_CONTENU, en conteneur jetable
 #   jq_vaut <attendu> <doc> <filtre>   le filtre jq, appliqué au document, imprime exactement <attendu>
 #   revision_de <image>                le label de révision (SHA du commit) de l'image
@@ -47,7 +47,8 @@
 #   lire_echec                         ECHEC_IMAGE et ECHEC_COMMIT, depuis le fichier echec
 {%- if sauvegardes %}
 #   verifier_copie <image> <dossier>   contrôle d'un dossier qui a la forme de /donnees, par la commande VERIFIER
-#   purger_par_nom <dossier> <regex> <limite>  retire les dossiers dont le nom date d'avant <limite>
+#   noter_couple <instantané>          écrit <instantané>.couple, à côté de lui : le couple de deploye
+#   purger_par_nom <dossier> <regex> <limite>  retire les dossiers dont le nom date d'avant <limite>, et leur .couple
 #   retirer_partiels <dossier> <regex> retire les instantanés en échec (.partiel) avant un nouvel essai
 #   retirer_restes_de_restauration     retire, sous le verrou, ce qu'une restauration tuée a laissé
 {%- endif %}
@@ -761,17 +762,54 @@ verifier_copie() {
   esac
 }
 
+# noter_couple <instantané> : écrit <instantané>.couple, à côté de l'instantané de /donnees et jamais
+# dedans (son contenu et les membres de son archive ne changent pas, P3 du lot 12), une ligne
+# « <image> <version> <commit> » : le couple de ${{ prefixe }}ETAT/deploye à cet instant, lu par
+# lire_version (le commit d'un état d'avant la v0.7.0 vaut « - »). Pour l'instantané d'avant un
+# déploiement, c'est le couple que le déploiement quitte (Ruling 16). Sans deploye (un premier
+# déploiement), aucun .couple, et le journal le dit : restaurer.sh dira « couple de l'instantané
+# inconnu ». Rend 0 si le .couple est écrit ou s'il n'y a pas de couple en service ; 1, journalisé,
+# si deploye ne se lit pas ou si l'écriture échoue : l'instantané reste, sans .couple (un .couple
+# coupé en route ne se lit pas, et restaurer.sh le dit inconnu). Utilisée par sauvegarder.sh et
+# deployer.sh, sous le verrou de l'état, juste après l'instantané.
+noter_couple() {
+  local instantane="${1:?noter_couple : instantané manquant}" deploye="${{ prefixe }}ETAT/deploye"
+  if [ ! -e "$deploye" ] && [ ! -L "$deploye" ]; then
+    journal "aucun couple en service ($deploye absent) : pas de $instantane.couple"
+    return 0
+  fi
+  if ! lire_version "$deploye"; then
+    journal "$deploye illisible : pas de $instantane.couple"
+    return 1
+  fi
+  if ! printf '%s %s %s\n' "$IMAGE_LUE" "$VERSION_LUE" "$COMMIT_LU" >"$instantane.couple"; then
+    journal "$instantane.couple ne s'écrit pas : l'instantané reste, sans son couple"
+    return 1
+  fi
+  journal "couple noté : $instantane.couple ($IMAGE_LUE $VERSION_LUE $COMMIT_LU)"
+}
+
 # purger_par_nom <dossier> <regex> <limite> : retire, emportés en entier, les dossiers de <dossier>
 # dont le nom suit <regex> et dont l'horodatage, le premier groupe de la regex (AAAAMMJJTHHMMSSZ),
-# est antérieur à <limite>, de la même forme : l'ordre lexical est celui du temps. Ni un fichier,
-# ni un lien, ni un nom d'une autre forme. La date du dossier n'est jamais lue. Utilisée par la
+# est antérieur à <limite>, de la même forme : l'ordre lexical est celui du temps. Le .couple voisin
+# d'un instantané (noter_couple), un fichier <nom>.couple, suit la règle de son instantané : même
+# nom, même âge ; il part avec lui, et seul s'il est seul. Ni un autre fichier, ni un lien, ni un
+# nom d'une autre forme. La date du dossier n'est jamais lue. Dans l'ordre des noms, un instantané
+# passe avant son .couple : un retrait qui échoue s'arrête avant le couple. Utilisée par la
 # rétention de sauvegarder.sh et par la purge de pre-deploiement/ de deployer.sh.
 purger_par_nom() {
-  local dossier="$1" motif="$2" limite="$3" chemin
+  local dossier="$1" motif="$2" limite="$3" chemin nom
   [ -d "$dossier" ] || return 0
   for chemin in "$dossier"/*; do
-    { [ -d "$chemin" ] && [ ! -L "$chemin" ]; } || continue
-    [[ "${chemin##*/}" =~ $motif ]] || continue
+    [ ! -L "$chemin" ] || continue
+    nom="${chemin##*/}"
+    if [ -d "$chemin" ]; then
+      [[ "$nom" =~ $motif ]] || continue
+    elif [ -f "$chemin" ] && [[ "$nom" == *.couple ]]; then
+      [[ "${nom%.couple}" =~ $motif ]] || continue
+    else
+      continue
+    fi
     [[ "${BASH_REMATCH[1]}" < "$limite" ]] || continue
     rm -rf -- "$chemin" || return 1
   done

@@ -561,7 +561,7 @@ poser_instantane() {
 # instantanes_de <env> : les entrées du dossier des instantanés de cet environnement, une par ligne,
 # dans l'ordre des noms.
 instantanes_de() {
-  (cd "${{ prefixe }}RACINE_ETAT/$1/instantanes" && ls -A | LC_ALL=C sort)
+  find "${{ prefixe }}RACINE_ETAT/$1/instantanes" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort
 }
 
 @test "ménage : les instantanés gardés et retirés" {

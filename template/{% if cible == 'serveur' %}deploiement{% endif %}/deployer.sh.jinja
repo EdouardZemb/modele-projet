@@ -69,9 +69,12 @@
 #      des sauvegardes) ; elle l'écrit sous un nom provisoire, <AAAAMMJJTHHMMSSZ>.partiel, que le
 #      dossier ne quitte qu'après le code 0 ; si elle ne rend pas 0, on s'arrête là, et le dossier
 #      garde ce nom, pour le diagnostic, jusqu'à la tentative suivante, qui retire les .partiel
-#      avant d'écrire : il n'en reste qu'un, le dernier. Après le renommage, pre-deploiement/ est
-#      purgé des instantanés de plus de 30 jours, d'après leur nom ; une purge ou un retrait en
-#      échec n'arrête rien ;
+#      avant d'écrire : il n'en reste qu'un, le dernier. Après le renommage, le couple que le
+#      déploiement quitte, celui de deploye, est noté à côté de l'instantané, jamais dedans :
+#      <AAAAMMJJTHHMMSSZ>.couple (noter_couple, lib.sh ; Ruling 16 du lot 12), rien sans deploye.
+#      Puis pre-deploiement/ est purgé des instantanés de plus de 30 jours, d'après leur nom, chacun
+#      avec son .couple ; un couple qui ne se note pas, une purge ou un retrait en échec n'arrêtent
+#      rien ;
 {%- else %}
 #   2. pas d'instantané de /donnees : le projet n'a pas de données à sauvegarder ;
 {%- endif %}
@@ -106,8 +109,10 @@
 #      que VERIFIER_CONFIG est déclarée) ; sans version précédente (premier déploiement), la version
 #      en échec est arrêtée. Signal /fail ;
 #   7. succès seulement (un déploiement ou un retour arrière réussi), après le signal ok :
-#      nettoyer-images.sh, sous le même verrou ({{ prefixe }}VERROU_TENU=1 : il ne l'attend pas). Son
-#      échec est journalisé et ne change pas le résultat.
+#      nettoyer-images.sh, sous le même verrou ({{ prefixe }}VERROU_TENU=1 : il ne l'attend pas), qui
+#      fait le ménage des images, puis celui des instantanés de ${{ prefixe }}ETAT/instantanes/. Son
+#      échec, ou une surprise du ménage des instantanés, est journalisé et ne change pas le
+#      résultat.
 {%- if sauvegardes %}
 #
 # L'étape 2 n'a rien changé quand elle échoue. Un instantané impossible ne marque pas la version en
@@ -215,9 +220,10 @@ signaler_sonde() {
   signaler HC_SONDE "$@" || true
 }
 
-# menage_des_images : retire les images du projet qui ne servent plus (nettoyer-images.sh), sous le
-# verrou que ce script tient déjà. Le déploiement est fini et réussi : le ménage ne le remet pas en
-# cause, et ne rend jamais autre chose que 0.
+# menage_des_images : retire les images du projet qui ne servent plus, puis les instantanés des
+# données que rien ne garde (nettoyer-images.sh), sous le verrou que ce script tient déjà. Le
+# déploiement est fini et réussi : le ménage ne le remet pas en cause, et ne rend jamais autre chose
+# que 0.
 menage_des_images() {
   local code=0
   {{ prefixe }}VERROU_TENU=1 bash "${{ prefixe }}CLONE/deploiement/nettoyer-images.sh" "$NOM_ENV" || code=$?
@@ -408,7 +414,10 @@ controler_montages() {
 # {{ prefixe }}SAUVEGARDES : la version en service ne monte pas /sauvegardes (I3).
 # Juste avant la commande, les .partiel des tentatives précédentes sont retirés : il n'en reste que
 # celui de la dernière (R31). Un retrait impossible est journalisé et n'arrête rien.
-# Après un instantané réussi, pre-deploiement/ est purgé de ce qui a plus de 30 jours (R24).
+# Après un instantané réussi, le couple que le déploiement quitte, celui de deploye, est noté à côté
+# de lui, <horodatage>.couple (noter_couple, lib.sh ; Ruling 16) : sans deploye, ou s'il ne se lit
+# pas, l'instantané reste sans couple, et le déploiement continue. Puis pre-deploiement/ est purgé de
+# ce qui a plus de 30 jours, chaque instantané avec son .couple (R24).
 instantane() {
   local horodatage destination hote sortie code=0 pre="${{ prefixe }}SAUVEGARDES/pre-deploiement" monte
   # I3 : le conteneur en service ne monte /sauvegardes que si son compose.env, celui de la version
@@ -453,13 +462,15 @@ instantane() {
     return 1
   fi
   journal "instantané : $destination"
+  noter_couple "$hote" || true
   purger_pre_deploiement "$pre"
 }
 
 # purger_pre_deploiement <dossier> : retire de pre-deploiement/ les instantanés de plus de 30 jours,
-# d'après leur nom, avec la regex et la limite de la rétention de sauvegarder.sh. Celle-ci ne tourne
-# qu'en prod : le staging, qui se déploie à chaque fusion, n'aurait sinon aucune purge. Un nom d'une
-# autre forme n'est jamais retiré. Un échec est journalisé et n'arrête pas le déploiement.
+# d'après leur nom, chacun avec son .couple, avec la regex et la limite de la rétention de
+# sauvegarder.sh. Celle-ci ne tourne qu'en prod : le staging, qui se déploie à chaque fusion,
+# n'aurait sinon aucune purge. Un nom d'une autre forme n'est jamais retiré. Un échec est journalisé
+# et n'arrête pas le déploiement.
 purger_pre_deploiement() {
   local limite
   if ! limite="$(date -u -d '30 days ago' +%Y%m%dT%H%M%SZ)" \

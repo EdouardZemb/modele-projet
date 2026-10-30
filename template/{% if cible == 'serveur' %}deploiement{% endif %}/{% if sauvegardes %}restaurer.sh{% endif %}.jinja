@@ -29,16 +29,26 @@
 #      - un dossier y est copié ; un dossier .partiel (une sauvegarde en cours ou en échec) est
 #        refusé (code 64) ;
 #      - une archive .tar.age exige --cle (l'identité hors ligne, apportée pour l'occasion et jamais
-#        gardée sur le serveur : voir /dev/stdin ci-dessus, lue une seule fois). La clé elle-même,
-#        collée dans un argument quel qu'il soit, est refusée sans être répétée (code 64).
+#        gardée sur le serveur : voir /dev/stdin ci-dessus, lue une seule fois, en mémoire, hors de
+#        la trace de bash -x, et jamais écrite : elle déchiffre l'archive, puis son couple). La clé
+#        elle-même, collée dans un argument quel qu'il soit, est refusée sans être répétée
+#        (code 64).
 #        L'archive vient d'un distant et la clé publique n'est pas secrète : n'importe qui peut
 #        fabriquer une archive qui se déchiffre. Ses membres sont donc contrôlés avant toute
 #        extraction : un seul dossier, {{ nom }}-<horodatage>/, et rien à côté ; ni chemin absolu, ni
 #        « .. », ni lien, rien que des fichiers et des dossiers ;
 #      dans les deux cas, un instantané vide, ou qui contient autre chose que des fichiers et des
-#      dossiers, est refusé ;
+#      dossiers, est refusé. Le couple de l'instantané, s'il a été noté (P3 du lot 12), est dans le
+#      fichier voisin de la source : <dossier>.couple, ou <archive sans .tar.age>.couple.age,
+#      déchiffré avec la même clé dans le dossier temporaire ;
 #   4. contrôle, comme le test de restauration : la commande VERIFIER de deploiement/projet.env, dans
-#      un conteneur jetable, sur la copie. Rien n'est touché si elle ne rend pas 0 ;
+#      un conteneur jetable, sur la copie. Rien n'est touché si elle ne rend pas 0. Puis le couple de
+#      l'instantané : « couple de l'instantané : <image> <version> <commit> (couple déployé : …) »
+#      s'il diffère de celui de deploye, rien si c'est le même, « couple de l'instantané inconnu »
+#      sans fichier voisin (un instantané d'avant la v0.7.0, ou pris sans couple en service), et
+#      « couple de l'instantané inconnu : <fichier> illisible » si ce fichier ne se lit pas (un lien,
+#      une autre clé, une autre forme). Le couple ne décide de rien : la restauration a lieu dans
+#      tous les cas, sur l'image déployée ;
 #   5. le reste d'une restauration interrompue (${{ prefixe }}DONNEES.nouvelle, la copie de travail
 #      qu'un SIGKILL ou un plantage de l'hôte laisse, hors de portée du trap) est retiré, puis
 #      l'instantané y est copié, à côté des données, et le dossier
@@ -129,6 +139,9 @@ REPORTER_MOTS=() # la commande REPORTER de deploiement/projet.env ; vide si le p
 REPORTER_SECTION="" # le titre de la section du runbook qui dit comment reporter à la main
 REPORT="" # la copie jetable des données en service, tant qu'elle existe
 REPORT_ABSENT="" # pourquoi le report, déclaré, n'a pas eu lieu : --sans-report, aucune donnée en service
+IDENTITE="" # l'identité age de --cle, lue une seule fois (lire_identite), effacée après l'étape 3
+COUPLE_VOISIN="" # le fichier voisin de la source qui porte son couple ; vide s'il n'y en a pas
+COUPLE_LU="" # « <image> <version> <commit> » lu dans ce fichier ; vide s'il ne se lit pas
 
 USAGE="usage : bash deploiement/restaurer.sh prod <dossier|archive .tar.age> [--oui] [--cle <identité age>]
 exemple, la clé hors ligne sur l'entrée standard, jamais écrite sur un disque ; sur le poste, dans
@@ -477,12 +490,30 @@ verifier_membres() {
   done
 }
 
+# lire_identite : IDENTITE ← le contenu de --cle, lu une seule fois : sur /dev/stdin, une seconde
+# lecture ne trouverait rien. Appelée par _sans_trace : sous bash -x, la clé ne paraît jamais dans la
+# trace. Elle reste en mémoire, jamais sur un disque ni dans un argument.
+# shellcheck disable=SC2329  # appelée par _sans_trace
+lire_identite() {
+  IDENTITE="$(cat -- "$CLE")"
+}
+
+# dechiffrer <entrée> <sortie> : `age -d` avec l'identité lue par lire_identite, qu'age reçoit par
+# un tube (une substitution de processus), jamais par un fichier. Appelée par _sans_trace, pour la
+# même raison.
+# shellcheck disable=SC2329  # appelée par _sans_trace
+dechiffrer() {
+  age -d -i <(printf '%s\n' "$IDENTITE") -o "$2" "$1"
+}
+
 # preparer_archive : déchiffre l'archive, contrôle ses membres, puis l'extrait : $TMP/donnees est son
 # dossier unique.
 preparer_archive() {
   local archive="$TMP/archive.tar"
   mkdir -m 700 "$TMP/extrait"
-  age -d -i "$CLE" -o "$archive" "$SOURCE" \
+  _sans_trace lire_identite \
+    || arreter 1 "déchiffrement impossible : $SOURCE (identité : $CLE)"
+  _sans_trace dechiffrer "$SOURCE" "$archive" \
     || arreter 1 "déchiffrement impossible : $SOURCE (identité : $CLE)"
   verifier_membres "$archive"
   tar -xf "$archive" -C "$TMP/extrait" --no-same-owner --no-same-permissions \
@@ -499,6 +530,46 @@ preparer_archive() {
 preparer_dossier() {
   mkdir -m 700 "$TMP/donnees"
   cp -R -- "$SOURCE/." "$TMP/donnees/" || arreter 1 "copie de $SOURCE impossible : rien n'a changé"
+}
+
+# lire_couple_voisin : le couple de l'instantané, dans le fichier voisin de la source, que
+# sauvegarder.sh et deployer.sh écrivent (noter_couple, lib.sh) : <dossier>.couple, en clair, ou
+# <archive sans .tar.age>.couple.age, déchiffré avec l'identité de l'archive dans le dossier
+# temporaire. COUPLE_VOISIN ← ce fichier s'il existe ; COUPLE_LU ← son couple s'il a la forme d'un
+# fichier d'état (lire_version). Un lien, jamais suivi, un fichier qui ne se déchiffre pas ou qui n'a
+# pas cette forme laissent COUPLE_LU vide. Rien ici n'arrête la restauration, ni ne journalise :
+# dire_le_couple le dit, après le contrôle.
+lire_couple_voisin() {
+  local voisin clair
+  if [ "$FORME" = archive ]; then
+    voisin="${SOURCE%.tar.age}.couple.age"
+    clair="$TMP/couple"
+  else
+    voisin="${SOURCE%/}.couple"
+    clair="$voisin"
+  fi
+  [ -e "$voisin" ] || [ -L "$voisin" ] || return 0
+  COUPLE_VOISIN="$voisin"
+  { [ -f "$voisin" ] && [ ! -L "$voisin" ]; } || return 0
+  if [ "$FORME" = archive ]; then
+    _sans_trace dechiffrer "$voisin" "$clair" || return 0
+  fi
+  if lire_version "$clair"; then
+    COUPLE_LU="$IMAGE_LUE $VERSION_LUE $COMMIT_LU"
+  fi
+}
+
+# dire_le_couple : le couple de l'instantané, au journal, face au couple déployé (lire_deploye).
+# Rien quand c'est le même : la restauration se fait sur l'image qui l'a écrit.
+dire_le_couple() {
+  local deploye="$DEPLOYE_IMAGE $DEPLOYE_VERSION $DEPLOYE_COMMIT"
+  if [ -z "$COUPLE_VOISIN" ]; then
+    journal "couple de l'instantané inconnu"
+  elif [ -z "$COUPLE_LU" ]; then
+    journal "couple de l'instantané inconnu : $COUPLE_VOISIN illisible"
+  elif [ "$COUPLE_LU" != "$deploye" ]; then
+    journal "couple de l'instantané : $COUPLE_LU (couple déployé : $deploye)"
+  fi
 }
 
 main() {
@@ -554,7 +625,8 @@ main() {
   if [ "$FORME" = archive ]; then
     [ -n "$CLE" ] || arreter 64 "une archive .tar.age exige --cle <identité age> (la clé hors ligne, apportée pour l'occasion)"
     # -r et non -f : /dev/stdin (un tube) ou tout autre chemin lisible, jamais un dossier. Le test ne
-    # lit rien : une identité sur l'entrée standard n'est consommée que par age.
+    # lit rien : une identité sur l'entrée standard n'est consommée qu'à l'étape 3, une seule fois
+    # (lire_identite).
     { [ -r "$CLE" ] && [ ! -d "$CLE" ]; } || arreter 64 "identité age introuvable ou illisible : $CLE"
   elif [ -n "$CLE" ]; then
     journal "--cle ignorée : elle ne sert qu'aux archives .tar.age"
@@ -599,6 +671,8 @@ main() {
   else
     preparer_dossier
   fi
+  lire_couple_voisin
+  IDENTITE=""
   [ -n "$(find "$TMP/donnees" -mindepth 1 -print -quit)" ] \
     || arreter 1 "instantané vide : $SOURCE : rien n'a changé"
   [ -z "$(find "$TMP/donnees" -mindepth 1 ! -type f ! -type d -print -quit)" ] \
@@ -615,6 +689,7 @@ main() {
     *) arreter 1 "vérification de $SOURCE impossible : rien n'a changé (le détail est dans le journal)" ;;
   esac
   journal "instantané conforme : $SOURCE ($fichiers)"
+  dire_le_couple
 
   # 5. Tout ce qui peut échouer sans toucher à l'application. L'horodatage est aussi celui de la
   # copie jetable du report (6 bis).
