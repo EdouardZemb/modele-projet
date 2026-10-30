@@ -348,6 +348,23 @@ nombre_de_lancements() {
   [ "$(cat "$instantane.couple")" = "$NOUVELLE 0.2.0 -" ]
 }
 
+# Le retour arrière manuel prend son instantané comme un déploiement : son .couple nomme le couple
+# qu'il quitte, celui de deploye avant le retour, et non celui vers lequel il revient (Ruling 16).
+@test "deployer : le retour arrière note le couple qu'il quitte" {
+  local pre="${{ prefixe }}RACINE_SAUVEGARDES/pre-deploiement" instantanes
+  deux_versions
+  deployer prod --retour
+  [ "$status" -eq 0 ]
+  [ "$(cat "$ETAT/deploye")" = "$ANCIENNE 0.1.0 -" ]
+  # deux instantanés : celui du déploiement de la nouvelle, puis celui du retour
+  mapfile -t instantanes < <(find "$pre" -mindepth 1 -maxdepth 1 -type d | LC_ALL=C sort)
+  [ "{% raw %}${#instantanes[@]}{% endraw %}" -eq 2 ]
+  [ "$(cat "${instantanes[0]}.couple")" = "$ANCIENNE 0.1.0 -" ]
+  [ "$(cat "${instantanes[1]}.couple")" = "$NOUVELLE 0.2.0 -" ]
+  [[ "$output" == *"couple noté : ${instantanes[1]}.couple ($NOUVELLE 0.2.0 -)"* ]]
+  [ "$(cd "${instantanes[1]}" && find . -mindepth 1 | LC_ALL=C sort)" = "$(printf '%s\n' ./.cachee ./donnees.txt ./sous ./sous/profond.txt)" ]
+}
+
 # R31 : un instantané en échec garde son nom provisoire, pour le diagnostic (R13), mais la sonde
 # retente le déploiement toutes les 5 minutes, et chaque tentative laisserait le sien : 12 copies
 # en clair par heure. Avant chaque instantané, les .partiel de pre-deploiement/ sont retirés ; seul

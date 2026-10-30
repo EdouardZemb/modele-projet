@@ -576,6 +576,49 @@ aucune_copie_jetable() {
   [ -z "$(envois_echec "$HC_SAUVEGARDE")" ]
 }
 
+# Les données passent avant leur couple : un couple qui ne se chiffre pas, ou qui ne prend pas la
+# date de l'archive, est journalisé ; l'archive part seule, contrôlée, la rétention a lieu, et la
+# nuit est signalée en échec à la fin, la raison dite. Le .couple local reste, avec son instantané.
+@test "sauvegarde : un couple en échec n'empêche pas l'archive de partir" {
+  local q="$SAUVEGARDES/quotidiennes" envoyes nom cas reel
+  echo "$IMAGE 0.1.0 -" >"$ETAT/deploye"
+  for cas in age touch; do
+    echo "cas : $cas"
+    rm -rf "$q" "$DISTANT" "${DOUBLES:?}/age" "$DOUBLES/touch"
+    : >"$APPELS"
+    : >"$APPELS.urls"
+    reel="$(command -v "$cas")"
+    # le double refuse ce qui vise le couple, et laisse passer le reste au vrai
+    creer_double "$cas" 'for a in "$@"; do case "$a" in *.couple | *.couple.age) echo "'"$cas"' : refus du double" >&2; exit 1 ;; esac; done; exec '"$reel"' "$@"'
+    sauvegarder prod
+    [ "$status" -eq 1 ]
+    envoyes=("$DISTANT"/*.tar.age)
+    [ "{% raw %}${#envoyes[@]}{% endraw %}" -eq 1 ]
+    nom="$(basename "${envoyes[0]}" .tar.age)"
+    # l'archive seule au distant, contrôlée, et qui se déchiffre
+    [ "$(find "$DISTANT" -mindepth 1 -maxdepth 1 -printf '%f\n')" = "$nom.tar.age" ]
+    age -d -i "$AGE_IDENTITE_HORS_LIGNE" -o "$BATS_TEST_TMPDIR/clair.tar" "$DISTANT/$nom.tar.age"
+    [ "$(appels_de rclone | grep -c '^rclone copy ')" -eq 1 ]
+    appels_de rclone | grep -Fx 'rclone lsf --files-only sauvegardes:{{ nom }}-sauvegardes'
+    # la rétention a eu lieu
+    appels_de rclone | grep -q '^rclone delete '
+    # en local, l'instantané et son couple
+    [ "$(cat "$q/$nom.couple")" = "$IMAGE 0.1.0 -" ]
+    [ -d "$q/$nom" ]
+    sans_horodatage | sed -E 's/-sauvegarde\.[A-Za-z0-9]+\//-sauvegarde.<tmp>\//' >"$BATS_TEST_TMPDIR/journal"
+    if [ "$cas" = age ]; then
+      grep -Fx "chiffrement du couple impossible (age -R $CLONE_DONNEES/$SOUS_CLES/hors-ligne.pub) : l'archive part sans son couple" "$BATS_TEST_TMPDIR/journal"
+    else
+      grep -Fx "le couple $TMPDIR/{{ nom }}-sauvegarde.<tmp>/$nom.couple.age ne prend pas la date de l'archive : l'archive part sans son couple" "$BATS_TEST_TMPDIR/journal"
+    fi
+    grep -Fx "envoyé : $nom.tar.age vers sauvegardes:{{ nom }}-sauvegardes" "$BATS_TEST_TMPDIR/journal"
+    [[ "$output" == *"sauvegarde $nom faite et envoyée, mais sans son couple"* ]]
+    [ -z "$(envois_ok "$HC_SAUVEGARDE")" ]
+    [ "$(envois_echec "$HC_SAUVEGARDE" | wc -l)" -eq 1 ]
+    aucun_temporaire
+  done
+}
+
 # Migration 5 : par défaut, les archives vont vers l'alias sauvegardes:, que le serveur fait pointer
 # vers le vrai remote, dans le dossier du projet.
 @test "sauvegarde_vers_l_alias_sauvegardes" {
@@ -2009,18 +2052,59 @@ cle_non_repetee() {
   run bash -c 'cat "$AGE_IDENTITE_HORS_LIGNE" | bash -x "$CLONE/deploiement/restaurer.sh" prod "$ARCHIVE" --oui --cle /dev/stdin'
   [ "$status" -eq 0 ]
   cle_non_repetee "$cle"
-  # 5. un couple qui ne se lit pas : chiffré pour une autre clé, ou d'une autre forme ; il est
-  # inconnu, et la restauration a lieu
+  # 5. un couple qui ne se lit pas : chiffré pour une autre clé, d'une autre forme, ou un lien ; il
+  # est inconnu, la raison est dans la même ligne (l'erreur d'age comprise, qui ne sort nulle part
+  # ailleurs), et la restauration a lieu
   printf '%s\n' "$autre 0.0.8 $d" | age -R "$CLONE_DONNEES/$SOUS_CLES/serveur.pub" >"$BATS_TEST_TMPDIR/$SNAPSHOT.couple.age"
   restaurer prod "$ARCHIVE" --oui --cle "$AGE_IDENTITE_HORS_LIGNE"
   [ "$status" -eq 0 ]
-  sans_horodatage | grep -Fx "couple de l'instantané inconnu : $BATS_TEST_TMPDIR/$SNAPSHOT.couple.age illisible"
+  sans_horodatage | grep -Ex "couple de l'instantané inconnu : $BATS_TEST_TMPDIR/$SNAPSHOT\.couple\.age illisible \(déchiffrement impossible : age: error: no identity matched any of the recipients.*\)"
+  aucune_ligne '^age:' <(printf '%s\n' "$output")
   diff -r "$BATS_TEST_TMPDIR/attendu" "$DONNEES"
   echo "pas un couple" >"$pre/20261014T120000Z.couple"
   restaurer prod "$pre/20261014T120000Z" --oui
   [ "$status" -eq 0 ]
-  sans_horodatage | grep -Fx "couple de l'instantané inconnu : $pre/20261014T120000Z.couple illisible"
+  sans_horodatage | grep -Fx "couple de l'instantané inconnu : $pre/20261014T120000Z.couple illisible (attendu : « <image> <version> <commit> »)"
   diff -r "$pre/20261014T120000Z" "$DONNEES"
+  rm "$pre/20261014T120000Z.couple"
+  echo "$autre 0.0.9 -" >"$BATS_TEST_TMPDIR/couple-ailleurs"
+  ln -s "$BATS_TEST_TMPDIR/couple-ailleurs" "$pre/20261014T120000Z.couple"
+  restaurer prod "$pre/20261014T120000Z" --oui
+  [ "$status" -eq 0 ]
+  sans_horodatage | grep -Fx "couple de l'instantané inconnu : $pre/20261014T120000Z.couple illisible (un lien, qui n'est jamais suivi)"
+  diff -r "$pre/20261014T120000Z" "$DONNEES"
+  aucun_temporaire
+}
+
+# Une identité chiffrée par phrase de passe, au format binaire (`age -p`, sans -a), dans un fichier :
+# age la lit lui-même, octets nuls compris, comme avant le lot 12 ; la phrase se demande au terminal,
+# une fois pour l'archive, une fois pour son couple. `script` tient lieu de terminal. La clé sur
+# l'entrée standard, elle, ne se lit qu'une fois, en mémoire (« restaurer : dit le couple de
+# l'instantané »).
+@test "restaurer : une identité chiffrée par phrase de passe, dans un fichier" {
+  local autre d cle="$BATS_TEST_TMPDIR/hors-ligne.age"
+  autre="ghcr.io/{{ compte | lower }}/{{ nom }}@sha256:$(printf '2%.0s' {1..64})"
+  d="$(printf 'd%.0s' {1..40})"
+  export PHRASE=phrase-de-test-seulement CLE_CHIFFREE="$cle" ARCHIVE="$BATS_TEST_TMPDIR/$SNAPSHOT.tar.age"
+  archive_chiffree
+  donnees_courantes
+  printf '%s\n' "$autre 0.0.8 $d" | chiffrer "$BATS_TEST_TMPDIR/$SNAPSHOT.couple.age"
+  printf '%s\n%s\n' "$PHRASE" "$PHRASE" | script -qec "age -p -o '$cle' '$AGE_IDENTITE_HORS_LIGNE'" /dev/null >/dev/null
+  # le format binaire : l'en-tête d'age, et des octets nuls
+  [ "$(head -c 21 "$cle")" = age-encryption.org/v1 ]
+  [ "$(tr -dc '\000' <"$cle" | wc -c)" -gt 0 ]
+  cat >"$BATS_TEST_TMPDIR/restaurer-au-terminal" <<'SCRIPT'
+#!/usr/bin/env bash
+exec bash "$CLONE/deploiement/restaurer.sh" prod "$ARCHIVE" --oui --cle "$CLE_CHIFFREE"
+SCRIPT
+  run bash -c 'printf "%s\n%s\n" "$PHRASE" "$PHRASE" | script -qec "bash '"$BATS_TEST_TMPDIR"'/restaurer-au-terminal" /dev/null'
+  output="${output//$'\r'/}"
+  [ "$status" -eq 0 ]
+  diff -r "$BATS_TEST_TMPDIR/attendu" "$DONNEES"
+  sans_horodatage | grep -Fx "couple de l'instantané : $autre 0.0.8 $d (couple déployé : $IMAGE 0.1.0 -)"
+  # deux demandes de la phrase : l'archive, puis son couple
+  [ "$(printf '%s\n' "$output" | grep -c 'Enter passphrase')" -eq 2 ]
+  [ -z "$(grep -rl 'AGE-SECRET-KEY' "$HOME" "$TMPDIR" "$ETAT" "$SAUVEGARDES" "$DONNEES" || true)" ]
   aucun_temporaire
 }
 

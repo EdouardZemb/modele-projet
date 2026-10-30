@@ -671,6 +671,64 @@ instantanes_de() {
   journal_dit "ménage des instantanés : 1 retiré, 3 gardés (0 par l'état, 3 en marge, 0 partiel de moins d'un jour)"
 }
 
+# Le ménage des images annulé (arreter, dans son sous-shell) n'annule pas celui des instantanés :
+# un echec illisible de l'environnement, un état illisible de l'autre, ou son verrou qui ne s'ouvre
+# pas. Le code de sortie reste celui des images, 1. L'autre environnement ne décide de rien pour
+# les instantanés de celui-ci (P2).
+@test "ménage : des images annulées laissent faire celui des instantanés" {
+  local I="${{ prefixe }}RACINE_ETAT/prod/instantanes" cas x
+  for cas in echec-illisible autre-illisible autre-verrou; do
+    echo "cas : $cas"
+    vider
+    cinq_images
+    for x in 1 2 3 4; do
+      poser_instantane prod "$(commit_de "$x")" "$x days ago"
+    done
+    case "$cas" in
+      echec-illisible) etat prod echec "" ;;
+      autre-illisible) etat staging deploye "$(empreinte_de 1)" ;;
+      autre-verrou) mkdir -p "${{ prefixe }}RACINE_ETAT/staging/verrou" ;;
+    esac
+    nettoyer prod
+    annule
+    restent 1 2 3 4 5
+    [ ! -e "$I/$(commit_de 4)" ]
+    [ "$(instantanes_de prod)" = "$(printf '%s\n' "$(commit_de 1)" "$(commit_de 2)" "$(commit_de 3)")" ]
+    journal_dit "instantané retiré : $(commit_de 4)"
+    journal_dit "ménage des instantanés : 1 retiré, 3 gardés (0 par l'état, 3 en marge, 0 partiel de moins d'un jour)"
+  done
+}
+
+# Une erreur inattendue dans le ménage des instantanés (ici, une heure qui n'est pas un nombre, que
+# l'arithmétique de bash refuse sous set -u) l'interrompt dans son sous-shell : rien n'est retiré,
+# le journal le dit, et le code de sortie reste celui des images, 0 ou 1.
+@test "ménage : celui des instantanés interrompu ne change pas le code des images" {
+  local I="${{ prefixe }}RACINE_ETAT/prod/instantanes" reel x attendu
+  reel="$(command -v date)"
+  creer_double date 'if [ "$*" = +%s ]; then echo pas-une-heure; exit 0; fi; exec '"$reel"' "$@"'
+  for attendu in 0 1; do
+    echo "cas : code $attendu"
+    vider
+    cinq_images
+    for x in 1 2 3 4; do
+      poser_instantane prod "$(commit_de "$x")" "$x days ago"
+    done
+    poser_instantane prod "$(commit_de 9).partiel" '2 days ago'
+    if [ "$attendu" -eq 1 ]; then
+      DOUBLE_DOCKER_IMAGE_RM_ECHEC="$(image_de 1)"
+      export DOUBLE_DOCKER_IMAGE_RM_ECHEC
+    fi
+    nettoyer prod
+    [ "$status" -eq "$attendu" ]
+    parties 2
+    restent 3 4 5
+    journal_dit "ménage des instantanés interrompu (code 1) : le code de sortie reste celui des images"
+    [ "$(instantanes_de prod | wc -l)" -eq 5 ]
+    [[ "$output" != *"instantané retiré"* ]]
+    [[ "$output" != *"ménage des instantanés : "* ]]
+  done
+}
+
 # Une surprise annule le ménage des instantanés, avant tout retrait, et le journal le dit : un nom
 # qui n'est ni un commit de 40 caractères hexadécimaux ni <commit>.partiel, une entrée qui n'est pas
 # un dossier, un lien (jamais suivi), un état illisible, un dossier des instantanés qui n'en est pas
