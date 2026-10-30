@@ -245,11 +245,12 @@ nombre_de_lancements() {
   deployer prod "$NOUVELLE" 0.2.0
   [ "$status" -eq 0 ]
   [ -d "$pre" ]
-  # un seul instantané, un dossier sous son nom définitif
-  [ "$(find "$pre" -mindepth 1 -maxdepth 1 | wc -l)" -eq 1 ]
-  instantane="$(find "$pre" -mindepth 1 -maxdepth 1)"
+  # un seul instantané, un dossier sous son nom définitif, et son couple à côté (P3 du lot 12)
+  [ "$(find "$pre" -mindepth 1 -maxdepth 1 | wc -l)" -eq 2 ]
+  instantane="$(find "$pre" -mindepth 1 -maxdepth 1 -type d)"
   [[ "$(basename "$instantane")" =~ ^[0-9]{8}T[0-9]{6}Z$ ]]
   [ -d "$instantane" ]
+  [ -f "$instantane.couple" ]
   [ -f "$instantane/donnees.txt" ]
   [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 -" ]
 }
@@ -291,7 +292,8 @@ nombre_de_lancements() {
   [ -f "$pre/$recent/sous/donnees.txt" ]
   [ -f "$pre/$vieux.copie/sous/donnees.txt" ]
   [ -f "$pre/garder/sous/donnees.txt" ]
-  [ "$(find "$pre" -mindepth 1 -maxdepth 1 | wc -l)" -eq 4 ]
+  # avec le couple de l'instantané du jour
+  [ "$(find "$pre" -mindepth 1 -maxdepth 1 | wc -l)" -eq 5 ]
   [ "$(cat "${{ prefixe }}RACINE_ETAT/staging/deploye")" = "$NOUVELLE main -" ]
 }
 
@@ -310,6 +312,40 @@ nombre_de_lancements() {
   [[ "$output" == *"purge de $pre en échec"* ]]
   [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 -" ]
   [ "$(signaux)" = "$(signal 'déployé 0.2.0') $HC" ]
+}
+
+# P3 et Ruling 16 du lot 12 : l'instantané d'avant le déploiement note, à côté de lui et jamais
+# dedans, <horodatage>.couple, le couple de deploye au moment de l'instantané : celui que le
+# déploiement quitte. Un état d'avant la v0.7.0 donne le commit « - ». La purge de pre-deploiement/
+# retire le couple avec son instantané, et un couple seul de plus de 30 jours.
+@test "deployer : l'instantané d'avant le déploiement note le couple qu'il quitte" {
+  deja_en_service "$ANCIENNE" 0.1.0
+  local pre="${{ prefixe }}RACINE_SAUVEGARDES/pre-deploiement" vieux ancien instantane
+  vieux="$(date -u -d '31 days ago' +%Y%m%dT%H%M%SZ)"
+  ancien="$(date -u -d '40 days ago' +%Y%m%dT%H%M%SZ)"
+  mkdir -p "$pre/$vieux"
+  echo "vieux" >"$pre/$vieux/donnees.txt"
+  echo "$ANCIENNE 0.0.9 -" >"$pre/$vieux.couple"
+  echo "$ANCIENNE 0.0.8 -" >"$pre/$ancien.couple"
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 0 ]
+  instantane="$(find "$pre" -mindepth 1 -maxdepth 1 -type d)"
+  [[ "$(basename "$instantane")" =~ ^[0-9]{8}T[0-9]{6}Z$ ]]
+  [ "$(cat "$instantane.couple")" = "$ANCIENNE 0.1.0 -" ]
+  [[ "$output" == *"couple noté : $instantane.couple ($ANCIENNE 0.1.0 -)"* ]]
+  # à côté de l'instantané, jamais dedans : il a la forme de /donnees
+  [ "$(cd "$instantane" && find . -mindepth 1 | LC_ALL=C sort)" = "$(printf '%s\n' ./.cachee ./donnees.txt ./sous ./sous/profond.txt)" ]
+  # la purge : le vieil instantané et son couple, le couple seul
+  [ ! -e "$pre/$vieux" ]
+  [ ! -e "$pre/$vieux.couple" ]
+  [ ! -e "$pre/$ancien.couple" ]
+  [ "$(find "$pre" -mindepth 1 -maxdepth 1 | wc -l)" -eq 2 ]
+  # au déploiement suivant, le couple quitté est celui que ce déploiement a écrit
+  rm -rf "$pre"
+  deployer prod "$SUIVANTE" 0.3.0
+  [ "$status" -eq 0 ]
+  instantane="$(find "$pre" -mindepth 1 -maxdepth 1 -type d)"
+  [ "$(cat "$instantane.couple")" = "$NOUVELLE 0.2.0 -" ]
 }
 
 # R31 : un instantané en échec garde son nom provisoire, pour le diagnostic (R13), mais la sonde
@@ -2223,6 +2259,24 @@ stock_a_nettoyer() {
   grep -q "^$(image_de d)|" "$BATS_TEST_TMPDIR/images"
   aucune_ligne "^$(image_de 9)\|" "$BATS_TEST_TMPDIR/images"
   [[ "$output" == *"ménage des images : 1 retirée, 5 gardées (2 par l'état, 0 par un conteneur, 3 en marge)"* ]]
+}
+
+# Le ménage des instantanés des données suit celui des images, sous le même verrou (P2 du lot 12).
+# Une surprise l'annule sans rien retirer, et le déploiement reste réussi, son signal compris.
+@test "deployer : une surprise du ménage des instantanés ne change pas le résultat" {
+  deja_en_service "$ANCIENNE" 0.1.0
+  stock_a_nettoyer
+  mkdir -p "$ETAT/instantanes"
+  echo "pas un instantané" >"$ETAT/instantanes/notes"
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 0 ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 -" ]
+  [ "$(signaux)" = "$(signal 'déployé 0.2.0') $HC" ]
+  [[ "$output" == *"ménage des instantanés annulé, rien n'est retiré : nom inattendu : $ETAT/instantanes/notes"* ]]
+  [[ "$output" != *"ménage des images en échec"* ]]
+  # les images, elles, sont rangées
+  aucune_ligne "^$(image_de 9)\|" "$BATS_TEST_TMPDIR/images"
+  [ -f "$ETAT/instantanes/notes" ]
 }
 
 # --- divers ----------------------------------------------------------------------------------
