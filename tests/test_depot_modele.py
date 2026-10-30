@@ -104,7 +104,7 @@ def test_mecanique_et_fausse_app_dans_la_ci_du_depot_modele():
     assert epreuve["run"] == "bash tests/modele/epreuve-menage.sh rendu"
     assert etapes.index(construire) < etapes.index(epreuve)
     # L'épreuve des données (#64), la chaîne à deux dépôts, sur l'image construite.
-    (donnees,) = [e for e in etapes if "epreuve-donnees" in e.get("run", "")]
+    (donnees,) = [e for e in etapes if "epreuve-donnees.sh" in e.get("run", "")]
     assert donnees["run"] == "bash tests/modele/epreuve-donnees.sh rendu"
     assert etapes.index(construire) < etapes.index(donnees)
     # Le registre et les conteneurs des épreuves sont retirés quoi qu'il arrive, puis la fausse app :

@@ -128,6 +128,7 @@ ETAT_STAGING="$RACINE_ETAT/staging"
 export HOME="$TRAVAIL/home"
 ECHECS=0
 CODE=0
+POINT=0
 REGISTRE_LANCE=0
 ETIQUETTE_POSEE=0
 declare -a RESEAUX_CREES=()
@@ -179,6 +180,19 @@ verifier() {
     echo "ECHEC  : $texte" >&2
     ECHECS=$((ECHECS + 1))
   fi
+}
+# exiger <ce qui est attendu> <commande…> : comme verifier, mais la suite en dépend ; en échec,
+# l'épreuve s'arrête là.
+exiger() {
+  verifier "$@"
+  fin_du_point "$POINT"
+}
+# fin_du_point <n> : chaque point part de l'état que le précédent a laissé ; s'il y a un échec,
+# l'épreuve s'arrête là.
+fin_du_point() {
+  [ "$ECHECS" -eq 0 ] && return 0
+  echo "épreuve : $ECHECS vérification(s) en échec au point $1 ; la suite en dépend : arrêt" >&2
+  exit 1
 }
 code_vaut() { [ "$CODE" -eq "$1" ]; }
 fichier_vaut() { [ -f "$1" ] && [ "$(cat -- "$1")" = "$2" ]; }
@@ -242,7 +256,7 @@ image_de() { docker container inspect --format '{{.Image}} {{.Config.Image}}' "$
 # MONTAGES, d'après docker container inspect.
 lire_montages() {
   MONTAGES="$(docker container inspect --format '{{json .Mounts}}' "$1" \
-    | jq -r '.[] | "\(.Destination) \(.RW) \(.Source)"')"
+    | jq -r '.[] | "\(.Destination) \(.RW) \(.Source)"')" || MONTAGES=""
 }
 champ_du_montage() { awk -v p="$1" -v c="$2" '$1 == p { print $c }' <<<"$MONTAGES"; }
 monte_une_fois() { [ "$(awk -v p="$1" '$1 == p' <<<"$MONTAGES" | wc -l)" -eq 1 ]; }
@@ -400,26 +414,29 @@ donnees_du_commit 2 1
 C2="$COMMIT"
 echo "commit 1 : $C1 ($(git_donnees tag --points-at "$C1")), commit 2 : $C2"
 
+POINT=1
 echo "== 1. le premier couple en prod"
 deployer 1 prod "$IMAGE" "$VERSION" --commit-donnees "$C1"
-verifier "code 0 (la racine de l'état passe par un lien, deployer.sh ne le refuse pas)" code_vaut 0
+exiger "code 0 (la racine de l'état passe par un lien, deployer.sh ne le refuse pas)" code_vaut 0
 verifier "deploye porte le couple 1" fichier_vaut "$ETAT_PROD/deploye" "$IMAGE $VERSION $C1"
 APP1="$(conteneur_app fausse-app)"
-verifier "un conteneur app en prod" un_seul "$APP1"
+exiger "un conteneur app en prod" un_seul "$APP1"
 verifier "il tourne" en_marche "$APP1"
 constater_montage "$APP1" /config prod "$C1" config
 constater_montage "$APP1" /contenu prod "$C1" contenu
 verifier "santé : ok, configuration montee, version $VERSION, révision de l'image" sante_dit "$PORT_PROD" \
   ".statut == \"ok\" and .environnement == \"prod\" and .configuration == \"montee\" and .version == \"$VERSION\" and .revision == \$revision"
+fin_du_point 1
 
+POINT=2
 echo "== 2. seul le commit change"
 IMAGE_APP1="$(image_de "$APP1")"
 deployer 2 prod "$IMAGE" "$VERSION" --commit-donnees "$C2"
-verifier "code 0" code_vaut 0
+exiger "code 0" code_vaut 0
 verifier "deploye porte le couple 2" fichier_vaut "$ETAT_PROD/deploye" "$IMAGE $VERSION $C2"
 verifier "precedent porte le couple 1" fichier_vaut "$ETAT_PROD/precedent" "$IMAGE $VERSION $C1"
 APP2="$(conteneur_app fausse-app)"
-verifier "un conteneur app en prod" un_seul "$APP2"
+exiger "un conteneur app en prod" un_seul "$APP2"
 verifier "le conteneur est recréé" differents "$APP2" "$APP1"
 verifier "même image ($IMAGE)" egaux "$(image_de "$APP2")" "$IMAGE_APP1"
 verifier "l'image du conteneur est la référence du couple" egaux "$(image_de "$APP2" | cut -d' ' -f2)" "$IMAGE"
@@ -427,13 +444,15 @@ constater_montage "$APP2" /config prod "$C2" config
 constater_montage "$APP2" /contenu prod "$C2" contenu
 verifier "santé : ok, configuration montee" sante_dit "$PORT_PROD" \
   '.statut == "ok" and .configuration == "montee"'
+fin_du_point 2
 
+POINT=3
 echo "== 3. une configuration que verifier-config refuse"
 donnees_du_commit 3 99
 C3="$COMMIT"
 DEMARRE2="$(demarre_le "$APP2")"
 deployer 3 prod "$IMAGE" "$VERSION" --commit-donnees "$C3"
-verifier "code 1" code_vaut 1
+exiger "code 1" code_vaut 1
 verifier "le journal dit la configuration non conforme" journal_dit 3 'configuration non conforme (VERIFIER_CONFIG : code 2)'
 verifier "echec porte le couple 3" fichier_vaut "$ETAT_PROD/echec" "$IMAGE $C3"
 verifier "deploye porte encore le couple 2" fichier_vaut "$ETAT_PROD/deploye" "$IMAGE $VERSION $C2"
@@ -443,7 +462,9 @@ verifier "il tourne" en_marche "$APP2"
 constater_montage "$APP2" /config prod "$C2" config
 verifier "santé : ok, configuration montee" sante_dit "$PORT_PROD" \
   '.statut == "ok" and .configuration == "montee"'
+fin_du_point 3
 
+POINT=4
 echo "== 4. le retour arrière remet le couple 1"
 # Pour le point 5 : deux instantanés laissés par d'anciens déploiements, hors de l'état.
 ANCIEN1="$(printf 'ancien commit 1' | git hash-object --stdin)"
@@ -451,18 +472,20 @@ ANCIEN2="$(printf 'ancien commit 2' | git hash-object --stdin)"
 planter_instantane "$ANCIEN1" '3 days ago'
 planter_instantane "$ANCIEN2" '2 days ago'
 deployer 4 prod --retour
-verifier "code 0" code_vaut 0
+exiger "code 0" code_vaut 0
 verifier "deploye porte le couple 1" fichier_vaut "$ETAT_PROD/deploye" "$IMAGE $VERSION $C1"
 verifier "precedent est consommé" absent "$ETAT_PROD/precedent"
 verifier "echec porte le couple quitté, le 2" fichier_vaut "$ETAT_PROD/echec" "$IMAGE $C2"
 APP4="$(conteneur_app fausse-app)"
-verifier "un conteneur app en prod" un_seul "$APP4"
+exiger "un conteneur app en prod" un_seul "$APP4"
 verifier "le conteneur est recréé" differents "$APP4" "$APP2"
 constater_montage "$APP4" /config prod "$C1" config
 constater_montage "$APP4" /contenu prod "$C1" contenu
 verifier "santé : ok, configuration montee, version $VERSION" sante_dit "$PORT_PROD" \
   ".statut == \"ok\" and .configuration == \"montee\" and .version == \"$VERSION\""
+fin_du_point 4
 
+POINT=5
 echo "== 5. le ménage qui a suivi le retour"
 verifier "le journal dit l'instantané le plus ancien retiré" journal_dit 4 "instantané retiré : $ANCIEN1"
 verifier "le journal dit « 1 retiré »" journal_dit 4 'ménage des instantanés : 1 retiré'
@@ -471,16 +494,18 @@ verifier "l'autre ancien reste, en marge" dossier_present "$ETAT_PROD/instantane
 for commit in "$C1" "$C2" "$C3"; do
   verifier "l'instantané de $commit reste" dossier_present "$ETAT_PROD/instantanes/$commit"
 done
+fin_du_point 5
 
+POINT=6
 echo "== 6. le staging, sans /config"
 TETE="$(git_donnees rev-parse main)"
 verifier "la tête de la branche des données est le commit 3" egaux "$TETE" "$C3"
 deployer 6 staging "$IMAGE" main --commit-donnees "$TETE"
-verifier "code 0" code_vaut 0
+exiger "code 0" code_vaut 0
 verifier "deploye du staging porte le couple" fichier_vaut "$ETAT_STAGING/deploye" "$IMAGE main $TETE"
 verifier "le journal dit que VERIFIER_CONFIG n'est pas lancée" journal_dit 6 "staging : VERIFIER_CONFIG n'est pas lancée"
 APP6="$(conteneur_app fausse-app-staging)"
-verifier "un conteneur app en staging" un_seul "$APP6"
+exiger "un conteneur app en staging" un_seul "$APP6"
 lire_montages "$APP6"
 verifier "/config n'est pas monté" non_monte /config
 constater_montage "$APP6" /contenu staging "$TETE" contenu
@@ -490,9 +515,6 @@ verifier "santé : ok, configuration exemple, version main" sante_dit "$PORT_STA
   '.statut == "ok" and .environnement == "staging" and .configuration == "exemple" and .version == "main" and .revision == $revision'
 verifier "la prod n'a pas bougé" egaux "$(conteneur_app fausse-app)" "$APP4"
 verifier "la racine de l'état est restée un lien" lien_en_place
+fin_du_point 6
 
-if [ "$ECHECS" -ne 0 ]; then
-  echo "épreuve : $ECHECS vérification(s) en échec" >&2
-  exit 1
-fi
 echo "épreuve : tout est comme attendu"
