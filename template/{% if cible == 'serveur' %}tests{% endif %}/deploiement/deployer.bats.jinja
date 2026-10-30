@@ -1420,12 +1420,12 @@ lier_donnees() {
   done
 }
 
-# poser_url_publique <valeur> : deploiement/env/prod.env du clone temporaire avec cette
-# {{ prefixe }}URL_PUBLIQUE (sans valeur : la ligne est retirée).
+# poser_url_publique <valeur> : l'env de la prod du clone des données du test avec cette
+# {{ prefixe }}URL_PUBLIQUE (sans valeur : la ligne est retirée). %q l'écrit sur une seule ligne.
 poser_url_publique() {
-  grep -v '^{{ prefixe }}URL_PUBLIQUE=' "$DEPOT/deploiement/env/prod.env" >"$CLONE/deploiement/env/prod.env"
+  sed -i '/^{{ prefixe }}URL_PUBLIQUE=/d' "$CLONE_DONNEES/$SOUS_ENV/prod.env"
   [ "$#" -eq 0 ] || printf '{{ prefixe }}URL_PUBLIQUE=%q
-' "$1" >>"$CLONE/deploiement/env/prod.env"
+' "$1" >>"$CLONE_DONNEES/$SOUS_ENV/prod.env"
 }
 
 # Une adresse qui n'est pas http(s)://hôte[:port] ne s'écrit pas dans compose.env (une valeur sur

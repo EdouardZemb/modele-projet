@@ -221,8 +221,40 @@ def test_projet_env(rendre):
     assert not re.search(r"^REPORTER", avec, flags=re.MULTILINE)
     sans = lire(rendre(**{**REPONSES_SERVEUR, "sauvegardes": False}), "deploiement/projet.env")
     assert "SAUVEGARDER" not in sans
-    assert "VERIFIER" not in sans
+    assert not re.search(r"^#?VERIFIER=", sans, flags=re.MULTILINE)
     assert "REPORTER" not in sans
+
+
+# Lot 12 (M-0006, § 5) : les deux commandes de l'instance, en commentaire, avec leur contrat et le
+# dossier qui va avec chacune, dans chaque mode, avec ou sans sauvegardes.
+@pytest.mark.parametrize("sauvegardes", [True, False])
+@pytest.mark.parametrize(
+    "reponses, config, contenu",
+    [
+        (REPONSES_SERVEUR_CODE, "`config/`", "`contenu/`"),
+        (REPONSES_SERVEUR, "`instance/config/`", "`instance/contenu/`"),
+    ],
+    ids=["deux-depots", "un-depot"],
+)
+def test_projet_env_dit_les_commandes_de_l_instance(rendre, reponses, config, contenu, sauvegardes):
+    texte = lire(rendre(**{**reponses, "sauvegardes": sauvegardes}), "deploiement/projet.env")
+    assert "#VERIFIER_CONFIG=verifier-config\n" in texte
+    assert "#VERIFIER_CONTENU=verifier-contenu\n" in texte
+    assert not re.search(r"^VERIFIER_CON", texte, flags=re.MULTILINE)
+    plat = a_plat(" ".join(ligne.lstrip("#") for ligne in texte.splitlines()))
+    for fragment in (
+        config,
+        contenu,
+        "`<VERIFIER_CONFIG…> /config`",
+        "jamais en staging",
+        "`<VERIFIER_CONTENU…> /contenu`",
+        "/en-service",
+        "sans réseau",
+        "lecture seule",
+        "0 conforme, 2 non conforme, 64 usage, tout autre code refuse",
+        "refuse le déploiement",
+    ):
+        assert fragment in plat, fragment
 
 
 # C0 : le crochet de restauration reste générique. Ni la base d'un projet, ni un projet, ni son
@@ -305,6 +337,44 @@ def test_en_tete_du_compose_decrit_l_appel_de_dc(rendre):
     assert appel in entete, entete
     assert "~/.local/state/essai/<env>" in entete
     assert "--env-file deploiement/env/" not in entete
+    # Lot 12 : les montages de l'instantané, que `dc` ajoute d'après compose.env.
+    assert "`dc` ajoute après eux -f <clone>/deploiement/compose.config.yml" in entete, entete
+    assert "-f <clone>/deploiement/compose.contenu.yml" in entete, entete
+
+
+# Lot 12 (M-0006, § 5) : les montages de l'instantané, gérés, chacun en lecture seule sur son point
+# de montage, d'après le chemin que compose.env leur donne.
+@pytest.mark.parametrize(
+    "reponses", [REPONSES_SERVEUR_CODE, REPONSES_SERVEUR], ids=["deux-depots", "un-depot"]
+)
+def test_compose_de_montage(rendre, reponses):
+    rendu = rendre(**reponses)
+    for nom in ("config", "contenu"):
+        doc = yaml.safe_load(lire(rendu, f"deploiement/compose.{nom}.yml"))
+        assert doc == {"services": {"app": {"volumes": [f"${{ESSAI_{nom.upper()}:?}}:/{nom}:ro"]}}}
+    copier_yml = yaml.safe_load((RACINE / "copier.yml").read_text(encoding="utf-8"))
+    for nom in ("config", "contenu"):
+        assert f"deploiement/compose.{nom}.yml" not in copier_yml["_skip_if_exists"]
+
+
+# Lot 12 (M-0006, § 6) : les chemins de l'instance sont définis dans lib.sh seulement, d'après le
+# mode ; aucun script n'écrit en dur un chemin de l'env, des secrets, des clés ou de l'instance. La
+# sauvegarde lit la clé hors ligne dans le clone des données.
+@pytest.mark.parametrize(
+    "reponses", [REPONSES_SERVEUR_CODE, REPONSES_SERVEUR], ids=["deux-depots", "un-depot"]
+)
+def test_chemins_de_l_instance_dans_lib_seulement(rendre, reponses):
+    rendu = rendre(**reponses)
+    definition = re.compile(r"^\s*(SOUS_DOSSIER_[A-Z]+)=", re.MULTILINE)
+    en_dur = re.compile(r"CLONE(?:_DONNEES)?\}?/(?:deploiement/(?:env|secrets|cles)|instance)\b")
+    noms = {f"SOUS_DOSSIER_{n}" for n in ("ENV", "SECRETS", "CLES", "CONFIG", "CONTENU")}
+    for chemin in sorted((rendu / "deploiement").rglob("*.sh")):
+        texte = chemin.read_text(encoding="utf-8")
+        assert not en_dur.search(texte), chemin
+        attendus = noms if chemin.name == "lib.sh" else set()
+        assert set(definition.findall(texte)) == attendus, chemin
+    sauvegarde = lire(rendu, "deploiement/sauvegarder.sh")
+    assert 'local cle="$ESSAI_CLONE_DONNEES/$SOUS_DOSSIER_CLES/hors-ligne.pub"' in sauvegarde
 
 
 def test_sonde_suit_la_branche_principale(rendre):
@@ -354,6 +424,7 @@ def test_motifs_de_l_etat_definis_une_seule_fois(rendre, sauvegardes):
     definitions = {
         "MOTIF_REFERENCE": re.compile(r"^MOTIF_REFERENCE=", re.MULTILINE),
         "MOTIF_VERSION": re.compile(r"^MOTIF_VERSION=", re.MULTILINE),
+        "MOTIF_COMMIT": re.compile(r"^MOTIF_COMMIT=", re.MULTILINE),
         "lire_version": re.compile(r"^\s*(?:function\s+)?lire_version\s*\(\)", re.MULTILINE),
         # le motif de la référence en toutes lettres, en ligne comme dans une définition
         "motif en ligne": re.compile(re.escape("[a-z0-9][a-z0-9._/:-]*@sha256:[0-9a-f]{64}")),

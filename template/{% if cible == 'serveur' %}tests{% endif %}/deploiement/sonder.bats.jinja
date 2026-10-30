@@ -607,7 +607,7 @@ signal() {
 
 @test "alerte_si_le_canal_est_inconnu" {
   preparer staging
-  sed -i 's/^{{ prefixe }}CANAL=.*/{{ prefixe }}CANAL=branche/' "$CLONE/deploiement/env/staging.env"
+  sed -i 's/^{{ prefixe }}CANAL=.*/{{ prefixe }}CANAL=branche/' "$CLONE_DONNEES/$SOUS_ENV/staging.env"
   sonder staging
   [ "$status" -eq 1 ]
   [[ "$(signaux)" == "$(signal 'canal inconnu')"*" $HC/fail" ]]

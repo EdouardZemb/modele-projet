@@ -104,7 +104,7 @@ contenu_courant_intact() {
 
 # chiffrer <archive> : chiffre l'entrée standard pour la clé hors ligne, comme sauvegarder.sh.
 chiffrer() {
-  age -R "$CLONE/deploiement/cles/hors-ligne.pub" >"$1"
+  age -R "$CLONE_DONNEES/$SOUS_CLES/hors-ligne.pub" >"$1"
 }
 
 # envois_ok <adresse> : les appels de curl qui ont signalé un succès à cette adresse ;
@@ -559,7 +559,7 @@ aucune_copie_jetable() {
 }
 
 @test "sauvegarde_refuse_sans_cle_publique_et_n_envoie_rien" {
-  rm "$CLONE/deploiement/cles/hors-ligne.pub"
+  rm "$CLONE_DONNEES/$SOUS_CLES/hors-ligne.pub"
   sauvegarder prod
   [ "$status" -eq 1 ]
   [[ "$output" == *"hors-ligne.pub"* ]]
@@ -572,7 +572,7 @@ aucune_copie_jetable() {
 }
 
 @test "sauvegarde_refuse_une_cle_publique_vide" {
-  : >"$CLONE/deploiement/cles/hors-ligne.pub"
+  : >"$CLONE_DONNEES/$SOUS_CLES/hors-ligne.pub"
   sauvegarder prod
   [ "$status" -eq 1 ]
   [ "$(envois_echec "$HC_SAUVEGARDE" | wc -l)" -eq 1 ]
@@ -580,7 +580,7 @@ aucune_copie_jetable() {
 }
 
 @test "sauvegarde_refuse_une_cle_privee_a_la_place_de_la_cle_publique" {
-  cp "$AGE_IDENTITE_HORS_LIGNE" "$CLONE/deploiement/cles/hors-ligne.pub"
+  cp "$AGE_IDENTITE_HORS_LIGNE" "$CLONE_DONNEES/$SOUS_CLES/hors-ligne.pub"
   sauvegarder prod
   [ "$status" -eq 1 ]
   [[ "$output" == *"clé privée"* ]]
@@ -897,7 +897,7 @@ aucune_copie_jetable() {
 }
 
 @test "sauvegarde_sans_secrets_s_arrete_avec_le_code_3" {
-  rm "$CLONE/deploiement/secrets/prod.env.enc"
+  rm "$CLONE_DONNEES/$SOUS_SECRETS/prod.env.enc"
   sauvegarder prod
   [ "$status" -eq 3 ]
   [ -z "$(appels_de docker)" ]
@@ -980,8 +980,8 @@ aucune_copie_jetable() {
 # Le port de l'essai est celui de la prod plus 9, lu dans son env au moment de l'essai : un dépôt de
 # code rend ce script sans bloc de ports (M-0006, § 4). 5000 est hors des blocs : aucun port rendu.
 @test "test_restauration_publie_le_port_de_la_prod_plus_9" {
-  sed -i 's/^{{ prefixe }}PORT=.*$/{{ prefixe }}PORT=5000/' "$CLONE/deploiement/env/prod.env"
-  grep -Fx '{{ prefixe }}PORT=5000' "$CLONE/deploiement/env/prod.env"
+  sed -i 's/^{{ prefixe }}PORT=.*$/{{ prefixe }}PORT=5000/' "$CLONE_DONNEES/$SOUS_ENV/prod.env"
+  grep -Fx '{{ prefixe }}PORT=5000' "$CLONE_DONNEES/$SOUS_ENV/prod.env"
   instantane "$SNAPSHOT" 1
   tester prod
   [ "$status" -eq 0 ]
@@ -996,7 +996,7 @@ aucune_copie_jetable() {
   instantane "$SNAPSHOT" 1
   local port
   for port in 43x0 0 04310 65527; do
-    sed -i "s/^{{ prefixe }}PORT=.*\$/{{ prefixe }}PORT=$port/" "$CLONE/deploiement/env/prod.env"
+    sed -i "s/^{{ prefixe }}PORT=.*\$/{{ prefixe }}PORT=$port/" "$CLONE_DONNEES/$SOUS_ENV/prod.env"
     tester prod
     [ "$status" -eq 1 ]
     [[ "$output" == *"port de la prod illisible : {{ prefixe }}PORT='$port'"* ]]
@@ -1238,7 +1238,7 @@ aucune_copie_jetable() {
 
 @test "test_restauration_sans_secrets_s_arrete_avec_le_code_3" {
   instantane "$SNAPSHOT" 1
-  rm "$CLONE/deploiement/secrets/prod.env.enc"
+  rm "$CLONE_DONNEES/$SOUS_SECRETS/prod.env.enc"
   tester prod
   [ "$status" -eq 3 ]
   [ -z "$(appels_de docker)" ]
@@ -1849,7 +1849,7 @@ cle_non_repetee() {
 
 @test "restaurer_sans_secrets_s_arrete_avec_le_code_3" {
   instantane "$SNAPSHOT" 1
-  rm "$CLONE/deploiement/secrets/prod.env.enc"
+  rm "$CLONE_DONNEES/$SOUS_SECRETS/prod.env.enc"
   restaurer prod "$SAUVEGARDES/quotidiennes/$SNAPSHOT" --oui
   [ "$status" -eq 3 ]
   [ -z "$(appels_de docker)" ]
