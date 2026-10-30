@@ -1,11 +1,25 @@
 #!/usr/bin/env bash
 # Sonde d'un environnement d'{{ nom }}, lancée toutes les 5 minutes par {{ nom }}-sonde-<env>.timer.
-# Elle suit la cible de l'environnement, déploie toute nouvelle image par deployer.sh, et sinon
-# contrôle la version en service.
+# Elle suit la cible de l'environnement, un couple : une image et un commit de données (M-0004 et
+# M-0006 § 5, amendés). Elle déploie tout nouveau couple par deployer.sh, et sinon contrôle celui
+# qui est en service.
 #
 #   bash deploiement/sonder.sh <prod|staging>
 #
+# Le commit de données. Un projet dont deploiement/projet.env ne déclare ni VERIFIER_CONFIG ni
+# VERIFIER_CONTENU a le commit « - » : rien n'est monté, comme avant le couple. Sinon, selon le mode
+# des données (MODE_DONNEES, lib.sh) :
+#   - deux dépôts : un commit du clone des données de l'environnement (${{ prefixe }}CLONE_DONNEES,
+#     lib.sh), la tête de sa branche en staging, la plus haute étiquette de données en prod ;
+#   - un dépôt : la révision de l'image visée (son label org.opencontainers.image.revision), qui doit
+#     exister dans le clone du projet, qui porte aussi l'instance.
+#
 # Déroulé :
+#   0. à deux dépôts, le clone des données doit exister, avant charger_env, qui y lit l'env :
+#      sinon, alerte « clone des données absent ». Sans lui, ni env ni secrets : le signal ne peut
+#      pas partir, et seuls le code de sortie (OnFailure=) et l'absence de signal ok le disent.
+#      Puis, avant toute action, le refus d'une image, d'une version ou d'un montage posés dans
+#      l'environnement (refuser_image_heritee, lib.sh) ;
 {%- if sauvegardes %}
 #   1. verrou ${{ prefixe }}ETAT/verrou, sans attente. S'il est pris (déploiement manuel, sauvegarde,
 #      autre sonde) : « occupé », code 0 ;
@@ -14,7 +28,7 @@
 #      « occupé », code 0 ;
 {%- endif %}
 #   2. clone propre (`git status --porcelain` vide), sinon alerte « clone modifié » ;
-#   3. cible, selon le canal de l'environnement ({{ prefixe }}CANAL, dans env/<env>.env) :
+#   3. cible du code, selon le canal de l'environnement ({{ prefixe }}CANAL, dans son env) :
 #      - main (staging) : `git fetch origin {{ branche_principale }}`, `git merge --ff-only origin/{{ branche_principale }}` (la
 #        branche principale) ; image :main, version main ;
 #      - etiquette (prod) : `git fetch --prune --prune-tags --tags origin` (une étiquette retirée
@@ -22,32 +36,51 @@
 #        locale, et la sonde viserait encore une version retirée) ; plus haute étiquette vX.Y.Z (tri
 #        -v:refname, les autres formes comme v1.0.0-rc1 sont ignorées) ; image :X.Y.Z, version
 #        X.Y.Z. Sans étiquette : « aucune version », signal ok ;
-#   4. `docker pull -q` de la cible. Sur le canal etiquette, une étiquette que le registre ne
+#   4. les commandes de l'instance que déclare deploiement/projet.env (donnees_declarees, lib.sh) ;
+#      puis, à deux dépôts, le clone des données, qu'un projet déclare une commande ou non (il porte
+#      l'env et les secrets) : propre, sinon alerte « clone des données modifié » ; à jour, selon le
+#      même canal, sinon alerte « mise à jour du clone des données impossible » :
+#      - main (staging) : `git fetch origin <branche>`, `git merge --ff-only origin/<branche>`, la
+#        branche des données étant {{ prefixe }}BRANCHE_DONNEES, dans l'env, sans défaut (absente :
+#        alerte) ; le commit est la tête du clone ;
+#      - etiquette (prod) : `git fetch --prune --prune-tags --tags origin` ; plus haute étiquette de
+#        données donnees-AAAA.MM.JJ.n (n sans zéro en tête ; tri -v:refname ; les autres formes,
+#        vX.Y.Z comprises, sont ignorées), dont le commit se lit sans checkout. Sans elle, un
+#        projet qui déclare une commande attend : « aucune version des données », signal ok ;
+#   5. `docker pull -q` de la cible. Sur le canal etiquette, une étiquette que le registre ne
 #      connaît pas (« manifest unknown », « manifest for <cible> not found », « <cible>: not
 #      found ») n'est pas encore publiée : on attend, sans signal. Tout autre échec alerte ;
-#   5. sa référence image@sha256:…, comparée à l'état :
-#      - en échec (`echec`, contrôlé en premier) : on attend une nouvelle image, sans signal, si
-#        l'état laissé par le retour arrière est cohérent (voir etat_apres_echec) ; sinon, alerte
-#        « retour arrière incomplet » à chaque passage, sans relance automatique : `deployer.sh` à
-#        la main. C'est l'état d'un retour arrière manuel (`deployer.sh <env> --retour`), qui
-#        écrit la version quittée dans `echec` et la garde : la sonde ne la redéploie pas. Si ce
-#        retour a échoué, la version quittée est à la fois déployée et en échec : même attente
-#        silencieuse (pas de signal ok), ou même alerte si elle ne répond pas non plus ;
-#      - déjà déployée (premier champ de `deploye`) : en prod, contrôle de dérive des unités ;
-#        puis l'adresse publique doit répondre HTTP 200 (une redirection est un échec), avec un
-#        corps statut ok pour cet environnement ; signal ok ;
-#      - sinon : le clone passe sur l'étiquette (canal etiquette) et, en prod, les unités sont
-#        réinstallées ; puis deployer.sh (qui envoie ses propres signaux), dont le code est renvoyé.
+#   6. sa référence image@sha256:… ; à un dépôt, avec une commande déclarée, le commit est la
+#      révision de cette image, qui doit exister dans le clone, sinon alerte ;
+#   7. le couple « <référence> <commit> », comparé à l'état, où un fichier d'avant la v0.7.0, sans
+#      commit, vaut « - » :
+#      - en échec (les deux champs d'`echec`, contrôlés en premier) : on attend un nouveau couple,
+#        sans signal, si l'état laissé par le retour arrière est cohérent (voir etat_apres_echec) ;
+#        sinon, alerte « retour arrière incomplet » à chaque passage, sans relance automatique :
+#        `deployer.sh` à la main. C'est l'état d'un retour arrière manuel (`deployer.sh <env>
+#        --retour`), qui écrit le couple quitté dans `echec` et le garde : la sonde ne le redéploie
+#        pas. Si ce retour a échoué, le couple quitté est à la fois déployé et en échec : même
+#        attente silencieuse (pas de signal ok), ou même alerte s'il ne répond pas non plus ;
+#      - déjà déployé (premier et troisième champs de `deploye`) : en prod, contrôle de dérive des
+#        unités ; puis l'adresse publique doit répondre HTTP 200 (une redirection est un échec),
+#        avec un corps statut ok pour cet environnement et, si VERIFIER_CONFIG est déclarée,
+#        configuration montee en prod, exemple en staging ; signal ok ;
+#      - sinon : le clone passe sur l'étiquette (canal etiquette), le clone des données sur
+#        l'étiquette de données s'il y en a une (même sans commande déclarée : l'env et les secrets
+#        de la prod suivent la série) et, en prod, les unités sont réinstallées ; puis
+#        `deployer.sh <env> <référence> <version> --commit-donnees <commit>` (sans l'option pour
+#        « - »), qui envoie ses propres signaux, et dont le code est renvoyé.
 #
 # Les unités systemd ne concernent que la prod : elles sont toutes rendues depuis son clone (voir
 # installer-unites.sh). Le staging ne les installe ni ne les contrôle.
 #
 # Pas de signal quand le verrou est pris, quand l'image de prod n'est pas encore publiée ou quand
-# la version est en échec et que son retour arrière a abouti : si cela dure, c'est l'absence de
+# le couple est en échec et que son retour arrière a abouti : si cela dure, c'est l'absence de
 # signal ok qui alerte.
 #
-# Codes de sortie : 0 ; 1 anomalie (signalée) ; 3 secrets absents ; 64 usage ; sinon, celui de
-# deployer.sh. Tout code non nul déclenche aussi l'alerte de l'unité (OnFailure=).
+# Codes de sortie : 0 ; 1 anomalie (signalée, sauf un clone des données absent), ou image, version
+# ou montage hérités (non signalé) ; 3 secrets absents ; 64 usage ; sinon, celui de deployer.sh.
+# Tout code non nul déclenche aussi l'alerte de l'unité (OnFailure=).
 set -euo pipefail
 # shellcheck source=deploiement/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -102,14 +135,15 @@ etat_apres_echec() {
   fi
 }
 
-# controler_adresse_publique <env> : l'adresse publique ({{ prefixe }}URL_PUBLIQUE, par le tunnel) doit
-# répondre HTTP 200, et son corps doit dire statut ok pour CET environnement. Le corps compte : des
-# routes du tunnel inversées (staging et prod) donneraient deux adresses « ok », et celle du staging
-# servirait les données réelles de la prod. Une redirection (Cloudflare Access…) n'est pas une santé,
-# et `curl -f` la laisse passer : le code HTTP est lu avec -w, sans suivre les redirections. En cas
-# d'échec : journal, signal d'échec, code 1.
+# controler_adresse_publique <env> [<configuration>] : l'adresse publique ({{ prefixe }}URL_PUBLIQUE, par
+# le tunnel) doit répondre HTTP 200, et son corps doit dire statut ok pour CET environnement, et,
+# avec un deuxième argument, ce champ configuration (exemple ou montee, M-0003 amendé). Le corps
+# compte : des routes du tunnel inversées (staging et prod) donneraient deux adresses « ok », et
+# celle du staging servirait les données réelles de la prod. Une redirection (Cloudflare Access…)
+# n'est pas une santé, et `curl -f` la laisse passer : le code HTTP est lu avec -w, sans suivre les
+# redirections. En cas d'échec : journal, signal d'échec, code 1.
 controler_adresse_publique() {
-  local nom_env="$1" sortie corps http code=0
+  local nom_env="$1" configuration="${2:-}" sortie corps http code=0 attendu filtre
   sortie="$(curl -sS -m 10 -w '\n%{http_code}' "${{ prefixe }}URL_PUBLIQUE{{ chemin_sante }}")" || code=$?
   if [ "$code" -ne 0 ]; then
     anomalie "adresse publique injoignable"
@@ -122,10 +156,14 @@ controler_adresse_publique() {
     anomalie "adresse publique : réponse HTTP $http au lieu de 200"
     return 1
   fi
-  # shellcheck disable=SC2016  # $env est une variable de jq (--arg)
-  if ! jq_vaut true "$corps" '.statut == "ok" and .environnement == $env' --arg env "$nom_env"; then
-    journal "adresse publique : corps inattendu (attendu : statut ok, environnement $nom_env) : ${corps:0:300}"
-    anomalie "adresse publique : réponse inattendue (attendu : statut ok, environnement $nom_env)"
+  attendu="statut ok, environnement $nom_env${configuration:+, configuration $configuration}"
+  # shellcheck disable=SC2016  # $env et $configuration sont des variables de jq (--arg)
+  filtre='.statut == "ok" and .environnement == $env'
+  # shellcheck disable=SC2016
+  [ -z "$configuration" ] || filtre="$filtre"' and .configuration == $configuration'
+  if ! jq_vaut true "$corps" "$filtre" --arg env "$nom_env" --arg configuration "$configuration"; then
+    journal "adresse publique : corps inattendu (attendu : $attendu) : ${corps:0:300}"
+    anomalie "adresse publique : réponse inattendue (attendu : $attendu)"
     return 1
   fi
 }
@@ -133,11 +171,25 @@ controler_adresse_publique() {
 main() {
   [ "$#" -eq 1 ] || arreter 64 "usage : bash deploiement/sonder.sh <prod|staging>"
   local nom_env="$1"
+  valider_env "$nom_env"
+
+  # 0. À deux dépôts, le clone des données, avant charger_env : il y lit l'env, et s'arrêterait
+  # sans rien signaler. Le signal ne part pas davantage ici, HC_SONDE étant un secret de ce clone :
+  # le journal et le code de sortie le disent.
+  poser_clone_donnees "$nom_env"
+  if [ "$MODE_DONNEES" = deux ] && [ ! -d "${{ prefixe }}CLONE_DONNEES" ]; then
+    journal "clone des données absent : ${{ prefixe }}CLONE_DONNEES (ni env ni secrets : aucun signal ne peut partir)"
+    anomalie "clone des données absent"
+    return 1
+  fi
   charger_env "$nom_env"
   charger_secrets "$nom_env"
-  local etat="${{ prefixe }}ETAT" clone="${{ prefixe }}CLONE"
-  local modifications etiquettes etiquette="" ligne version cible sortie code=0 reference
-  local deployee="" version_deployee="" en_echec="" raison
+  # L'image, la version et les montages ne viennent que de compose.env : avant tout `dc`.
+  refuser_image_heritee
+  local etat="${{ prefixe }}ETAT" clone="${{ prefixe }}CLONE" donnees="${{ prefixe }}CLONE_DONNEES"
+  local modifications etiquettes etiquette="" ligne version cible sortie code=0 reference raison
+  local branche_donnees etiquette_donnees="" commit=- declaree=0 configuration=""
+  local -a option_commit=()
 
   # 1. Verrou, gardé jusqu'à la fin de la sonde (deployer.sh compris).
   exec 9>"$etat/verrou"
@@ -157,8 +209,8 @@ main() {
     return 1
   fi
 
-  # 3. Cible. `9>&-` : un processus que git laisserait derrière lui (maître ssh persistant…) ne
-  # garde pas le verrou après la sonde.
+  # 3. Cible du code. `9>&-` : un processus que git laisserait derrière lui (maître ssh
+  # persistant…) ne garde pas le verrou après la sonde.
   case "${{ prefixe }}CANAL" in
     main)
       if ! git -C "$clone" fetch origin {{ branche_principale }} 9>&-; then
@@ -200,7 +252,81 @@ main() {
   esac
   cible="$DEPOT_IMAGE:$version"
 
-  # 4. Image. Seules les réponses du registre « cette étiquette n'existe pas » valent attente ; un
+  # 4. Les données. Les commandes de l'instance que déclare projet.env, lu dans le clone du code tel
+  # qu'il est : en staging, la tête de la branche principale ; en prod, la version d'où l'on part.
+  if ! donnees_declarees; then
+    anomalie "deploiement/projet.env illisible"
+    return 1
+  fi
+  [ "$DECLARE_CONFIG" -eq 0 ] && [ "$DECLARE_CONTENU" -eq 0 ] || declaree=1
+  # Puis, à deux dépôts, le clone des données, qu'il y ait une commande ou non : l'env et les
+  # secrets y vivent. Le canal a été contrôlé à l'étape 3.
+  if [ "$MODE_DONNEES" = deux ]; then
+    if ! modifications="$(git -C "$donnees" status --porcelain)"; then
+      anomalie "git status du clone des données impossible"
+      return 1
+    fi
+    if [ -n "$modifications" ]; then
+      journal "clone des données modifié ($donnees) : ${modifications//$'\n'/ ; }"
+      anomalie "clone des données modifié"
+      return 1
+    fi
+    case "${{ prefixe }}CANAL" in
+      main)
+        # Sans défaut : une branche devinée suivrait peut-être les données d'un autre environnement.
+        # Une valeur qui commencerait par « - » serait une option de git.
+        branche_donnees="${ {{- prefixe }}BRANCHE_DONNEES:-}"
+        if ! [[ "$branche_donnees" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]]; then
+          journal "{{ prefixe }}BRANCHE_DONNEES absente ou invalide dans $donnees/$SOUS_DOSSIER_ENV/$nom_env.env : '$branche_donnees' (attendu : le nom de la branche des données, sans défaut)"
+          anomalie "{{ prefixe }}BRANCHE_DONNEES absente ou invalide"
+          return 1
+        fi
+        if ! git -C "$donnees" fetch origin "$branche_donnees" 9>&- \
+          || ! git -C "$donnees" merge --ff-only "origin/$branche_donnees"; then
+          journal "clone des données ($donnees) : git fetch origin $branche_donnees, puis git merge --ff-only origin/$branche_donnees, impossible"
+          anomalie "mise à jour du clone des données impossible"
+          return 1
+        fi
+        if [ "$declaree" -eq 1 ] \
+          && { ! commit="$(git -C "$donnees" rev-parse HEAD)" || ! [[ "$commit" =~ ^[0-9a-f]{40}$ ]]; }; then
+          anomalie "commit du clone des données illisible"
+          return 1
+        fi
+        ;;
+      etiquette)
+        if ! git -C "$donnees" fetch --prune --prune-tags --tags origin 9>&-; then
+          journal "clone des données ($donnees) : git fetch --prune --prune-tags --tags origin impossible"
+          anomalie "mise à jour du clone des données impossible"
+          return 1
+        fi
+        # Les étiquettes de données seulement : jamais les vX.Y.Z que porterait ce clone.
+        if ! etiquettes="$(git -C "$donnees" tag --list 'donnees-*' --sort=-v:refname)"; then
+          anomalie "liste des étiquettes de données illisible"
+          return 1
+        fi
+        while IFS= read -r ligne; do
+          if [[ "$ligne" =~ ^donnees-[0-9]{4}\.[0-9]{2}\.[0-9]{2}\.[1-9][0-9]*$ ]]; then
+            etiquette_donnees="$ligne"
+            break
+          fi
+        done <<<"$etiquettes"
+        if [ "$declaree" -eq 1 ] && [ -z "$etiquette_donnees" ]; then
+          journal "aucune version des données : pas d'étiquette donnees-AAAA.MM.JJ.n dans $donnees"
+          signaler_sonde ok "aucune version des données"
+          return 0
+        fi
+        # Le commit de l'étiquette, sans checkout : le clone n'y passe qu'avant deployer.sh.
+        if [ "$declaree" -eq 1 ] \
+          && { ! commit="$(git -C "$donnees" rev-parse "$etiquette_donnees^{commit}")" \
+            || ! [[ "$commit" =~ ^[0-9a-f]{40}$ ]]; }; then
+          anomalie "commit de $etiquette_donnees illisible"
+          return 1
+        fi
+        ;;
+    esac
+  fi
+
+  # 5. Image. Seules les réponses du registre « cette étiquette n'existe pas » valent attente ; un
   # « not found » quelconque (docker absent, assistant d'identifiants introuvable, dépôt inconnu)
   # est une panne.
   sortie="$(docker pull -q "$cible" 2>&1)" || code=$?
@@ -218,7 +344,7 @@ main() {
     return 1
   fi
 
-  # 5. Référence et état.
+  # 6. Référence ; à un dépôt, le commit de données est sa révision, celle du clone du projet.
   if ! reference="$(docker image inspect -f '{% raw %}{{index .RepoDigests 0}}{% endraw %}' "$cible")" \
     || [[ "$reference" != "$DEPOT_IMAGE@sha256:"* ]] \
     || ! [[ "${reference#"$DEPOT_IMAGE@sha256:"}" =~ ^[0-9a-f]{64}$ ]]; then
@@ -226,47 +352,72 @@ main() {
     anomalie "référence de $cible illisible"
     return 1
   fi
-  if [ -f "$etat/deploye" ]; then
-    { read -r deployee version_deployee _ || true; } <"$etat/deploye"
-  fi
-  if [ -f "$etat/echec" ]; then
-    { read -r en_echec _ || true; } <"$etat/echec"
+  if [ "$MODE_DONNEES" = un ] && [ "$declaree" -eq 1 ]; then
+    if ! commit="$(revision_de "$reference")"; then
+      anomalie "révision de $cible illisible"
+      return 1
+    fi
+    if ! git -C "$donnees" cat-file -e "$commit^{commit}" 2>/dev/null; then
+      journal "révision $commit de $cible absente du clone ($donnees) : ses données ne s'y lisent pas"
+      anomalie "révision de l'image absente du clone"
+      return 1
+    fi
   fi
 
-  # La version en échec d'abord : `deployer.sh <env> --retour` qui n'a pas pu quitter la version en
-  # service la laisse à la fois déployée et en échec. Elle n'est pas « en service » : pas de signal
+  # 7. Le couple visé et l'état (lib.sh : « - » pour un commit absent, état d'avant la v0.7.0).
+  DEPLOYE_IMAGE="" DEPLOYE_VERSION="" DEPLOYE_COMMIT=-
+  [ ! -f "$etat/deploye" ] || lire_deploye || true
+  lire_echec || journal "$etat/echec illisible : aucun couple n'est tenu pour en échec"
+
+  # Le couple en échec d'abord : `deployer.sh <env> --retour` qui n'a pas pu quitter le couple en
+  # service le laisse à la fois déployé et en échec. Il n'est pas « en service » : pas de signal
   # ok, le silence tient l'incident ouvert.
-  if [ "$reference" = "$en_echec" ]; then
+  if [ "$reference" = "$ECHEC_IMAGE" ] && [ "$commit" = "$ECHEC_COMMIT" ]; then
 {%- if sauvegardes %}
     # Pas de relance automatique : elle reprendrait un instantané à chaque passage.
 {%- else %}
     # Pas de relance automatique : elle referait un déploiement et son retour arrière à chaque passage.
 {%- endif %}
-    if ! raison="$(etat_apres_echec "$deployee" "$version_deployee")"; then
-      journal "version en échec ($version, $reference), mais le retour arrière n'a pas abouti : $raison. Relancer deployer.sh à la main"
+    if ! raison="$(etat_apres_echec "$DEPLOYE_IMAGE" "$DEPLOYE_VERSION")"; then
+      journal "couple en échec ($version, $reference, données $commit), mais le retour arrière n'a pas abouti : $raison. Relancer deployer.sh à la main"
       anomalie "retour arrière incomplet : $raison"
       return 1
     fi
-    journal "version en échec, attente d'une nouvelle : $version ($reference)"
+    journal "couple en échec, attente d'un nouveau : $version ($reference, données $commit)"
     return 0
   fi
 
-  if [ "$reference" = "$deployee" ]; then
+  if [ "$reference" = "$DEPLOYE_IMAGE" ] && [ "$commit" = "$DEPLOYE_COMMIT" ]; then
     if [ "$nom_env" = prod ] && ! bash "$clone/deploiement/installer-unites.sh" --verifier; then
       anomalie "unités divergentes"
       return 1
     fi
-    if ! controler_adresse_publique "$nom_env"; then
+    # Le champ configuration, comme deployer.sh l'exige (M-0003, amendé) : un couple en service a un
+    # commit dès qu'une commande est déclarée, et le staging ne monte jamais /config.
+    if [ "$DECLARE_CONFIG" -eq 1 ]; then
+      configuration=montee
+      [ "$nom_env" = prod ] || configuration=exemple
+    fi
+    if ! controler_adresse_publique "$nom_env" "$configuration"; then
       return 1
     fi
-    journal "$version en service : $reference"
-    signaler_sonde ok "$version en service"
+    journal "$version en service : $reference, données $commit"
+    if [ "$commit" = - ]; then
+      signaler_sonde ok "$version en service"
+    else
+      signaler_sonde ok "$version en service, données ${commit:0:12}"
+    fi
     return 0
   fi
 
-  journal "nouvelle image pour $version : $reference (en service : ${deployee:-aucune})"
+  journal "nouveau couple pour $version : $reference, données $commit (en service : ${DEPLOYE_IMAGE:-aucun}, données $DEPLOYE_COMMIT)"
   if [ -n "$etiquette" ] && ! git -C "$clone" checkout --quiet "$etiquette"; then
     anomalie "git checkout $etiquette impossible"
+    return 1
+  fi
+  if [ -n "$etiquette_donnees" ] && ! git -C "$donnees" checkout --quiet "$etiquette_donnees"; then
+    journal "clone des données ($donnees) : git checkout $etiquette_donnees impossible"
+    anomalie "mise à jour du clone des données impossible"
     return 1
   fi
   if [ "$nom_env" = prod ]; then
@@ -275,9 +426,10 @@ main() {
       return 1
     fi
   fi
+  [ "$commit" = - ] || option_commit=(--commit-donnees "$commit")
   code=0
   {{ prefixe }}VERROU_TENU=1 bash "$clone/deploiement/deployer.sh" "$nom_env" "$reference" "$version" \
-    || code=$?
+    "${option_commit[@]}" || code=$?
   return "$code"
 }
 
