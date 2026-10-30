@@ -1369,7 +1369,7 @@ lier_donnees() {
 # vaut « - » sans données montées.
 
 JETABLES="--user 1000:1000 --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true --memory 384m"
-FORMAT_MONTAGES='{% raw %}{{range .Mounts}}{{println .Destination .RW .Source}}{{end}}{% endraw %}'
+FORMAT_MONTAGES='{% raw %}{{json .Mounts}}{% endraw %}'
 
 # avec_donnees <commande…> : deploiement/projet.env déclare aussi ces commandes de l'instance
 # (VERIFIER_CONFIG=outil verifier_config…), et l'application suit le contrat de /config (M-0003,

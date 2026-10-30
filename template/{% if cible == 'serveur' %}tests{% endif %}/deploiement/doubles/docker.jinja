@@ -22,8 +22,9 @@
 #                                        (code 1, « No such image », pour un identifiant absent)
 #   ps --all --no-trunc --quiet          l'identifiant de chaque conteneur
 #   container inspect --format {% raw %}'{{.Image}}'{% endraw %} <id…>  l'image de chaque conteneur
-#   container inspect --format {% raw %}'{{range .Mounts}}{{println .Destination .RW .Source}}{{end}}'{% endraw %} c0ffee
-#                                        les montages de l'application en service (voir plus bas)
+#   container inspect --format {% raw %}'{{json .Mounts}}'{% endraw %} c0ffee
+#                                        les montages de l'application en service, un tableau JSON
+#                                        par conteneur, comme docker (voir plus bas)
 #   image rm <id>                        retire l'image du stock et écrit « Deleted: <id> »
 #   image rm <nom>                       retire ce nom (une étiquette) de l'image et écrit
 #                                        « Untagged: <nom> » ; comme docker, le dernier nom emporte
@@ -389,16 +390,19 @@ case "${1:-}" in
       echo "Error response from daemon: inspection impossible" >&2
       exit 1
     fi
-    if [ "$4" = '{% raw %}{{range .Mounts}}{{println .Destination .RW .Source}}{{end}}{% endraw %}' ]; then
+    if [ "$4" = '{% raw %}{{json .Mounts}}{% endraw %}' ]; then
       # Les montages de l'application en service (compose ps -q app : c0ffee) : /donnees, puis ceux
-      # que son `up` a notés.
+      # que son `up` a notés (« <point> <true|false> <source> »), en un tableau JSON sur une ligne,
+      # avec les champs de docker que deployer.sh lit.
       for id in "${@:5}"; do
         { [ "$id" = c0ffee ] && [ -f "$EN_SERVICE" ]; } || {
           echo "Error: No such container: $id" >&2
           exit 1
         }
-        printf '/donnees true %s\n' "$(sed -n 's/^{{ prefixe }}DONNEES=//p' "$EN_SERVICE")"
-        sed -n 's/^MONTAGE=//p' "$EN_SERVICE"
+        { printf '/donnees true %s\n' "$(sed -n 's/^{{ prefixe }}DONNEES=//p' "$EN_SERVICE")"
+          sed -n 's/^MONTAGE=//p' "$EN_SERVICE"; } \
+          | jq -Rcn '[inputs | capture("^(?<d>[^ ]+) (?<rw>true|false) (?<s>.*)$")
+              | {Type: "bind", Source: .s, Destination: .d, RW: (.rw == "true")}]'
       done
       exit 0
     fi

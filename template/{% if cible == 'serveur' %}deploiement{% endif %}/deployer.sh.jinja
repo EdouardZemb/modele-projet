@@ -330,9 +330,10 @@ decrit_le_couple() {
 }
 
 # controler_montages : après le `up`, les montages du conteneur app, lus par `docker container
-# inspect`, sont ceux du couple visé : sur /config et /contenu, l'instantané visé en lecture seule
-# s'il les monte, et rien sinon (jamais /config en staging). Rien à contrôler sans commit de
-# données. Rend 0, ou 1 journalisé.
+# inspect` (le JSON de .Mounts, une ligne « <point> <RW> <source> » par montage, par jq), sont ceux
+# du couple visé : sur /config et /contenu, l'instantané visé en lecture seule s'il les monte, et
+# rien sinon (jamais /config en staging). Rien à contrôler sans commit de données. Rend 0, ou 1
+# journalisé.
 controler_montages() {
   local sortie point attendu vu destination ecriture chemin
   local -a ids=()
@@ -342,8 +343,12 @@ controler_montages() {
     return 1
   fi
   mapfile -t ids <<<"$sortie"
-  if ! sortie="$(docker container inspect --format '{% raw %}{{range .Mounts}}{{println .Destination .RW .Source}}{{end}}{% endraw %}' "${ids[@]}")"; then
+  if ! sortie="$(docker container inspect --format '{% raw %}{{json .Mounts}}{% endraw %}' "${ids[@]}")"; then
     journal "montages invérifiables : docker container inspect ${ids[*]} en échec"
+    return 1
+  fi
+  if ! sortie="$(printf '%s\n' "$sortie" | jq -r '.[] | "\(.Destination) \(.RW) \(.Source)"' 2>&1)"; then
+    journal "montages invérifiables : la réponse de docker container inspect ne se lit pas : ${sortie//$'\n'/ }"
     return 1
   fi
   for point in config contenu; do
