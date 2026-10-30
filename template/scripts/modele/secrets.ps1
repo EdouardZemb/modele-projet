@@ -180,16 +180,21 @@ function Invoke-RefaireInterne([string]$Fichier, [scriptblock]$LireValeur) {
     }
     $nomCles = [System.IO.Path]::GetFileName($complet).Replace('.env.enc', '') + '.cles'
     $depotCode = Get-DepotCode $racineDepot
+    $cloneCode = $null
     if ($null -ne $depotCode) {
         # Un depot de donnees : la liste des cles est celle du depot de code, dans son clone voisin.
         $voisins = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($racineDepot))
-        $fichierCles = [System.IO.Path]::Combine([string[]]@($voisins, $depotCode, 'deploiement', 'secrets', $nomCles))
+        $cloneCode = [System.IO.Path]::Combine($voisins, $depotCode)
+        $fichierCles = [System.IO.Path]::Combine([string[]]@($cloneCode, 'deploiement', 'secrets', $nomCles))
     }
     else {
         $fichierCles = Join-Path $dossier $nomCles
     }
     if (-not (Test-Path -LiteralPath $fichierCles -PathType Leaf)) {
         Write-Host "le fichier des clés est absent : $fichierCles"
+        if ($null -ne $cloneCode -and -not (Test-Path -LiteralPath $cloneCode -PathType Container)) {
+            Write-Host "clone le dépôt de code $depotCode à côté du dépôt de données : $cloneCode"
+        }
         return $script:EXIT_USAGE
     }
     try { $cles = Lire-Cles $fichierCles }

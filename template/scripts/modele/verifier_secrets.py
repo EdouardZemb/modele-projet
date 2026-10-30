@@ -13,10 +13,13 @@ Un `.cles` sans `.enc` avertit seulement : un projet neuf n'a pas encore ses sec
 
 Le dépôt de données d'un projet `serveur` (M-0006, § 8) porte ses `secrets/<env>.env.enc`, mais la
 liste de leurs clés est dans le dépôt de code (`deploiement/secrets/<env>.cles`). Avec `--cles DIR`,
-le `.cles` d'un `<env>.env.enc` est `DIR/<env>.cles`, seuls les `.cles` de DIR sont lus, et les
-destinataires de `.sops.yaml` doivent en plus être exactement les clés age de `cles/*.pub`. Sans
-`--cles`, dans un dépôt dont `reglages.DEPOT_CODE` nomme le dépôt de code, le contrôle passe en le
-disant : modele-donnees.yml le fait, le dépôt de code cloné à côté.
+seuls les `secrets/*.env.enc` de la racine sont lus (jamais un `.enc` du clone du code, ni
+d'ailleurs), le `.cles` d'un `<env>.env.enc` est `DIR/<env>.cles`, seuls les `.cles` de DIR sont
+lus, et les destinataires de `.sops.yaml` doivent en plus être exactement les clés age de
+`cles/*.pub`. Sans `--cles`, dans un dépôt dont `reglages.DEPOT_CODE` nomme le dépôt de code et qui
+porte `.github/workflows/modele-donnees.yml`, le contrôle passe en le disant : modele-donnees.yml le
+fait, le dépôt de code cloné à côté. Sans ce workflow (le dépôt de données d'un projet sans
+serveur), le contrôle ordinaire tourne.
 
 Les messages nomment des chemins, des numéros de ligne et des noms de clé, jamais une valeur.
 
@@ -43,6 +46,8 @@ BOM_UTF8 = b"\xef\xbb\xbf"
 SUFFIXE_ENC = ".env.enc"
 SUFFIXE_CLES = ".cles"
 DOSSIER_PUB = "cles"
+DOSSIER_SECRETS = "secrets"
+WORKFLOW_DONNEES = ".github/workflows/modele-donnees.yml"
 MESSAGE_DONNEES = "secrets : contrôlés par modele-donnees.yml, contre le .cles du dépôt de code"
 
 
@@ -161,13 +166,15 @@ def _comparer_au_parc(racine: Path, attendus: set[str]) -> list[Constat]:
 
 def verifier(racine: Path, exiges: dict[str, list[str]], cles: Path | None = None) -> list[Constat]:
     """Les constats sur les secrets de <racine>. Avec <cles>, le dossier des .cles du dépôt de code :
-    seuls ses .cles sont lus, et .sops.yaml se compare aussi aux clés de cles/*.pub."""
+    seuls les secrets/*.env.enc de <racine> et les .cles de <cles> sont lus, et .sops.yaml se
+    compare aussi aux clés de cles/*.pub."""
     racine = Path(racine)
     constats: list[Constat] = []
-    enc = _fichiers(racine, "*" + SUFFIXE_ENC)
     if cles is None:
+        enc = _fichiers(racine, "*" + SUFFIXE_ENC)
         cles_fichiers = _fichiers(racine, "*" + SUFFIXE_CLES)
     else:
+        enc = sorted(p for p in (racine / DOSSIER_SECRETS).glob("*" + SUFFIXE_ENC) if p.is_file())
         cles_fichiers = sorted(p for p in Path(cles).glob("*" + SUFFIXE_CLES) if p.is_file())
 
     sops_yaml = racine / ".sops.yaml"
@@ -281,8 +288,9 @@ def main(argv: list[str] | None = None, exiges: dict[str, list[str]] | None = No
         if not cles.is_dir():
             print(f"dossier des .cles introuvable : {cles}", file=sys.stderr)
             return EXIT_USAGE
-    elif getattr(_reglages(), "DEPOT_CODE", None):
-        # Un dépôt de données : la liste des clés est dans le dépôt de code (M-0006, § 8).
+    elif getattr(_reglages(), "DEPOT_CODE", None) and (racine / WORKFLOW_DONNEES).is_file():
+        # Le dépôt de données d'un projet serveur : la liste des clés est dans le dépôt de code, et
+        # modele-donnees.yml les compare (M-0006, § 8).
         print(MESSAGE_DONNEES)
         return 0
     if exiges is None:

@@ -23,7 +23,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: donnees
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -39,7 +40,8 @@ jobs:
             exit 1
           fi
           echo "depot=$depot" >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: clone
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ github.repository_owner }}/${{ steps.code.outputs.depot }}
           path: code
@@ -47,5 +49,8 @@ jobs:
           persist-credentials: false
       - name: Secrets chiffrés, contre le .cles du dépôt de code
         run: python scripts/modele/verifier_secrets.py --cles code/deploiement/secrets
+      # Les données se vérifient même quand les secrets refusent : tout ce qui refuse se dit dans
+      # la même exécution, pourvu que les deux dépôts soient là et le nom du code lu.
       - name: Données, contre les images du code
+        if: ${{ !cancelled() && steps.donnees.outcome == 'success' && steps.code.outcome == 'success' && steps.clone.outcome == 'success' }}
         run: python scripts/modele/verifier_donnees.py --code code

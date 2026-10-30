@@ -60,6 +60,10 @@ OPTIONS_JETABLES = (
 DOSSIER_CONFIG = "config"
 DOSSIER_CONTENU = "contenu"
 PROJET_ENV = "deploiement/projet.env"
+# Les droits de ce que lit le conteneur jetable, posés explicitement (l'umask n'y entre pas).
+DROITS_DOSSIER = 0o755
+DROITS_FICHIER = 0o644
+DROITS_EXECUTABLE = 0o755
 
 REGEX_CLE = re.compile(r"[A-Z][A-Z0-9_]*")
 REGEX_VERSION = re.compile(r"v([0-9]+)\.([0-9]+)\.([0-9]+)")
@@ -176,17 +180,41 @@ def present(depot: Path, revision: str, dossier: str) -> bool:
     return False
 
 
+def ouvrir_au_conteneur(racine: Path) -> None:
+    """<racine> et tout ce qu'elle porte, lisibles par le conteneur jetable, qui tourne sous
+    1000:1000 et non sous l'utilisateur du script, quel que soit l'umask : dossiers 0755, fichiers
+    0644 (0755 s'ils sont exécutables). Un lien n'est pas suivi."""
+    os.chmod(racine, DROITS_DOSSIER)
+    for dossier, sous_dossiers, fichiers in os.walk(racine):
+        for nom in sous_dossiers + fichiers:
+            chemin = os.path.join(dossier, nom)
+            if os.path.islink(chemin):
+                continue
+            if os.path.isdir(chemin):
+                os.chmod(chemin, DROITS_DOSSIER)
+            else:
+                executable = os.stat(chemin).st_mode & 0o111
+                os.chmod(chemin, DROITS_EXECUTABLE if executable else DROITS_FICHIER)
+
+
 def extraire(depot: Path, revision: str, dossier: str, destination: Path) -> Path:
-    """Le <dossier> de <revision>, par git archive, dans <destination> : jamais la copie de travail."""
+    """Le <dossier> de <revision>, par git archive, dans <destination> : jamais la copie de travail.
+    Ce que l'extraction refuse (un lien qui sort du dossier, avec le filtre `data`) est Illisible."""
     r = _git(depot, "archive", "--format=tar", f"{revision}:{dossier}")
     if r.returncode != 0:
         raise Illisible(f"{dossier}/ de {revision} ne s'extrait pas : {_une_ligne(r.stderr)}")
     destination.mkdir(parents=True)
-    with tarfile.open(fileobj=io.BytesIO(r.stdout)) as archive:
-        if hasattr(tarfile, "data_filter"):
-            archive.extractall(destination, filter="data")
-        else:  # un Python 3.10 ou 3.11 d'avant le filtre : l'archive vient du dépôt lui-même
-            archive.extractall(destination)
+    try:
+        with tarfile.open(fileobj=io.BytesIO(r.stdout)) as archive:
+            if hasattr(tarfile, "data_filter"):
+                archive.extractall(destination, filter="data")
+            else:  # un Python 3.10 ou 3.11 d'avant le filtre : l'archive vient du dépôt lui-même
+                archive.extractall(destination)
+    except (tarfile.TarError, OSError) as e:
+        raise Illisible(
+            f"{dossier}/ de {revision} ne s'extrait pas : {' '.join(str(e).split())}"
+        ) from None
+    ouvrir_au_conteneur(destination)
     return destination
 
 
@@ -262,8 +290,10 @@ class Verification:
         """<dossier> de <revision>, extrait une fois, sous <temporaire>/<nom>/<dossier> : « vise »
         pour HEAD, « en-service » pour l'étiquette du contenu en service."""
         if (nom, dossier) not in self._extraits:
-            destination = self.temporaire / nom / dossier
-            self._extraits[nom, dossier] = extraire(self.depot, revision, dossier, destination)
+            parent = self.temporaire / nom
+            parent.mkdir(exist_ok=True)
+            os.chmod(parent, DROITS_DOSSIER)
+            self._extraits[nom, dossier] = extraire(self.depot, revision, dossier, parent / dossier)
         return self._extraits[nom, dossier]
 
     def verifier(self, cible: Cible) -> None:
@@ -302,7 +332,8 @@ class Verification:
         if declaration.contenu:
             montages = [(self.extrait("vise", "HEAD", DOSSIER_CONTENU), "/contenu")]
             if self.en_service:
-                en_service = self.extrait("en-service", self.en_service, DOSSIER_CONTENU)
+                etiquette = f"refs/tags/{self.en_service}"
+                en_service = self.extrait("en-service", etiquette, DOSSIER_CONTENU)
                 montages.append((en_service, "/en-service"))
             self.lancer(cible, "VERIFIER_CONTENU", "contenu", declaration.contenu, montages)
 
@@ -405,7 +436,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"données : contenu en service : {DOSSIER_CONTENU}/ de {en_service}")
         with tempfile.TemporaryDirectory(prefix="verifier-donnees-") as temporaire:
             # Le conteneur tourne sous l'utilisateur 1000 : il doit pouvoir traverser le dossier.
-            os.chmod(temporaire, 0o755)
+            os.chmod(temporaire, DROITS_DOSSIER)
             verification = Verification(depot, docker, Path(temporaire), en_service)
             for cible in cibles:
                 verification.verifier(cible)

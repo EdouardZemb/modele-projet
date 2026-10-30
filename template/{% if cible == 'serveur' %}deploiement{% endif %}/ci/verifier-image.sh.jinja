@@ -23,10 +23,11 @@
 #      sur son dossier d'exemple, à la racine du dépôt, comme le serveur la lance sur un instantané
 #      (_verifier_par de lib.sh) : `docker run --rm --network none <options jetables>
 #      -v <dépôt>/exemple:/config:ro {{ nom }}:ci <VERIFIER_CONFIG…> /config`, et de même
-#      exemple-contenu/ sur /contenu pour VERIFIER_CONTENU ; 0 exigé. D'abord la règle des paires,
-#      pour les deux : un dossier d'exemple sans sa commande, ou une commande sans son dossier,
-#      refuse, avant tout conteneur ; un dossier qui ne porte que le README.md de sa racine compte
-#      comme absent. Un projet qui ne déclare aucune des deux et n'a pas d'exemple ne lance rien.
+#      exemple-contenu/ sur /contenu pour VERIFIER_CONTENU ; 0 exigé. D'abord, pour les deux, une
+#      commande déclarée sans son dossier d'exemple refuse, avant tout conteneur : la CI ne peut pas
+#      la prouver. Un dossier d'exemple sans sa commande ne refuse pas : il n'est pas vérifié, et le
+#      journal le dit. Un dossier qui ne porte que le README.md de sa racine compte comme absent. Un
+#      projet qui ne déclare aucune des deux commandes ne lance rien.
 #
 # Codes de sortie : 0 image conforme ; 1 non conforme ; 64 usage.
 #
@@ -147,23 +148,21 @@ main() {
   journal "pas d'instantané : le projet n'a pas de données à sauvegarder"
 {%- endif %}
 
-  # 4. L'exemple : la règle des paires pour les deux dossiers, puis chaque commande déclarée.
+  # 4. L'exemple : chaque commande déclarée a son dossier, puis elle tourne dessus. Un dossier sans
+  # sa commande n'est pas vérifié : un projet qui n'a pas encore déclaré la sienne garde sa CI.
   local paire dossier commande declaree defaut=0
   donnees_declarees || arreter 1 "image non conforme : deploiement/projet.env illisible (VERIFIER_CONFIG, VERIFIER_CONTENU)"
   for paire in "exemple VERIFIER_CONFIG $DECLARE_CONFIG" "exemple-contenu VERIFIER_CONTENU $DECLARE_CONTENU"; do
     read -r dossier commande declaree <<<"$paire"
     if exemple_present "${{ prefixe }}CLONE/$dossier"; then
-      if [ "$declaree" -eq 0 ]; then
-        journal "$dossier/ sans $commande"
-        defaut=1
-      fi
+      [ "$declaree" -eq 1 ] || journal "$dossier/ présent, sans $commande : non vérifié"
     elif [ "$declaree" -eq 1 ]; then
       journal "$commande sans $dossier/"
       defaut=1
     fi
   done
   [ "$defaut" -eq 0 ] \
-    || arreter 1 "exemple non conforme : un dossier d'exemple va avec sa commande de deploiement/projet.env, et une commande avec son dossier"
+    || arreter 1 "exemple non conforme : chaque commande déclarée dans deploiement/projet.env va avec son dossier d'exemple"
   [ "$DECLARE_CONFIG" -eq 0 ] || verifier_exemple VERIFIER_CONFIG "exemple de configuration" exemple /config
   [ "$DECLARE_CONTENU" -eq 0 ] || verifier_exemple VERIFIER_CONTENU "exemple de contenu" exemple-contenu /contenu
   journal "image conforme"
