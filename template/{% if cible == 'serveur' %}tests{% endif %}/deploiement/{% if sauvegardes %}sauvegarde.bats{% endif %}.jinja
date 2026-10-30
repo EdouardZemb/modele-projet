@@ -249,8 +249,9 @@ aucune_copie_jetable() {
   sauvegarder prod
   [ "$status" -eq 0 ]
 
-  # un seul fichier au distant : l'archive chiffrée, nommée {{ nom }}-<horodatage UTC>
-  local envoyes=("$DISTANT"/*)
+  # une seule archive au distant, chiffrée, nommée {{ nom }}-<horodatage UTC> (son couple chiffré
+  # est à côté : voir « sauvegarde : le couple voisin, local et distant »)
+  local envoyes=("$DISTANT"/*.tar.age)
   [ "{% raw %}${#envoyes[@]}{% endraw %}" -eq 1 ]
   local nom
   nom="$(basename "${envoyes[0]}" .tar.age)"
@@ -274,8 +275,9 @@ aucune_copie_jetable() {
   appels_de rclone | grep -E "^rclone copy $TMPDIR/{{ nom }}-sauvegarde\.[A-Za-z0-9]+/$nom\.tar\.age sauvegardes:{{ nom }}-sauvegardes$"
   [ "$(ligne_de 'rclone copy')" -lt "$(ligne_de 'rclone lsf')" ]
   appels_de rclone | grep -Fx 'rclone lsf --files-only sauvegardes:{{ nom }}-sauvegardes'
-  # le clair ne part jamais : seule l'archive est passée à rclone, jamais l'instantané
-  [ "$(appels_de rclone | grep -c '^rclone copy ')" -eq 1 ]
+  # le clair ne part jamais : seuls l'archive et son couple chiffrés passent à rclone, jamais
+  # l'instantané
+  [ "$(appels_de rclone | grep -c '^rclone copy ')" -eq 2 ]
   aucune_ligne 'quotidiennes' <(appels_de rclone)
 
   # signal de succès : nom et nombre de fichiers de l'instantané ; aucun échec
@@ -296,8 +298,10 @@ aucune_copie_jetable() {
 @test "sauvegarde_dossier_instantane" {
   sauvegarder prod
   [ "$status" -eq 0 ]
+  # l'instantané, et son couple à côté (P3 du lot 12)
   local instantanes=("$SAUVEGARDES"/quotidiennes/*)
-  [ "{% raw %}${#instantanes[@]}{% endraw %}" -eq 1 ]
+  [ "{% raw %}${#instantanes[@]}{% endraw %}" -eq 2 ]
+  [ "${instantanes[1]}" = "${instantanes[0]}.couple" ]
   local nom="${instantanes[0]##*/}"
   [[ "$nom" =~ ^{{ nom }}-[0-9]{8}T[0-9]{6}Z$ ]]
   # un dossier, au contenu de /donnees, fichiers cachés et sous-dossiers compris
@@ -433,7 +437,8 @@ aucune_copie_jetable() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"sauvegardes en échec de $q : retrait impossible"* ]]
   [ -f "$q/$ancien/verrouille/donnees.txt" ]
-  [ "$(nombre_d_entrees "$DISTANT")" -eq 1 ]
+  # l'archive et son couple
+  [ "$(nombre_d_entrees "$DISTANT")" -eq 2 ]
   [ "$(envois_ok "$HC_SAUVEGARDE" | wc -l)" -eq 1 ]
   [ -z "$(envois_echec "$HC_SAUVEGARDE")" ]
 }
@@ -464,7 +469,7 @@ aucune_copie_jetable() {
 @test "sauvegarde_liens_physiques_archive_restaurable" {
   DOUBLE_DOCKER_SAUVEGARDE_FORME=physique sauvegarder prod
   [ "$status" -eq 0 ]
-  local envoyes=("$DISTANT"/*) nom
+  local envoyes=("$DISTANT"/*.tar.age) nom
   nom="$(basename "${envoyes[0]}" .tar.age)"
   age -d -i "$AGE_IDENTITE_HORS_LIGNE" -o "$BATS_TEST_TMPDIR/clair.tar" "${envoyes[0]}"
   # que des fichiers et des dossiers dans l'archive
@@ -482,7 +487,7 @@ aucune_copie_jetable() {
 @test "sauvegarde_archive_un_seul_dossier" {
   sauvegarder prod
   [ "$status" -eq 0 ]
-  local envoyes=("$DISTANT"/*) nom membre
+  local envoyes=("$DISTANT"/*.tar.age) nom membre
   nom="$(basename "${envoyes[0]}" .tar.age)"
   age -d -i "$AGE_IDENTITE_HORS_LIGNE" -o "$BATS_TEST_TMPDIR/clair.tar" "${envoyes[0]}"
   # le premier membre est le dossier, et tous les autres sont dessous
@@ -497,14 +502,136 @@ aucune_copie_jetable() {
   [ -z "$(tar -tvf "$BATS_TEST_TMPDIR/clair.tar" | cut -c1 | grep -v '^[-d]$' || true)" ]
 }
 
+# P3 du lot 12 : l'instantané note le couple en service, celui de deploye au moment de l'instantané
+# (Ruling 16), dans <nom>.couple, à côté de lui et jamais dedans : son contenu et les membres de son
+# archive ne changent pas. La sauvegarde l'envoie chiffré pour la clé hors ligne, <nom>.couple.age,
+# à la date de l'archive : la purge distante les voit du même âge. Un état d'avant la v0.7.0 donne
+# le commit « - » ; sans deploye, ou s'il ne se lit pas, aucun couple n'est noté, et la sauvegarde
+# a lieu.
+@test "sauvegarde : le couple voisin, local et distant" {
+  local q="$SAUVEGARDES/quotidiennes" commit nom envoyes
+  commit="$(printf 'c%.0s' {1..40})"
+  echo "$IMAGE 0.1.0 $commit" >"$ETAT/deploye"
+  sauvegarder prod
+  [ "$status" -eq 0 ]
+  envoyes=("$DISTANT"/*.tar.age)
+  [ "{% raw %}${#envoyes[@]}{% endraw %}" -eq 1 ]
+  nom="$(basename "${envoyes[0]}" .tar.age)"
+  [[ "$output" == *"couple noté : $q/$nom.couple ($IMAGE 0.1.0 $commit)"* ]]
+  # en local : l'instantané et son couple, rien d'autre ; l'instantané a la forme de /donnees
+  [ "$(find "$q" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)" = "$(printf '%s\n' "$nom" "$nom.couple")" ]
+  [ "$(cat "$q/$nom.couple")" = "$IMAGE 0.1.0 $commit" ]
+  [ "$(cd "$q/$nom" && find . -mindepth 1 | LC_ALL=C sort)" = "$(printf '%s\n' ./.cachee ./donnees.txt ./sous ./sous/profond.txt)" ]
+  # au distant : l'archive et son couple chiffré, à la même date, et rien d'autre
+  [ "$(find "$DISTANT" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)" = "$(printf '%s\n' "$nom.couple.age" "$nom.tar.age")" ]
+  [ "$(head -c 21 "$DISTANT/$nom.couple.age")" = age-encryption.org/v1 ]
+  [ "$(age -d -i "$AGE_IDENTITE_HORS_LIGNE" "$DISTANT/$nom.couple.age")" = "$IMAGE 0.1.0 $commit" ]
+  [ "$(stat -c %y "$DISTANT/$nom.couple.age")" = "$(stat -c %y "$DISTANT/$nom.tar.age")" ]
+  # l'archive n'a pas changé : un seul dossier, les mêmes membres, sans le couple
+  age -d -i "$AGE_IDENTITE_HORS_LIGNE" -o "$BATS_TEST_TMPDIR/clair.tar" "$DISTANT/$nom.tar.age"
+  [ "$(tar -tf "$BATS_TEST_TMPDIR/clair.tar" | LC_ALL=C sort)" = "$(printf '%s\n' "$nom/" "$nom/.cachee" "$nom/donnees.txt" "$nom/sous/" "$nom/sous/profond.txt")" ]
+  # le couple part chiffré, du dossier temporaire, après l'archive et avant le contrôle ; le clair
+  # ne part jamais
+  appels_de rclone | grep -E "^rclone copy $TMPDIR/{{ nom }}-sauvegarde\.[A-Za-z0-9]+/$nom\.couple\.age sauvegardes:{{ nom }}-sauvegardes$"
+  [ "$(ligne_de "/$nom.tar.age sauvegardes:")" -lt "$(ligne_de "/$nom.couple.age sauvegardes:")" ]
+  [ "$(ligne_de "/$nom.couple.age sauvegardes:")" -lt "$(ligne_de 'rclone lsf')" ]
+  aucune_ligne '\.couple( |$)' <(appels_de rclone)
+  aucune_ligne 'quotidiennes' <(appels_de rclone)
+  aucun_temporaire
+  # la clé du serveur ne lit pas le couple
+  run ! age -d -i "$AGE_IDENTITE_SERVEUR" "$DISTANT/$nom.couple.age"
+
+  # un état d'avant la v0.7.0, à deux champs : le commit vaut « - »
+  echo "$IMAGE 0.1.0" >"$ETAT/deploye"
+  rm -rf "$q" "$DISTANT"
+  sauvegarder prod
+  [ "$status" -eq 0 ]
+  envoyes=("$DISTANT"/*.tar.age)
+  nom="$(basename "${envoyes[0]}" .tar.age)"
+  [ "$(cat "$q/$nom.couple")" = "$IMAGE 0.1.0 -" ]
+  [ "$(age -d -i "$AGE_IDENTITE_HORS_LIGNE" "$DISTANT/$nom.couple.age")" = "$IMAGE 0.1.0 -" ]
+
+  # deploye illisible, puis absent : aucun couple, ni en local ni au distant ; la sauvegarde a lieu
+  local cas
+  for cas in illisible absent; do
+    rm -rf "$q" "$DISTANT"
+    if [ "$cas" = illisible ]; then
+      echo "pas un couple" >"$ETAT/deploye"
+    else
+      rm "$ETAT/deploye"
+    fi
+    sauvegarder prod
+    [ "$status" -eq 0 ]
+    envoyes=("$DISTANT"/*.tar.age)
+    nom="$(basename "${envoyes[0]}" .tar.age)"
+    [ "$(ls -A "$q")" = "$nom" ]
+    [ "$(ls -A "$DISTANT")" = "$nom.tar.age" ]
+    if [ "$cas" = illisible ]; then
+      [[ "$output" == *"$ETAT/deploye illisible : pas de $q/$nom.couple"* ]]
+    else
+      [[ "$output" == *"aucun couple en service ($ETAT/deploye absent) : pas de $q/$nom.couple"* ]]
+    fi
+  done
+  [ "$(envois_ok "$HC_SAUVEGARDE" | wc -l)" -eq 4 ]
+  [ -z "$(envois_echec "$HC_SAUVEGARDE")" ]
+}
+
+# Les données passent avant leur couple : un couple qui ne se chiffre pas, ou qui ne prend pas la
+# date de l'archive, est journalisé ; l'archive part seule, contrôlée, la rétention a lieu, et la
+# nuit est signalée en échec à la fin, la raison dite. Le .couple local reste, avec son instantané.
+@test "sauvegarde : un couple en échec n'empêche pas l'archive de partir" {
+  local q="$SAUVEGARDES/quotidiennes" envoyes nom cas reel
+  echo "$IMAGE 0.1.0 -" >"$ETAT/deploye"
+  for cas in age touch; do
+    echo "cas : $cas"
+    rm -rf "$q" "$DISTANT" "${DOUBLES:?}/age" "$DOUBLES/touch"
+    # le double du cas précédent est parti : bash ne doit plus le chercher là
+    hash -r
+    : >"$APPELS"
+    : >"$APPELS.urls"
+    reel="$(command -v "$cas")"
+    # le double refuse ce qui vise le couple, et laisse passer le reste au vrai ; son corps se
+    # développe dans le double, pas ici
+    # shellcheck disable=SC2016
+    creer_double "$cas" 'for a in "$@"; do case "$a" in *.couple | *.couple.age) echo "'"$cas"' : refus du double" >&2; exit 1 ;; esac; done; exec '"$reel"' "$@"'
+    sauvegarder prod
+    [ "$status" -eq 1 ]
+    envoyes=("$DISTANT"/*.tar.age)
+    [ "{% raw %}${#envoyes[@]}{% endraw %}" -eq 1 ]
+    nom="$(basename "${envoyes[0]}" .tar.age)"
+    # l'archive seule au distant, contrôlée, et qui se déchiffre
+    [ "$(find "$DISTANT" -mindepth 1 -maxdepth 1 -printf '%f\n')" = "$nom.tar.age" ]
+    age -d -i "$AGE_IDENTITE_HORS_LIGNE" -o "$BATS_TEST_TMPDIR/clair.tar" "$DISTANT/$nom.tar.age"
+    [ "$(appels_de rclone | grep -c '^rclone copy ')" -eq 1 ]
+    appels_de rclone | grep -Fx 'rclone lsf --files-only sauvegardes:{{ nom }}-sauvegardes'
+    # la rétention a eu lieu
+    appels_de rclone | grep -q '^rclone delete '
+    # en local, l'instantané et son couple
+    [ "$(cat "$q/$nom.couple")" = "$IMAGE 0.1.0 -" ]
+    [ -d "$q/$nom" ]
+    sans_horodatage | sed -E 's/-sauvegarde\.[A-Za-z0-9]+\//-sauvegarde.<tmp>\//' >"$BATS_TEST_TMPDIR/journal"
+    if [ "$cas" = age ]; then
+      grep -Fx "chiffrement du couple impossible (age -R $CLONE_DONNEES/$SOUS_CLES/hors-ligne.pub) : l'archive part sans son couple" "$BATS_TEST_TMPDIR/journal"
+    else
+      grep -Fx "le couple $TMPDIR/{{ nom }}-sauvegarde.<tmp>/$nom.couple.age ne prend pas la date de l'archive : l'archive part sans son couple" "$BATS_TEST_TMPDIR/journal"
+    fi
+    grep -Fx "envoyé : $nom.tar.age vers sauvegardes:{{ nom }}-sauvegardes" "$BATS_TEST_TMPDIR/journal"
+    [[ "$output" == *"sauvegarde $nom faite et envoyée, mais sans son couple"* ]]
+    [ -z "$(envois_ok "$HC_SAUVEGARDE")" ]
+    [ "$(envois_echec "$HC_SAUVEGARDE" | wc -l)" -eq 1 ]
+    aucun_temporaire
+  done
+}
+
 # Migration 5 : par défaut, les archives vont vers l'alias sauvegardes:, que le serveur fait pointer
 # vers le vrai remote, dans le dossier du projet.
 @test "sauvegarde_vers_l_alias_sauvegardes" {
   unset {{ prefixe }}DISTANT
   sauvegarder prod
   [ "$status" -eq 0 ]
-  # copie, contrôle, rétention : tous visent sauvegardes:{{ nom }}-sauvegardes, et rien d'autre
-  [ "$(appels_de rclone | wc -l)" -eq 3 ]
+  # copie de l'archive et de son couple, contrôle, rétention : tous visent
+  # sauvegardes:{{ nom }}-sauvegardes, et rien d'autre
+  [ "$(appels_de rclone | wc -l)" -eq 4 ]
   [ -z "$(appels_de rclone | grep -v ' sauvegardes:{{ nom }}-sauvegardes$' || true)" ]
   local envoyes=("$BATS_TEST_TMPDIR"/distant/sauvegardes/{{ nom }}-sauvegardes/{{ nom }}-*.tar.age)
   [ "{% raw %}${#envoyes[@]}{% endraw %}" -eq 1 ]
@@ -755,7 +882,7 @@ aucune_copie_jetable() {
   instantane "$aujourdhui" 60 pre-deploiement
   DOUBLE_DOCKER_SAUVEGARDE_VIEILLI=60 sauvegarder prod
   [ "$status" -eq 0 ]
-  local instantanes=("$SAUVEGARDES"/quotidiennes/{{ nom }}-*)
+  local instantanes=("$SAUVEGARDES"/quotidiennes/{{ nom }}-*Z)
   [ "{% raw %}${#instantanes[@]}{% endraw %}" -eq 1 ]
   [ -d "${instantanes[0]}" ]
   [ -f "$SAUVEGARDES/pre-deploiement/$aujourdhui/sous/profond.txt" ]
@@ -785,12 +912,99 @@ aucune_copie_jetable() {
   [ -e "$DISTANT/notes.txt" ]
   # ni ce qui n'est pas directement dans le dossier de la destination
   [ -e "$DISTANT/sous-dossier/{{ nom }}-20260501T024500Z.tar.age" ]
-  [ "$(nombre_d_entrees "$DISTANT")" -eq 4 ]
+  # le récent, notes.txt, le sous-dossier, l'archive du jour et son couple
+  [ "$(nombre_d_entrees "$DISTANT")" -eq 5 ]
   # la suppression distante est bornée au dossier (--max-depth 1), à l'âge et à nos archives, et
   # définitive (pas de corbeille : elle prolongerait la conservation au-delà des 90 jours de
-  # M-0005) ; elle suit l'envoi
-  appels_de rclone | grep -Fx "rclone delete --min-age 90d --max-depth 1 --drive-use-trash=false --include {{ nom }}-*.tar.age sauvegardes:{{ nom }}-sauvegardes"
+  # M-0005) ; elle suit l'envoi, et vise aussi les couples (voir « sauvegarde : la purge distante
+  # retire le couple avec son archive »)
+  appels_de rclone | grep -Fx "rclone delete --min-age 90d --max-depth 1 --drive-use-trash=false --include {{ nom }}-*.tar.age --include {{ nom }}-*.couple.age sauvegardes:{{ nom }}-sauvegardes"
   [ "$(ligne_de 'rclone lsf')" -lt "$(ligne_de 'rclone delete')" ]
+}
+
+# La rétention locale retire le .couple avec son instantané : même nom, même âge, lu dans le nom.
+# Un couple seul, dont l'instantané est parti, part aussi quand son nom a plus de 30 jours. Ni un
+# lien, ni un nom d'une autre forme ; un .couple n'est jamais pris pour un instantané.
+@test "sauvegarde : la rétention locale retire le couple avec son instantané" {
+  local q="$SAUVEGARDES/quotidiennes" p="$SAUVEGARDES/pre-deploiement" vieux recent ancien lien
+  local ailleurs="$BATS_TEST_TMPDIR/ailleurs.txt" chemin
+  vieux="$(il_y_a 31)"
+  recent="$(il_y_a 29)"
+  ancien="$(il_y_a 40)"
+  lien="$(il_y_a 41)"
+  echo "à garder" >"$ailleurs"
+  # vieux par leur nom ; récents par leur nom, mais datés de 60 jours
+  instantane "{{ nom }}-$vieux"
+  instantane "{{ nom }}-$recent" 60
+  instantane "$vieux" 0 pre-deploiement
+  instantane "$recent" 60 pre-deploiement
+  for chemin in "$q/{{ nom }}-$vieux" "$q/{{ nom }}-$recent" "$p/$vieux" "$p/$recent"; do
+    echo "$IMAGE 0.0.1 -" >"$chemin.couple"
+  done
+  touch -d '60 days ago' "$q/{{ nom }}-$recent.couple" "$p/$recent.couple"
+  # un couple seul, vieux par son nom
+  echo "$IMAGE 0.0.1 -" >"$q/{{ nom }}-$ancien.couple"
+  # un lien au nom d'un couple, d'autres noms : ils restent, et ce que le lien désigne aussi
+  ln -s "$ailleurs" "$q/{{ nom }}-$lien.couple"
+  echo autre >"$q/notes.couple"
+  echo autre >"$q/{{ nom }}-$ancien.couple.copie"
+  echo autre >"$p/$ancien.couple.copie"
+  touch -d '60 days ago' "$q/notes.couple" "$q/{{ nom }}-$ancien.couple.copie" "$p/$ancien.couple.copie"
+  sauvegarder prod
+  [ "$status" -eq 0 ]
+  # plus de 30 jours, par le nom : l'instantané et son couple partent ensemble, un couple seul aussi
+  [ ! -e "$q/{{ nom }}-$vieux" ]
+  [ ! -e "$q/{{ nom }}-$vieux.couple" ]
+  [ ! -e "$p/$vieux" ]
+  [ ! -e "$p/$vieux.couple" ]
+  [ ! -e "$q/{{ nom }}-$ancien.couple" ]
+  # les récents restent, chacun avec son couple
+  [ -f "$q/{{ nom }}-$recent/sous/profond.txt" ]
+  [ -f "$q/{{ nom }}-$recent.couple" ]
+  [ -f "$p/$recent/sous/profond.txt" ]
+  [ -f "$p/$recent.couple" ]
+  # le lien et sa cible, les autres noms
+  [ -L "$q/{{ nom }}-$lien.couple" ]
+  [ "$(cat "$ailleurs")" = "à garder" ]
+  [ -f "$q/notes.couple" ]
+  [ -f "$q/{{ nom }}-$ancien.couple.copie" ]
+  [ -f "$p/$ancien.couple.copie" ]
+  # deux instantanés, le récent et celui du jour, chacun avec son couple
+  [ "$(find "$q" -mindepth 1 -maxdepth 1 -type d -regextype posix-extended -regex '.*/{{ nom }}-[0-9]{8}T[0-9]{6}Z' | wc -l)" -eq 2 ]
+  [ "$(find "$q" -mindepth 1 -maxdepth 1 -type f -regextype posix-extended -regex '.*/{{ nom }}-[0-9]{8}T[0-9]{6}Z\.couple' | wc -l)" -eq 2 ]
+}
+
+# La purge distante, 90 jours, retire le .couple.age avec son archive : la sauvegarde leur donne la
+# même date, et un seul `rclone delete` les vise tous deux, du même âge. Ensemble ils partent,
+# ensemble ils restent ; un couple seul, vieux, part aussi. Ni ce qui n'est pas à nous, ni un
+# sous-dossier.
+@test "sauvegarde : la purge distante retire le couple avec son archive" {
+  local n
+  mkdir -p "$DISTANT/sous-dossier"
+  for n in 20260601T024500Z 20260901T024500Z; do
+    echo archive >"$DISTANT/{{ nom }}-$n.tar.age"
+    echo couple >"$DISTANT/{{ nom }}-$n.couple.age"
+  done
+  echo couple >"$DISTANT/{{ nom }}-20260501T024500Z.couple.age"
+  echo couple >"$DISTANT/autre-projet-20260501T024500Z.couple.age"
+  echo couple >"$DISTANT/sous-dossier/{{ nom }}-20260401T024500Z.couple.age"
+  touch -d '91 days ago' "$DISTANT/{{ nom }}-20260601T024500Z.tar.age" \
+    "$DISTANT/{{ nom }}-20260601T024500Z.couple.age" "$DISTANT/{{ nom }}-20260501T024500Z.couple.age" \
+    "$DISTANT/autre-projet-20260501T024500Z.couple.age"
+  touch -d '89 days ago' "$DISTANT/{{ nom }}-20260901T024500Z.tar.age" "$DISTANT/{{ nom }}-20260901T024500Z.couple.age"
+  touch -d '120 days ago' "$DISTANT/sous-dossier/{{ nom }}-20260401T024500Z.couple.age"
+  sauvegarder prod
+  [ "$status" -eq 0 ]
+  [ ! -e "$DISTANT/{{ nom }}-20260601T024500Z.tar.age" ]
+  [ ! -e "$DISTANT/{{ nom }}-20260601T024500Z.couple.age" ]
+  [ ! -e "$DISTANT/{{ nom }}-20260501T024500Z.couple.age" ]
+  [ -e "$DISTANT/{{ nom }}-20260901T024500Z.tar.age" ]
+  [ -e "$DISTANT/{{ nom }}-20260901T024500Z.couple.age" ]
+  [ -e "$DISTANT/autre-projet-20260501T024500Z.couple.age" ]
+  [ -e "$DISTANT/sous-dossier/{{ nom }}-20260401T024500Z.couple.age" ]
+  # le récent et son couple, l'autre projet, le sous-dossier, l'archive du jour et son couple
+  [ "$(nombre_d_entrees "$DISTANT")" -eq 6 ]
+  appels_de rclone | grep -Fx "rclone delete --min-age 90d --max-depth 1 --drive-use-trash=false --include {{ nom }}-*.tar.age --include {{ nom }}-*.couple.age sauvegardes:{{ nom }}-sauvegardes"
 }
 
 @test "retention_locale_ne_vise_jamais_le_dossier_des_sauvegardes_lui_meme" {
@@ -805,7 +1019,8 @@ aucune_copie_jetable() {
   sauvegarder prod
   [ "$status" -eq 0 ]
   [ -d "$SAUVEGARDES/quotidiennes" ]
-  [ "$(nombre_d_entrees "$SAUVEGARDES/quotidiennes")" -eq 1 ]
+  # l'instantané du jour et son couple
+  [ "$(nombre_d_entrees "$SAUVEGARDES/quotidiennes")" -eq 2 ]
 }
 
 @test "retention_n_efface_rien_de_local_si_l_envoi_echoue" {
@@ -825,8 +1040,8 @@ aucune_copie_jetable() {
   [[ "$output" == *"rétention"* ]]
   [ -z "$(envois_ok "$HC_SAUVEGARDE")" ]
   [ "$(envois_echec "$HC_SAUVEGARDE" | wc -l)" -eq 1 ]
-  # la sauvegarde elle-même est partie
-  [ "$(nombre_d_entrees "$DISTANT")" -eq 1 ]
+  # la sauvegarde elle-même est partie, avec son couple
+  [ "$(nombre_d_entrees "$DISTANT")" -eq 2 ]
 }
 
 @test "sauvegarde_refuse_un_distant_qui_viserait_plus_que_son_dossier" {
@@ -853,7 +1068,7 @@ aucune_copie_jetable() {
   [ -z "$(appels_de rclone)" ]
   relacher_le_verrou
   wait "$sauvegarde"
-  [ "$(nombre_d_entrees "$DISTANT")" -eq 1 ]
+  [ "$(nombre_d_entrees "$DISTANT")" -eq 2 ]
   [ "$(envois_ok "$HC_SAUVEGARDE" | wc -l)" -eq 1 ]
 }
 
@@ -1165,6 +1380,37 @@ aucune_copie_jetable() {
   [[ "$output" == *"test de restauration de $SNAPSHOT"* ]]
   [[ "$(envois_ok "$HC_TEST")" == *"$SNAPSHOT restaurée"* ]]
   [ "$(cat "$BATS_TEST_TMPDIR/verifie/donnees.txt")" = "instantané de test $SNAPSHOT" ]
+}
+
+# P3 du lot 12 : un .couple, ou un .couple.age, n'est jamais pris pour une sauvegarde, même plus
+# récent par son nom et par sa date : le test de restauration prend le dernier instantané, le
+# retrait des .partiel n'y touche pas, et restaurer.sh refuse de le restaurer.
+@test "sauvegarde : un .couple n'est jamais pris pour une sauvegarde" {
+  local q="$SAUVEGARDES/quotidiennes"
+  instantane "$SNAPSHOT" 2
+  echo "$IMAGE 0.1.0 -" >"$q/$SNAPSHOT.couple"
+  echo "$IMAGE 0.1.0 -" >"$q/{{ nom }}-20261020T024500Z.couple"
+  echo "chiffré" >"$q/{{ nom }}-20261021T024500Z.couple.age"
+  tester prod
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"test de restauration de $SNAPSHOT"* ]]
+  [[ "$(envois_ok "$HC_TEST")" == *"$SNAPSHOT restaurée"* ]]
+  [ "$(cat "$BATS_TEST_TMPDIR/verifie/donnees.txt")" = "instantané de test $SNAPSHOT" ]
+  DOUBLE_DOCKER_SAUVEGARDE_FORME=partielle sauvegarder prod
+  [ "$status" -eq 1 ]
+  [ -f "$q/$SNAPSHOT.couple" ]
+  [ -f "$q/{{ nom }}-20261020T024500Z.couple" ]
+  [ -f "$q/{{ nom }}-20261021T024500Z.couple.age" ]
+  donnees_courantes
+  : >"$APPELS"
+  restaurer prod "$q/$SNAPSHOT.couple" --oui
+  [ "$status" -eq 64 ]
+  [[ "$output" == *"forme inconnue"* ]]
+  restaurer prod "$q/{{ nom }}-20261021T024500Z.couple.age" --oui --cle "$AGE_IDENTITE_HORS_LIGNE"
+  [ "$status" -eq 64 ]
+  [[ "$output" == *"forme inconnue"* ]]
+  [ -z "$(appels_de docker | grep -E ' (stop|start) ' || true)" ]
+  contenu_courant_intact
 }
 
 @test "test_restauration_ne_prend_pas_le_verrou_partage" {
@@ -1760,6 +2006,161 @@ cle_non_repetee() {
   aucun_temporaire
 }
 
+# P3 du lot 12 : restaurer.sh lit le couple voisin de la source, <dossier>.couple, ou, pour une
+# archive, <archive sans .tar.age>.couple.age, déchiffré avec la même clé. Il dit « couple de
+# l'instantané : … » quand il diffère du couple déployé, rien quand c'est le même, « couple de
+# l'instantané inconnu » quand il ne se lit pas. La restauration a lieu dans tous les cas. La clé
+# sur l'entrée standard ne se lit qu'une fois : elle déchiffre l'archive et son couple, sans jamais
+# toucher un disque ni la trace.
+@test "restaurer : dit le couple de l'instantané" {
+  local q="$SAUVEGARDES/quotidiennes" pre="$SAUVEGARDES/pre-deploiement" autre commit d cle
+  autre="ghcr.io/{{ compte | lower }}/{{ nom }}@sha256:$(printf '2%.0s' {1..64})"
+  commit="$(printf 'c%.0s' {1..40})"
+  d="$(printf 'd%.0s' {1..40})"
+  echo "$IMAGE 0.1.0 $commit" >"$ETAT/deploye"
+  horloge_qui_avance
+  donnees_courantes
+  # 1. le couple d'un instantané quotidien est le couple déployé : rien à dire
+  instantane "$SNAPSHOT" 1
+  echo "$IMAGE 0.1.0 $commit" >"$q/$SNAPSHOT.couple"
+  restaurer prod "$q/$SNAPSHOT" --oui
+  [ "$status" -eq 0 ]
+  diff -r "$q/$SNAPSHOT" "$DONNEES"
+  [[ "$output" != *"couple de l'instantané"* ]]
+  # 2. un instantané d'avant déploiement, pris sous un autre couple : il le dit, et restaure
+  instantane 20261014T120000Z 1 pre-deploiement
+  echo "$autre 0.0.9 -" >"$pre/20261014T120000Z.couple"
+  restaurer prod "$pre/20261014T120000Z/" --oui
+  [ "$status" -eq 0 ]
+  diff -r "$pre/20261014T120000Z" "$DONNEES"
+  sans_horodatage | grep -Fx "couple de l'instantané : $autre 0.0.9 - (couple déployé : $IMAGE 0.1.0 $commit)"
+  # 3. une archive et son couple chiffré, la clé dans un fichier
+  archive_chiffree
+  printf '%s\n' "$autre 0.0.8 $d" | chiffrer "$BATS_TEST_TMPDIR/$SNAPSHOT.couple.age"
+  restaurer prod "$BATS_TEST_TMPDIR/$SNAPSHOT.tar.age" --oui --cle "$AGE_IDENTITE_HORS_LIGNE"
+  [ "$status" -eq 0 ]
+  diff -r "$BATS_TEST_TMPDIR/attendu" "$DONNEES"
+  sans_horodatage | grep -Fx "couple de l'instantané : $autre 0.0.8 $d (couple déployé : $IMAGE 0.1.0 $commit)"
+  aucun_temporaire
+  # 4. la clé sur l'entrée standard, lue une seule fois : l'archive et son couple se déchiffrent
+  export ARCHIVE="$BATS_TEST_TMPDIR/$SNAPSHOT.tar.age"
+  run bash -c 'cat "$AGE_IDENTITE_HORS_LIGNE" | bash "$CLONE/deploiement/restaurer.sh" prod "$ARCHIVE" --oui --cle /dev/stdin'
+  [ "$status" -eq 0 ]
+  diff -r "$BATS_TEST_TMPDIR/attendu" "$DONNEES"
+  sans_horodatage | grep -Fx "couple de l'instantané : $autre 0.0.8 $d (couple déployé : $IMAGE 0.1.0 $commit)"
+  aucune_ligne 'AGE-SECRET-KEY' "$APPELS" <(printf '%s\n' "$output")
+  [ -z "$(grep -rl 'AGE-SECRET-KEY' "$HOME" "$TMPDIR" "$ETAT" "$SAUVEGARDES" "$DONNEES" || true)" ]
+  aucun_temporaire
+  # sous bash -x non plus, la clé n'est jamais répétée
+  cle="$(grep '^AGE-SECRET-KEY-' "$AGE_IDENTITE_HORS_LIGNE")"
+  run bash -c 'cat "$AGE_IDENTITE_HORS_LIGNE" | bash -x "$CLONE/deploiement/restaurer.sh" prod "$ARCHIVE" --oui --cle /dev/stdin'
+  [ "$status" -eq 0 ]
+  cle_non_repetee "$cle"
+  # 5. un couple qui ne se lit pas : chiffré pour une autre clé, d'une autre forme, ou un lien ; il
+  # est inconnu, la raison est dans la même ligne (l'erreur d'age comprise, qui ne sort nulle part
+  # ailleurs), et la restauration a lieu
+  printf '%s\n' "$autre 0.0.8 $d" | age -R "$CLONE_DONNEES/$SOUS_CLES/serveur.pub" >"$BATS_TEST_TMPDIR/$SNAPSHOT.couple.age"
+  restaurer prod "$ARCHIVE" --oui --cle "$AGE_IDENTITE_HORS_LIGNE"
+  [ "$status" -eq 0 ]
+  sans_horodatage | grep -Ex "couple de l'instantané inconnu : $BATS_TEST_TMPDIR/$SNAPSHOT\.couple\.age illisible \(déchiffrement impossible : age: error: no identity matched any of the recipients.*\)"
+  aucune_ligne '^age:' <(printf '%s\n' "$output")
+  diff -r "$BATS_TEST_TMPDIR/attendu" "$DONNEES"
+  echo "pas un couple" >"$pre/20261014T120000Z.couple"
+  restaurer prod "$pre/20261014T120000Z" --oui
+  [ "$status" -eq 0 ]
+  sans_horodatage | grep -Fx "couple de l'instantané inconnu : $pre/20261014T120000Z.couple illisible (attendu : « <image> <version> <commit> »)"
+  diff -r "$pre/20261014T120000Z" "$DONNEES"
+  rm "$pre/20261014T120000Z.couple"
+  echo "$autre 0.0.9 -" >"$BATS_TEST_TMPDIR/couple-ailleurs"
+  ln -s "$BATS_TEST_TMPDIR/couple-ailleurs" "$pre/20261014T120000Z.couple"
+  restaurer prod "$pre/20261014T120000Z" --oui
+  [ "$status" -eq 0 ]
+  sans_horodatage | grep -Fx "couple de l'instantané inconnu : $pre/20261014T120000Z.couple illisible (un lien, qui n'est jamais suivi)"
+  diff -r "$pre/20261014T120000Z" "$DONNEES"
+  aucun_temporaire
+}
+
+# Une identité chiffrée par phrase de passe, au format binaire (`age -p`, sans -a), dans un fichier :
+# age la lit lui-même, octets nuls compris, comme avant le lot 12 ; la phrase se demande au terminal,
+# une fois pour l'archive, une fois pour son couple. `script` tient lieu de terminal. La clé sur
+# l'entrée standard, elle, ne se lit qu'une fois, en mémoire (« restaurer : dit le couple de
+# l'instantané »).
+@test "restaurer : une identité chiffrée par phrase de passe, dans un fichier" {
+  local autre d cle="$BATS_TEST_TMPDIR/hors-ligne.age" tentative=0
+  autre="ghcr.io/{{ compte | lower }}/{{ nom }}@sha256:$(printf '2%.0s' {1..64})"
+  d="$(printf 'd%.0s' {1..40})"
+  export PHRASE=phrase-de-test-seulement CLE_CHIFFREE="$cle" ARCHIVE="$BATS_TEST_TMPDIR/$SNAPSHOT.tar.age"
+  archive_chiffree
+  donnees_courantes
+  printf '%s\n' "$autre 0.0.8 $d" | chiffrer "$BATS_TEST_TMPDIR/$SNAPSHOT.couple.age"
+  # le format binaire : l'en-tête d'age, et des octets nuls. Le chiffré est aléatoire : un octet nul
+  # n'y est pas toujours (une fois sur deux environ, pour une identité de cette taille), et le test
+  # rechiffre jusqu'à en avoir un
+  until [ -s "$cle" ] && [ "$(tr -dc '\000' <"$cle" | wc -c)" -gt 0 ]; do
+    tentative=$((tentative + 1))
+    [ "$tentative" -le 40 ]
+    rm -f "$cle"
+    printf '%s\n%s\n' "$PHRASE" "$PHRASE" | script -qec "age -p -o '$cle' '$AGE_IDENTITE_HORS_LIGNE'" /dev/null >/dev/null
+  done
+  [ "$(head -c 21 "$cle")" = age-encryption.org/v1 ]
+  cat >"$BATS_TEST_TMPDIR/restaurer-au-terminal" <<'SCRIPT'
+#!/usr/bin/env bash
+exec bash "$CLONE/deploiement/restaurer.sh" prod "$ARCHIVE" --oui --cle "$CLE_CHIFFREE"
+SCRIPT
+  run bash -c 'printf "%s\n%s\n" "$PHRASE" "$PHRASE" | script -qec "bash '"$BATS_TEST_TMPDIR"'/restaurer-au-terminal" /dev/null'
+  output="${output//$'\r'/}"
+  [ "$status" -eq 0 ]
+  diff -r "$BATS_TEST_TMPDIR/attendu" "$DONNEES"
+  sans_horodatage | grep -Fx "couple de l'instantané : $autre 0.0.8 $d (couple déployé : $IMAGE 0.1.0 -)"
+  # deux demandes de la phrase : l'archive, puis son couple
+  [ "$(printf '%s\n' "$output" | grep -c 'Enter passphrase')" -eq 2 ]
+  [ -z "$(grep -rl 'AGE-SECRET-KEY' "$HOME" "$TMPDIR" "$ETAT" "$SAUVEGARDES" "$DONNEES" || true)" ]
+  aucun_temporaire
+}
+
+# Une archive d'avant la v0.7.0, sans .couple.age, se restaure exactement comme avant, la clé dans
+# un fichier comme sur l'entrée standard : le même journal, une ligne de plus, « couple de
+# l'instantané inconnu », et les mêmes appels de Docker.
+@test "restaurer : une archive sans couple se restaure comme avant" {
+  archive_chiffree
+  donnees_courantes
+  local archive="$BATS_TEST_TMPDIR/$SNAPSHOT.tar.age" revision="${IMAGE##*:}"
+  local ancien="$SAUVEGARDES/avant-restauration-<horodatage>"
+  revision="${revision:0:40}"
+  horloge_qui_avance
+  restaurer prod "$archive" --oui --cle "$AGE_IDENTITE_HORS_LIGNE"
+  [ "$status" -eq 0 ]
+  diff -r "$BATS_TEST_TMPDIR/attendu" "$DONNEES"
+  diff - <(sans_horodatage) <<JOURNAL
+restauration de prod depuis $archive (image $IMAGE, version 0.1.0)
+copie conforme (verifier : code 0)
+instantané conforme : $archive (3 fichiers)
+couple de l'instantané inconnu
+arrêt de l'application
+ancien contenu gardé dans $ancien
+démarrage de l'application
+santé conforme sur le port {{ bloc_ports }} (essai 1) : {"statut":"ok","environnement":"prod","version":"0.1.0","revision":"$revision"}
+restauration terminée : $archive ; l'ancien contenu est dans $ancien
+JOURNAL
+  diff - <(appels_de docker | sed -E 's/-restauration\.[A-Za-z0-9]+\//-restauration.<tmp>\//') <<APPELS_DOCKER
+docker run --rm $OPTIONS_JETABLES -v $TMPDIR/{{ nom }}-restauration.<tmp>/donnees:/donnees $IMAGE outil verifier /donnees
+$(dc_prod) stop app
+$(dc_prod) start app
+docker image inspect -f {% raw %}{{index .Config.Labels "org.opencontainers.image.revision"}}{% endraw %} $IMAGE
+APPELS_DOCKER
+  aucun_temporaire
+  # la clé sur l'entrée standard : la même restauration, le même journal
+  : >"$APPELS"
+  export ARCHIVE="$archive"
+  run bash -c 'cat "$AGE_IDENTITE_HORS_LIGNE" | bash "$CLONE/deploiement/restaurer.sh" prod "$ARCHIVE" --oui --cle /dev/stdin'
+  [ "$status" -eq 0 ]
+  diff -r "$BATS_TEST_TMPDIR/attendu" "$DONNEES"
+  [ "$(sans_horodatage | grep -c "couple de l'instantané")" -eq 1 ]
+  sans_horodatage | grep -Fx "couple de l'instantané inconnu"
+  sans_horodatage | grep -Fx "restauration terminée : $archive ; l'ancien contenu est dans $ancien"
+  aucun_temporaire
+}
+
 @test "restaurer_signale_une_sante_en_echec_et_dit_ou_est_l_ancien_contenu" {
   instantane "$SNAPSHOT" 1
   donnees_courantes
@@ -1996,7 +2397,8 @@ SECTION="Reporter à la main"
 OPTIONS_JETABLES="--user 1000:1000 --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true --memory 384m"
 
 # Sans REPORTER, la restauration est celle d'avant le crochet, à l'octet près : le plan, le journal
-# et les appels de Docker. Le projet.env du setup ne le déclare pas.
+# et les appels de Docker. Le projet.env du setup ne le déclare pas. Seul ajout au journal depuis,
+# le couple de l'instantané (P3 du lot 12), inconnu ici : l'instantané n'a pas de .couple.
 @test "restaurer_sans_reporter_ne_change_rien" {
   instantane "$SNAPSHOT" 1
   donnees_courantes
@@ -2029,6 +2431,7 @@ PLAN
 restauration de prod depuis $SAUVEGARDES/quotidiennes/$SNAPSHOT (image $IMAGE, version 0.1.0)
 copie conforme (verifier : code 0)
 instantané conforme : $SAUVEGARDES/quotidiennes/$SNAPSHOT (3 fichiers)
+couple de l'instantané inconnu
 arrêt de l'application
 ancien contenu gardé dans $ancien
 démarrage de l'application

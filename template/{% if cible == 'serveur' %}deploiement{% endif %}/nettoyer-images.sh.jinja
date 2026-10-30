@@ -1,8 +1,10 @@
 {#- Gabarit Copier. `${ {{- prefixe }}X}` : l'espace et le tiret évitent `${{{`, que Jinja lit mal. -#}
 #!/usr/bin/env bash
-# Ménage des images d'{{ nom }} : retire du Docker du serveur les images du dépôt du projet qui ne
-# servent plus. Les deux environnements partagent ce Docker, donc ce stock d'images. GHCR garde
-# tout : une image retirée revient par un `docker pull`, et `docker compose up` la tire lui-même.
+# Ménage d'{{ nom }} : retire du Docker du serveur les images du dépôt du projet qui ne servent plus,
+# puis, de l'état de l'environnement, les instantanés des données qui ne servent plus. Les deux
+# environnements partagent ce Docker, donc ce stock d'images. GHCR garde tout : une image retirée
+# revient par un `docker pull`, et `docker compose up` la tire lui-même. Un instantané retiré se
+# refait du clone des données (preparer_instantane, lib.sh).
 #
 #   bash deploiement/nettoyer-images.sh <prod|staging>
 #
@@ -11,7 +13,7 @@
 # prend alors ce verrou lui-même. Toujours par `bash`, depuis le clone de
 # l'environnement.
 #
-# Déroulé :
+# Déroulé (les étapes 2 à 6, les images, dans un sous-shell : une annulation n'y arrête qu'elles) :
 #   1. verrou ${{ prefixe }}ETAT/verrou, partagé avec la sonde et le déploiement (600 s d'attente au
 #      plus, prendre_verrou), sauf si {{ prefixe }}VERROU_TENU=1 ;
 #   2. verrou de l'autre environnement, sans attente. S'il est pris, le ménage est sauté (code 0) :
@@ -34,12 +36,15 @@
 #      (`docker image rm <id>`) si elles portent une étiquette au plus ; sinon par leurs
 #      étiquettes, une par appel (`docker image rm <dépôt>:<étiquette>`), car docker refuse sans -f
 #      le retrait par l'identifiant d'une image qui en porte plusieurs, et la dernière emporte
-#      l'image et ses empreintes. Un retrait en échec est journalisé, et l'image suivante est tentée.
+#      l'image et ses empreintes. Un retrait en échec est journalisé, et l'image suivante est tentée ;
+#   7. les instantanés des données de cet environnement, et de lui seul (P2 du lot 12) :
+#      ${{ prefixe }}ETAT/instantanes/, toujours, même quand le ménage des images est sauté ou annulé.
+#      Voir « Les instantanés », plus bas.
 #
 # Jamais de `-f`, de `docker image prune`, de `docker system prune` ni de retrait par un filtre : le
 # script liste toutes les images et choisit lui-même celles du projet.
 #
-# Le ménage est annulé en entier, avant tout retrait (code 1), si :
+# Le ménage des images est annulé en entier, avant tout retrait (code 1), si :
 #   - le verrou de l'autre environnement ne s'ouvre pas, ou flock y échoue autrement que parce
 #     qu'il est pris ;
 #   - un fichier d'état existe mais ne se lit pas, ou n'a pas la forme qu'écrit deployer.sh ;
@@ -61,8 +66,29 @@
 # pour la première de ces trois raisons qui la garde ; une image dont un retrait échoue ne compte ni
 # parmi les retirées ni parmi les gardées.
 #
-# Codes de sortie : 0 fait, ou sauté (verrou de l'autre environnement pris) ; 1 un retrait en échec,
-# un ménage annulé, ou le verrou de l'environnement toujours pris après l'attente ; 64 usage, ou
+# Les instantanés (étape 7). ${{ prefixe }}ETAT/instantanes/ porte un dossier par commit de données,
+# figé en lecture seule, et le <commit>.partiel d'un instantané en cours ou coupé (preparer_instantane,
+# lib.sh). Le ménage garde les instantanés que nomment deploye et precedent de l'environnement (le
+# commit de leur couple, lu par lire_version ; « - », ou un état d'avant la v0.7.0, n'en nomme
+# aucun), plus les 3 plus récents des autres (la marge, comme les images), d'après leur date de
+# modification, puis leur nom à date égale. Il retire les autres, et tout .partiel de plus d'un jour ;
+# un .partiel plus jeune reste, qu'un déploiement peut être en train de construire. Chaque entrée
+# est lue une fois, sans suivre de lien ; un retrait passe par _retirer_fige (lib.sh), les droits
+# d'abord. Une surprise annule le ménage des instantanés en entier, avant tout retrait, et le journal
+# le dit (« ménage des instantanés annulé, rien n'est retiré : <raison> ») :
+#   - ${{ prefixe }}ETAT/instantanes est un lien, ou n'est pas un dossier ;
+#   - deploye ou precedent existe mais ne se lit pas, ou n'a pas la forme qu'écrit deployer.sh ;
+#   - une entrée dont le nom n'est ni un commit de 40 caractères hexadécimaux ni <commit>.partiel,
+#     une entrée qui est un lien, ou qui n'est pas un dossier ;
+#   - une date de modification illisible.
+# Sans dossier des instantanés (un projet qui ne monte pas de données), rien n'est dit. Le journal :
+# une ligne par instantané retiré, une par retrait impossible, puis le bilan, les retirés et les
+# gardés, par l'état, en marge, ou parce que .partiel de moins d'un jour. Le ménage des instantanés
+# ne change jamais le code de sortie : il dit tout au journal.
+#
+# Codes de sortie, ceux du ménage des images : 0 fait, ou sauté (verrou de l'autre environnement
+# pris) ; 1 un retrait en échec, un ménage annulé, ou le verrou de l'environnement toujours pris
+# après l'attente (rien n'est alors fait, ni images ni instantanés) ; 64 usage, ou
 # {{ prefixe }}DEPOT_IMAGE refusée.
 #
 # Variables de test :
@@ -74,8 +100,14 @@ set -euo pipefail
 # shellcheck source=deploiement/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-# La marge : parmi les images du projet que rien ne protège, les plus récentes, gardées.
+# La marge : parmi les images du projet que rien ne protège, les plus récentes, gardées. La même
+# pour les instantanés des données.
 MARGE=3
+# Les noms du dossier des instantanés : un commit de données (MOTIF_SHA, lib.sh), ou l'instantané
+# provisoire d'un commit, <commit>.partiel (preparer_instantane, lib.sh). Un .partiel plus vieux que
+# AGE_PARTIEL secondes est le reste d'un essai coupé ; plus jeune, un déploiement peut être en train
+# de le construire.
+AGE_PARTIEL=86400
 
 # Ce qu'écrit deployer.sh dans l'état suit MOTIF_REFERENCE et MOTIF_VERSION, de lib.sh. Ce que
 # rend Docker : un identifiant, et une date RFC 3339 en UTC dont la fraction perd ses zéros de fin,
@@ -154,30 +186,124 @@ lire_etat() {
   done
 }
 
-main() {
-  [ "$#" -eq 1 ] || arreter 64 "usage : bash deploiement/nettoyer-images.sh <prod|staging>"
-  local nom_env="$1"
-  valider_env "$nom_env"
-  charger_env "$nom_env"
-  local etat="${{ prefixe }}ETAT" autre dossier_autre verrou_autre sortie ligne code=0
+# abandonner_instantanes <raison> : le ménage des instantanés s'arrête avant tout retrait. Le code de
+# sortie ne change pas : c'est celui des images.
+abandonner_instantanes() {
+  journal "ménage des instantanés annulé, rien n'est retiré : $1"
+}
+
+# menage_instantanes : l'étape 7, les instantanés des données de ${{ prefixe }}ETAT/instantanes/, ceux
+# de cet environnement seulement (P2 du lot 12) ; voir « Les instantanés », en tête. Rend toujours
+# 0 : une surprise ou un retrait impossible ne se disent qu'au journal.
+menage_instantanes() {
+  local etat="${{ prefixe }}ETAT" dossier="${{ prefixe }}ETAT/instantanes" fichier chemin nom modifie
+  local maintenant tries partiel par_etat=0 en_marge=0 recents=0 retires=0 rang=0
+  local -A gardes=()
+  local -a candidats=() plus_vieux_d_abord=() a_retirer=()
+  [ -e "$dossier" ] || [ -L "$dossier" ] || return 0
+  if [ -L "$dossier" ]; then
+    abandonner_instantanes "$dossier est un lien, qui n'est jamais suivi"
+    return 0
+  fi
+  if [ ! -d "$dossier" ]; then
+    abandonner_instantanes "$dossier n'est pas un dossier"
+    return 0
+  fi
+
+  # Ce que l'état garde : le commit du couple de deploye et de precedent ; « - » n'en garde aucun.
+  for fichier in deploye precedent; do
+    chemin="$etat/$fichier"
+    [ -e "$chemin" ] || [ -L "$chemin" ] || continue
+    if ! lire_version "$chemin"; then
+      abandonner_instantanes "$chemin illisible (attendu : la forme qu'écrit deployer.sh)"
+      return 0
+    fi
+    [ "$COMMIT_LU" = - ] || gardes["$COMMIT_LU"]=1
+  done
+
+  # Chaque entrée, une fois, sans suivre de lien ; toutes sont lues avant le premier retrait. Les
+  # motifs sans correspondance restent tels quels, et ne désignent rien qui existe.
+  if ! maintenant="$(date +%s)"; then
+    abandonner_instantanes "heure illisible"
+    return 0
+  fi
+  for chemin in "$dossier"/* "$dossier"/.*; do
+    nom="${chemin##*/}"
+    case "$nom" in . | ..) continue ;; esac
+    [ -e "$chemin" ] || [ -L "$chemin" ] || continue
+    # Un commit (MOTIF_SHA, lib.sh), ou ce commit suivi de .partiel.
+    partiel=0
+    if [[ "$nom" == *.partiel ]] && [[ "${nom%.partiel}" =~ $MOTIF_SHA ]]; then
+      partiel=1
+    elif ! [[ "$nom" =~ $MOTIF_SHA ]]; then
+      abandonner_instantanes "nom inattendu : $chemin (attendu : un commit de 40 caractères hexadécimaux, ou <commit>.partiel)"
+      return 0
+    fi
+    if [ -L "$chemin" ]; then
+      abandonner_instantanes "$chemin est un lien, qui n'est jamais suivi"
+      return 0
+    fi
+    if [ ! -d "$chemin" ]; then
+      abandonner_instantanes "$chemin n'est pas un dossier"
+      return 0
+    fi
+    # La date de modification, en secondes, par stat, qui ne suit pas les liens.
+    if ! modifie="$(stat -c %Y -- "$chemin")" || ! [[ "$modifie" =~ ^[0-9]+$ ]]; then
+      abandonner_instantanes "date de modification illisible pour $chemin"
+      return 0
+    fi
+    if [ "$partiel" -eq 1 ]; then
+      if [ "$modifie" -lt "$((maintenant - AGE_PARTIEL))" ]; then
+        a_retirer+=("$nom")
+      else
+        recents=$((recents + 1))
+      fi
+    elif [ -n "${gardes[$nom]+present}" ]; then
+      par_etat=$((par_etat + 1))
+    else
+      candidats+=("$modifie $nom")
+    fi
+  done
+
+  # La marge : les plus récents d'abord, à date égale dans l'ordre des noms ; au-delà, du plus
+  # ancien au plus récent.
+  if [ -n "${candidats[*]}" ]; then
+    if ! tries="$(printf '%s\n' "${candidats[@]}" | LC_ALL=C sort -k1,1nr -k2,2)"; then
+      abandonner_instantanes "tri des instantanés impossible"
+      return 0
+    fi
+    while IFS=' ' read -r _ nom; do
+      rang=$((rang + 1))
+      if [ "$rang" -le "$MARGE" ]; then
+        en_marge=$((en_marge + 1))
+      else
+        plus_vieux_d_abord=("$nom" "${plus_vieux_d_abord[@]}")
+      fi
+    done <<<"$tries"
+    a_retirer+=("${plus_vieux_d_abord[@]}")
+  fi
+
+  # Les retraits, un à la fois : un échec est journalisé, et l'instantané suivant est tenté.
+  for nom in "${a_retirer[@]}"; do
+    if _retirer_fige "$dossier/$nom"; then
+      journal "instantané retiré : $nom"
+      retires=$((retires + 1))
+    else
+      journal "retrait impossible : $dossier/$nom"
+    fi
+  done
+  journal "ménage des instantanés : $(accorder "$retires" retiré), $(accorder "$((par_etat + en_marge + recents))" gardé) ($par_etat par l'état, $en_marge en marge, $(accorder "$recents" partiel) de moins d'un jour)"
+}
+
+# menage_images <env> : les étapes 2 à 6, les images. Lancée dans un sous-shell (main) : annuler
+# (code 1) n'arrête qu'elle.
+menage_images() {
+  local nom_env="$1" etat="${{ prefixe }}ETAT" autre dossier_autre verrou_autre sortie ligne code=0
   local id cree noms empreintes reference du_depot nommee fraction tries rang cible partie
   local par_etat=0 par_conteneur=0 en_marge=0 retirees=0 listees=0 inspectees=0
   local -a conteneurs=() identifiants=() references=() liste_empreintes=() candidats=() a_retirer=()
   local -a etiquettes=() cibles=()
   local -A vue=()
-
-  # Le dépôt : celui du projet, ou, pour l'épreuve sur un vrai Docker, un registre de la machine.
-  DEPOT="$DEPOT_IMAGE"
-  if [ -n "${ {{- prefixe }}DEPOT_IMAGE+present}" ]; then
-    [[ "${{ prefixe }}DEPOT_IMAGE" =~ $MOTIF_DEPOT_DE_TEST ]] \
-      || arreter 64 "{{ prefixe }}DEPOT_IMAGE refusée : seul un registre de la machine (localhost:<port>/…) est accepté"
-    DEPOT="${{ prefixe }}DEPOT_IMAGE"
-  fi
-
-  # 1. Le verrou de l'environnement : tenu par celui qui lance le ménage, ou pris ici.
-  if [ "${ {{- prefixe }}VERROU_TENU:-}" != 1 ] && ! prendre_verrou; then
-    arreter 1 "verrou $etat/verrou toujours pris après ${ {{- prefixe }}VERROU_ATTENTE:-600} s : ménage abandonné, rien n'est retiré"
-  fi
 
   # 2. Le verrou de l'autre environnement, sans attente, sur le descripteur 8. flock rend 1 quand
   # il est pris ; tout autre code est une erreur.
@@ -317,6 +443,51 @@ main() {
   done
 
   journal "ménage des images : $(accorder "$retirees" retirée), $(accorder "$((par_etat + par_conteneur + en_marge))" gardée) ($par_etat par l'état, $par_conteneur par un conteneur, $en_marge en marge)"
+  return "$code"
+}
+
+main() {
+  [ "$#" -eq 1 ] || arreter 64 "usage : bash deploiement/nettoyer-images.sh <prod|staging>"
+  local nom_env="$1" code=0 code_instantanes=0
+  valider_env "$nom_env"
+  charger_env "$nom_env"
+
+  # Le dépôt : celui du projet, ou, pour l'épreuve sur un vrai Docker, un registre de la machine.
+  DEPOT="$DEPOT_IMAGE"
+  if [ -n "${ {{- prefixe }}DEPOT_IMAGE+present}" ]; then
+    [[ "${{ prefixe }}DEPOT_IMAGE" =~ $MOTIF_DEPOT_DE_TEST ]] \
+      || arreter 64 "{{ prefixe }}DEPOT_IMAGE refusée : seul un registre de la machine (localhost:<port>/…) est accepté"
+    DEPOT="${{ prefixe }}DEPOT_IMAGE"
+  fi
+
+  # 1. Le verrou de l'environnement : tenu par celui qui lance le ménage, ou pris ici.
+  if [ "${ {{- prefixe }}VERROU_TENU:-}" != 1 ] && ! prendre_verrou; then
+    arreter 1 "verrou ${{ prefixe }}ETAT/verrou toujours pris après ${ {{- prefixe }}VERROU_ATTENTE:-600} s : ménage abandonné, rien n'est retiré"
+  fi
+
+  # 2 à 6. Les images, dans un sous-shell : annuler (arreter, code 1) n'y arrête qu'elles, et le
+  # verrou de l'autre environnement (descripteur 8) se relâche à sa sortie. errexit est rétabli
+  # dedans : dans une liste || ou un if, bash l'y ignorerait.
+  set +e
+  (
+    set -e
+    menage_images "$nom_env"
+  )
+  code=$?
+  set -e
+
+  # 7. Les instantanés des données de cet environnement, sous le même verrou : ils ne changent pas
+  # le code de sortie, celui des images, même sur une erreur inattendue, que le journal dit.
+  set +e
+  (
+    set -e
+    menage_instantanes
+  )
+  code_instantanes=$?
+  set -e
+  if [ "$code_instantanes" -ne 0 ]; then
+    journal "ménage des instantanés interrompu (code $code_instantanes) : le code de sortie reste celui des images"
+  fi
   return "$code"
 }
 

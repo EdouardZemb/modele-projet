@@ -1194,4 +1194,47 @@ messages_du_journal() {
   [[ "$output" == *"réglage VERIFIER absent"* ]]
   [ "$(nombre_d_appels docker)" -eq 0 ]
 }
+
+# noter_couple écrit <instantané>.couple par un fichier temporaire du même dossier, puis `mv -T` :
+# un lien planté à la place du .couple est remplacé, jamais suivi, et ce qu'il désigne ne change
+# pas. Rien ne reste du fichier temporaire, ni quand l'écriture échoue (un dossier à la place du
+# .couple) ; sans deploye, pas de couple ; deploye illisible, pas de couple, code 1.
+@test "noter_couple : à côté de l'instantané, jamais à travers un lien" {
+  local image sha etat="${{ prefixe }}RACINE_ETAT/prod" i ailleurs="$BATS_TEST_TMPDIR/ailleurs"
+  image="ghcr.io/{{ compte | lower }}/{{ nom }}@sha256:$(printf 'a%.0s' {1..64})"
+  sha="$(printf 'c%.0s' {1..40})"
+  i="$BATS_TEST_TMPDIR/instantanes/{{ nom }}-20261014T024500Z"
+  mkdir -p "$etat" "$i"
+  echo "$image 1.2.3 $sha" >"$etat/deploye"
+  echo "à garder" >"$ailleurs"
+  ln -s "$ailleurs" "$i.couple"
+  avec_lib 'charger_env prod; noter_couple "'"$i"'"'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"couple noté : $i.couple ($image 1.2.3 $sha)"* ]]
+  [ ! -L "$i.couple" ]
+  [ -f "$i.couple" ]
+  [ "$(cat "$i.couple")" = "$image 1.2.3 $sha" ]
+  [ "$(cat "$ailleurs")" = "à garder" ]
+  [ "$(find "$BATS_TEST_TMPDIR/instantanes" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)" \
+    = "$(printf '%s\n' "{{ nom }}-20261014T024500Z" "{{ nom }}-20261014T024500Z.couple")" ]
+  # un dossier à la place du .couple : l'écriture échoue, journalisée, et rien ne reste d'elle
+  rm "$i.couple"
+  mkdir -p "$i.couple/dedans"
+  avec_lib 'charger_env prod; noter_couple "'"$i"'"'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"$i.couple ne s'écrit pas : l'instantané reste, sans son couple"* ]]
+  [ -d "$i.couple/dedans" ]
+  [ "$(find "$BATS_TEST_TMPDIR/instantanes" -mindepth 1 -maxdepth 1 | wc -l)" -eq 2 ]
+  rm -r "$i.couple"
+  # deploye illisible : code 1, pas de couple ; absent : code 0, pas de couple
+  echo "pas un couple" >"$etat/deploye"
+  avec_lib 'charger_env prod; noter_couple "'"$i"'"'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"$etat/deploye illisible : pas de $i.couple"* ]]
+  rm "$etat/deploye"
+  avec_lib 'charger_env prod; noter_couple "'"$i"'"'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"aucun couple en service ($etat/deploye absent) : pas de $i.couple"* ]]
+  [ "$(find "$BATS_TEST_TMPDIR/instantanes" -mindepth 1 -maxdepth 1 | wc -l)" -eq 1 ]
+}
 {%- endif %}
