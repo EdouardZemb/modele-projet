@@ -548,11 +548,13 @@ def depot_de_nature(tmp_path, env, sur_la_branche, dans_la_copie, branche="main"
 
 
 def porte_en_ci(clone, f, env, depot_prive="true", **variables):
+    """La porte du clone sur `f`, comme en CI. Le chemin est relatif au clone, en `/`, comme le
+    donne git : la règle des chemins de l'instance en lit le premier et le dernier segment."""
     env = {**env, "DEPOT_PRIVE": depot_prive}
     env.pop("BRANCHE_DEFAUT", None)
     env.update(variables)
     script = clone / "scripts/modele/confidentialite.py"
-    return lancer_porte(script, ["--fichiers", str(f)], env, clone)
+    return lancer_porte(script, ["--fichiers", f.relative_to(clone).as_posix()], env, clone)
 
 
 def test_nature_en_ci_lue_sur_la_branche_par_defaut(tmp_path, env_isole):
@@ -1180,6 +1182,38 @@ def test_cle_age_publique_refusee_en_code(tmp_path, env_isole, mode):
 def test_cle_age_publique_forme_exacte(texte, trouve):
     noms = [x.motif for x in c.examiner([("f:1", texte)], c.MOTIFS_DU_CODE)]
     assert noms == (["clé publique age"] if trouve else [])
+
+
+@pytest.mark.parametrize(
+    ("sur_la_branche", "dans_la_copie", "depot_prive", "refuse"),
+    [
+        ("donnees", "code", "true", False),  # un dépôt de données privé : aucun de ces constats
+        ("donnees", "donnees", "false", True),  # un dépôt public est toujours de code
+        ("code", "donnees", "true", True),  # une PR ne change pas sa nature
+    ],
+)
+def test_motifs_du_code_suivent_la_nature_en_ci(
+    tmp_path, env_isole, sur_la_branche, dans_la_copie, depot_prive, refuse
+):
+    """En CI, les deux motifs du régime `code` suivent la visibilité réelle et la nature écrite
+    sur la branche par défaut, jamais celle de la copie."""
+    env = env_isole()
+    clone, _ = depot_de_nature(tmp_path, env, sur_la_branche, dans_la_copie)
+    cle = cle_age_de_test()
+    sops = clone / ".sops.yaml"
+    sops.write_text("age: " + cle + "\n", encoding="utf-8")
+    r = porte_en_ci(clone, sops, env, depot_prive=depot_prive, BRANCHE_DEFAUT="main")
+    assert cle not in r.stdout + r.stderr
+    if refuse:
+        assert r.returncode == 1, r.stderr
+        assert "confidentialité : .sops.yaml:0 — fichier de l'instance" in r.stderr
+        assert "confidentialité : .sops.yaml:1 — clé publique age" in r.stderr
+        assert "confidentialité : 2 constat(s), refus." in r.stderr
+    else:
+        assert r.returncode == 0, r.stderr
+        assert "fichier de l'instance" not in r.stderr
+        assert "clé publique age" not in r.stderr
+        assert "constat(s)" not in r.stderr
 
 
 def test_historique_d_un_depot_de_code_voit_l_instance(tmp_path, env_isole):
