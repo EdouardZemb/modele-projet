@@ -253,6 +253,7 @@ def test_projet_env_dit_les_commandes_de_l_instance(rendre, reponses, config, co
         "lecture seule",
         "0 conforme, 2 non conforme, 64 usage, tout autre code refuse",
         "refuse le déploiement",
+        "Un dossier qui ne porte que son README.md compte comme absent",
     ):
         assert fragment in plat, fragment
 
