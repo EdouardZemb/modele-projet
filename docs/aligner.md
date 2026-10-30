@@ -30,8 +30,11 @@ Chaque case se coche dans la PR d'alignement. Une case qui ne s'applique pas au 
 - [ ] **La nature est choisie** (`--data nature=<code|donnees>`) : un dépôt qui nomme son serveur ou
       son instance, ou qui porte la configuration ou le contenu de l'instance (M-0006, § 2), prend
       `donnees` jusqu'à sa scission (M-0006, § 7) ; tout autre prend `code`. La nature n'est pas la
-      cible : elle ne change pas les fichiers rendus, seulement le régime de la porte de
-      confidentialité.
+      cible : en cible `aucune`, elle ne change pas les fichiers rendus, seulement le régime de la
+      porte de confidentialité. Dans un dépôt de code, la porte lit aussi les chemins : rien sous
+      `instance/`, `config/` ou `contenu/` à la racine, aucun `.sops.yaml`, `*.enc` ni
+      `cles/*.pub`, à toute profondeur, et aucune clé publique `age` (M-0002). Un dépôt qui en
+      porte prend `donnees`.
 - [ ] **Un dépôt de code aligné relit son historique avant la PR** : `python
       scripts/modele/confidentialite.py --exiger-prives --historique`, en local. Écrire dans
       `.github/constats-acceptes.txt` les constats acceptés (une ligne `<commit> <chemin>`, le motif
@@ -159,20 +162,37 @@ qu'au §1, dans un worktree `<dépôt>.worktrees\modele-serveur`.
       reçoit au premier `copier update` vers une étiquette qui la connaît, souvent celui qui le
       passe en cible `serveur`. Tant que la branche principale n'a pas la réponse, le garde la lit
       comme `edouard` et refuse toute fusion : 👤 Edouard fusionne cette PR.
-- [ ] **Rendre**, sur un arbre propre, avec le bloc de ports que `projets/<nom>.env` réserve dans
-      `serveur` :
+- [ ] **Rendre**, sur un arbre propre :
 
   ```sh
-  copier update --defaults --vcs-ref <étiquette> --data cible=serveur --data bloc_ports=<bloc> \
+  copier update --defaults --vcs-ref <étiquette> --data cible=serveur \
     --data sauvegardes=<true|false> --data fusion=<session|edouard>
   ```
 
   `--data fusion=…` est nécessaire tant que le projet n'a pas la réponse : `--defaults` lui
   donnerait en silence `fusion=session`, alors que le mode se choisit (M-0002). Ajouter
-  `--data domaine=…`, `sous_domaine=…`, `port_app=…` ou `chemin_sante=…` si le projet
-  diffère des valeurs par défaut. `branche_principale` reste la réponse du projet : le staging suit
-  cette branche, et l'image `:main` que la CI publie à chaque fusion sur elle. Un conflit dans un
-  fichier géré se résout en faveur du modèle.
+  `--data port_app=…` ou `chemin_sante=…` si le projet diffère des valeurs par défaut.
+  `branche_principale` reste la réponse du projet : le staging suit cette branche, et l'image
+  `:main` que la CI publie à chaque fusion sur elle. Un conflit dans un fichier géré se résout en
+  faveur du modèle.
+- [ ] **Ce qui nomme l'instance dépend de la nature** (M-0004, § 8).
+  - **Un dépôt de nature `donnees`**, à un dépôt, porte son instance. Il ajoute
+    `--data domaine=<domaine> --data bloc_ports=<bloc>`, le bloc que `projets/<nom>.env` lui
+    réserve dans `serveur`, et `--data sous_domaine=…` s'il diffère du nom : `domaine` et
+    `bloc_ports` n'ont pas de défaut. Ces réponses sont enregistrées dans `.copier-answers.yml`.
+  - **Ses clés publiques ne servent qu'au premier rendu** :
+    `--data cle_serveur=<clé publique age du serveur> --data cle_hors_ligne=<clé publique age hors
+    ligne>`. Elles sèment `.sops.yaml` et `deploiement/cles/*.pub`, que `copier update` ne touche
+    plus ensuite. Sans elles, un rendu neuf sème ces fichiers vides, et `.sops.yaml` sans
+    destinataire : les remplir à la main, dans la même PR. Un projet qui a déjà ces fichiers les
+    garde.
+  - **Un dépôt de nature `code`**, à deux dépôts, ne porte pas son instance : `domaine`,
+    `sous_domaine`, `bloc_ports` et les clés ne lui sont pas demandés. Un `--data` pour l'une
+    d'elles sert au seul rendu, sans entrer dans `.copier-answers.yml` : le `copier update` suivant
+    reviendrait en silence aux valeurs d'exemple (`exemple.org`, `4310`). Ne pas les passer. Les
+    vraies valeurs sont celles du dépôt de données, `<nom>-donnees`, né du modèle en cible
+    `donnees` avec `cible_code=serveur` : il les demande, et les écrit dans ses `env/`
+    (M-0006, § 4).
 - [ ] **Les reports à la main de `ci.yml`**, que `copier update` ne touche plus. Rendre le modèle à
       côté, avec les mêmes réponses :
 
@@ -202,7 +222,27 @@ qu'au §1, dans un worktree `<dépôt>.worktrees\modele-serveur`.
       le contrat de M-0003, dont `/donnees` à l'uid 1000.
 - [ ] **Les fichiers semés de la cible**, à remplir : `deploiement/projet.env` (les commandes
       `SAUVEGARDER` et `VERIFIER`) ; `deploiement/compose.projet.yml` ; les secrets de l'app dans
-      `deploiement/secrets/<env>.cles` ; `docs/exploitation.md`, avec ce qui est propre à l'app.
+      `deploiement/secrets/<env>.cles` ; `docs/exploitation.md`, avec ce qui est propre à l'app. À
+      deux dépôts, la liste des clés reste dans le dépôt de code, et les `.enc` vont dans le dépôt
+      de données (`docs/exploitation.md`, « Secrets »).
+- [ ] **Une application qui lit son instance** (M-0003, § 6) déclare dans `deploiement/projet.env`
+      `VERIFIER_CONFIG`, pour sa configuration, ou `VERIFIER_CONTENU`, pour son contenu, ou les
+      deux. Une application qui n'en déclare aucune ne monte rien, et cette case ne s'applique pas.
+  - **Son exemple** : pour chaque commande, un dossier à la racine du code, `exemple/` ou
+    `exemple-contenu/`. La CI du code y lance la commande, et refuse une commande déclarée sans
+    son exemple. Le staging ne monte jamais `/config` : l'image y sert sa configuration d'exemple,
+    et sa santé dit `configuration` `exemple`.
+  - **Ses données, à un dépôt** (nature `donnees`) : `instance/config/` et `instance/contenu/`, à la
+    racine du dépôt, que le déploiement lit dans le commit que l'image désigne, sa révision. La CI
+    ne lit pas `instance/` : `instance/contenu/` se vérifie au déploiement du staging, et
+    `instance/config/` à celui de la prod seulement.
+  - **Ses données, à deux dépôts** (nature `code`) : `config/` et `contenu/`, à la racine du dépôt
+    de données, que sa CI, `modele-donnees.yml`, vérifie contre les images du code. La porte du
+    dépôt de code refuse ces dossiers à sa racine.
+  - **La règle des paires** : un dossier présent, qui porte un fichier autre que son `README.md`,
+    va avec sa commande, et une commande avec son dossier. Sinon, le déploiement est refusé.
+  - **L'image d'abord** : la version qui déclare la commande se publie avant que les données
+    suivent (`docs/exploitation.md`, « Mettre en ligne »).
 - [ ] **Un état qu'une restauration ne doit pas défaire** (un registre de suppressions, par
       exemple) : le projet déclare `REPORTER` et `REPORTER_SECTION` dans `deploiement/projet.env`,
       et écrit cette section dans `docs/exploitation.md` (M-0003, M-0005).
@@ -230,7 +270,9 @@ qu'au §1, dans un worktree `<dépôt>.worktrees\modele-serveur`.
       propre arbre. D'abord le plan, sans `--oui`.
 - [ ] **Les secrets avant `serveur`.** 👤 `secrets.ps1 refaire` pour chaque environnement, puis 🤖
       la PR des deux `.enc`, fusionnée **avant** la PR de `serveur` qui déclare le projet : la
-      sonde d'un projet sans ses secrets alerte (code 3). L'ordre complet est celui de
+      sonde d'un projet sans ses secrets alerte (code 3). À deux dépôts, cette PR est celle du dépôt
+      de données ; sa CI tire l'image `:main` du code, qui doit donc être publiée et publique
+      avant elle. L'ordre complet est celui de
       `docs/exploitation.md`, « La mise en service ». Pour un projet déjà en service,
       `projets/<nom>.env` déclare ce qui existe, et la sonde de `serveur` n'y crée rien.
 - [ ] `gh pr checks` entièrement vert : `socle`, `verifier`, `deploiement` et `image`.

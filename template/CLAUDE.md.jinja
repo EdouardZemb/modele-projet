@@ -12,8 +12,14 @@ Ce dépôt est le dépôt de données de `{{ nom | regex_replace('-donnees$', ''
 - La configuration personnelle de l'application, dans `config/`.
 - Le contenu de l'instance, dans `contenu/` : ce que l'application montre et qui ne peut pas être public.
 - La documentation qui porte un récit personnel ou des noms du parc.
+{%- if cible_code == 'serveur' %}
+- L'instance du serveur : `env/`, les secrets chiffrés dans `secrets/`, `.sops.yaml` et les clés publiques dans `cles/` (M-0006, § 4).
 
-L'instance (`env/`, secrets, clés) arrive au lot 12 du modèle : ce dépôt ne la porte pas encore.
+Le staging suit la branche que nomme `{{ prefixe }}BRANCHE_DONNEES` dans `env/staging.env`, `{{ branche_principale }}` à la création ; la prod suit la plus haute étiquette de données, `donnees-AAAA.MM.JJ.n`. La CI, `modele-donnees.yml`, vérifie les secrets contre le `.cles` du dépôt de code, et `config/` et `contenu/` contre ses images.
+{%- else %}
+
+Son application n'est pas en cible `serveur` : ce dépôt ne porte ni `env/`, ni secrets, ni clés, et rien n'y est monté.
+{%- endif %}
 
 ## Les règles de ce dépôt
 

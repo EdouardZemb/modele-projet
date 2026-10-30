@@ -337,8 +337,21 @@ def test_liste_d_alignement():
         "**Les instantanés d'avant l'alignement**",
         # tout l'ancien deploiement/ : l'ancien restaurer.sh charge sa lib.sh à côté de lui
         "archive <commit> deploiement | tar -x -C <dossier temporaire>",
+        # lot 12 : la porte par chemins, ce qui nomme l'instance selon la nature, l'instance lue
+        "`instance/`, `config/` ou `contenu/` à la racine",
+        "**Ce qui nomme l'instance dépend de la nature**",
+        "`--data domaine=<domaine> --data bloc_ports=<bloc>`",
+        "**Ses clés publiques ne servent qu'au premier rendu**",
+        "sans entrer dans `.copier-answers.yml`",
+        "**Une application qui lit son instance**",
+        "`exemple/` ou",
+        "`instance/config/` et `instance/contenu/`",
+        "**La règle des paires**",
     ):
         assert fragment in texte, fragment
+    # un --data d'une question que le projet ne se voit pas poser n'entre pas dans ses réponses :
+    # le bloc de ports ne s'ajoute qu'aux dépôts qui portent leur instance (lot 12)
+    assert "--data cible=serveur --data bloc_ports=<bloc>" not in texte
     # le seul script ne suffit pas, il lui faut son arbre (revue des corrections du lot 2, I2)
     assert ":deploiement/restaurer.sh` dans un fichier temporaire" not in texte
     # avant le commit, --diff compare <base>...HEAD et n'examine rien (LE-15)
