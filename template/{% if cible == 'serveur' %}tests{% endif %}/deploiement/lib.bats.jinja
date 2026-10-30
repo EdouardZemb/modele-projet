@@ -228,6 +228,14 @@ lire_les_chemins='charger_env prod; charger_secrets prod
   avec_lib 'charger_env prod'
   [ "$status" -eq 1 ]
   [[ "$output" == *"fichier d'environnement absent : $HOME/{{ nom }}-donnees/env/prod.env"* ]]
+  # poser_clone_donnees, la même règle, sans rien lire : la sonde dit ainsi un clone absent
+  avec_lib 'poser_clone_donnees prod; echo "${{ prefixe }}CLONE_DONNEES"
+    poser_clone_donnees staging; echo "${{ prefixe }}CLONE_DONNEES"'
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "$HOME/{{ nom }}-donnees" ]
+  [ "${lines[1]}" = "$HOME/{{ nom }}-donnees-staging" ]
+  avec_lib 'poser_clone_donnees essai'
+  [ "$status" -eq 64 ]
 }
 {%- else %}
 
@@ -245,6 +253,8 @@ lire_les_chemins='charger_env prod; charger_secrets prod
   [ "${lines[1]}" = "{{ bloc_ports }}" ]
   [ "${lines[2]}" = jeton-du-clone ]
   [ "${lines[*]:3}" = "deploiement/env deploiement/secrets deploiement/cles instance/config instance/contenu" ]
+  avec_lib 'poser_clone_donnees staging; echo "${{ prefixe }}CLONE_DONNEES"'
+  [ "$output" = "$CLONE" ]
 }
 {%- endif %}
 

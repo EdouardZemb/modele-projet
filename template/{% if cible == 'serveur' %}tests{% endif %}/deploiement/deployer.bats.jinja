@@ -762,7 +762,7 @@ EOF
   for _ in 1 2; do
     passage_de_la_sonde
     [ "$status" -eq 0 ]
-    [[ "$output" == *"version en échec, attente d'une nouvelle"* ]]
+    [[ "$output" == *"couple en échec, attente d'un nouveau"* ]]
     [ "$(nombre_de_lancements)" -eq 0 ]
     [ "$(appels_de docker | grep -c ' exec ')" -eq 0 ]
     [ "$(nombre_d_appels deployer.sh)" -eq 0 ]

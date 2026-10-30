@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 # Double de `git` pour les tests de la sonde : il note chaque appel dans $APPELS et simule le
-# clone (`-C <clone>` accepté devant la sous-commande). Aucun dépôt réel n'est lu ni modifié.
+# clone (`-C <clone>` accepté devant la sous-commande). Aucun dépôt réel n'est lu ni modifié, sauf
+# celui de DOUBLE_GIT_REEL_DANS.
 #
 # Pilotage :
+#   DOUBLE_GIT_REEL_DANS     un dossier, celui d'un vrai dépôt du test (le clone des données, à deux
+#                            dépôts) : un appel `-C <ce dossier> …` est noté, puis passé au vrai git,
+#                            et les autres variables n'y ont pas cours
 #   DOUBLE_GIT_STATUS        sortie de `status --porcelain` (défaut : vide, clone propre)
-#   DOUBLE_GIT_ECHEC         sous-commande qui échoue (fetch, merge, checkout ou tag)
+#   DOUBLE_GIT_ECHEC         sous-commande qui échoue (fetch, merge, checkout, tag ou cat-file)
 #   DOUBLE_GIT_ETIQUETTES    étiquettes du clone, séparées par des espaces, pour `tag --list`.
 #                            Avec --sort=-v:refname, elles sortent dans l'ordre de version
 #                            décroissant, comme le fait git (sort -rV : même ordre que git sur
@@ -46,6 +50,10 @@ mettre_a_jour_les_etiquettes() {
 }
 
 if [ "${1:-}" = -C ]; then
+  if [ -n "${DOUBLE_GIT_REEL_DANS:-}" ] && [ "${2:-}" = "$DOUBLE_GIT_REEL_DANS" ]; then
+    # Le vrai git : le premier du PATH, hors du dossier des doubles.
+    exec "$(PATH="${PATH//"$(dirname "$0")":/}" command -v git)" "$@"
+  fi
   shift 2
 fi
 sous_commande="${1:-}"
