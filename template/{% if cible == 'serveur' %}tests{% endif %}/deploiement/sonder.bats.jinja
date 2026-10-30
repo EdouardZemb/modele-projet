@@ -98,7 +98,7 @@ appels_git_dans() {
 }
 
 # arbre_vise [<commande…>] : l'arbre de l'étiquette visée du code, que le double de git sert à
-# `show` et à `cat-file -e` (DOUBLE_GIT_ARBRE) : son deploiement/projet.env est celui de la copie
+# `ls-tree` et à `show` (DOUBLE_GIT_ARBRE) : son deploiement/projet.env est celui de la copie
 # de travail, sans commande de l'instance, avec ces commandes.
 arbre_vise() {
   local arbre="$BATS_TEST_TMPDIR/arbre-vise" commande

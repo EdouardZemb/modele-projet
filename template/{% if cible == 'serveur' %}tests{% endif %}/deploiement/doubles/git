@@ -15,9 +15,9 @@
 #   DOUBLE_GIT_ARBRE         dossier qui tient lieu de l'arbre de toute révision du clone :
 #                            `show <rév>:<chemin>` imprime son fichier <chemin> (code 128 s'il n'y
 #                            est pas), `ls-tree --name-only <rév> -- <chemin>` imprime <chemin> s'il
-#                            y est, rien sinon (code 0, comme git), et `cat-file -e <rév>:<chemin>`
-#                            dit s'il y est. Défaut : la copie de travail du clone (celui de `-C`).
-#                            Tout autre objet de `cat-file -e` (un `<sha>^{commit}`) existe.
+#                            y est, rien sinon (code 0, comme git). Défaut : la copie de travail du
+#                            clone (celui de `-C`). Tout objet de `cat-file -e` (un `<sha>^{commit}`)
+#                            existe.
 #   DOUBLE_GIT_ETIQUETTES    étiquettes du clone, séparées par des espaces, pour `tag --list`.
 #                            Avec --sort=-v:refname, elles sortent dans l'ordre de version
 #                            décroissant, comme le fait git (sort -rV : même ordre que git sur
@@ -104,14 +104,7 @@ case "$sous_commande" in
     ;;
   ls-tree)
     chemin="${!#}"
-    [ ! -f "$ARBRE/$chemin" ] || printf '%s
-' "$chemin"
-    ;;
-  cat-file)
-    objet="${!#}"
-    if [[ "$objet" == *:* ]] && [ ! -f "$ARBRE/${objet#*:}" ]; then
-      exit 128
-    fi
+    [ ! -f "$ARBRE/$chemin" ] || printf '%s\n' "$chemin"
     ;;
   merge | checkout)
     if [ -n "${DOUBLE_GIT_REECRIRE:-}" ]; then

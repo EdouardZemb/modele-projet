@@ -339,8 +339,10 @@ donnees_declarees() {
 
 # donnees_declarees_dans <fichier> : la même chose, d'après <fichier>, le projet.env d'une autre
 # version du code (sonder.sh y passe celui de l'étiquette visée, lu sans checkout). Un fichier
-# absent ne déclare rien.
+# absent ne déclare rien. Un nom vide ou manquant arrête le script : lire_projet_env_facultatif
+# lirait sinon le projet.env du clone, celui d'une autre version.
 donnees_declarees_dans() {
+  : "${1:?donnees_declarees_dans : fichier manquant}"
   DECLARE_CONFIG=0 DECLARE_CONTENU=0
   lire_projet_env_facultatif VERIFIER_CONFIG "$1" || return 1
   [ -z "${PROJET_MOTS[0]:-}" ] || DECLARE_CONFIG=1
