@@ -335,15 +335,15 @@ decrit_le_couple() {
 # données. Rend 0, ou 1 journalisé.
 controler_montages() {
   local sortie point attendu vu destination ecriture chemin
-  local -a conteneurs=()
+  local -a ids=()
   [ "$COMMIT_DONNEES" != - ] || return 0
   if ! sortie="$(dc ps -q app)" || [ -z "$sortie" ]; then
     journal "montages invérifiables : aucun conteneur app en service (docker compose ps)"
     return 1
   fi
-  mapfile -t conteneurs <<<"$sortie"
-  if ! sortie="$(docker container inspect --format '{% raw %}{{range .Mounts}}{{println .Destination .RW .Source}}{{end}}{% endraw %}' "${conteneurs[@]}")"; then
-    journal "montages invérifiables : docker container inspect ${conteneurs[*]} en échec"
+  mapfile -t ids <<<"$sortie"
+  if ! sortie="$(docker container inspect --format '{% raw %}{{range .Mounts}}{{println .Destination .RW .Source}}{{end}}{% endraw %}' "${ids[@]}")"; then
+    journal "montages invérifiables : docker container inspect ${ids[*]} en échec"
     return 1
   fi
   for point in config contenu; do
