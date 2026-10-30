@@ -585,10 +585,14 @@ aucune_copie_jetable() {
   for cas in age touch; do
     echo "cas : $cas"
     rm -rf "$q" "$DISTANT" "${DOUBLES:?}/age" "$DOUBLES/touch"
+    # le double du cas précédent est parti : bash ne doit plus le chercher là
+    hash -r
     : >"$APPELS"
     : >"$APPELS.urls"
     reel="$(command -v "$cas")"
-    # le double refuse ce qui vise le couple, et laisse passer le reste au vrai
+    # le double refuse ce qui vise le couple, et laisse passer le reste au vrai ; son corps se
+    # développe dans le double, pas ici
+    # shellcheck disable=SC2016
     creer_double "$cas" 'for a in "$@"; do case "$a" in *.couple | *.couple.age) echo "'"$cas"' : refus du double" >&2; exit 1 ;; esac; done; exec '"$reel"' "$@"'
     sauvegarder prod
     [ "$status" -eq 1 ]

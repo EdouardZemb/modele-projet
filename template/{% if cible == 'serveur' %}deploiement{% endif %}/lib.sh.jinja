@@ -117,10 +117,13 @@ _{{ prefixe }}CLONE_DONNEES_SURCHARGE="${ {{- prefixe }}CLONE_DONNEES:-}"
 # lire_echec). Définis ici seulement : une forme nouvelle (une version X.Y.Z-rc.1…) vaut à la fois
 # pour l'écriture et pour la lecture, et le ménage des images ne s'annule pas, en silence, à chaque
 # passage. Le commit de données est un sha de 40 caractères, ou « - » pour un couple sans données
-# montées, et pour un état d'avant la v0.7.0, qui n'a pas ce champ (M-0004, amendé).
+# montées, et pour un état d'avant la v0.7.0, qui n'a pas ce champ (M-0004, amendé). MOTIF_SHA est
+# ce sha seul, sans « - » : le commit qui nomme un dossier de l'état (instantanes/<sha>), et la
+# révision d'une image.
 MOTIF_REFERENCE='^[a-z0-9][a-z0-9._/:-]*@sha256:[0-9a-f]{64}$'
 MOTIF_VERSION='^(main|[0-9]+\.[0-9]+\.[0-9]+)$'
 MOTIF_COMMIT='^([0-9a-f]{40}|-)$'
+MOTIF_SHA='^[0-9a-f]{40}$'
 
 # journal <message…> : une ligne sur stderr, préfixée de l'heure ISO (UTC).
 journal() {
@@ -354,7 +357,7 @@ donnees_declarees_dans() {
 # _exiger_commit <commit> <fonction> : un commit de données, 40 caractères hexadécimaux, sinon code
 # 64 : il nomme un dossier de l'état.
 _exiger_commit() {
-  [[ "${1:-}" =~ ^[0-9a-f]{40}$ ]] \
+  [[ "${1:-}" =~ $MOTIF_SHA ]] \
     || arreter 64 "$2 : commit de données invalide : '${1:-}' (attendu : 40 caractères hexadécimaux)"
 }
 
@@ -582,7 +585,7 @@ revision_de() {
   local revision
   revision="$(docker image inspect -f '{% raw %}{{index .Config.Labels "org.opencontainers.image.revision"}}{% endraw %}' "$1")" \
     || return 1
-  if ! [[ "$revision" =~ ^[0-9a-f]{40}$ ]]; then
+  if ! [[ "$revision" =~ $MOTIF_SHA ]]; then
     journal "révision illisible pour $1 : '$revision'"
     return 1
   fi
@@ -768,12 +771,14 @@ verifier_copie() {
 # lire_version (le commit d'un état d'avant la v0.7.0 vaut « - »). Pour l'instantané d'avant un
 # déploiement, c'est le couple que le déploiement quitte (Ruling 16). Sans deploye (un premier
 # déploiement), aucun .couple, et le journal le dit : restaurer.sh dira « couple de l'instantané
-# inconnu ». Rend 0 si le .couple est écrit ou s'il n'y a pas de couple en service ; 1, journalisé,
-# si deploye ne se lit pas ou si l'écriture échoue : l'instantané reste, sans .couple (un .couple
-# coupé en route ne se lit pas, et restaurer.sh le dit inconnu). Utilisée par sauvegarder.sh et
-# deployer.sh, sous le verrou de l'état, juste après l'instantané.
+# inconnu ». L'écriture passe par un fichier temporaire du même dossier (mktemp, qui le crée
+# lui-même), puis `mv -T` : un lien planté à la place du .couple est remplacé, jamais suivi, et un
+# .couple n'est jamais à moitié écrit. Rend 0 si le .couple est écrit ou s'il n'y a pas de couple en
+# service ; 1, journalisé, si deploye ne se lit pas ou si l'écriture échoue : l'instantané reste,
+# sans .couple, et le fichier temporaire est retiré. Utilisée par sauvegarder.sh et deployer.sh,
+# sous le verrou de l'état, juste après l'instantané.
 noter_couple() {
-  local instantane="${1:?noter_couple : instantané manquant}" deploye="${{ prefixe }}ETAT/deploye"
+  local instantane="${1:?noter_couple : instantané manquant}" deploye="${{ prefixe }}ETAT/deploye" provisoire=""
   if [ ! -e "$deploye" ] && [ ! -L "$deploye" ]; then
     journal "aucun couple en service ($deploye absent) : pas de $instantane.couple"
     return 0
@@ -782,7 +787,10 @@ noter_couple() {
     journal "$deploye illisible : pas de $instantane.couple"
     return 1
   fi
-  if ! printf '%s %s %s\n' "$IMAGE_LUE" "$VERSION_LUE" "$COMMIT_LU" >"$instantane.couple"; then
+  if ! provisoire="$(mktemp -- "$instantane.couple.XXXXXX")" \
+    || ! printf '%s %s %s\n' "$IMAGE_LUE" "$VERSION_LUE" "$COMMIT_LU" >"$provisoire" \
+    || ! mv -T -- "$provisoire" "$instantane.couple"; then
+    [ -z "$provisoire" ] || rm -f -- "$provisoire"
     journal "$instantane.couple ne s'écrit pas : l'instantané reste, sans son couple"
     return 1
   fi

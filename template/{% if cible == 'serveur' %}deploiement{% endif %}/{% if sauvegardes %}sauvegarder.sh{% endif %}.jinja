@@ -44,7 +44,9 @@
 #      (<SOUS_DOSSIER_CLES>/hors-ligne.pub, lib.sh), dans un dossier temporaire 0700 ; l'en-tête age
 #      est contrôlé. La clé privée n'est pas sur le serveur : personne ici ne peut relire cette
 #      archive. Le .couple, s'il y en a un, est chiffré de même, pour la même clé : <nom>.couple.age,
-#      à côté de l'archive et à sa date (`touch -r`), que rclone garde au distant ;
+#      à côté de l'archive et à sa date (`touch -r`), que rclone garde au distant. Les données passent
+#      avant leur couple : un couple qui ne se chiffre pas, ou ne prend pas cette date, est
+#      journalisé, l'archive part seule, et la nuit est signalée en échec à l'étape 7 ;
 #   5. `rclone copy` de l'archive, puis de son couple chiffré, vers
 #      ${ {{- prefixe }}DISTANT:-sauvegardes:{{ nom }}-sauvegardes}, puis `rclone lsf` : l'un et
 #      l'autre doivent y figurer. sauvegardes: est l'alias que le serveur fait pointer vers son
@@ -65,7 +67,8 @@
 #        suppression est définitive : la corbeille d'un Drive garderait ces archives 30 jours de
 #        plus, au-delà des 90 jours promis (M-0005). Le distant peut servir à d'autres projets : une
 #        destination qui serait la racine du remote est refusée à l'étape 0 ;
-#   7. signal HC_SAUVEGARDE ok « <nom> : <N> fichiers ».
+#   7. signal HC_SAUVEGARDE ok « <nom> : <N> fichiers » ; un échec si le couple n'est pas parti
+#      (étape 4), après l'envoi et la rétention.
 #
 # Toute erreur, à partir du chargement des secrets, est signalée (HC_SAUVEGARDE /fail) par un trap
 # de sortie, qui détruit aussi le dossier temporaire, y compris sur INT, TERM et HUP. Healthchecks
@@ -160,7 +163,7 @@ main() {
   local distant="${ {{- prefixe }}DISTANT:-sauvegardes:{{ nom }}-sauvegardes}"
   local cle="${{ prefixe }}CLONE_DONNEES/$SOUS_DOSSIER_CLES/hors-ligne.pub"
   local nom destination instantane partiel sortie code=0 nombre fichiers archive couple="" presents
-  local envoyes
+  local envoyes echec_couple=""
 
   # 0. Contrôles qui précèdent tout effet.
   valider_distant "$distant"
@@ -240,15 +243,22 @@ main() {
   [ "$(head -c 21 "$archive")" = age-encryption.org/v1 ] \
     || echouer "l'archive $archive n'est pas un fichier age : rien n'est envoyé"
   # Le couple, chiffré pour la même clé, à la date de l'archive : la purge distante leur voit le
-  # même âge.
+  # même âge. Les données passent avant leur couple : un couple en échec est journalisé, l'archive
+  # part seule, et l'échec est signalé à la fin (étape 7).
   if [ -f "$instantane.couple" ] && [ ! -L "$instantane.couple" ]; then
     couple="$TMP/$nom.couple.age"
-    age -R "$cle" -o "$couple" "$instantane.couple" \
-      || echouer "chiffrement du couple impossible (age -R $cle)"
-    [ "$(head -c 21 "$couple")" = age-encryption.org/v1 ] \
-      || echouer "le couple $couple n'est pas un fichier age : rien n'est envoyé"
-    touch -r "$archive" -- "$couple" \
-      || echouer "le couple $couple ne prend pas la date de l'archive : rien n'est envoyé"
+    if ! age -R "$cle" -o "$couple" "$instantane.couple"; then
+      echec_couple="chiffrement du couple impossible (age -R $cle)"
+    elif [ "$(head -c 21 "$couple")" != age-encryption.org/v1 ]; then
+      echec_couple="le couple $couple n'est pas un fichier age"
+    elif ! touch -r "$archive" -- "$couple"; then
+      echec_couple="le couple $couple ne prend pas la date de l'archive"
+    fi
+    if [ -n "$echec_couple" ]; then
+      journal "$echec_couple : l'archive part sans son couple"
+      rm -f -- "$couple"
+      couple=""
+    fi
   fi
 
   # 5. Envoi, puis contrôle de présence.
@@ -281,7 +291,10 @@ main() {
     --include '{{ nom }}-*.couple.age' "$distant" \
     || echouer "sauvegarde $nom faite et envoyée, mais rétention distante en échec (rclone delete : code $?)"
 
-  # 7. Signal.
+  # 7. Signal. Un couple qui n'est pas parti est un échec : la sauvegarde est faite, mais
+  # restaurer.sh dirait son couple inconnu.
+  [ -z "$echec_couple" ] \
+    || echouer "sauvegarde $nom faite et envoyée, mais sans son couple : $echec_couple"
   journal "sauvegarde terminée : $nom ($fichiers)"
   signaler HC_SAUVEGARDE ok "$nom : $fichiers" || true
   return 0

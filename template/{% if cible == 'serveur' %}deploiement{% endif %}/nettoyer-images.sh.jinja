@@ -103,11 +103,10 @@ set -euo pipefail
 # La marge : parmi les images du projet que rien ne protège, les plus récentes, gardées. La même
 # pour les instantanés des données.
 MARGE=3
-# Les noms du dossier des instantanés : un commit de données, ou l'instantané provisoire d'un commit
-# (preparer_instantane, lib.sh). Un .partiel plus vieux que AGE_PARTIEL secondes est le reste d'un
-# essai coupé ; plus jeune, un déploiement peut être en train de le construire.
-MOTIF_INSTANTANE='^[0-9a-f]{40}$'
-MOTIF_PARTIEL='^[0-9a-f]{40}\.partiel$'
+# Les noms du dossier des instantanés : un commit de données (MOTIF_SHA, lib.sh), ou l'instantané
+# provisoire d'un commit, <commit>.partiel (preparer_instantane, lib.sh). Un .partiel plus vieux que
+# AGE_PARTIEL secondes est le reste d'un essai coupé ; plus jeune, un déploiement peut être en train
+# de le construire.
 AGE_PARTIEL=86400
 
 # Ce qu'écrit deployer.sh dans l'état suit MOTIF_REFERENCE et MOTIF_VERSION, de lib.sh. Ce que
@@ -198,7 +197,7 @@ abandonner_instantanes() {
 # 0 : une surprise ou un retrait impossible ne se disent qu'au journal.
 menage_instantanes() {
   local etat="${{ prefixe }}ETAT" dossier="${{ prefixe }}ETAT/instantanes" fichier chemin nom modifie
-  local maintenant tries par_etat=0 en_marge=0 recents=0 retires=0 rang=0
+  local maintenant tries partiel par_etat=0 en_marge=0 recents=0 retires=0 rang=0
   local -A gardes=()
   local -a candidats=() plus_vieux_d_abord=() a_retirer=()
   [ -e "$dossier" ] || [ -L "$dossier" ] || return 0
@@ -232,7 +231,11 @@ menage_instantanes() {
     nom="${chemin##*/}"
     case "$nom" in . | ..) continue ;; esac
     [ -e "$chemin" ] || [ -L "$chemin" ] || continue
-    if ! [[ "$nom" =~ $MOTIF_INSTANTANE ]] && ! [[ "$nom" =~ $MOTIF_PARTIEL ]]; then
+    # Un commit (MOTIF_SHA, lib.sh), ou ce commit suivi de .partiel.
+    partiel=0
+    if [[ "$nom" == *.partiel ]] && [[ "${nom%.partiel}" =~ $MOTIF_SHA ]]; then
+      partiel=1
+    elif ! [[ "$nom" =~ $MOTIF_SHA ]]; then
       abandonner_instantanes "nom inattendu : $chemin (attendu : un commit de 40 caractères hexadécimaux, ou <commit>.partiel)"
       return 0
     fi
@@ -249,7 +252,7 @@ menage_instantanes() {
       abandonner_instantanes "date de modification illisible pour $chemin"
       return 0
     fi
-    if [[ "$nom" =~ $MOTIF_PARTIEL ]]; then
+    if [ "$partiel" -eq 1 ]; then
       if [ "$modifie" -lt "$((maintenant - AGE_PARTIEL))" ]; then
         a_retirer+=("$nom")
       else
