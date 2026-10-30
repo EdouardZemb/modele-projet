@@ -1072,6 +1072,14 @@ etiqueter_les_donnees() {
     [ "$(nombre_d_appels docker)" -eq 0 ]
     [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
   done
+  # présent, mais pas un fichier : illisible aussi
+  rm "$ETAT/deploye"
+  mkdir "$ETAT/deploye"
+  : >"$APPELS"
+  sonder prod
+  [ "$status" -eq 1 ]
+  [ "$(signaux)" = "$(signal "$ETAT/deploye illisible") $HC/fail" ]
+  [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
 }
 {%- else %}
 

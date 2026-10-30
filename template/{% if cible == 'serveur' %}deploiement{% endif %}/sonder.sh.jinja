@@ -368,18 +368,25 @@ donnees_visees() {
 }
 
 # attendre_les_donnees <env> <version> : la version visée déclare une commande, mais aucune version
-# des données n'existe encore (donnees_visees). Sans couple en service (deploye absent ou
-# illisible), le signal ok « aucune version des données ». Avec, ce couple se contrôle comme quand
-# rien n'est nouveau (rien_de_nouveau), et le signal ok dit l'attente. Le champ configuration exigé
-# suit ce couple, pas la déclaration visée : montee si son compose.env monte /config, rien sinon.
+# des données n'existe encore (donnees_visees). Sans couple en service (deploye absent), le signal
+# ok « aucune version des données ». Un deploye présent mais illisible est une anomalie : rien ne
+# dirait plus ce qui sert la prod (ruling 19 du lot 12 ; hors de l'attente, deployer.sh s'en
+# charge). Avec un couple en service, il se contrôle comme quand rien n'est nouveau
+# (rien_de_nouveau), et le signal ok dit l'attente. Le champ configuration exigé suit ce couple, pas
+# la déclaration visée : montee si son compose.env monte /config, rien sinon.
 # L'attente n'arrive qu'en prod : le staging prend la tête de la branche des données.
 # Échec : anomalie signalée, code 1.
 attendre_les_donnees() {
   local nom_env="$1" version="$2" etat="${{ prefixe }}ETAT" configuration=""
-  if [ ! -f "$etat/deploye" ] || ! lire_deploye; then
+  if [ ! -e "$etat/deploye" ] && [ ! -L "$etat/deploye" ]; then
     journal "$version attend une version des données, aucun couple en service"
     signaler_sonde ok "aucune version des données"
     return 0
+  fi
+  # lire_deploye journalise les champs qu'il n'a pas pu lire.
+  if ! lire_deploye; then
+    anomalie "$etat/deploye illisible"
+    return 1
   fi
   lire_echec || journal "$etat/echec illisible : aucun couple n'est tenu pour en échec"
   if valeur_de {{ prefixe }}CONFIG "$etat/compose.env" >/dev/null; then
