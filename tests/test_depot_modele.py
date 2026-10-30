@@ -121,19 +121,47 @@ def test_mecanique_et_fausse_app_dans_la_ci_du_depot_modele():
     assert etapes.index(menage) < len(etapes) - 1
 
 
+EPREUVE_DONNEES = RACINE / "tests/modele/epreuve-donnees.sh"
+
+
 def test_l_epreuve_des_donnees_epingle_sops():
     """sops vient de sa publication, à une version épinglée, et son empreinte est vérifiée avant
     usage ; age vient d'apt. Aucune clé ni aucun secret n'est écrit dans l'épreuve : ils naissent
     au moment où elle tourne."""
-    texte = (RACINE / "tests/modele/epreuve-donnees.sh").read_text(encoding="utf-8")
+    texte = EPREUVE_DONNEES.read_text(encoding="utf-8")
     assert re.search(r"^SOPS_VERSION=\d+\.\d+\.\d+$", texte, re.MULTILINE)
     assert re.search(r"^SOPS_EMPREINTE=[0-9a-f]{64}$", texte, re.MULTILINE)
-    assert "https://github.com/getsops/sops/releases/download/" in texte
-    assert "sha256sum -c" in texte
+    # Dans cet ordre : le téléchargement, le contrôle de l'empreinte, puis seulement le bit
+    # d'exécution et l'entrée dans le PATH, avant le premier appel de sops.
+    telechargement = texte.index("https://github.com/getsops/sops/releases/download/")
+    controle = texte.index("sha256sum -c")
+    executable = texte.index('chmod +x "$OUTILS/sops"')
+    chemin = texte.index('export PATH="$OUTILS:$PATH"')
+    premier_appel = min(m.start() for m in re.finditer(r"\bsops (?:encrypt|--version)\b", texte))
+    assert telechargement < controle < executable < premier_appel
+    assert controle < chemin < premier_appel
     assert "apt-get install -y -qq age" in texte
     assert "age-keygen -o" in texte
     assert not re.search(r"age1[0-9a-z]{58}", texte)
     assert "AGE-SECRET-KEY" not in texte
+
+
+def test_sops_a_le_meme_epinglage_dans_l_epreuve_et_dans_le_job_tests():
+    """L'épinglage de sops est écrit deux fois : l'épreuve des données et le job tests de la CI. Les
+    deux disent la même version et la même empreinte du binaire linux amd64."""
+    texte = EPREUVE_DONNEES.read_text(encoding="utf-8")
+    version = re.search(r"^SOPS_VERSION=(\S+)$", texte, re.MULTILINE).group(1)
+    empreinte = re.search(r"^SOPS_EMPREINTE=(\S+)$", texte, re.MULTILINE).group(1)
+    jobs = yaml.safe_load(CI.read_text(encoding="utf-8"))["jobs"]
+    (installer,) = [e for e in jobs["tests"]["steps"] if e.get("name") == "Installer sops et age"]
+    base = re.search(
+        r"^SOPS_BASE=https://github\.com/getsops/sops/releases/download/v(\S+)$",
+        installer["run"],
+        re.MULTILINE,
+    )
+    assert base and base.group(1) == version
+    assert f'"$SOPS_BASE/sops-v{version}.linux.amd64"' in installer["run"]
+    assert re.findall(r"^\s*([0-9a-f]{64})  sops$", installer["run"], re.MULTILINE) == [empreinte]
 
 
 def test_claude_md_du_depot_modele():

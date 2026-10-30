@@ -27,13 +27,15 @@
 #   - la racine de l'état passe par un lien symbolique, lien-etat -> etat-reel, pendant toute
 #     l'épreuve (Ruling 32) : deployer.sh compare les montages sans résoudre les liens.
 #
-# Déroulé, chaque point constaté par docker inspect ou par la santé :
-#   1. le premier couple, l'image et le commit 1, se déploie en prod : /config et /contenu montés en
-#      lecture seule depuis instantanes/<commit 1>, sources sans « // », santé « montee » ;
-#   2. seul le commit change (commit 2) : le conteneur est recréé sur instantanes/<commit 2>, même
-#      image ;
-#   3. un troisième commit porte une configuration que verifier-config refuse (une version de schéma
-#      inconnue) : code 1, echec porte le couple, le conteneur en service n'a pas bougé ;
+# Déroulé, chaque point constaté par docker inspect, par la santé ou par le journal de deployer.sh :
+#   1. le premier couple, l'image et le commit 1, se déploie en prod : VERIFIER_CONTENU a tourné
+#      (code 0), sans contenu en service ; /config et /contenu montés en lecture seule depuis
+#      instantanes/<commit 1>, sources sans « // », santé « montee » ;
+#   2. seul le commit change (commit 2) : VERIFIER_CONTENU a tourné (code 0) avec /en-service, le
+#      contenu du couple 1 ; le conteneur est recréé sur instantanes/<commit 2>, même image ;
+#   3. un troisième commit porte une configuration que verifier-config refuse, et le journal en dit
+#      la cause, la version de schéma 99, inconnue : code 1, echec porte le couple, le conteneur en
+#      service n'a pas bougé, /config et /contenu toujours sur le commit 2 ;
 #   4. --retour remet le couple 1 ;
 #   5. le ménage qui suit ce retour retire un instantané qui n'est plus gardé : deux instantanés
 #      laissés par d'anciens déploiements, datés de trois et de deux jours, sont posés juste avant ;
@@ -201,6 +203,7 @@ dossier_present() { [ -d "$1" ] && [ ! -L "$1" ]; }
 egaux() { [ "$1" = "$2" ]; }
 differents() { [ "$1" != "$2" ]; }
 journal_dit() { grep -qF -- "$2" "$TRAVAIL/journal-$1"; }
+journal_tait() { ! grep -qF -- "$2" "$TRAVAIL/journal-$1"; }
 lien_en_place() { [ -L "$RACINE_ETAT" ] && [ "$(readlink -- "$RACINE_ETAT")" = "$ETAT_REEL" ]; }
 
 # git_donnees <args…> : git dans le faux dépôt de données, avec une identité d'épreuve.
@@ -418,6 +421,10 @@ POINT=1
 echo "== 1. le premier couple en prod"
 deployer 1 prod "$IMAGE" "$VERSION" --commit-donnees "$C1"
 exiger "code 0 (la racine de l'état passe par un lien, deployer.sh ne le refuse pas)" code_vaut 0
+verifier "VERIFIER_CONTENU a tourné, code 0" journal_dit 1 \
+  "contenu conforme (VERIFIER_CONTENU : code 0) : conforme"
+verifier "sans contenu en service à comparer (rien n'est en service)" journal_tait 1 \
+  "contenu en service comparé"
 verifier "deploye porte le couple 1" fichier_vaut "$ETAT_PROD/deploye" "$IMAGE $VERSION $C1"
 APP1="$(conteneur_app fausse-app)"
 exiger "un conteneur app en prod" un_seul "$APP1"
@@ -433,6 +440,8 @@ echo "== 2. seul le commit change"
 IMAGE_APP1="$(image_de "$APP1")"
 deployer 2 prod "$IMAGE" "$VERSION" --commit-donnees "$C2"
 exiger "code 0" code_vaut 0
+verifier "VERIFIER_CONTENU a tourné, code 0, avec /en-service, le contenu du couple 1" journal_dit 2 \
+  "contenu conforme (VERIFIER_CONTENU : code 0) : conforme, contenu en service comparé : 1 page, aucune disparue"
 verifier "deploye porte le couple 2" fichier_vaut "$ETAT_PROD/deploye" "$IMAGE $VERSION $C2"
 verifier "precedent porte le couple 1" fichier_vaut "$ETAT_PROD/precedent" "$IMAGE $VERSION $C1"
 APP2="$(conteneur_app fausse-app)"
@@ -454,12 +463,15 @@ DEMARRE2="$(demarre_le "$APP2")"
 deployer 3 prod "$IMAGE" "$VERSION" --commit-donnees "$C3"
 exiger "code 1" code_vaut 1
 verifier "le journal dit la configuration non conforme" journal_dit 3 'configuration non conforme (VERIFIER_CONFIG : code 2)'
+verifier "la cause : la version de schéma 99, inconnue de l'image" journal_dit 3 \
+  "configuration non conforme (VERIFIER_CONFIG : code 2) : non conforme : version de schéma inconnue : '99'"
 verifier "echec porte le couple 3" fichier_vaut "$ETAT_PROD/echec" "$IMAGE $C3"
 verifier "deploye porte encore le couple 2" fichier_vaut "$ETAT_PROD/deploye" "$IMAGE $VERSION $C2"
 verifier "le conteneur en service est le même" egaux "$(conteneur_app fausse-app)" "$APP2"
 verifier "il n'a pas redémarré" egaux "$(demarre_le "$APP2")" "$DEMARRE2"
 verifier "il tourne" en_marche "$APP2"
 constater_montage "$APP2" /config prod "$C2" config
+constater_montage "$APP2" /contenu prod "$C2" contenu
 verifier "santé : ok, configuration montee" sante_dit "$PORT_PROD" \
   '.statut == "ok" and .configuration == "montee"'
 fin_du_point 3

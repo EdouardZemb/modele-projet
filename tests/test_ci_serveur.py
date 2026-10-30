@@ -631,11 +631,21 @@ class AppLancee:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
+        # Une attente qui échoue n'atteint pas __exit__ : l'app est arrêtée ici, avant que l'erreur
+        # ne remonte.
+        try:
+            self.attendre()
+        except BaseException:
+            self.__exit__()
+            raise
+        return self
+
+    def attendre(self):
         limite = time.monotonic() + 15
         while True:
             try:
                 obtenir(self.adresse())
-                return self
+                return
             except OSError:
                 assert self.app.poll() is None, "la fausse app s'est arrêtée"
                 assert time.monotonic() < limite, "la fausse app ne répond pas"
@@ -788,8 +798,13 @@ def test_fausse_app_verifier_contenu(tmp_path):
         tmp_path / "plus",
         pages={"accueil": "Bonjour\n", "aide": "Aide\n", "nouvelle": "Nouvelle page\n"},
     )
-    assert lancer(tmp_path / "plus").returncode == 0
-    assert lancer(tmp_path / "plus", tmp_path / "en-service").returncode == 0
+    r = lancer(tmp_path / "plus")
+    assert r.returncode == 0
+    assert "contenu en service" not in r.stdout
+    r = lancer(tmp_path / "plus", tmp_path / "en-service")
+    assert r.returncode == 0
+    # La sortie, que deployer.sh relaie au journal, dit que le contenu en service a été comparé.
+    assert r.stdout.strip() == "conforme, contenu en service comparé : 2 pages, aucune disparue"
     ecrire_contenu(tmp_path / "moins", pages={"accueil": "Bienvenue\n"})
     assert lancer(tmp_path / "moins").returncode == 0
     r = lancer(tmp_path / "moins", tmp_path / "en-service")
