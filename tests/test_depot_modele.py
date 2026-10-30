@@ -68,44 +68,72 @@ def test_mecanique_et_fausse_app_dans_la_ci_du_depot_modele():
     assert bats["env"] == {"MODELE_TESTS_SANS_SAUT": "1"}
 
     fausse_app = jobs["fausse-app"]
+    etapes = fausse_app["steps"]
     assert fausse_app["runs-on"] == "ubuntu-latest"
     texte = "\n".join(commandes("fausse-app"))
     for fragment in (
         "copier copy --vcs-ref HEAD --defaults --trust",
         "--data nom=fausse-app",
         "--data cible=serveur",
-        # le mode à un dépôt, que la fausse app sert jusqu'à ce que la chaîne à deux dépôts l'atteigne
-        "--data nature=donnees",
-        "--data bloc_ports=4310",
+        # la chaîne à deux dépôts (M-0006, § 6) : la fausse app est un dépôt de code
+        "--data nature=code",
         # explicite : la preuve de la sauvegarde ne dépend pas d'un défaut de copier.yml (R20)
         "--data sauvegardes=true",
-        "--data domaine=exemple.org",
         ". rendu",
-        "cp tests/modele/fausse-app/* rendu/",
+        # les dossiers d'exemple compris
+        "cp -R tests/modele/fausse-app/. rendu/",
     ):
         assert fragment in texte, fragment
-    (construire,) = [e for e in fausse_app["steps"] if "uses" in e and "modele-image" in e["uses"]]
+    # L'instance (le domaine, le bloc de ports) vit dans le dépôt de données, que l'épreuve fabrique.
+    for absent in ("nature=donnees", "bloc_ports", "domaine="):
+        assert absent not in texte, absent
+    (rendre,) = [e for e in etapes if "copier copy" in e.get("run", "")]
+    # projet.env déclare les deux commandes de l'instance, que verifier-image.sh lance sur l'exemple
+    # et deployer.sh sur les instantanés.
+    for ligne in ("VERIFIER_CONFIG=verifier-config", "VERIFIER_CONTENU=verifier-contenu"):
+        assert ligne in rendre["run"], ligne
+    assert "rendu/deploiement/projet.env" in rendre["run"]
+    (construire,) = [e for e in etapes if "uses" in e and "modele-image" in e["uses"]]
     assert construire == {
         "uses": "./rendu/.github/actions/modele-image-construire",
         "with": {"dossier": "rendu"},
     }
-    rendu_avant = [
-        i for i, e in enumerate(fausse_app["steps"]) if "copier copy" in e.get("run", "")
-    ]
-    assert rendu_avant and rendu_avant[0] < fausse_app["steps"].index(construire)
+    assert etapes.index(rendre) < etapes.index(construire)
     # L'épreuve du ménage des images (#19), sur le vrai Docker du job, après la construction.
-    (epreuve,) = [e for e in fausse_app["steps"] if "epreuve-menage" in e.get("run", "")]
+    (epreuve,) = [e for e in etapes if "epreuve-menage" in e.get("run", "")]
     assert epreuve["run"] == "bash tests/modele/epreuve-menage.sh rendu"
-    assert fausse_app["steps"].index(construire) < fausse_app["steps"].index(epreuve)
-    # Le registre et les conteneurs de l'épreuve sont retirés quoi qu'il arrive, puis la fausse app :
+    assert etapes.index(construire) < etapes.index(epreuve)
+    # L'épreuve des données (#64), la chaîne à deux dépôts, sur l'image construite.
+    (donnees,) = [e for e in etapes if "epreuve-donnees" in e.get("run", "")]
+    assert donnees["run"] == "bash tests/modele/epreuve-donnees.sh rendu"
+    assert etapes.index(construire) < etapes.index(donnees)
+    # Le registre et les conteneurs des épreuves sont retirés quoi qu'il arrive, puis la fausse app :
     # ce dernier retrait ferme le job.
-    (menage,) = [e for e in fausse_app["steps"] if "epreuve-registre" in e.get("run", "")]
+    (menage,) = [e for e in etapes if "epreuve-registre" in e.get("run", "")]
     assert menage["if"] == "always()"
     assert "docker rm -f -v epreuve-registre epreuve-conteneur" in menage["run"]
-    assert fausse_app["steps"].index(epreuve) < fausse_app["steps"].index(menage)
-    assert fausse_app["steps"][-1]["if"] == "always()"
-    assert fausse_app["steps"][-1]["run"] == "docker rm -f -v fausse-app"
-    assert fausse_app["steps"].index(menage) < len(fausse_app["steps"]) - 1
+    for nom in ("epreuve-donnees-registre", "fausse-app-app-1", "fausse-app-staging-app-1"):
+        assert nom in menage["run"], nom
+    assert etapes.index(epreuve) < etapes.index(menage)
+    assert etapes.index(donnees) < etapes.index(menage)
+    assert etapes[-1]["if"] == "always()"
+    assert etapes[-1]["run"] == "docker rm -f -v fausse-app"
+    assert etapes.index(menage) < len(etapes) - 1
+
+
+def test_l_epreuve_des_donnees_epingle_sops():
+    """sops vient de sa publication, à une version épinglée, et son empreinte est vérifiée avant
+    usage ; age vient d'apt. Aucune clé ni aucun secret n'est écrit dans l'épreuve : ils naissent
+    au moment où elle tourne."""
+    texte = (RACINE / "tests/modele/epreuve-donnees.sh").read_text(encoding="utf-8")
+    assert re.search(r"^SOPS_VERSION=\d+\.\d+\.\d+$", texte, re.MULTILINE)
+    assert re.search(r"^SOPS_EMPREINTE=[0-9a-f]{64}$", texte, re.MULTILINE)
+    assert "https://github.com/getsops/sops/releases/download/" in texte
+    assert "sha256sum -c" in texte
+    assert "apt-get install -y -qq age" in texte
+    assert "age-keygen -o" in texte
+    assert not re.search(r"age1[0-9a-z]{58}", texte)
+    assert "AGE-SECRET-KEY" not in texte
 
 
 def test_claude_md_du_depot_modele():
