@@ -70,7 +70,8 @@ REFUS_ETIQUETTE = (
 )
 MODES_FUSION = ("session", "edouard")
 REPONSE_SESSION = re.compile(r"^fusion:[ \t]*session[ \t]*\r?$", re.MULTILINE)
-DESTINATION_ETIQUETTE = re.compile(r"^v[0-9]")
+# Une étiquette du code (`v1.2.3`) ou de données (`donnees-2026.11.03.1`, et tout `donnees-…`).
+DESTINATION_ETIQUETTE = re.compile(r"^(?:v[0-9]|donnees-)")
 RELEASE_LECTURE = {"view", "list", "download"}
 
 # Mots qui précèdent la vraie commande sans la changer.

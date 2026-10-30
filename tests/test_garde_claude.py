@@ -265,6 +265,24 @@ def test_admis(commande, courante, verts):
     assert refus(commande, courante, verts) is None, commande
 
 
+@pytest.mark.parametrize(
+    ("commande", "refuse"),
+    [
+        ("git push origin donnees-2026.11.03.1", True),
+        ("git push origin HEAD:donnees-2026.11.03.1", True),
+        ("git push origin refs/tags/donnees-2026.11.03.1", True),
+        ("git push --delete origin donnees-2026.11.03.1", True),
+        ("git push origin donnees-autre-forme", True),
+        # l'étiquette se pose en local ; une branche qui contient le mot n'est pas une étiquette
+        ("git tag donnees-2026.11.03.1", False),
+        ("git push origin lot-12/donnees", False),
+    ],
+)
+def test_garde_refuse_les_etiquettes_de_donnees(commande, refuse):
+    """Les étiquettes de données sont à Edouard, comme celles du code (M-0006, § 6)."""
+    assert refus(commande) == (garde_claude.REFUS_ETIQUETTE if refuse else None), commande
+
+
 def test_cd_change_la_branche_courante():
     vus = []
 

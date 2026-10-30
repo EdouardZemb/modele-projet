@@ -17,6 +17,11 @@ refuse toujours. En CI, DEPOT_PRIVE (la visibilité réelle) force le régime `c
 --public force le régime `code`. Sans reglages.py (le dépôt modèle lui-même) ou en `code`, tout
 constat refuse. Les erreurs d'usage et l'absence d'une liste privée exigée refusent toujours (64).
 
+Le régime `code` ajoute deux motifs (M-0006, § 3) : une clé publique `age`, où qu'elle soit écrite,
+et un fichier de l'instance, lu sur son seul nom (`*.enc`, `.sops.yaml`, un `*.pub` dans `cles/`,
+et ce qui est sous `instance/`, `config/` ou `contenu/` à la racine). Un dépôt de données porte ces
+fichiers par définition : en régime `donnees`, ils ne donnent aucun constat.
+
 Le mode --historique relit tout l'historique d'un dépôt de code (`git log --all -p`) : chaque
 constat porte l'emplacement `<sha>:<chemin>:<ligne>`, le message d'un commit étant le chemin
 `message`. Une fusion est lue par `--remerge-diff` : ce que sa résolution a changé est attribué à
@@ -63,6 +68,9 @@ class Motif:
     nom: str
     expression: re.Pattern[str]
     famille: str = IDENTIFICATION
+    # Un motif de chemin ne lit que les lignes `<chemin>:0`, le nom d'un fichier : un texte qui
+    # cite ce chemin n'est pas ce fichier. Il ne masque pas le chemin qu'il signale.
+    chemin_seul: bool = False
 
 
 @dataclass(frozen=True)
@@ -101,6 +109,23 @@ MOTIFS_GENERIQUES: tuple[Motif, ...] = (
     _g("jeton de tunnel Cloudflare", r"\beyJ[A-Za-z0-9+/=]{100,}", SECRET),
     # l'adresse de ping porte la clé du contrôle : qui la connaît peut le faire mentir
     _g("adresse de ping Healthchecks", r"hc-ping\.com/[A-Za-z0-9_-]{20,}", SECRET),
+)
+
+# Le régime `code` seul (M-0006, § 3) : un dépôt de code ne porte rien de l'instance, ni clé du
+# parc, ni fichier chiffré, ni configuration. Un dépôt de données porte ces fichiers par
+# définition : ces motifs ne lui donnent aucun constat.
+MOTIFS_DU_CODE: tuple[Motif, ...] = (
+    _g("clé publique age", r"\bage1[0-9a-z]{58}\b"),
+    Motif(
+        "fichier de l'instance",
+        # un nom `*.enc` ou `.sops.yaml`, ou un `*.pub` dans un dossier `cles`, à toute
+        # profondeur ; un premier segment `instance`, `config` ou `contenu` (`src/config/` est du
+        # code). Un gabarit `….jinja` n'est pas le fichier qu'il rend.
+        re.compile(
+            r"^(?:instance|config|contenu)/|(?:^|/)(?:[^/]*\.enc|\.sops\.yaml|cles/[^/]*\.pub)$"
+        ),
+        chemin_seul=True,
+    ),
 )
 
 
@@ -144,7 +169,10 @@ def examiner(lignes: Iterable[tuple[str, str]], motifs: Sequence[Motif]) -> list
     """Un constat par couple (ligne, motif) qui correspond. La valeur trouvée n'est pas gardée."""
     constats: list[Constat] = []
     for emplacement, texte in lignes:
+        nom_de_fichier = emplacement.endswith(":0")
         for motif in motifs:
+            if motif.chemin_seul and not nom_de_fichier:
+                continue
             if motif.expression.search(texte):
                 constats.append(Constat(emplacement, motif.nom, motif.famille))
     return constats
@@ -582,7 +610,6 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_USAGE
     if liste is None:
         print("confidentialité : aucune liste privée, motifs génériques seuls", file=sys.stderr)
-    motifs = (*MOTIFS_GENERIQUES, *prives)
     acceptes: set[tuple[str, str]] = set()
     if args.acceptes is not None:
         try:
@@ -595,12 +622,16 @@ def main(argv: list[str] | None = None) -> int:
         except ValueError as e:  # message déjà neutre : le seul numéro de ligne
             print(f"confidentialité : {e}", file=sys.stderr)
             return EXIT_USAGE
-    if args.historique and not args.public and nature() == "donnees":
+    regime = "code" if args.public else nature()
+    if args.historique and regime == "donnees":
         print(
             "confidentialité : dépôt de données : historique relu par gitleaks seul",
             file=sys.stderr,
         )
         return 0
+    du_code = MOTIFS_DU_CODE if regime == "code" else ()
+    motifs = (*MOTIFS_GENERIQUES, *du_code, *prives)
+    masquants = tuple(m for m in motifs if not m.chemin_seul)
     try:
         lignes, non_examines = _lignes_du_mode(args)
     except ErreurUsage as e:
@@ -610,7 +641,7 @@ def main(argv: list[str] | None = None) -> int:
     masquer = _masquer_historique if args.historique else _masquer
     for chemin in non_examines:  # la fin du silence, pas un refus
         print(
-            f"confidentialité : fichier binaire non examiné : {masquer_chemin(chemin, motifs)}",
+            f"confidentialité : fichier binaire non examiné : {masquer_chemin(chemin, masquants)}",
             file=sys.stderr,
         )
     constats = examiner(lignes, motifs)
@@ -619,12 +650,13 @@ def main(argv: list[str] | None = None) -> int:
         if ecartes:
             print(f"confidentialité : {ecartes} constat(s) accepté(s), écarté(s)", file=sys.stderr)
     for constat in constats:
-        emplacement = masquer(constat.emplacement, motifs)
+        emplacement = masquer(constat.emplacement, masquants)
         print(f"confidentialité : {emplacement} — {constat.motif}", file=sys.stderr)
     if not constats:
         return 0
-    # Dans l'historique, le régime est `code` : même l'identification refuse.
-    if not args.public and not args.historique and nature() == "donnees":
+    # Dans l'historique, le régime est `code` (un dépôt de données s'est arrêté plus haut) : même
+    # l'identification refuse.
+    if regime == "donnees":
         secrets = sum(1 for c in constats if c.famille == SECRET)
         if not secrets:  # un dépôt de données peut nommer son serveur : il est averti
             print(
