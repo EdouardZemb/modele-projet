@@ -53,8 +53,9 @@
 #      ${{ prefixe }}ETAT/instantanes/<sha> (preparer_instantane ; jamais config/ en staging), puis les
 #      commandes déclarées, dans un conteneur jetable de l'image visée, sur cet instantané :
 #      VERIFIER_CONFIG hors staging, et VERIFIER_CONTENU avec, sur /en-service, le contenu de
-#      l'instantané du couple en service, s'il en a un (verifier_instantane). Une règle des paires
-#      en défaut, un instantané impossible ou une vérification qui n'a pas eu lieu : code 1 signalé,
+#      l'instantané du couple en service, s'il en a un, refait d'abord s'il manque
+#      (verifier_instantane). Une règle des paires en défaut, un instantané impossible (celui du
+#      couple en service compris) ou une vérification qui n'a pas eu lieu : code 1 signalé,
 #      rien de changé, rien de marqué en échec, et la sonde réessaiera. Des données non conformes
 #      (code 2) : echec ← "<image> <sha>", code 1 signalé, et rien d'autre ne change : le
 #      conteneur en service n'est pas touché ;
@@ -85,7 +86,8 @@
 #   4. `docker compose up -d --wait --remove-orphans` (un conteneur dont aucun des deux fichiers
 #      compose ne déclare plus le service est retiré) ; avec un commit de données, les montages du
 #      conteneur app (`docker container inspect`) : sur /config et /contenu, l'instantané visé en
-#      lecture seule s'il les monte, rien sinon (jamais /config en staging) ; puis santé sur
+#      lecture seule s'il les monte, rien sinon (jamais /config en staging), les chemins sous leur
+#      forme canonique, sans résoudre les liens ; puis santé sur
 #      127.0.0.1 : statut ok, la version attendue, la révision du label
 #      org.opencontainers.image.revision de l'image et, avec un commit de données et
 #      VERIFIER_CONFIG déclarée, le champ configuration : exemple en staging, montee en prod ;
@@ -97,9 +99,12 @@
 #      ok ;
 {%- endif %}
 #   6. échec : echec ← "<image> <commit>" d'abord (la sonde ne retentera pas ce couple, même si la
-#      suite est coupée), puis retour à compose.env.precedent et contrôle de sa santé (statut,
-#      version, révision) ; sans version précédente (premier déploiement), la version en échec est
-#      arrêtée. Signal /fail ;
+#      suite est coupée), puis retour à compose.env.precedent, contrôlé comme à l'aller : ses
+#      montages (ceux de compose.env.precedent, sauf si ni lui ni le couple en échec n'ont de commit
+#      de données), puis sa santé (statut, version, révision et, aux conditions de l'aller, le champ
+#      configuration : montee s'il monte /config, exemple en staging s'il a un commit de données et
+#      que VERIFIER_CONFIG est déclarée) ; sans version précédente (premier déploiement), la version
+#      en échec est arrêtée. Signal /fail ;
 #   7. succès seulement (un déploiement ou un retour arrière réussi), après le signal ok :
 #      nettoyer-images.sh, sous le même verrou ({{ prefixe }}VERROU_TENU=1 : il ne l'attend pas). Son
 #      échec est journalisé et ne change pas le résultat.
@@ -182,6 +187,7 @@ INSTANTANE_VISE=""        # l'instantané des données du couple visé ; vide sa
 MONTER_CONFIG=0           # 1 : compose.env monte la configuration sur /config (jamais en staging)
 MONTER_CONTENU=0          # 1 : compose.env monte le contenu sur /contenu
 CONFIGURATION_ATTENDUE="" # le champ configuration que la santé doit dire, exemple ou montee ; vide : non lu
+COMMIT_PRECEDENT=""       # le commit du couple que l'étape 3 copie dans compose.env.precedent ; vide : inconnu
 
 # Ce qui s'écrit dans compose.env : une seule ligne chacune, sans surprise. L'image et la version
 # suivent MOTIF_REFERENCE et MOTIF_VERSION, définis dans lib.sh : ceux que lire_version et le ménage
@@ -279,7 +285,8 @@ controler_couple() {
 # et avant tout changement : la règle des paires (controler_paires), l'instantané du commit
 # (preparer_instantane), puis les commandes déclarées, dans un conteneur jetable de l'image visée,
 # sur cet instantané, avec, pour VERIFIER_CONTENU, l'instantané du couple en service, s'il a un
-# commit (verifier_instantane). <quoi> et <avant> sont ceux des messages de main. Rend 0 si le couple
+# commit (verifier_instantane), refait d'abord s'il manque. <quoi> et <avant> sont ceux des messages
+# de main. Rend 0 si le couple
 # peut se déployer. Des données non conformes (code 2) : echec ← "<image> <commit>", signal, code 1 ;
 # la sonde ne retentera pas ce couple. Une règle des paires en défaut, un instantané impossible, ou
 # une vérification qui n'a pas eu lieu : rien n'est marqué, signal, code 1, et la sonde réessaiera.
@@ -298,7 +305,17 @@ verifier_donnees() {
     return 1
   fi
   INSTANTANE_VISE="$INSTANTANE"
-  [ "$commit_service" = - ] || en_service=("${{ prefixe }}ETAT/instantanes/$commit_service")
+  if [ "$commit_service" != - ]; then
+    en_service=("${{ prefixe }}ETAT/instantanes/$commit_service")
+    # L'instantané du couple en service, que VERIFIER_CONTENU reçoit sur /en-service, se refait s'il
+    # manque (retiré à la main, disque refait) : sinon la vérification n'aurait jamais lieu. S'il ne
+    # se refait pas, verifier_instantane le dit introuvable, et rien ne change.
+    if [ "$DECLARE_CONTENU" -eq 1 ] && [ ! -e "${en_service[0]}" ] && [ ! -L "${en_service[0]}" ]; then
+      journal "instantané du couple en service absent : ${en_service[0]} ; il se refait"
+      preparer_instantane "$commit_service" \
+        || journal "l'instantané du couple en service ne se refait pas"
+    fi
+  fi
   verifier_instantane "$NOM_ENV" "$REFERENCE" "$INSTANTANE_VISE" "${en_service[@]}" || code=$?
   case "$code" in
     0) return 0 ;;
@@ -329,15 +346,22 @@ decrit_le_couple() {
   done
 }
 
-# controler_montages : après le `up`, les montages du conteneur app, lus par `docker container
-# inspect` (le JSON de .Mounts, une ligne « <point> <RW> <source> » par montage, par jq), sont ceux
-# du couple visé : sur /config et /contenu, l'instantané visé en lecture seule s'il les monte, et
-# rien sinon (jamais /config en staging). Rien à contrôler sans commit de données. Rend 0, ou 1
-# journalisé.
+# canonique <chemin> : la forme canonique d'un chemin absolu, sans « // », « . », « .. » ni « / »
+# final, sans résoudre les liens (`realpath -m -s`) : un lien repointé reste vu. Le chemin tel quel
+# si realpath échoue.
+canonique() {
+  realpath -m -s -- "$1" 2>/dev/null || printf '%s\n' "$1"
+}
+
+# controler_montages <source de /config> <source de /contenu> : après le `up`, les montages du
+# conteneur app, lus par `docker container inspect` (le JSON de .Mounts, une ligne « <point> <RW>
+# <source> » par montage, par jq), sont ceux du couple lancé : sur /config et /contenu, cette source
+# en lecture seule, ou rien si elle est vide (jamais /config en staging). Les deux sources se
+# comparent sous leur forme canonique (canonique) : docker rend la source nettoyée, et ${{ prefixe }}ETAT
+# peut porter un « // ». Rend 0, ou 1 journalisé.
 controler_montages() {
   local sortie point attendu vu destination ecriture chemin
   local -a ids=()
-  [ "$COMMIT_DONNEES" != - ] || return 0
   if ! sortie="$(dc ps -q app)" || [ -z "$sortie" ]; then
     journal "montages invérifiables : aucun conteneur app en service (docker compose ps)"
     return 1
@@ -352,15 +376,12 @@ controler_montages() {
     return 1
   fi
   for point in config contenu; do
-    attendu=""
-    if [ "$point" = config ] && [ "$MONTER_CONFIG" -eq 1 ]; then
-      attendu="$INSTANTANE_VISE/config"
-    elif [ "$point" = contenu ] && [ "$MONTER_CONTENU" -eq 1 ]; then
-      attendu="$INSTANTANE_VISE/contenu"
-    fi
+    attendu="$1"
+    [ "$point" = config ] || attendu="$2"
+    [ -z "$attendu" ] || attendu="$(canonique "$attendu")"
     vu=""
     while read -r destination ecriture chemin; do
-      [ "$destination" != "/$point" ] || vu="${vu:+$vu, }$ecriture $chemin"
+      [ "$destination" != "/$point" ] || vu="${vu:+$vu, }$ecriture $(canonique "$chemin")"
     done <<<"$sortie"
     if [ -z "$attendu" ] && [ -n "$vu" ]; then
       journal "/$point monté alors que le couple ne le monte pas : $vu"
@@ -371,7 +392,7 @@ controler_montages() {
       return 1
     fi
   done
-  journal "montages conformes : l'instantané $INSTANTANE_VISE"
+  journal "montages conformes (/config : ${1:-rien}, /contenu : ${2:-rien})"
 }
 {%- if sauvegardes %}
 
@@ -534,11 +555,33 @@ preparer_retour() {
   controler_couple "retour arrière impossible"
 }
 
+# commit_des_montages <compose.env> : le commit de données que nomment les montages de ce
+# compose.env ({{ prefixe }}CONFIG, {{ prefixe }}CONTENU, sous ${{ prefixe }}ETAT/instantanes/<commit>/), ou « - »
+# s'il n'en monte aucun.
+commit_des_montages() {
+  local cle chemin reste
+  for cle in {{ prefixe }}CONFIG {{ prefixe }}CONTENU; do
+    chemin="$(valeur_de "$cle" "$1")" || continue
+    reste="${chemin#"${{ prefixe }}ETAT/instantanes/"}"
+    if [ "$reste" != "$chemin" ] && [[ "${reste%%/*}" =~ ^[0-9a-f]{40}$ ]]; then
+      printf '%s\n' "${reste%%/*}"
+      return 0
+    fi
+  done
+  printf '%s\n' -
+}
+
 # echouer <raison> : le couple est marqué en échec avant tout le reste, puis retour arrière. En
 # retour arrière manuel, le « couple en échec » est celui qu'on quittait : echec le nomme déjà, et
-# le remettre en service est le comportement d'un déploiement raté.
+# le remettre en service est le comportement d'un déploiement raté. Le couple remis en service se
+# contrôle comme à l'aller : ses montages après le `up`, ceux de compose.env.precedent (un conteneur
+# que compose ne recrée pas monterait encore l'instantané en échec), sauf si ni lui ni le couple en
+# échec n'ont de commit de données ; puis sa santé, avec le champ configuration aux conditions de
+# l'aller, lues sur ce couple : montee s'il monte /config, exemple en staging s'il a un commit de
+# données (COMMIT_PRECEDENT, sinon celui de ses montages) et que projet.env déclare VERIFIER_CONFIG.
 echouer() {
   local raison="$1" etat="${{ prefixe }}ETAT" retour=aucun image_prec version_prec revision_prec message
+  local config_prec contenu_prec commit_prec configuration_prec=""
   ecrire_atomique "$etat/echec" "$COUPLE_EN_ECHEC"
   if [ "$RETOUR" -eq 1 ]; then
     journal "échec du retour à $VERSION ($raison) : $COUPLE_EN_ECHEC ($VERSION_QUITTEE) reste marqué en échec"
@@ -550,10 +593,21 @@ echouer() {
     copier_atomique "$etat/compose.env.precedent" "$etat/compose.env"
     image_prec="$(valeur_de {{ prefixe }}IMAGE "$etat/compose.env")" || image_prec=""
     version_prec="$(valeur_de {{ prefixe }}VERSION "$etat/compose.env")" || version_prec=inconnue
+    config_prec="$(valeur_de {{ prefixe }}CONFIG "$etat/compose.env")" || config_prec=""
+    contenu_prec="$(valeur_de {{ prefixe }}CONTENU "$etat/compose.env")" || contenu_prec=""
+    commit_prec="${COMMIT_PRECEDENT:-$(commit_des_montages "$etat/compose.env")}"
+    if [ -n "$config_prec" ]; then
+      configuration_prec=montee
+    elif [ "$NOM_ENV" != prod ] && [ "$commit_prec" != - ] && [ "$DECLARE_CONFIG" -eq 1 ]; then
+      configuration_prec=exemple
+    fi
     retour="$version_prec"
-    journal "retour à $version_prec : $image_prec"
-    if lancer && revision_prec="$(revision_de "$image_prec")" \
-      && sante_conforme "$version_prec" "$revision_prec"; then
+    journal "retour à $version_prec : $image_prec, données $commit_prec"
+    if lancer \
+      && { { [ "$commit_prec" = - ] && [ "$COMMIT_DONNEES" = - ]; } \
+        || controler_montages "$config_prec" "$contenu_prec"; } \
+      && revision_prec="$(revision_de "$image_prec")" \
+      && sante_conforme "$version_prec" "$revision_prec" ${configuration_prec:+"$configuration_prec"}; then
       journal "retour à $version_prec réussi"
     else
       retour="$version_prec en échec"
@@ -637,6 +691,7 @@ main() {
   charger_env "$NOM_ENV"
   charger_secrets "$NOM_ENV"
   local etat="${{ prefixe }}ETAT" deployee="" commit_deploye=-{% if sauvegardes %} conteneurs=""{% endif %} revision raison="" quoi avant declarees=""
+  local config_visee="" contenu_vise=""
   local -a lignes=()
 
   # L'image, la version et les montages ne viennent que de compose.env (refuser_image_heritee,
@@ -734,6 +789,7 @@ main() {
   if [ -f "$etat/compose.env" ]; then
     if decrit_le_couple "$etat/compose.env" "$deployee" "$commit_deploye"; then
       copier_atomique "$etat/compose.env" "$etat/compose.env.precedent"
+      COMMIT_PRECEDENT="$commit_deploye"
     else
       journal "compose.env ne décrit pas le couple déployé (déploiement interrompu ?) : compose.env.precedent reste la cible du retour arrière"
     fi
@@ -750,14 +806,16 @@ main() {
     "{{ prefixe }}URL_PUBLIQUE=${{ prefixe }}URL_PUBLIQUE"
   )
   # Les montages de l'instantané visé, que `dc` lit dans compose.env (jamais /config en staging).
-  [ "$MONTER_CONFIG" -eq 0 ] || lignes+=("{{ prefixe }}CONFIG=$INSTANTANE_VISE/config")
-  [ "$MONTER_CONTENU" -eq 0 ] || lignes+=("{{ prefixe }}CONTENU=$INSTANTANE_VISE/contenu")
+  [ "$MONTER_CONFIG" -eq 0 ] || config_visee="$INSTANTANE_VISE/config"
+  [ "$MONTER_CONTENU" -eq 0 ] || contenu_vise="$INSTANTANE_VISE/contenu"
+  [ -z "$config_visee" ] || lignes+=("{{ prefixe }}CONFIG=$config_visee")
+  [ -z "$contenu_vise" ] || lignes+=("{{ prefixe }}CONTENU=$contenu_vise")
   ecrire_atomique "$etat/compose.env" "${lignes[@]}"
 
-  # 4. Lancement, montages et santé.
+  # 4. Lancement, montages (avec un commit de données) et santé.
   if ! lancer; then
     raison="docker compose up en échec"
-  elif ! controler_montages; then
+  elif [ "$COMMIT_DONNEES" != - ] && ! controler_montages "$config_visee" "$contenu_vise"; then
     raison="montage des données non conforme"
   elif ! revision="$(revision_de "$REFERENCE")"; then
     raison="révision de l'image illisible"
