@@ -55,7 +55,10 @@ def test_combinaison(rendre, env_isole, cible, nature, fusion):
         assert not RESTE_DE_JINJA.search(texte), chemin
 
     env = env_isole()
-    commande = [sys.executable, "scripts/modele/confidentialite.py", "--fichiers", *[str(f) for f in fichiers]]
+    # Des chemins relatifs au rendu, en `/`, comme les donne git : la règle des chemins de
+    # l'instance lit le premier et le dernier segment (M-0006, § 3).
+    relatifs = [f.relative_to(rendu).as_posix() for f in fichiers]
+    commande = [sys.executable, "scripts/modele/confidentialite.py", "--fichiers", *relatifs]
     # --public force le régime `code`, celui d'un dépôt de code ; un dépôt de données n'en est jamais un.
     if nature == "code" and not cible.startswith("donnees"):
         commande.append("--public")

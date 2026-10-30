@@ -3,4 +3,7 @@
 # Une ligne par couple (commit, chemin). Un constat nouveau refuse tant qu'il n'est pas décidé.
 ff95d490864e863ad2294e7866f5e4dd84a14e9d docs/cadrage.md  # motif privé n°8
 8cbe0c718487811c7a1d63d348a2df21982be7ce copier.yml  # motif privé n°8
-8cbe0c718487811c7a1d63d348a2df21982be7ce tests/test_cible_serveur.py  # motif privé n°8
+8cbe0c718487811c7a1d63d348a2df21982be7ce tests/test_cible_serveur.py  # motif privé n°8, clé publique age
+8cbe0c718487811c7a1d63d348a2df21982be7ce template/{% if cible == 'serveur' %}.sops.yaml{% endif %}  # clé publique age
+8cbe0c718487811c7a1d63d348a2df21982be7ce template/{% if cible == 'serveur' %}deploiement{% endif %}/cles/hors-ligne.pub  # fichier de l'instance, clé publique age
+8cbe0c718487811c7a1d63d348a2df21982be7ce template/{% if cible == 'serveur' %}deploiement{% endif %}/cles/serveur.pub  # fichier de l'instance, clé publique age

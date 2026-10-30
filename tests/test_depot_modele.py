@@ -2,6 +2,8 @@
 
 import json
 import re
+import subprocess
+import sys
 
 import yaml
 from conftest import RACINE
@@ -120,6 +122,30 @@ def test_hooks_du_depot_modele():
     assert "template/scripts/modele/masques.py" in pre_commit
     assert pre_commit.index("masques.py") < pre_commit.index("confidentialite.py")
     assert "--branche main" in (RACINE / ".githooks/pre-push").read_text(encoding="utf-8")
+
+
+def test_depot_modele_passe_sa_porte(env_isole):
+    """Le dépôt modèle est un dépôt de code : son arbre entier passe sa propre porte, règle des
+    chemins de l'instance et clé publique `age` comprises, sans exception (M-0006, § 3)."""
+    suivis = subprocess.run(
+        ["git", "-c", "core.quotepath=false", "ls-files", "-z"],
+        cwd=RACINE,
+        capture_output=True,
+        check=True,
+    ).stdout.decode("utf-8")
+    chemins = [c for c in suivis.split("\0") if c]
+    assert "template/scripts/modele/confidentialite.py" in chemins
+    r = subprocess.run(
+        [sys.executable, str(RACINE / "template/scripts/modele/confidentialite.py")]
+        + ["--fichiers", *chemins],
+        cwd=RACINE,
+        env=env_isole(),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert r.returncode == 0, r.stderr
 
 
 def test_settings_du_depot_modele():

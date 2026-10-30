@@ -6,7 +6,7 @@ import sys
 
 import confidentialite as c
 import pytest
-from conftest import SCRIPTS, depot, git
+from conftest import SCRIPTS, cle_age_de_test, depot, git
 
 CLE_AGE = "AGE-SECRET-KEY-1" + "Q" * 58
 SCRIPT = SCRIPTS / "confidentialite.py"
@@ -47,7 +47,7 @@ def test_motifs_generiques_detectent(nom):
         "corepack pnpm@10.34.2",
         "version 10.34.2",
         "@docs/modele/methode.md",
-        "age1" + "q" * 58,
+        "age1" + "q" * 58,  # une clé publique : seul le régime code la refuse (MOTIFS_DU_CODE)
         "ssh -T git@github.com",
         "essai@example.com",
         "les noms *.ts" + ".net de Tailscale",
@@ -548,11 +548,13 @@ def depot_de_nature(tmp_path, env, sur_la_branche, dans_la_copie, branche="main"
 
 
 def porte_en_ci(clone, f, env, depot_prive="true", **variables):
+    """La porte du clone sur `f`, comme en CI. Le chemin est relatif au clone, en `/`, comme le
+    donne git : la règle des chemins de l'instance en lit le premier et le dernier segment."""
     env = {**env, "DEPOT_PRIVE": depot_prive}
     env.pop("BRANCHE_DEFAUT", None)
     env.update(variables)
     script = clone / "scripts/modele/confidentialite.py"
-    return lancer_porte(script, ["--fichiers", str(f)], env, clone)
+    return lancer_porte(script, ["--fichiers", f.relative_to(clone).as_posix()], env, clone)
 
 
 def test_nature_en_ci_lue_sur_la_branche_par_defaut(tmp_path, env_isole):
@@ -1045,3 +1047,191 @@ def test_historique_ignore_show_signature(tmp_path, env_isole):
     r = lancer(["--historique"], env, d)
     assert r.returncode == 1
     assert f"{sha}:a.txt:1 — adresse IP privée" in r.stderr
+
+
+# --- lot 12 : un dépôt de code ne porte rien de l'instance (M-0006, § 3) -----------------------
+# La règle des chemins et la clé publique `age` ne valent qu'en régime `code` : un dépôt de données
+# porte ces fichiers par définition.
+
+CHEMINS_DE_L_INSTANCE = [
+    "secrets/prod.env.enc",
+    ".sops.yaml",
+    "cles/serveur.pub",
+    "config/a.yaml",
+    "instance/config/a.yaml",
+    "contenu/x.md",
+    # un nom compte à toute profondeur
+    "deploiement/secrets/staging.env.enc",
+    "deploiement/.sops.yaml",
+    "deploiement/cles/hors-ligne.pub",
+]
+CHEMINS_DU_CODE = [
+    "src/config/a.ts",
+    "exemple/a.yaml",
+    "exemple-contenu/x.md",
+    # un dossier ne compte qu'au premier segment ; un `.pub` hors de `cles/`, ou l'inverse
+    "docs/contenu/x.md",
+    "serveur.pub",
+    "cles/LISEZMOI.md",
+    "tests/modele/fausse-app/exemple/a.yaml",
+    # un gabarit `.jinja` n'est pas le fichier qu'il rend
+    "template/{% if nature == 'donnees' %}cles{% endif %}/serveur.pub.jinja",
+    "template/{% if nature == 'donnees' %}.sops.yaml{% endif %}.jinja",
+]
+
+
+def porte_de_nature(tmp_path, nature):
+    """Une copie de la porte, avec à côté un reglages.py qui dit `nature`."""
+    dossier = tmp_path / f"porte-{nature}"
+    dossier.mkdir()
+    shutil.copy(SCRIPT, dossier / "confidentialite.py")
+    (dossier / "reglages.py").write_text(f'NATURE = "{nature}"\n', encoding="utf-8")
+    return dossier / "confidentialite.py"
+
+
+def index_qui_ajoute(tmp_path, env, chemins):
+    """Un dépôt dont l'index ajoute chacun des `chemins`, au contenu neutre."""
+    d = depot(tmp_path, env)
+    for chemin in chemins:
+        fichier = d / chemin
+        fichier.parent.mkdir(parents=True, exist_ok=True)
+        fichier.write_text("x\n", encoding="utf-8")
+    git(d, env, "add", "--", *chemins)
+    return d
+
+
+@pytest.mark.parametrize(
+    ("chemin", "refuse"),
+    [(x, True) for x in CHEMINS_DE_L_INSTANCE] + [(x, False) for x in CHEMINS_DU_CODE],
+)
+def test_chemins_de_l_instance_refuses_en_code(tmp_path, env_isole, chemin, refuse):
+    env = env_isole()
+    d = index_qui_ajoute(tmp_path, env, [chemin])
+    r = lancer_porte(porte_de_nature(tmp_path, "code"), ["--index"], env, d)
+    if refuse:
+        assert r.returncode == 1, r.stderr
+        assert f"confidentialité : {chemin}:0 — fichier de l'instance" in r.stderr
+        assert "confidentialité : 1 constat(s), refus." in r.stderr
+    else:
+        assert r.returncode == 0, r.stderr
+        assert "fichier de l'instance" not in r.stderr
+
+
+def test_chemins_de_l_instance_admis_en_donnees(tmp_path, env_isole):
+    env = env_isole()
+    d = index_qui_ajoute(tmp_path, env, CHEMINS_DE_L_INSTANCE)
+    r = lancer_porte(porte_de_nature(tmp_path, "donnees"), ["--index"], env, d)
+    assert r.returncode == 0, r.stderr
+    assert "fichier de l'instance" not in r.stderr
+    assert "constat(s)" not in r.stderr
+
+
+def test_fichier_de_l_instance_ne_lit_que_les_chemins():
+    """Un texte qui cite un chemin de l'instance n'est pas ce fichier : seules les lignes
+    `<chemin>:0` comptent. Les deux motifs sont de la famille « identification »."""
+    lignes = [
+        ("f.md:1", "config/a.yaml"),
+        ("f.md:10", ".sops.yaml"),
+        ("abc:message:1", "cles/serveur.pub"),
+        ("config/a.yaml:0", "config/a.yaml"),
+    ]
+    constats = c.examiner(lignes, c.MOTIFS_DU_CODE)
+    assert [(x.emplacement, x.motif) for x in constats] == [
+        ("config/a.yaml:0", "fichier de l'instance")
+    ]
+    assert {m.nom: m.famille for m in c.MOTIFS_DU_CODE} == {
+        "clé publique age": c.IDENTIFICATION,
+        "fichier de l'instance": c.IDENTIFICATION,
+    }
+
+
+@pytest.mark.parametrize("mode", ["--index", "--texte"])
+def test_cle_age_publique_refusee_en_code(tmp_path, env_isole, mode):
+    """Sur le contenu (l'index) comme sur un texte (corps de PR), sans jamais imprimer la clé ;
+    en `donnees`, pas de constat."""
+    env = env_isole()
+    cle = cle_age_de_test()
+    d = depot(tmp_path, env)
+    note = d / "note.txt"
+    note.write_text("destinataires :\n  - " + cle + "\n", encoding="utf-8")
+    git(d, env, "add", "note.txt")
+    if mode == "--index":
+        args, emplacement = ["--index"], "note.txt:2"
+    else:
+        args, emplacement = ["--texte", str(note)], f"{note}:2"
+    code = lancer_porte(porte_de_nature(tmp_path, "code"), args, env, d)
+    assert code.returncode == 1, code.stderr
+    assert f"confidentialité : {emplacement} — clé publique age" in code.stderr
+    assert cle not in code.stdout + code.stderr
+    donnees = lancer_porte(porte_de_nature(tmp_path, "donnees"), args, env, d)
+    assert donnees.returncode == 0, donnees.stderr
+    assert "clé publique age" not in donnees.stderr
+    assert cle not in donnees.stdout + donnees.stderr
+
+
+@pytest.mark.parametrize(
+    ("texte", "trouve"),
+    [
+        ("age1" + "q" * 58, True),
+        ("- age1" + "q" * 58 + ",", True),
+        ("age1" + "q" * 57, False),
+        ("age1" + "q" * 59, False),
+        ("xage1" + "q" * 58, False),
+    ],
+)
+def test_cle_age_publique_forme_exacte(texte, trouve):
+    noms = [x.motif for x in c.examiner([("f:1", texte)], c.MOTIFS_DU_CODE)]
+    assert noms == (["clé publique age"] if trouve else [])
+
+
+@pytest.mark.parametrize(
+    ("sur_la_branche", "dans_la_copie", "depot_prive", "refuse"),
+    [
+        ("donnees", "code", "true", False),  # un dépôt de données privé : aucun de ces constats
+        ("donnees", "donnees", "false", True),  # un dépôt public est toujours de code
+        ("code", "donnees", "true", True),  # une PR ne change pas sa nature
+    ],
+)
+def test_motifs_du_code_suivent_la_nature_en_ci(
+    tmp_path, env_isole, sur_la_branche, dans_la_copie, depot_prive, refuse
+):
+    """En CI, les deux motifs du régime `code` suivent la visibilité réelle et la nature écrite
+    sur la branche par défaut, jamais celle de la copie."""
+    env = env_isole()
+    clone, _ = depot_de_nature(tmp_path, env, sur_la_branche, dans_la_copie)
+    cle = cle_age_de_test()
+    sops = clone / ".sops.yaml"
+    sops.write_text("age: " + cle + "\n", encoding="utf-8")
+    r = porte_en_ci(clone, sops, env, depot_prive=depot_prive, BRANCHE_DEFAUT="main")
+    assert cle not in r.stdout + r.stderr
+    if refuse:
+        assert r.returncode == 1, r.stderr
+        assert "confidentialité : .sops.yaml:0 — fichier de l'instance" in r.stderr
+        assert "confidentialité : .sops.yaml:1 — clé publique age" in r.stderr
+        assert "confidentialité : 2 constat(s), refus." in r.stderr
+    else:
+        assert r.returncode == 0, r.stderr
+        assert "fichier de l'instance" not in r.stderr
+        assert "clé publique age" not in r.stderr
+        assert "constat(s)" not in r.stderr
+
+
+def test_historique_d_un_depot_de_code_voit_l_instance(tmp_path, env_isole):
+    """Un `.sops.yaml` ajouté à l'historique : son nom et sa clé sont deux constats du même couple
+    (commit, chemin), qu'une seule ligne de la liste accepte, le motif en commentaire."""
+    env = env_isole()
+    cle = cle_age_de_test()
+    d = depot(tmp_path, env)
+    sha = _commit(d, env, "feat: sops", __sops__yaml="age: " + cle + "\n")
+    r = lancer(["--historique"], env, d)
+    assert r.returncode == 1, r.stderr
+    assert f"{sha}:.sops.yaml:0 — fichier de l'instance" in r.stderr
+    assert f"{sha}:.sops.yaml:1 — clé publique age" in r.stderr
+    assert cle not in r.stdout + r.stderr
+    liste = d.parent / "acceptes.txt"
+    liste.write_text(
+        f"{sha} .sops.yaml  # fichier de l'instance, clé publique age\n", encoding="utf-8"
+    )
+    r = lancer(["--historique", "--acceptes", str(liste)], env, d)
+    assert r.returncode == 0, r.stderr
+    assert "confidentialité : 2 constat(s) accepté(s), écarté(s)" in r.stderr
