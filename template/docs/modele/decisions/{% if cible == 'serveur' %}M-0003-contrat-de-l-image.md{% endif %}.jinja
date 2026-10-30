@@ -56,8 +56,8 @@ revision}`, ou un 503 avec `{statut: "ko"}`.
   en staging, puis `X.Y.Z` en prod, et une étiquette de retour la redéploie sous un autre numéro
   (M-0004). Absente, en CI, elle a une valeur par défaut.
 - `revision` est le SHA du commit construit, celui du label.
-- `configuration`, pour un projet qui lit son instance (amendement du 2026-10-29) : le champ
-  `configuration` (§ 6), `exemple` ou `montee`.
+- `configuration`, pour un projet qui lit son instance (amendement du 2026-10-29) : `exemple` ou
+  `montee` (§ 6).
 
 Trois contrôles la lisent : la CI (`deploiement/ci/verifier-image.sh` : statut `ok`, la révision du
 commit, l'environnement `ci`) ; le déploiement, sur le port local (statut `ok`, la version et la
@@ -189,18 +189,20 @@ et `instance/contenu/` du dépôt lui-même, à un dépôt.
   commit de données : il sert l'exemple. Il monte `/contenu`, et y lance `VERIFIER_CONTENU`.
 - **La prod ne se replie pas sur l'exemple** : c'est l'application qui refuse de démarrer sans
   `/config` (M-0006, § 5). La chaîne, elle, garantit que la prod d'un projet qui déclare
-  `VERIFIER_CONFIG` reçoit le montage, et que sa santé dit `montee`. Une seule exception : un retour
-  arrière par `--retour` vers un couple précédent sans commit de données, celui d'une version
-  d'avant ses données, ne monte rien et ne lit pas le champ (M-0004, § 8).
+  `VERIFIER_CONFIG` reçoit le montage, et que sa santé dit `montee`. Deux exceptions, où la prod
+  sert sans `/config`, toutes deux vers une version d'avant ses données, qui ne monte rien et dont
+  le champ n'est pas lu :
+  - un retour arrière par `--retour` vers un couple précédent sans commit de données ;
+  - le retour automatique qui suit l'échec de la première version qui déclare `VERIFIER_CONFIG` :
+    la version d'avant revient, telle qu'elle était (M-0004, § 8).
 - **L'exemple.** Le dépôt de code porte sa configuration d'exemple dans `exemple/` et son contenu
   d'exemple dans `exemple-contenu/`, à sa racine ; l'image les embarque. La CI lance chaque commande
   déclarée sur son exemple, par `docker run` sur l'image construite, comme le serveur la lance
   (`deploiement/ci/verifier-image.sh`) : elle prouve à la fois l'exemple et la clause de
   l'`ENTRYPOINT`. Avant tout conteneur, une commande déclarée sans son dossier d'exemple refuse ;
   un dossier d'exemple sans sa commande n'est pas vérifié, et le journal le dit. La règle du
-  `README.md` vaut aussi pour l'exemple. À un dépôt aussi, où `instance/config/` est à côté, un
-  projet qui déclare une commande porte donc son dossier d'exemple : la CI l'exige, et le staging
-  sert `exemple/`.
+  `README.md` vaut aussi pour l'exemple. Un projet à un dépôt porte lui aussi son exemple, à côté
+  d'`instance/` : la CI l'exige dès qu'une commande est déclarée, et le staging sert `exemple/`.
 - **Un projet qui ne déclare ni l'une ni l'autre ne voit aucun changement** : rien n'est monté, rien
   n'est vérifié, le champ `configuration` n'est pas lu, et le commit de données de son couple vaut
   `-` (M-0004, § 8).

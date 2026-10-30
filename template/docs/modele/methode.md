@@ -131,11 +131,11 @@ refusent toujours.
 
 **La porte d'un dépôt de code suit aussi les chemins.** Un dépôt de code ne porte rien de
 l'instance (M-0006, § 3). La porte y refuse, au hook comme en CI : tout fichier nommé `*.enc` ou
-`.sops.yaml`, et tout `*.pub` dans un dossier `cles/`, à toute profondeur ; tout fichier dont le
-premier segment du chemin est `instance/`, `config/` ou `contenu/` (un `src/config/` reste du
-code) ; et une clé publique `age`, où qu'elle soit écrite. Un gabarit `….jinja` n'est pas le fichier
-qu'il rend. Dans un dépôt de données, ces fichiers sont chez eux : ces règles n'y donnent aucun
-constat.
+`.sops.yaml`, et tout `*.pub` dans un dossier `cles/`, à toute profondeur, sauf un gabarit
+`….jinja`, qui n'est pas le fichier qu'il rend ; tout fichier dont le premier segment du chemin est
+`instance/`, `config/` ou `contenu/`, gabarit compris (un `src/config/` reste du code) ; et une clé
+publique `age`, où qu'elle soit écrite. Dans un dépôt de données, ces fichiers sont chez eux : ces
+règles n'y donnent aucun constat.
 
 **En CI, la nature ne se lit pas dans la PR.** En CI, un dépôt public est toujours un dépôt de code,
 et un dépôt privé prend la nature écrite sur sa branche par défaut, jamais celle de la PR. La porte
@@ -168,10 +168,11 @@ toléré. Dans un dépôt de données, la porte dit que gitleaks seul relit l'hi
 
 - **À deux dépôts**, pour un dépôt de code né après M-0006. L'instance vit à la racine du dépôt de
   données `<nom>-donnees` : `env/`, `secrets/`, `.sops.yaml`, `cles/`, `config/` et `contenu/`. Le
-  staging suit les deux branches principales ; la prod suit la plus haute `vX.Y.Z` du code et la
-  plus haute étiquette de données. Les secrets du dépôt de données sont contrôlés par
-  `modele-donnees.yml`, contre le `.cles` du dépôt de code, et ses destinataires contre `cles/*.pub`.
-  `secrets.ps1 refaire` y prend le `.cles` du clone voisin du dépôt de code : le dépôt de code se
+  staging suit la branche principale du code et la branche des données que nomme `env/staging.env`
+  (`…_BRANCHE_DONNEES`), la principale à la création ; la prod suit la plus haute `vX.Y.Z` du code
+  et la plus haute étiquette de données. Les secrets du dépôt de données sont contrôlés par
+  `modele-donnees.yml`, contre le `.cles` du dépôt de code, et ses destinataires contre
+  `cles/*.pub`. `secrets.ps1 refaire` y prend le `.cles` du clone voisin du dépôt de code : le dépôt de code se
   clone à côté. Le dépôt de code garde gitleaks et le contrôle de ses `.cles`.
 - **À un dépôt**, pour un dépôt de nature `donnees`, d'avant M-0006, jusqu'à sa scission. Tout est
   dans le même dépôt : `deploiement/env/`, `deploiement/secrets/`, `deploiement/cles/`,

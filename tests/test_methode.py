@@ -4,7 +4,13 @@ import re
 
 import pytest
 import yaml
-from conftest import RACINE, REGISTRE_ENTETE, REPONSES_SERVEUR, REPONSES_SERVEUR_CODE
+from conftest import (
+    RACINE,
+    REGISTRE_ENTETE,
+    RENVOI_AU_PLAN,
+    REPONSES_SERVEUR,
+    REPONSES_SERVEUR_CODE,
+)
 
 TEMPLATE = RACINE / "template"
 METHODE = TEMPLATE / "docs/modele/methode.md"
@@ -350,7 +356,7 @@ def test_m0004_ne_renvoie_a_m0005_qu_avec_sauvegardes(rendre, sauvegardes):
     texte = adr_rendu(rendre, "M-0004-chaine-de-livraison.md", sauvegardes=sauvegardes)
     assert ("M-0005" in texte) is sauvegardes
     assert ("instantané de `/donnees`" in texte) is sauvegardes
-    assert ("instantané de /donnees" in texte) is False
+    assert "**L'instantané des données.** Pour un couple qui a un commit" in texte
 
 
 def test_m0002_amende():
@@ -429,8 +435,6 @@ def test_signaux_n_affichent_pas_ce_qu_un_fork_ecrit(chemin):
 # --- lot 12 : le contrat de /config et la chaîne à deux dépôts (M-0006, §§ 4 à 6) ---
 
 AMENDE_LOT_12 = "- **Amendé** le 2026-10-29, avec le lot 12 :"
-# Les numéros du plan ne vivent que dans le plan, qui disparaît à la clôture du lot.
-RENVOI_AU_PLAN = re.compile(r"\b(?:Ruling|ruling) \d|\bP[1-8]\b|\btâche \d|\bdécision \d du lot")
 
 
 @pytest.mark.parametrize("sauvegardes", [True, False])
@@ -452,14 +456,19 @@ def test_m0003_dit_le_contrat_de_l_instance(rendre, sauvegardes):
         "**Le staging ne monte jamais `/config`**",
         "**La prod ne se replie pas sur l'exemple**",
         "vers un couple précédent sans commit de données",
+        # la prod sert sans /config dans deux cas : les deux retours vers une version d'avant
+        "Deux exceptions, où la prod sert sans `/config`",
+        "l'échec de la première version qui déclare `VERIFIER_CONFIG`",
         "une commande déclarée sans son dossier d'exemple refuse",
         "un dossier d'exemple sans sa commande n'est pas vérifié, et le journal le dit",
+        "Un projet à un dépôt porte lui aussi son exemple, à côté d'`instance/`",
         "**Un projet qui ne déclare ni l'une ni l'autre ne voit aucun changement**",
     ):
         assert fragment in texte, fragment
+    assert "Une seule exception" not in texte
     # La route de santé du § 2 annonce le champ, et la CI prouve la clause de l'ENTRYPOINT pour
     # les deux commandes de l'instance, qu'elle lance par docker run.
-    assert "le champ `configuration` (§ 6)" in texte
+    assert "pour un projet qui lit son instance (amendement du 2026-10-29) : `exemple` ou" in texte
     assert (
         "**La CI prouve la clause de l'`ENTRYPOINT` pour `VERIFIER_CONFIG` et `VERIFIER_CONTENU`**"
         in texte
@@ -498,6 +507,9 @@ def test_m0004_dit_le_couple_et_les_deux_modes(rendre, reponses, mode):
         "**La limite d'un projet sans commande.**",
         # l'attente d'une étiquette de données
         "« aucune version des données »",
+        "son signal ok dit « <version> attend une version des données »",
+        # le staging suit la branche que nomme BRANCHE_DONNEES, pas forcément la principale
+        "la tête de la branche que nomme `ESSAI_BRANCHE_DONNEES`",
         # une commande ajoutée ou retirée
         "Dans l'intervalle, la CI des données refuse",
         # le retour arrière et ses deux cas de transition
@@ -509,10 +521,15 @@ def test_m0004_dit_le_couple_et_les_deux_modes(rendre, reponses, mode):
         "seule l'absence du signal ok avertit",
         "« clone des données modifié »",
         "« mise à jour du clone des données impossible »",
-        # le ménage des instantanés
-        "le ménage des instantanés",
+        # le ménage des instantanés, au § 8 : ce qu'il garde
+        "**Le ménage des instantanés.**",
+        "plus les 3 plus récents des autres, et retire les autres, ainsi que tout `.partiel`",
+        # l'instantané, puis son montage, en deux paragraphes
+        "**Le montage de l'instantané.**",
     ):
         assert fragment in texte, fragment
+    assert "la tête de la branche principale des données" not in texte
+    assert "la tête de sa branche principale" not in texte
     # Les clés du parc se lisent dans le clone des données, selon le mode.
     assert "`deploiement/cles/serveur.pub` et `hors-ligne.pub`" not in texte
     assert "`cles/` à deux dépôts, `deploiement/cles/` à un dépôt" in texte
@@ -539,8 +556,14 @@ def test_m0005_dit_le_couple_de_l_instantane(rendre):
         "« couple de l'instantané inconnu »",
         "Le couple ne décide de rien",
         "demande la phrase deux fois",
+        # au premier déploiement, sans deploye, pas de .couple
+        "Sans `deploye`, ou s'il ne se lit pas, il n'y a pas de `.couple`",
+        # la restauration lit le couple avec la source, et le dit après VERIFIER
+        "Avec la source, la restauration lit le couple dans le fichier voisin",
+        "Après `VERIFIER`, elle le dit quand il diffère du couple déployé",
     ):
         assert fragment in texte, fragment
+    assert "Après `VERIFIER`, la restauration lit le couple" not in texte
     assert "deploiement/cles/" not in texte
     assert "en 4e position" not in texte
     assert not RENVOI_AU_PLAN.search(texte)
@@ -555,13 +578,19 @@ def test_m0002_amende_par_le_lot_12():
         "**Dans un dépôt de code, la porte suit aussi les chemins**",
         "un fichier dont le premier segment du chemin est `instance/`, `config/` ou `contenu/`",
         "un `src/config/` reste du code",
-        "un fichier nommé `*.enc` ou `.sops.yaml`, et un `*.pub` dans un dossier `cles/`, à toute profondeur",
+        (
+            "un fichier nommé `*.enc` ou `.sops.yaml`, et un `*.pub` dans un dossier `cles/`, "
+            "à toute profondeur"
+        ),
         "une clé publique `age` (`age1…`), où qu'elle soit écrite",
-        "Un gabarit `….jinja` n'est pas le fichier qu'il rend",
+        # l'exception du gabarit ne vaut que pour les noms : config/x.jinja refuse
+        "sauf un gabarit `….jinja`, qui n'est pas le fichier qu'il rend",
+        "`instance/`, `config/` ou `contenu/`, gabarit compris",
         "`.github/constats-acceptes.txt`",
         "`donnees-AAAA.MM.JJ.n`",
     ):
         assert fragment in texte, fragment
+    assert "où qu'elle soit écrite. Un gabarit" not in texte
     assert not RENVOI_AU_PLAN.search(texte)
 
 
@@ -571,6 +600,7 @@ def test_m0006_dit_le_choix_des_deux_modes():
     texte = " ".join(lire(DECISIONS / "M-0006-code-et-donnees.md").split())
     assert AMENDE_LOT_12 in texte
     assert "Le lot de la chaîne a gardé les deux modes" in texte
+    assert "passe aux versions suivantes du modèle sans attendre sa scission" in texte
     assert "`instance/config/` et `instance/contenu/`" in texte
     assert "tout `contenu/`, à n'importe quelle profondeur" not in texte
     assert (
@@ -598,7 +628,10 @@ def test_methode_dit_les_deux_modes_et_les_etiquettes_de_donnees():
         "Les étiquettes de données `donnees-AAAA.MM.JJ.n` sont à Edouard, comme les `vX.Y.Z`",
         "**La porte d'un dépôt de code suit aussi les chemins.**",
         "tout fichier dont le premier segment du chemin est `instance/`, `config/` ou `contenu/`",
+        "sauf un gabarit `….jinja`, qui n'est pas le fichier qu'il rend",
+        "`instance/`, `config/` ou `contenu/`, gabarit compris",
         "**Les deux modes de la chaîne.**",
+        "la branche des données que nomme `env/staging.env` (`…_BRANCHE_DONNEES`)",
         "**À deux dépôts**",
         "**À un dépôt**",
         "la plus haute `vX.Y.Z` du code et la plus haute étiquette de données",

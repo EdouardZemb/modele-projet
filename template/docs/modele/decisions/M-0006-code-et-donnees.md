@@ -243,8 +243,9 @@ décrivent l'instance et le parc, pas l'auteur.
   décide si elle garde les deux modes, ou si ce projet attend sa scission pour monter de version.
   **Le lot de la chaîne a gardé les deux modes** (amendement du 2026-10-29). Le mode suit la nature,
   sans réponse de plus : un dépôt de nature `donnees` en cible `serveur` déploie à un dépôt. Il
-  monte de version sans attendre sa scission, garde ses réponses, et monte déjà sa configuration et
-  son contenu depuis `instance/config/` et `instance/contenu/`, à côté de son code. La prod y prend
+  passe aux versions suivantes du modèle sans attendre sa scission et garde ses réponses. Il monte
+  déjà sa configuration et son contenu depuis `instance/config/` et `instance/contenu/`, à côté de
+  son code. La prod y prend
   le commit de la plus haute `vX.Y.Z`, sans série d'étiquettes de données. La scission ne fait
   ensuite que déplacer ces dossiers, avec `deploiement/env/`, les secrets chiffrés, `.sops.yaml` et
   `deploiement/cles/`, vers le dépôt de données : le contrat de l'application ne change pas

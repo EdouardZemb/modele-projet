@@ -154,7 +154,7 @@ commit de données. Le commit de données dit quelle configuration et quel conte
 | `env/`, les secrets, `.sops.yaml`, les clés du parc | à la racine du clone des données, le dépôt `<nom>-donnees` | sous `deploiement/` du clone unique, `.sops.yaml` à sa racine |
 | La configuration et le contenu | `config/` et `contenu/` du clone des données | `instance/config/` et `instance/contenu/` du clone unique |
 | Les clones du serveur | `~/<nom>` et `~/<nom>-staging`, puis `~/<nom>-donnees` et `~/<nom>-donnees-staging` | `~/<nom>` et `~/<nom>-staging` |
-| Le commit de données, en staging | la tête de la branche principale des données | la révision de l'image `:main` |
+| Le commit de données, en staging | la tête de la branche des données que nomme `{{ prefixe }}BRANCHE_DONNEES`, la principale à la création | la révision de l'image `:main` |
 | Le commit de données, en prod | la plus haute étiquette de données | la révision de l'image de la plus haute `vX.Y.Z` |
 
 {% if nature == 'code' -%}
@@ -167,9 +167,10 @@ Ce projet est à un dépôt : sa nature est `donnees`, et il porte son instance 
 
 - Un projet qui ne déclare ni `VERIFIER_CONFIG` ni `VERIFIER_CONTENU` a le commit `-` : rien n'est
   monté ni vérifié, et le champ `configuration` n'est pas lu, comme avant le couple.
-- Sinon, à deux dépôts, c'est un commit du clone des données de l'environnement : en staging, la
-  tête de sa branche principale, que nomme `{{ prefixe }}BRANCHE_DONNEES` dans `env/staging.env`,
-  sans défaut ; en prod, la plus haute étiquette de données.
+- Sinon, à deux dépôts, c'est un commit du clone des données de l'environnement. En staging, la
+  tête de la branche que nomme `{{ prefixe }}BRANCHE_DONNEES` dans `env/staging.env` : la variable
+  n'a pas de défaut, et le gabarit du dépôt de données y écrit sa branche principale à la création.
+  En prod, la plus haute étiquette de données.
 - À un dépôt, c'est la révision de l'image visée, son label `org.opencontainers.image.revision`,
   qui doit exister dans le clone. En prod, c'est le commit que la `vX.Y.Z` désigne : la CI construit
   l'image de ce commit, et l'étiquette la réétiquette sans la reconstruire (§ 1). L'instance va
@@ -197,7 +198,9 @@ peut échouer avec une image et passer avec la suivante.
 `~/.local/state/{{ nom }}/<env>/instantanes/<commit>/config` et `…/contenu`, quel que soit le mode.
 Elle travaille sous `<commit>.partiel`, qu'elle retire d'abord s'il reste d'un essai coupé, fige
 les droits en lecture seule, puis renomme. Un instantané complet se réutilise tel quel. En staging,
-`config/` n'est jamais extrait. `compose.env` porte alors `{{ prefixe }}CONFIG` et
+`config/` n'est jamais extrait.
+
+**Le montage de l'instantané.** Le `compose.env` du couple porte `{{ prefixe }}CONFIG` et
 `{{ prefixe }}CONTENU`, les chemins de l'instantané, et `dc` (`lib.sh`) ajoute `compose.config.yml`
 et `compose.contenu.yml`, gérés, qui les montent en lecture seule. Le conteneur ne voit jamais le
 clone. Le chemin nomme le commit : un nouveau commit change le montage et recrée le conteneur.
@@ -279,9 +282,9 @@ sur l'ancien commit ramène ensemble l'image et l'instance de ce commit.
 **Le ménage des instantanés.** Après chaque déploiement ou retour arrière réussi,
 `nettoyer-images.sh` fait, après le ménage des images, celui des instantanés de l'environnement. Il
 garde ceux que nomment `deploye` et `precedent` de cet environnement, plus les 3 plus récents des
-autres, et retire les autres, comme tout `.partiel` de plus d'un jour. Une surprise l'annule sans
-rien retirer ; son échec ne change pas le résultat du déploiement. Un instantané retiré se refait du
-clone des données.
+autres, et retire les autres, ainsi que tout `.partiel` de plus d'un jour. Une surprise l'annule
+sans rien retirer ; son échec ne change pas le résultat du déploiement. Un instantané retiré se
+refait du clone des données.
 
 ## Conséquences
 
