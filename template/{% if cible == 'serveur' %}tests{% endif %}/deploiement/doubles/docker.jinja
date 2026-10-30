@@ -52,7 +52,8 @@
 # monte {{ prefixe }}CONFIG sur /config, et `-f …/compose.contenu.yml` {{ prefixe }}CONTENU sur /contenu,
 # en lecture seule (la variable vide ou absente : code 1, comme `${…:?}`). en-service.env porte une
 # ligne « MONTAGE=<point> <écriture> <source> » par montage, que `container inspect` rend, après
-# celui de /donnees, dans la forme de son format : « <point> <false|true> <source> ».
+# celui de /donnees, dans la forme de son format : « <point> <false|true> <source> ». La source y est
+# nettoyée, sans « // » ni « / » final, comme docker la rend après compose.
 #
 # Pilotage :
 #   DOUBLE_DOCKER_PULL_ERREUR        `pull` échoue avec ce message (« manifest unknown »…)
@@ -87,6 +88,8 @@
 #   DOUBLE_DOCKER_STOP_ECHEC         `compose stop` échoue
 #   DOUBLE_DOCKER_MONTAGES_GARDES    `compose up` ne recrée pas le conteneur : ses montages restent
 #                                    ceux de l'application en service avant lui
+#   DOUBLE_DOCKER_MONTAGES_GARDES_AU_UP  de même, pour le n-ième `compose up` noté dans $APPELS
+#                                    seulement (un retour arrière que compose ne recrée pas)
 #   DOUBLE_DOCKER_MONTAGES_EN_ECRITURE  les montages de l'instance sont en écriture (RW true)
 #   DOUBLE_DOCKER_MONTAGES_EN_PLUS   des montages de plus, « <point>:<source> » séparés par des
 #                                    espaces, comme en déclarerait compose.projet.yml
@@ -531,7 +534,8 @@ case "${1:-}" in
         done >"$effective"
         # Les montages de l'instance : ceux des fichiers de montage reçus, ou, si le conteneur n'est
         # pas recréé, ceux de l'application en service ; puis ceux qu'ajouterait compose.projet.yml.
-        if [ -n "${DOUBLE_DOCKER_MONTAGES_GARDES:-}" ] && [ -f "$EN_SERVICE" ]; then
+        nieme="$(grep -c '^docker compose .* up -d ' "$APPELS" || true)"
+        if { [ -n "${DOUBLE_DOCKER_MONTAGES_GARDES:-}" ]           || [ "${DOUBLE_DOCKER_MONTAGES_GARDES_AU_UP:-}" = "$nieme" ]; } && [ -f "$EN_SERVICE" ]; then
           grep '^MONTAGE=' "$EN_SERVICE" >>"$effective" || true
         else
           for fichier in "${fichiers_compose[@]}"; do
@@ -549,6 +553,9 @@ case "${1:-}" in
               echo "required variable $cle is missing a value" >&2
               exit 1
             }
+            origine="$(printf '%s
+' "$origine" | tr -s /)"
+            [ "$origine" = / ] || origine="${origine%/}"
             ecriture=false
             [ -z "${DOUBLE_DOCKER_MONTAGES_EN_ECRITURE:-}" ] || ecriture=true
             printf 'MONTAGE=%s %s %s\n' "$point" "$ecriture" "$origine" >>"$effective"

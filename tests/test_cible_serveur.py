@@ -450,12 +450,19 @@ def test_motifs_de_l_etat_definis_une_seule_fois(rendre, sauvegardes):
 
 # Review Focus 2 du lot 12 (M-0004, amendé) : un retour par une étiquette du code vers une version
 # d'avant la v0.7.0 relit l'état que la v0.7.0 écrit. deploye et precedent y ont un troisième champ,
-# le commit de données, et echec un second : les scripts de la v0.6.0 n'en lisent que les premiers.
+# le commit de données, et echec un second : les scripts de la v0.6.0 n'en lisent que les premiers,
+# lib.sh (lire_version, lire_deploye), sonder.sh (deploye, echec) et nettoyer-images.sh (lire_etat).
 # Le rendu de la v0.6.0 porte de vraies clés publiques : aucun de ses fichiers n'est imprimé ni
 # comparé comme du texte ; seule la sortie des lectures, faite des valeurs du test, l'est.
 LECTURE_D_ECHEC = re.compile(
     r'^\s*(\{ read -r en_echec _ \|\| true; \} <"\$etat/echec")$', re.MULTILINE
 )
+LECTURE_DE_DEPLOYE = re.compile(
+    r'^\s*(\{ read -r deployee version_deployee _ \|\| true; \} <"\$etat/deploye")$',
+    re.MULTILINE,
+)
+# nettoyer-images.sh lit deploye et precedent par lire_version, echec par `read -r image _`.
+LIRE_ETAT = re.compile(r"^(lire_etat\(\) \{\n.*?\n\})$", re.MULTILINE | re.DOTALL)
 
 
 def test_un_couple_se_lit_par_les_scripts_de_la_v0_6_0(tmp_path):
@@ -468,8 +475,8 @@ def test_un_couple_se_lit_par_les_scripts_de_la_v0_6_0(tmp_path):
         copier.run_copy(
             str(RACINE), rendu, data=reponses, vcs_ref="v0.6.0", defaults=True, quiet=True
         )
-    image = "ghcr.io/edouardzemb/essai@sha256:" + "1" * 64
-    precedente = "ghcr.io/edouardzemb/essai@sha256:" + "2" * 64
+    image = "ghcr.io/exemple/essai@sha256:" + "1" * 64
+    precedente = "ghcr.io/exemple/essai@sha256:" + "2" * 64
     commit = "0123456789abcdef0123456789abcdef01234567"
     etat = tmp_path / "etat"
     etat.mkdir()
@@ -479,8 +486,14 @@ def test_un_couple_se_lit_par_les_scripts_de_la_v0_6_0(tmp_path):
         ("echec", f"{image} {commit}"),
     ):
         (etat / nom).write_text(ligne + "\n", encoding="utf-8", newline="\n")
-    lecture = LECTURE_D_ECHEC.search((rendu / "deploiement/sonder.sh").read_text(encoding="utf-8"))
+    sonder = (rendu / "deploiement/sonder.sh").read_text(encoding="utf-8")
+    lecture = LECTURE_D_ECHEC.search(sonder)
     assert lecture is not None, "sonder.sh de la v0.6.0 ne lit plus echec par read -r en_echec _"
+    lecture_deploye = LECTURE_DE_DEPLOYE.search(sonder)
+    assert lecture_deploye is not None, "sonder.sh de la v0.6.0 ne lit plus deploye par read -r"
+    nettoyer = (rendu / "deploiement/nettoyer-images.sh").read_text(encoding="utf-8")
+    lire_etat = LIRE_ETAT.search(nettoyer)
+    assert lire_etat is not None, "nettoyer-images.sh de la v0.6.0 n'a plus lire_etat"
     script = "\n".join(
         (
             "set -euo pipefail",
@@ -495,6 +508,14 @@ def test_un_couple_se_lit_par_les_scripts_de_la_v0_6_0(tmp_path):
             'etat="$ESSAI_ETAT" en_echec=""',
             lecture.group(1),
             'echo "echec $en_echec"',
+            'deployee="" version_deployee=""',
+            lecture_deploye.group(1),
+            'echo "sonder $deployee $version_deployee"',
+            "declare -A NOMMEE=()",
+            'annuler() { echo "annuler $*"; exit 1; }',
+            lire_etat.group(1),
+            'lire_etat "$ESSAI_ETAT"',
+            'printf "nettoyer %s\\n" "${!NOMMEE[@]}" | sort',
         )
     )
     r = subprocess.run(
@@ -511,6 +532,9 @@ def test_un_couple_se_lit_par_les_scripts_de_la_v0_6_0(tmp_path):
         f"precedent {precedente} 0.1.0",
         f"lire_deploye {image} 0.2.0",
         f"echec {image}",
+        f"sonder {image} 0.2.0",
+        f"nettoyer {image}",
+        f"nettoyer {precedente}",
     ]
 
 

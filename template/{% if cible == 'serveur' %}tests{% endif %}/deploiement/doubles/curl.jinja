@@ -31,6 +31,8 @@
 #
 # Pilotage :
 #   DOUBLE_CURL_SANTE_KO           images (séparées par des espaces) dont la santé répond 503
+#   DOUBLE_CURL_SANTE_KO_AU_UP     la santé répond 503 tant que le dernier `compose up` noté dans
+#                                  $APPELS est le n-ième (un `up` en échec, puis un retour sain)
 #   DOUBLE_CURL_SANTE_VIDE         images dont la santé répond 200 avec un corps vide
 #   DOUBLE_CURL_REVISION_FAUSSE    images dont l'application annonce une autre révision
 #   DOUBLE_CURL_CONFIGURATION      le champ configuration de l'application en service (M-0003,
@@ -116,6 +118,10 @@ case "$adresse" in
         exit 22
         ;;
     esac
+    if [ -n "${DOUBLE_CURL_SANTE_KO_AU_UP:-}" ]       && [ "$(grep -c '^docker compose .* up -d ' "$APPELS" || true)" = "$DOUBLE_CURL_SANTE_KO_AU_UP" ]; then
+      echo "curl: (22) The requested URL returned error: 503" >&2
+      exit 22
+    fi
     case " ${DOUBLE_CURL_SANTE_VIDE:-} " in
       *" $image "*) exit 0 ;;
     esac

@@ -1567,7 +1567,8 @@ $(verification contenu "$NOUVELLE" "$vise" "$service")" ]
   sed -i "s|^{{ prefixe }}CONTENU=.*|{{ prefixe }}CONTENU=$(instantane_de prod "$(printf 'e%.0s' {1..40})")/contenu|" \
     "$ETAT/compose.env"
   commit_de_donnees "$SOUS_CONTENU/page.md" "$SOUS_CONTENU/quatre.md"
-  export DOUBLE_DOCKER_MONTAGES_GARDES=1
+  # seul le `up` de l'aller garde ses montages ; celui du retour remonte le précédent
+  export DOUBLE_DOCKER_MONTAGES_GARDES_AU_UP=1
   : >"$APPELS"
   deployer prod "$NOUVELLE" 0.2.0 --commit-donnees "$COMMIT"
   [ "$status" -eq 1 ]
@@ -1578,7 +1579,7 @@ $(verification contenu "$NOUVELLE" "$vise" "$service")" ]
 }
 
 @test "deployer : le montage visé se vérifie après le up" {
-  local premier service vise cas raison
+  local premier service vise cas raison retour
 {%- if sauvegardes %}
   horloge_qui_avance
 {%- endif %}
@@ -1598,7 +1599,9 @@ $(verification contenu "$NOUVELLE" "$vise" "$service")" ]
   vise="$(instantane_de prod "$COMMIT")"
   # Un conteneur que compose n'a pas recréé (il monte encore l'ancien instantané), un montage en
   # écriture, des montages illisibles, ou une santé qui ne dit pas montee : échec, et retour au
-  # couple précédent, comme pour toute santé non conforme.
+  # couple précédent, comme pour toute santé non conforme. Le pilote vaut aussi pour le `up` du
+  # retour, qui se contrôle de même : sauf le conteneur gardé, qui monte encore le couple précédent,
+  # le retour est en échec.
   for cas in DOUBLE_DOCKER_MONTAGES_GARDES=1 DOUBLE_DOCKER_MONTAGES_EN_ECRITURE=1 \
     DOUBLE_DOCKER_CONTAINER_INSPECT_ECHEC=1 DOUBLE_CURL_CONFIGURATION=exemple; do
     rm -f "$ETAT/echec"
@@ -1608,6 +1611,8 @@ $(verification contenu "$NOUVELLE" "$vise" "$service")" ]
     [ "$status" -eq 1 ]
     raison="montage des données non conforme"
     [ "$cas" != DOUBLE_CURL_CONFIGURATION=exemple ] || raison="santé non conforme"
+    retour="retour à 0.2.0 en échec"
+    [ "$cas" != DOUBLE_DOCKER_MONTAGES_GARDES=1 ] || retour="retour à 0.2.0"
     [[ "$output" == *"échec du déploiement de 0.2.0 ($raison)"* ]]
     [ "$cas" != DOUBLE_DOCKER_MONTAGES_GARDES=1 ] \
       || [[ "$output" == *"/config : attendu $vise/config en lecture seule, monté : false $service/config"* ]]
@@ -1615,7 +1620,7 @@ $(verification contenu "$NOUVELLE" "$vise" "$service")" ]
     [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 $premier" ]
     grep -Fx "{{ prefixe }}CONFIG=$service/config" "$ETAT/compose.env"
     [[ "$(montage_de /config)" == *" $service/config" ]]
-    [ "$(signaux)" = "$(signal 'échec 0.2.0, retour à 0.2.0') $HC/fail" ]
+    [ "$(signaux)" = "$(signal "échec 0.2.0, $retour") $HC/fail" ]
     unset "${cas%%=*}"
     export DOUBLE_CURL_CONFIGURATION=auto
   done
@@ -1674,6 +1679,161 @@ $(verification contenu "$NOUVELLE" "$vise" "$service")" ]
   [ "$(cat "$ETAT/echec")" = "$NOUVELLE $troisieme" ]
   [ ! -e "$ETAT/precedent" ]
   [ "$(signaux)" = "$(signal 'retour à 0.2.0 effectué (depuis 0.2.0)') $HC" ]
+}
+
+# Le retour d'un couple en échec (relecture de la tâche 5, constat 1) : le couple remis en service
+# se contrôle comme à l'aller, ses montages après son `up` (ceux de compose.env.precedent) et, aux
+# conditions de l'aller, le champ configuration de sa santé. Un conteneur que compose ne recrée pas
+# monterait encore l'instantané en échec, et le signal dirait le retour réussi.
+@test "deployer : le retour d'un couple en échec remonte l'instantané du précédent" {
+  local premier service vise
+{%- if sauvegardes %}
+  horloge_qui_avance
+{%- endif %}
+  avec_donnees VERIFIER_CONFIG VERIFIER_CONTENU
+  commit_de_donnees "$SOUS_CONFIG/profil.yml" "$SOUS_CONTENU/page.md"
+  premier="$COMMIT"
+  service="$(instantane_de prod "$premier")"
+  deployer prod "$NOUVELLE" 0.2.0 --commit-donnees "$premier"
+  [ "$status" -eq 0 ]
+  poser_donnees prod
+  commit_de_donnees "$SOUS_CONFIG/profil.yml" "$SOUS_CONTENU/autre.md"
+  vise="$(instantane_de prod "$COMMIT")"
+  # Les données seules en échec (la santé de leur `up` répond 503) : le retour remonte l'instantané
+  # du précédent, ses montages se contrôlent après son `up`, et sa santé dit montee.
+  export DOUBLE_CURL_SANTE_KO_AU_UP=1
+  : >"$APPELS"
+  deployer prod "$NOUVELLE" 0.2.0 --commit-donnees "$COMMIT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"échec du déploiement de 0.2.0 (santé non conforme)"* ]]
+  [ "$(appels_de docker | sed -nE 's/.* (up -d|container inspect) .*/\1/p')" = "up -d
+container inspect
+up -d
+container inspect" ]
+  [[ "$output" == *"montages conformes (/config : $service/config, /contenu : $service/contenu)"* ]]
+  [[ "$output" == *"santé conforme (essai "*", configuration montee"* ]]
+  [ "$(montage_de /config)" = "false $service/config" ]
+  [ "$(montage_de /contenu)" = "false $service/contenu" ]
+  [ "$(cat "$ETAT/echec")" = "$NOUVELLE $COMMIT" ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 $premier" ]
+  [ "$(signaux)" = "$(signal 'échec 0.2.0, retour à 0.2.0') $HC/fail" ]
+  # Un retour dont le `up` ne recrée pas le conteneur : il monte encore l'instantané en échec, et le
+  # retour est en échec, même si sa santé répond.
+  export DOUBLE_DOCKER_MONTAGES_GARDES_AU_UP=2
+  rm -f "$ETAT/echec"
+  : >"$APPELS"
+  deployer prod "$NOUVELLE" 0.2.0 --commit-donnees "$COMMIT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"/config : attendu $service/config en lecture seule, monté : false $vise/config"* ]]
+  [[ "$output" == *"retour à 0.2.0 en échec : intervention nécessaire"* ]]
+  [ "$(montage_de /config)" = "false $vise/config" ]
+  [ "$(signaux)" = "$(signal 'échec 0.2.0, retour à 0.2.0 en échec') $HC/fail" ]
+  # Un retour recréé, mais dont la santé ne dit pas montee : en échec aussi.
+  unset DOUBLE_DOCKER_MONTAGES_GARDES_AU_UP
+  export DOUBLE_CURL_CONFIGURATION=exemple
+  rm -f "$ETAT/echec"
+  : >"$APPELS"
+  deployer prod "$NOUVELLE" 0.2.0 --commit-donnees "$COMMIT"
+  [ "$status" -eq 1 ]
+  [ "$(montage_de /config)" = "false $service/config" ]
+  # l'aller, puis le retour, attendaient montee
+  [ "$(grep -c 'santé non conforme après 10 essais (attendu : statut ok, version 0.2.0, révision .*, configuration montee)' <<<"$output")" -eq 2 ]
+  [ "$(signaux)" = "$(signal 'échec 0.2.0, retour à 0.2.0 en échec') $HC/fail" ]
+}
+
+# Relecture de la tâche 5, constat 2 : docker rend la source d'un montage nettoyée. Un $ETAT qui
+# porte « // » (une racine de l'état avec un « / » final) se compare sous sa forme canonique, sans
+# résoudre les liens.
+@test "deployer : les montages se comparent sous leur forme canonique" {
+  local racine="${{ prefixe }}RACINE_ETAT" vise propre
+{%- if sauvegardes %}
+  horloge_qui_avance
+{%- endif %}
+  export {{ prefixe }}RACINE_ETAT="$racine/"
+  avec_donnees VERIFIER_CONFIG VERIFIER_CONTENU
+  commit_de_donnees "$SOUS_CONFIG/profil.yml" "$SOUS_CONTENU/page.md"
+  vise="$(instantane_de prod "$COMMIT")"
+  propre="$racine/prod/instantanes/$COMMIT"
+  [ "$vise" = "$racine//prod/instantanes/$COMMIT" ]
+  deployer prod "$NOUVELLE" 0.2.0 --commit-donnees "$COMMIT"
+  [ "$status" -eq 0 ]
+  grep -Fx "{{ prefixe }}CONFIG=$vise/config" "$ETAT/compose.env"
+  [ "$(montage_de /config)" = "false $propre/config" ]
+  [ "$(montage_de /contenu)" = "false $propre/contenu" ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 $COMMIT" ]
+  [ "$(signaux)" = "$(signal "déployé 0.2.0, données ${COMMIT:0:12}") $HC" ]
+}
+
+# Relecture de la tâche 5, constat 3 : l'instantané du couple en service, que VERIFIER_CONTENU
+# reçoit sur /en-service, se refait s'il manque. S'il ne se refait pas (son commit n'est plus dans
+# le clone des données), le refus reste : la vérification n'a pas lieu, et rien ne change.
+@test "deployer : l'instantané du couple en service se refait s'il manque" {
+  local premier service vise absent
+{%- if sauvegardes %}
+  horloge_qui_avance
+{%- endif %}
+  avec_donnees VERIFIER_CONTENU
+  commit_de_donnees "$SOUS_CONTENU/page.md"
+  premier="$COMMIT"
+  service="$(instantane_de prod "$premier")"
+  deployer prod "$ANCIENNE" 0.1.0 --commit-donnees "$premier"
+  [ "$status" -eq 0 ]
+  poser_donnees prod
+  chmod -R u+w "$service"
+  rm -rf "$service"
+  commit_de_donnees "$SOUS_CONTENU/page.md" "$SOUS_CONTENU/autre.md"
+  vise="$(instantane_de prod "$COMMIT")"
+  : >"$APPELS"
+  deployer prod "$NOUVELLE" 0.2.0 --commit-donnees "$COMMIT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"instantané des données prêt : $service"* ]]
+  [ "$(cat "$service/contenu/page.md")" = "fichier d'exemple $SOUS_CONTENU/page.md" ]
+  [ "$(verifications)" = "$(verification contenu "$NOUVELLE" "$vise" "$service")" ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 $COMMIT" ]
+  # Un couple en service dont le commit n'est plus dans le clone : son instantané ne se refait pas.
+  absent="$(printf 'e%.0s' {1..40})"
+  printf '%s 0.2.0 %s\n' "$NOUVELLE" "$absent" >"$ETAT/deploye"
+  commit_de_donnees "$SOUS_CONTENU/page.md" "$SOUS_CONTENU/trois.md"
+  etat_fige
+  deployer prod "$SUIVANTE" 0.3.0 --commit-donnees "$COMMIT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"instantané en service introuvable : $(instantane_de prod "$absent")"* ]]
+  [ -z "$(verifications)" ]
+  rien_n_a_change "vérification des données impossible avant 0.3.0, rien n'a changé (voir le journal)"
+}
+
+# Relecture de la tâche 5, constat 4 : --retour refuse (64), sans rien toucher, le commit de données
+# de precedent que projet.env (plus aucune commande déclarée) ou le clone des données (commit absent)
+# refusent.
+@test "deployer : --retour refuse un commit que projet.env ou le clone refusent" {
+  local absent
+{%- if sauvegardes %}
+  horloge_qui_avance
+{%- endif %}
+  avec_donnees VERIFIER_CONTENU
+  commit_de_donnees "$SOUS_CONTENU/page.md"
+  deployer prod "$ANCIENNE" 0.1.0 --commit-donnees "$COMMIT"
+  [ "$status" -eq 0 ]
+  poser_donnees prod
+  deployer prod "$NOUVELLE" 0.2.0 --commit-donnees "$COMMIT"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$ETAT/precedent")" = "$ANCIENNE 0.1.0 $COMMIT" ]
+  projet_env_du_test
+  etat_fige
+  deployer prod --retour
+  [ "$status" -eq 64 ]
+  [[ "$output" == *"retour arrière impossible : commit de données $COMMIT, mais deploiement/projet.env ne déclare ni VERIFIER_CONFIG ni VERIFIER_CONTENU"* ]]
+  [ ! -s "$APPELS" ]
+  diff -r "$BATS_TEST_TMPDIR/etat-avant" "$ETAT"
+  avec_donnees VERIFIER_CONTENU
+  absent="$(printf 'f%.0s' {1..40})"
+  printf '%s 0.1.0 %s\n' "$ANCIENNE" "$absent" >"$ETAT/precedent"
+  etat_fige
+  deployer prod --retour
+  [ "$status" -eq 64 ]
+  [[ "$output" == *"retour arrière impossible : commit de données $absent introuvable dans $CLONE_DONNEES. Rien n'a changé"* ]]
+  [ ! -s "$APPELS" ]
+  diff -r "$BATS_TEST_TMPDIR/etat-avant" "$ETAT"
 }
 
 # P4 du lot 12 : sans --commit-donnees, un projet qui déclare une commande de l'instance refuse (64),
