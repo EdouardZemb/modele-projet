@@ -26,6 +26,8 @@ setup() {
 
 teardown() {
   abandonner_le_verrou
+  # les instantanés sont en lecture seule : bats doit pouvoir retirer le dossier du test
+  chmod -R u+rwX "$BATS_TEST_TMPDIR" 2>/dev/null || true
 }
 
 # Le contrat de lib.sh est son en-tête : une fonction publique (sans « _ » devant) qui n'y figure
@@ -157,8 +159,8 @@ teardown() {
   [ "$status" -eq 0 ]
   [ "$output" = "$BATS_TEST_TMPDIR/autre.txt" ]
   # le message d'un déchiffrement impossible nomme l'identité par défaut
-  mkdir -p "$CLONE/deploiement/secrets"
-  echo 'pas du sops' >"$CLONE/deploiement/secrets/prod.env.enc"
+  mkdir -p "$CLONE_DONNEES/$SOUS_SECRETS"
+  echo 'pas du sops' >"$CLONE_DONNEES/$SOUS_SECRETS/prod.env.enc"
   creer_double sops 'exit 1'
   avec_lib 'charger_env prod; charger_secrets prod'
   [ "$status" -eq 1 ]
@@ -173,7 +175,7 @@ teardown() {
 }
 
 @test "charger_env_refuse_un_fichier_d_environnement_incoherent" {
-  sed -i 's/^{{ prefixe }}ENV=.*/{{ prefixe }}ENV=staging/' "$CLONE/deploiement/env/prod.env"
+  sed -i 's/^{{ prefixe }}ENV=.*/{{ prefixe }}ENV=staging/' "$CLONE_DONNEES/$SOUS_ENV/prod.env"
   avec_lib 'charger_env prod'
   [ "$status" -eq 1 ]
   [[ "$output" == *"prod.env"* ]]
@@ -184,6 +186,67 @@ teardown() {
   avec_lib 'charger_env prod; case "$-" in *a*) echo "set -a reste actif"; exit 1;; esac'
   [ "$status" -eq 0 ]
 }
+
+# Les chemins de l'instance, que lib.sh seul définit (M-0006, § 6) : charger_env lit l'env, et
+# charger_secrets les secrets, dans le clone des données.
+lire_les_chemins='charger_env prod; charger_secrets prod
+  printf "%s\n" "${{ prefixe }}CLONE_DONNEES" "${{ prefixe }}PORT" "$JETON" "$SOUS_DOSSIER_ENV" "$SOUS_DOSSIER_SECRETS" \
+    "$SOUS_DOSSIER_CLES" "$SOUS_DOSSIER_CONFIG" "$SOUS_DOSSIER_CONTENU"'
+{%- if nature == 'code' %}
+
+# Deux dépôts : le clone des données est ~/{{ nom }}-donnees en prod et ~/{{ nom }}-donnees-staging
+# en staging (la surcharge {{ prefixe }}CLONE_DONNEES le déplace, pour les tests) ; deploiement/ du
+# clone du code n'est jamais lu, même s'il porte un env et des secrets.
+@test "chemins : deux dépôts" {
+  mkdir -p "$CLONE/deploiement/env" "$CLONE/deploiement/secrets"
+  sed 's/^{{ prefixe }}PORT=.*/{{ prefixe }}PORT=4399/' "$CLONE_DONNEES/env/prod.env" >"$CLONE/deploiement/env/prod.env"
+  echo 'pas du sops' >"$CLONE/deploiement/secrets/prod.env.enc"
+  preparer_secrets_de_test prod JETON=jeton-du-clone-des-donnees
+  [ -f "$CLONE_DONNEES/secrets/prod.env.enc" ]
+  avec_lib "$lire_les_chemins"
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "$CLONE_DONNEES" ]
+  [ "${lines[1]}" = "{{ bloc_ports }}" ]
+  [ "${lines[2]}" = jeton-du-clone-des-donnees ]
+  [ "${lines[*]:3}" = "env secrets cles config contenu" ]
+
+  # sans la surcharge : le clone de chaque environnement, même appelé l'un après l'autre
+  unset {{ prefixe }}CLONE_DONNEES
+  cp -R "$CLONE_DONNEES" "$HOME/{{ nom }}-donnees"
+  cp -R "$CLONE_DONNEES" "$HOME/{{ nom }}-donnees-staging"
+  sed -i 's/^{{ prefixe }}PORT=.*/{{ prefixe }}PORT=4397/' "$HOME/{{ nom }}-donnees/env/prod.env"
+  sed -i 's/^{{ prefixe }}PORT=.*/{{ prefixe }}PORT=4398/' "$HOME/{{ nom }}-donnees-staging/env/staging.env"
+  avec_lib 'charger_env prod; printf "%s\n" "${{ prefixe }}CLONE_DONNEES" "${{ prefixe }}PORT"
+    charger_env staging; printf "%s\n" "${{ prefixe }}CLONE_DONNEES" "${{ prefixe }}PORT"'
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "$HOME/{{ nom }}-donnees" ]
+  [ "${lines[1]}" = 4397 ]
+  [ "${lines[2]}" = "$HOME/{{ nom }}-donnees-staging" ]
+  [ "${lines[3]}" = 4398 ]
+  # le clone absent : charger_env s'arrête, et nomme le fichier qu'il attendait
+  rm -rf "$HOME/{{ nom }}-donnees"
+  avec_lib 'charger_env prod'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"fichier d'environnement absent : $HOME/{{ nom }}-donnees/env/prod.env"* ]]
+}
+{%- else %}
+
+# Un dépôt : l'instance est sous deploiement/ et instance/ du clone qui lance le script ; la
+# surcharge {{ prefixe }}CLONE_DONNEES, qui ne vaut qu'à deux dépôts, n'y change rien.
+@test "chemins : un dépôt" {
+  export {{ prefixe }}CLONE_DONNEES="$BATS_TEST_TMPDIR/ailleurs"
+  mkdir -p "$BATS_TEST_TMPDIR/ailleurs/env"
+  sed 's/^{{ prefixe }}PORT=.*/{{ prefixe }}PORT=4399/' "$CLONE/deploiement/env/prod.env" >"$BATS_TEST_TMPDIR/ailleurs/env/prod.env"
+  preparer_secrets_de_test prod JETON=jeton-du-clone
+  [ -f "$CLONE/deploiement/secrets/prod.env.enc" ]
+  avec_lib "$lire_les_chemins"
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "$CLONE" ]
+  [ "${lines[1]}" = "{{ bloc_ports }}" ]
+  [ "${lines[2]}" = jeton-du-clone ]
+  [ "${lines[*]:3}" = "deploiement/env deploiement/secrets deploiement/cles instance/config instance/contenu" ]
+}
+{%- endif %}
 
 # Deux fichiers compose : celui du modèle, puis les ajouts du projet, que compose fusionne.
 @test "dc_passe_projet_fichier_compose_et_fichier_d_environnement" {
@@ -201,6 +264,38 @@ teardown() {
   run bash -c 'set -euo pipefail; unset {{ prefixe }}PROJET; . "$CLONE/deploiement/lib.sh"; dc ps'
   [ "$status" -ne 0 ]
   [ "$(nombre_d_appels docker)" -eq 0 ]
+}
+
+# Les montages de l'instantané (M-0006, § 5) ne sont décrits que pour ce que compose.env monte :
+# compose.config.yml pour {{ prefixe }}CONFIG, compose.contenu.yml pour {{ prefixe }}CONTENU, après les
+# fichiers du projet.
+@test "dc : les fichiers de montage suivent compose.env" {
+  creer_double docker
+  local etat="${{ prefixe }}RACINE_ETAT/prod" fichiers cas lignes attendus
+  fichiers="-f $CLONE/deploiement/compose.yml -f $CLONE/deploiement/compose.projet.yml"
+  mkdir -p "$etat"
+  # <lignes de compose.env, séparées par des virgules>|<fichiers ajoutés>
+  for cas in \
+    "{{ prefixe }}IMAGE=x|" \
+    "{{ prefixe }}IMAGE=x,{{ prefixe }}CONFIG=/i/config|-f $CLONE/deploiement/compose.config.yml" \
+    "{{ prefixe }}CONTENU=/i/contenu,{{ prefixe }}IMAGE=x|-f $CLONE/deploiement/compose.contenu.yml" \
+    "{{ prefixe }}CONTENU=/i/contenu,{{ prefixe }}CONFIG=/i/config|-f $CLONE/deploiement/compose.config.yml -f $CLONE/deploiement/compose.contenu.yml" \
+    "{{ prefixe }}CONFIGURATION=x,{{ prefixe }}CONTENUS=x,#{{ prefixe }}CONFIG=/i/config|"; do
+    IFS=',' read -r -a lignes <<<"${cas%%|*}"
+    printf '%s\n' "${lignes[@]}" >"$etat/compose.env"
+    attendus="$fichiers"
+    [ -z "${cas#*|}" ] || attendus="$fichiers ${cas#*|}"
+    avec_lib 'charger_env prod; dc ps -q app'
+    [ "$status" -eq 0 ]
+    [ "$(appels_de docker | tail -n 1)" = "docker compose -p {{ nom }} $attendus --env-file $etat/compose.env ps -q app" ]
+  done
+  # sans compose.env : un seul appel, sur les fichiers du projet seulement
+  rm "$etat/compose.env"
+  : >"$APPELS"
+  avec_lib 'charger_env prod; dc ps -q app'
+  [ "$status" -eq 0 ]
+  [ "$(nombre_d_appels docker)" -eq 1 ]
+  [ "$(appels_de docker)" = "docker compose -p {{ nom }} $fichiers --env-file $etat/compose.env ps -q app" ]
 }
 
 # --- deploiement/projet.env : les réglages du projet, lus et jamais sourcés ----------------------
@@ -279,25 +374,6 @@ projet_env() {
   avec_lib 'lire_projet_env verifier'
   [ "$status" -eq 64 ]
 }
-{%- if sauvegardes %}
-
-# Le projet.env du dépôt déclare les deux commandes de l'image, lisibles et d'au moins un mot
-# chacune. Le banc en contrôle la forme, jamais les valeurs : chaque projet y met les commandes de
-# son image (le fichier n'est semé qu'une fois), et la valeur semée par le modèle est contrôlée
-# côté modèle.
-@test "projet_env_declare_les_commandes_de_sauvegarde" {
-  local cas
-  for cas in depot propres; do
-    # celui d'un projet qui a mis les commandes de son image à la place des valeurs semées
-    [ "$cas" = depot ] || projet_env "# Commandes de l'image" \
-      "SAUVEGARDER=node dist/cli.js sauvegarder" "VERIFIER=node dist/cli.js verifier"
-    avec_lib 'for cle in SAUVEGARDER VERIFIER; do
-        lire_projet_env "$cle"
-        [ -n "${PROJET_MOTS[0]:-}" ] || { echo "$cle : aucune commande"; exit 1; }
-      done'
-    [ "$status" -eq 0 ]
-  done
-}
 
 # Une clé facultative (REPORTER, REPORTER_SECTION de la restauration) : absente, rien n'est lu ni
 # journalisé, pas même une ligne invalide qu'un lire_projet_env signalerait ; déclarée, elle se lit
@@ -342,6 +418,25 @@ projet_env() {
   avec_lib 'lire_projet_env_facultatif reporter'
   [ "$status" -eq 64 ]
 }
+{%- if sauvegardes %}
+
+# Le projet.env du dépôt déclare les deux commandes de l'image, lisibles et d'au moins un mot
+# chacune. Le banc en contrôle la forme, jamais les valeurs : chaque projet y met les commandes de
+# son image (le fichier n'est semé qu'une fois), et la valeur semée par le modèle est contrôlée
+# côté modèle.
+@test "projet_env_declare_les_commandes_de_sauvegarde" {
+  local cas
+  for cas in depot propres; do
+    # celui d'un projet qui a mis les commandes de son image à la place des valeurs semées
+    [ "$cas" = depot ] || projet_env "# Commandes de l'image" \
+      "SAUVEGARDER=node dist/cli.js sauvegarder" "VERIFIER=node dist/cli.js verifier"
+    avec_lib 'for cle in SAUVEGARDER VERIFIER; do
+        lire_projet_env "$cle"
+        [ -n "${PROJET_MOTS[0]:-}" ] || { echo "$cle : aucune commande"; exit 1; }
+      done'
+    [ "$status" -eq 0 ]
+  done
+}
 {%- else %}
 
 # Sans sauvegardes, le projet.env semé par le modèle ne déclare aucune commande.
@@ -351,6 +446,304 @@ projet_env() {
   [[ "$output" == *"réglage SAUVEGARDER absent"* ]]
 }
 {%- endif %}
+
+# --- L'instance : la règle des paires, l'instantané, sa vérification (M-0006, § 5) ---------------
+# Chaque test écrit son projet.env : celui du projet déclare peut-être ses propres commandes.
+
+# declarer <commande…> : deploiement/projet.env ne déclare que ces commandes de vérification de
+# l'instance, chacune avec des mots d'exemple (VERIFIER_CONFIG=outil verifier_config…).
+declarer() {
+  local commande
+  local -a lignes=("# Réglages du test")
+  for commande in "$@"; do
+    lignes+=("$commande=outil ${commande,,}")
+  done
+  projet_env "${lignes[@]}"
+}
+
+# L'image que viserait un déploiement, et les options des conteneurs jetables de lib.sh.
+IMAGE_VISEE="ghcr.io/{{ compte | lower }}/{{ nom }}@sha256:$(printf 'b%.0s' {1..64})"
+JETABLES="--user 1000:1000 --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true --memory 384m"
+
+# messages_du_journal : les lignes de $output (le journal), sans leur horodatage.
+messages_du_journal() {
+  local ligne
+  for ligne in "${lines[@]}"; do
+    printf '%s\n' "${ligne#* }"
+  done
+}
+
+# La règle des paires : un dossier de l'instance présent dans le commit (un fichier au moins, autre
+# que son README.md : voir le test suivant) va avec sa commande, et une commande avec son dossier.
+# Chaque paire en défaut est dite ; un commit illisible refuse aussi.
+@test "paires : un dossier sans sa commande, une commande sans son dossier" {
+  local cas fichiers commandes attendus message attendu
+  local -a messages
+  # <fichiers du commit>|<commandes déclarées>|<messages attendus, séparés par des virgules>
+  for cas in \
+    "$SOUS_CONFIG/profil.yml||$SOUS_CONFIG sans VERIFIER_CONFIG" \
+    "|VERIFIER_CONFIG|VERIFIER_CONFIG sans $SOUS_CONFIG" \
+    "$SOUS_CONTENU/page.md||$SOUS_CONTENU sans VERIFIER_CONTENU" \
+    "|VERIFIER_CONTENU|VERIFIER_CONTENU sans $SOUS_CONTENU" \
+    "$SOUS_CONFIG/profil.yml|VERIFIER_CONTENU|$SOUS_CONFIG sans VERIFIER_CONFIG,VERIFIER_CONTENU sans $SOUS_CONTENU"; do
+    IFS='|' read -r fichiers commandes attendus <<<"$cas"
+    # shellcheck disable=SC2086  # listes séparées par des espaces, voulues
+    commit_de_donnees $fichiers
+    # shellcheck disable=SC2086
+    declarer $commandes
+    avec_lib 'charger_env prod; controler_paires '"$COMMIT"
+    [ "$status" -eq 1 ]
+    attendu=""
+    IFS=',' read -r -a messages <<<"$attendus"
+    for message in "${messages[@]}"; do
+      attendu+="$message (commit de données $COMMIT)"$'\n'
+    done
+    [ "$(messages_du_journal)" = "${attendu%$'\n'}" ]
+  done
+  # chaque dossier avec sa commande, ou ni l'un ni l'autre : rien à dire. Un dossier du même nom
+  # ailleurs dans le dépôt n'est pas celui de l'instance.
+  for cas in "$SOUS_CONFIG/profil.yml $SOUS_CONTENU/page.md|VERIFIER_CONFIG VERIFIER_CONTENU" \
+    "$SOUS_CONTENU/sous/page.md|VERIFIER_CONTENU" "|" "autre/$SOUS_CONFIG/profil.yml|"; do
+    IFS='|' read -r fichiers commandes <<<"$cas"
+    # shellcheck disable=SC2086
+    commit_de_donnees $fichiers
+    # shellcheck disable=SC2086
+    declarer $commandes
+    avec_lib 'charger_env prod; controler_paires '"$COMMIT"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+  done
+  # un commit que le clone n'a pas : refus, dit ; un argument qui n'est pas un commit : usage
+  avec_lib 'charger_env prod; controler_paires '"$(printf 'd%.0s' {1..40})"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"commit de données illisible"* ]]
+  avec_lib 'charger_env prod; controler_paires {{ branche_principale }}'
+  [ "$status" -eq 64 ]
+}
+
+# Décision 6 du lot 12 : un dossier de l'instance qui ne porte que le README.md de sa racine (celui
+# que sème le gabarit du dépôt de données) compte comme absent, dans les deux sens de la règle. Un
+# autre fichier à côté, ou un README.md plus bas, le rend présent.
+@test "paires : un dossier qui ne porte que son README.md compte comme absent" {
+  local cas fichiers commandes attendu
+  # <fichiers du commit>|<commandes déclarées>|<message attendu, vide quand il n'y a rien à dire>
+  for cas in \
+    "$SOUS_CONFIG/README.md||" \
+    "$SOUS_CONFIG/README.md $SOUS_CONTENU/README.md||" \
+    "$SOUS_CONFIG/README.md $SOUS_CONTENU/page.md|VERIFIER_CONTENU|" \
+    "$SOUS_CONFIG/README.md|VERIFIER_CONFIG|VERIFIER_CONFIG sans $SOUS_CONFIG" \
+    "$SOUS_CONTENU/README.md|VERIFIER_CONTENU|VERIFIER_CONTENU sans $SOUS_CONTENU" \
+    "$SOUS_CONFIG/README.md $SOUS_CONFIG/a.yaml||$SOUS_CONFIG sans VERIFIER_CONFIG" \
+    "$SOUS_CONFIG/a/README.md||$SOUS_CONFIG sans VERIFIER_CONFIG" \
+    "$SOUS_CONFIG/README.md $SOUS_CONFIG/été.yml||$SOUS_CONFIG sans VERIFIER_CONFIG" \
+    "$SOUS_CONFIG/README.md $SOUS_CONFIG/a.yaml|VERIFIER_CONFIG|"; do
+    echo "cas : $cas"
+    IFS='|' read -r fichiers commandes attendu <<<"$cas"
+    # shellcheck disable=SC2086  # listes séparées par des espaces, voulues
+    commit_de_donnees $fichiers
+    # shellcheck disable=SC2086
+    declarer $commandes
+    avec_lib 'charger_env prod; controler_paires '"$COMMIT"
+    if [ -z "$attendu" ]; then
+      [ "$status" -eq 0 ]
+      [ -z "$output" ]
+    else
+      [ "$status" -eq 1 ]
+      [ "$(messages_du_journal)" = "$attendu (commit de données $COMMIT)" ]
+    fi
+  done
+}
+
+# Review Focus 4 : un .partiel laissé par un essai coupé (en lecture seule, s'il a été coupé après
+# chmod) se retire et l'instantané se refait ; un instantané complet se réutilise sans git archive.
+@test "instantané : un .partiel se refait, un complet se réutilise" {
+  local instantanes="${{ prefixe }}RACINE_ETAT/prod/instantanes"
+  declarer VERIFIER_CONFIG VERIFIER_CONTENU
+  commit_de_donnees "$SOUS_CONFIG/profil.yml" "$SOUS_CONTENU/page.md"
+  mkdir -p "$instantanes/$COMMIT.partiel/config"
+  echo "reste d'un essai coupé" >"$instantanes/$COMMIT.partiel/config/reste"
+  chmod -R a-w "$instantanes/$COMMIT.partiel"
+  creer_double_transparent git
+  avec_lib 'charger_env prod; preparer_instantane '"$COMMIT"'; echo "INSTANTANE=$INSTANTANE"'
+  [ "$status" -eq 0 ]
+  [ "${lines[-1]}" = "INSTANTANE=$instantanes/$COMMIT" ]
+  [ ! -e "$instantanes/$COMMIT.partiel" ]
+  [ "$(cat "$instantanes/$COMMIT/config/profil.yml")" = "fichier d'exemple $SOUS_CONFIG/profil.yml" ]
+  [ "$(cat "$instantanes/$COMMIT/contenu/page.md")" = "fichier d'exemple $SOUS_CONTENU/page.md" ]
+  [ ! -e "$instantanes/$COMMIT/config/reste" ]
+  [ "$(appels_de git | grep -c ' archive ')" -eq 2 ]
+
+  # complet : réutilisé tel quel
+  : >"$APPELS"
+  avec_lib 'charger_env prod; preparer_instantane '"$COMMIT"'; echo "INSTANTANE=$INSTANTANE"'
+  [ "$status" -eq 0 ]
+  [ "${lines[-1]}" = "INSTANTANE=$instantanes/$COMMIT" ]
+  [[ "$output" == *"instantané des données réutilisé : $instantanes/$COMMIT"* ]]
+  [ -z "$(appels_de git | grep ' archive ' || true)" ]
+
+  # un essai qui échoue (un dossier déclaré que le commit n'a pas) : dit, et rien de complet ; son
+  # .partiel reste, pour le diagnostic, jusqu'à l'essai suivant
+  commit_de_donnees "$SOUS_CONFIG/profil.yml"
+  avec_lib 'charger_env prod; preparer_instantane '"$COMMIT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"extraction impossible de $SOUS_CONTENU du commit de données $COMMIT"* ]]
+  [ ! -e "$instantanes/$COMMIT" ]
+  [ -d "$instantanes/$COMMIT.partiel" ]
+  # un instantané qui n'a pas un dossier déclaré n'est pas complet : refus, sans rien remplacer
+  mkdir -p "$instantanes/$COMMIT/config"
+  avec_lib 'charger_env prod; preparer_instantane '"$COMMIT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"instantané des données incomplet : $instantanes/$COMMIT (sans contenu)"* ]]
+  [ -d "$instantanes/$COMMIT/config" ]
+}
+
+# L'instantané vient du commit, pas de la copie de travail du clone ; il ne porte que les dossiers
+# déclarés, chacun sous son nom final et en entier (son README.md compris), et rien n'y est
+# inscriptible.
+@test "instantané : en lecture seule, et seulement les dossiers déclarés" {
+  local instantane
+  declarer VERIFIER_CONTENU
+  commit_de_donnees "$SOUS_CONFIG/profil.yml" "$SOUS_CONTENU/page.md" "$SOUS_CONTENU/sous/profond.md" \
+    "$SOUS_CONTENU/README.md"
+  echo "modifié après le commit" >"$CLONE_DONNEES/$SOUS_CONTENU/page.md"
+  avec_lib 'charger_env staging; preparer_instantane '"$COMMIT"'; echo "INSTANTANE=$INSTANTANE"'
+  [ "$status" -eq 0 ]
+  instantane="${{ prefixe }}RACINE_ETAT/staging/instantanes/$COMMIT"
+  [ "${lines[-1]}" = "INSTANTANE=$instantane" ]
+  [ "$(find "$instantane" -mindepth 1 -maxdepth 1 -printf '%f')" = contenu ]
+  [ "$(cat "$instantane/contenu/page.md")" = "fichier d'exemple $SOUS_CONTENU/page.md" ]
+  [ "$(cat "$instantane/contenu/sous/profond.md")" = "fichier d'exemple $SOUS_CONTENU/sous/profond.md" ]
+  [ "$(cat "$instantane/contenu/README.md")" = "fichier d'exemple $SOUS_CONTENU/README.md" ]
+  [ -z "$(find "$instantane" -perm /222)" ]
+  # chaque environnement a les siens
+  [ ! -e "${{ prefixe }}RACINE_ETAT/prod/instantanes" ]
+  # les deux dossiers déclarés : les deux, sous config/ et contenu/ quel que soit le mode
+  declarer VERIFIER_CONFIG VERIFIER_CONTENU
+  commit_de_donnees "$SOUS_CONFIG/profil.yml" "$SOUS_CONTENU/page.md"
+  avec_lib 'charger_env prod; preparer_instantane '"$COMMIT"
+  [ "$status" -eq 0 ]
+  instantane="${{ prefixe }}RACINE_ETAT/prod/instantanes/$COMMIT"
+  [ "$(find "$instantane" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort | tr '\n' ' ')" = "config contenu " ]
+  [ -z "$(find "$instantane" -perm /222)" ]
+  # décision 7 : le staging ne monte ni ne vérifie jamais /config, et son instantané n'en porte pas
+  # de copie, même quand VERIFIER_CONFIG est déclarée ; complet sans lui, il se réutilise
+  avec_lib 'charger_env staging; preparer_instantane '"$COMMIT"
+  [ "$status" -eq 0 ]
+  instantane="${{ prefixe }}RACINE_ETAT/staging/instantanes/$COMMIT"
+  [ "$(find "$instantane" -mindepth 1 -maxdepth 1 -printf '%f')" = contenu ]
+  [[ "$output" == *"instantané des données prêt : $instantane"* ]]
+  avec_lib 'charger_env staging; preparer_instantane '"$COMMIT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"instantané des données réutilisé : $instantane"* ]]
+  # VERIFIER_CONFIG seule, en staging : rien à extraire
+  declarer VERIFIER_CONFIG
+  commit_de_donnees "$SOUS_CONFIG/profil.yml"
+  avec_lib 'charger_env staging; preparer_instantane '"$COMMIT"
+  [ "$status" -eq 0 ]
+  instantane="${{ prefixe }}RACINE_ETAT/staging/instantanes/$COMMIT"
+  [ -d "$instantane" ]
+  [ -z "$(find "$instantane" -mindepth 1)" ]
+}
+
+# Les commandes de vérification : chacune dans un conteneur jetable de l'image visée, sans réseau,
+# avec les options des conteneurs jetables, son seul dossier monté en lecture seule. 0 conforme,
+# 2 non conforme ; 64 ou tout autre code : la vérification n'a pas eu lieu (1).
+@test "vérifier : codes 0, 2 et autres" {
+  local instantane="$BATS_TEST_TMPDIR/instantane" dossier code
+  mkdir -p "$instantane/config" "$instantane/contenu"
+  declarer VERIFIER_CONFIG VERIFIER_CONTENU
+  creer_double docker 'echo "conforme : 2 fichiers"'
+  run --separate-stderr bash -c 'set -euo pipefail; . "$CLONE/deploiement/lib.sh"; verifier_instantane prod '"$IMAGE_VISEE $instantane"
+  [ "$status" -eq 0 ]
+  # rien sur stdout : la sortie des commandes va au journal
+  [ -z "$output" ]
+  # shellcheck disable=SC2154  # $stderr est posée par run --separate-stderr
+  [[ "$stderr" == *"configuration conforme (VERIFIER_CONFIG : code 0) : conforme : 2 fichiers"* ]]
+  [[ "$stderr" == *"contenu conforme (VERIFIER_CONTENU : code 0) : conforme : 2 fichiers"* ]]
+  [ "$(appels_de docker)" = "$(printf '%s\n' \
+    "docker run --rm --network none $JETABLES -v $instantane/config:/config:ro $IMAGE_VISEE outil verifier_config /config" \
+    "docker run --rm --network none $JETABLES -v $instantane/contenu:/contenu:ro $IMAGE_VISEE outil verifier_contenu /contenu")" ]
+  # 2 : non conforme, dit, et la vérification s'arrête là
+  for dossier in config contenu; do
+    creer_double docker 'case "$*" in *":/'"$dossier"':ro "*) echo "écart : '"$dossier"'"; exit 2 ;; esac'
+    avec_lib 'verifier_instantane prod '"$IMAGE_VISEE $instantane"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"non conforme (VERIFIER_${dossier^^} : code 2) : écart : $dossier"* ]]
+  done
+  : >"$APPELS"
+  creer_double docker 'echo "écart"; exit 2'
+  avec_lib 'verifier_instantane prod '"$IMAGE_VISEE $instantane"
+  [ "$status" -eq 2 ]
+  [ "$(nombre_d_appels docker)" -eq 1 ]
+  # 64 (usage refusé par l'image) ou tout autre code
+  for code in 64 1 125; do
+    creer_double docker 'echo "usage : outil <commande>"; exit '"$code"
+    avec_lib 'verifier_instantane prod '"$IMAGE_VISEE $instantane"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"vérification impossible (VERIFIER_CONFIG : code $code)"*"usage : outil <commande>"* ]]
+  done
+  # un dossier déclaré qui manque à l'instantané : erreur, et aucun conteneur (docker créerait le
+  # dossier à monter)
+  rm -rf "$instantane/contenu"
+  : >"$APPELS"
+  creer_double docker
+  avec_lib 'verifier_instantane prod '"$IMAGE_VISEE $instantane"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"instantané sans contenu : $instantane/contenu"* ]]
+  [ "$(nombre_d_appels docker)" -eq 0 ]
+  # rien de déclaré : rien à lancer
+  declarer
+  avec_lib 'verifier_instantane prod '"$IMAGE_VISEE $instantane"
+  [ "$status" -eq 0 ]
+  [ "$(nombre_d_appels docker)" -eq 0 ]
+}
+
+# Le staging ne monte jamais /config (M-0006, § 5) : VERIFIER_CONFIG n'y tourne pas, quoi que porte
+# l'instantané ; VERIFIER_CONTENU, si.
+@test "vérifier : le staging ne lance pas VERIFIER_CONFIG" {
+  local instantane="$BATS_TEST_TMPDIR/instantane"
+  mkdir -p "$instantane/config" "$instantane/contenu"
+  declarer VERIFIER_CONFIG VERIFIER_CONTENU
+  creer_double docker 'case "$*" in *":/config:ro "*) exit 2 ;; esac; echo conforme'
+  avec_lib 'verifier_instantane staging '"$IMAGE_VISEE $instantane"
+  [ "$status" -eq 0 ]
+  [ "$(appels_de docker)" = "docker run --rm --network none $JETABLES -v $instantane/contenu:/contenu:ro $IMAGE_VISEE outil verifier_contenu /contenu" ]
+  [[ "$output" == *"staging : VERIFIER_CONFIG n'est pas lancée, /config n'y est jamais monté"* ]]
+  # sans config/ dans l'instantané non plus
+  rm -rf "$instantane/config"
+  avec_lib 'verifier_instantane staging '"$IMAGE_VISEE $instantane"
+  [ "$status" -eq 0 ]
+  aucune_ligne ':/config' "$APPELS"
+  # un environnement inconnu est une faute d'usage
+  avec_lib 'verifier_instantane recette '"$IMAGE_VISEE $instantane"
+  [ "$status" -eq 64 ]
+}
+
+# VERIFIER_CONTENU reçoit en second argument le contenu du couple en service, monté sur
+# /en-service ; VERIFIER_CONFIG, jamais.
+@test "vérifier : /en-service pour le contenu en service" {
+  local vise="$BATS_TEST_TMPDIR/vise" service="$BATS_TEST_TMPDIR/service"
+  mkdir -p "$vise/config" "$vise/contenu" "$service/config" "$service/contenu"
+  declarer VERIFIER_CONFIG VERIFIER_CONTENU
+  creer_double docker 'echo conforme'
+  avec_lib 'verifier_instantane prod '"$IMAGE_VISEE $vise $service"
+  [ "$status" -eq 0 ]
+  [ "$(appels_de docker)" = "$(printf '%s\n' \
+    "docker run --rm --network none $JETABLES -v $vise/config:/config:ro $IMAGE_VISEE outil verifier_config /config" \
+    "docker run --rm --network none $JETABLES -v $vise/contenu:/contenu:ro -v $service/contenu:/en-service:ro $IMAGE_VISEE outil verifier_contenu /contenu /en-service")" ]
+  # un couple en service sans contenu (il ne montait que la configuration) : pas de /en-service
+  rm -rf "$service/contenu"
+  : >"$APPELS"
+  avec_lib 'verifier_instantane prod '"$IMAGE_VISEE $vise $service"
+  [ "$status" -eq 0 ]
+  [ "$(appels_de docker | tail -n 1)" = "docker run --rm --network none $JETABLES -v $vise/contenu:/contenu:ro $IMAGE_VISEE outil verifier_contenu /contenu" ]
+  # un instantané en service introuvable : erreur, aucun conteneur
+  : >"$APPELS"
+  avec_lib 'verifier_instantane prod '"$IMAGE_VISEE $vise $BATS_TEST_TMPDIR/absent"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"instantané en service introuvable : $BATS_TEST_TMPDIR/absent"* ]]
+  [ "$(nombre_d_appels docker)" -eq 0 ]
+}
 
 @test "signaler_ok_envoie_le_message_a_l_adresse_de_la_variable" {
   creer_double curl
@@ -503,6 +896,26 @@ projet_env() {
   [ "$status" -eq 1 ]
 }
 
+# Le champ configuration (exemple ou montee) n'est exigé que si on le demande : un projet qui ne
+# déclare pas VERIFIER_CONFIG garde la santé d'avant.
+@test "santé : le champ configuration n'est lu que sur demande" {
+  creer_double curl 'echo "{\"statut\":\"ok\",\"version\":\"1.2.3\",\"revision\":\"abc\"}"'
+  avec_lib 'charger_env prod; sante_locale 1.2.3 abc'
+  [ "$status" -eq 0 ]
+  avec_lib 'charger_env prod; sante_locale 1.2.3 abc montee'
+  [ "$status" -eq 1 ]
+  creer_double curl 'echo "{\"statut\":\"ok\",\"version\":\"1.2.3\",\"revision\":\"abc\",\"configuration\":\"montee\"}"'
+  avec_lib 'charger_env prod; sante_locale 1.2.3 abc montee'
+  [ "$status" -eq 0 ]
+  avec_lib 'charger_env prod; sante_locale 1.2.3 abc exemple'
+  [ "$status" -eq 1 ]
+  avec_lib 'charger_env prod; sante_locale 1.2.3 abc'
+  [ "$status" -eq 0 ]
+  # la version et la révision comptent toujours
+  avec_lib 'charger_env prod; sante_locale 1.2.3 autre montee'
+  [ "$status" -eq 1 ]
+}
+
 @test "attendre_sante_reessaie_puis_reussit" {
   export {{ prefixe }}SANTE_DELAI=0
   # les deux premiers essais échouent, le troisième est bon
@@ -547,6 +960,72 @@ projet_env() {
   [[ "$output" == *"{{ prefixe }}VERSION est posée dans l'environnement"* ]]
 }
 
+# Les montages de l'instantané aussi : compose prend {{ prefixe }}CONFIG et {{ prefixe }}CONTENU du shell avant
+# compose.env, et la prod monterait un autre dossier que l'instantané vérifié (M-0006, § 5). Une
+# valeur venue de l'env de l'environnement, que charger_env source et exporte, est refusée de même.
+@test "refuser_image_heritee : la configuration et le contenu, du shell ou de l'env" {
+  local variable env_prod="$CLONE_DONNEES/$SOUS_ENV/prod.env"
+  cp "$env_prod" "$BATS_TEST_TMPDIR/prod.env.origine"
+  for variable in {{ prefixe }}CONFIG {{ prefixe }}CONTENU; do
+    echo "cas : $variable du shell"
+    export "$variable=$CLONE_DONNEES/$SOUS_CONFIG"
+    avec_lib 'charger_env prod; refuser_image_heritee; echo pas de refus'
+    unset "$variable"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"$variable est posée dans l'environnement : elle prendrait le pas sur compose.env"* ]]
+    [[ "$output" != *"pas de refus"* ]]
+
+    echo "cas : $variable de l'env de prod"
+    cp "$BATS_TEST_TMPDIR/prod.env.origine" "$env_prod"
+    echo "$variable=$CLONE_DONNEES/$SOUS_CONTENU" >>"$env_prod"
+    avec_lib 'charger_env prod; refuser_image_heritee; echo pas de refus'
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"$variable est posée dans l'environnement"* ]]
+    [[ "$output" != *"pas de refus"* ]]
+    cp "$BATS_TEST_TMPDIR/prod.env.origine" "$env_prod"
+  done
+  # un nom voisin n'est pas visé
+  {{ prefixe }}CONFIGURATION=x {{ prefixe }}CONTENUS=x avec_lib 'charger_env prod; refuser_image_heritee; echo pas de refus'
+  [ "$status" -eq 0 ]
+  [ "${lines[-1]}" = "pas de refus" ]
+}
+
+# _retirer_fige : un dossier figé (a-w, comme un instantané) se retire, sous-dossiers figés compris ;
+# un lien est retiré sans que sa cible perde rien, ni ses droits ; un chemin absent n'est pas une
+# erreur.
+@test "_retirer_fige : un dossier en lecture seule, jamais à travers un lien" {
+  local fige="$BATS_TEST_TMPDIR/fige" cible="$BATS_TEST_TMPDIR/cible"
+  mkdir -p "$fige/sous" "$cible"
+  echo garde >"$cible/fichier"
+  echo x >"$fige/sous/fichier"
+  ln -s "$cible" "$fige/lien"
+  chmod -R a-w "$fige" "$cible"
+  avec_lib '_retirer_fige "'"$fige"'"'
+  [ "$status" -eq 0 ]
+  [ ! -e "$fige" ]
+  [ "$(cat "$cible/fichier")" = garde ]
+  [ -z "$(find "$cible" -perm /222)" ]
+  # un lien à la place du dossier : le lien s'en va, la cible reste, en lecture seule
+  ln -s "$cible" "$fige"
+  avec_lib '_retirer_fige "'"$fige"'"'
+  [ "$status" -eq 0 ]
+  [ ! -L "$fige" ]
+  [ -d "$cible" ]
+  [ -z "$(find "$cible" -perm /222)" ]
+  # absent : rien à faire
+  avec_lib '_retirer_fige "'"$fige"'"'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  # un dossier qui ne se retire pas (son parent est figé, et _retirer_fige ne remonte pas) : échec,
+  # sans rien journaliser, et il reste
+  mkdir -p "$BATS_TEST_TMPDIR/parent/fige"
+  chmod a-w "$BATS_TEST_TMPDIR/parent"
+  avec_lib '_retirer_fige "'"$BATS_TEST_TMPDIR/parent/fige"'"'
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  [ -d "$BATS_TEST_TMPDIR/parent/fige" ]
+}
+
 @test "prendre_verrou_est_le_verrou_de_l_etat_et_attend_le_delai" {
   avec_lib 'charger_env prod; prendre_verrou; echo pris'
   [ "$status" -eq 0 ]
@@ -581,6 +1060,56 @@ projet_env() {
     avec_lib 'charger_env prod; lire_deploye'
     [ "$status" -eq 1 ]
     [[ "$output" == *"deploye illisible"* ]]
+  done
+}
+
+# L'état en couple (M-0004, amendé) : deploye et precedent gagnent un troisième champ, le commit de
+# données, et echec un second. Un état d'avant la v0.7.0, sans ce champ, se lit comme un couple dont
+# le commit vaut « - ».
+@test "couple : lire un état à deux, trois champs, et echec à un, deux champs" {
+  local image sha etat="${{ prefixe }}RACINE_ETAT/prod" cas contenu version commit_lu
+  image="ghcr.io/{{ compte | lower }}/{{ nom }}@sha256:$(printf 'a%.0s' {1..64})"
+  sha="$(printf 'c%.0s' {1..40})"
+  mkdir -p "$etat"
+  local lire='charger_env prod; lire_deploye; printf "%s\n" "$DEPLOYE_IMAGE" "$DEPLOYE_VERSION" "$DEPLOYE_COMMIT"
+    lire_version "${{ prefixe }}ETAT/deploye"; printf "%s\n" "$IMAGE_LUE" "$VERSION_LUE" "$COMMIT_LU"'
+  # <contenu de deploye>|<version lue>|<commit lu> ; un quatrième champ est ignoré, comme avant
+  for cas in "$image 1.2.3|1.2.3|-" "$image 1.2.3 $sha|1.2.3|$sha" "$image 1.2.3 -|1.2.3|-" \
+    "$image main $sha autre|main|$sha"; do
+    IFS='|' read -r contenu version commit_lu <<<"$cas"
+    echo "$contenu" >"$etat/deploye"
+    avec_lib "$lire"
+    [ "$status" -eq 0 ]
+    [ "${lines[*]}" = "$image $version $commit_lu $image $version $commit_lu" ]
+  done
+  # un commit d'une autre forme : l'état est illisible
+  for commit_lu in abc "$(printf 'C%.0s' {1..40})" "${sha}0" "--"; do
+    echo "$image 1.2.3 $commit_lu" >"$etat/deploye"
+    avec_lib 'charger_env prod; lire_deploye'
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"deploye illisible"* ]]
+    avec_lib 'charger_env prod; lire_version "${{ prefixe }}ETAT/deploye" || echo "illisible : [$IMAGE_LUE]"'
+    [ "$output" = "illisible : []" ]
+  done
+
+  # echec : aucun fichier, aucun couple en échec
+  local lecture_echec='charger_env prod; lire_echec; printf "[%s] [%s]\n" "$ECHEC_IMAGE" "$ECHEC_COMMIT"'
+  avec_lib "$lecture_echec"
+  [ "$status" -eq 0 ]
+  [ "$output" = "[] []" ]
+  # <contenu de echec>|<commit lu>
+  for contenu in "$image|-" "$image $sha|$sha" "$image -|-"; do
+    echo "${contenu%|*}" >"$etat/echec"
+    avec_lib "$lecture_echec"
+    [ "$status" -eq 0 ]
+    [ "$output" = "[$image] [${contenu#*|}]" ]
+  done
+  # illisible : vide, une image d'une autre forme, un commit d'une autre forme
+  for contenu in "" "image-sans-condense" "image-sans-condense $sha" "$image abc"; do
+    echo "$contenu" >"$etat/echec"
+    avec_lib 'charger_env prod; lire_echec || printf "illisible : [%s] [%s]\n" "$ECHEC_IMAGE" "$ECHEC_COMMIT"'
+    [ "$status" -eq 0 ]
+    [ "$output" = "illisible : [] []" ]
   done
 }
 {%- if sauvegardes %}
