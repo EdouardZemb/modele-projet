@@ -32,10 +32,10 @@
 # son registre, son conteneur et ses images, et rien d'autre (ni prune, ni -f hors d'elle).
 set -euo pipefail
 
-[ "$#" -eq 1 ] && [ -d "$1" ] || {
+if [ "$#" -ne 1 ] || [ ! -d "$1" ]; then
   echo "usage : bash tests/modele/epreuve-menage.sh <rendu>" >&2
   exit 64
-}
+fi
 RENDU="$(cd "$1" && pwd)"
 SCRIPT="$RENDU/deploiement/nettoyer-images.sh"
 [ -f "$SCRIPT" ] || {
@@ -138,7 +138,7 @@ fi
 echo "== le registre et les images"
 mkdir -p "$TRAVAIL/docker"
 docker rm -f -v "$REGISTRE" >/dev/null 2>&1 || true
-docker run -d -p 5000:5000 --name "$REGISTRE" "$REGISTRE_IMAGE" >/dev/null
+docker run -d -p 127.0.0.1:5000:5000 --name "$REGISTRE" "$REGISTRE_IMAGE" >/dev/null
 
 # m0 : seule sous son étiquette 0.0.0, avec son empreinte (retirée par son identifiant). Son envoi
 # attend que le registre réponde.

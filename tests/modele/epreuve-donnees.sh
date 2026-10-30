@@ -343,7 +343,7 @@ export PATH="$OUTILS:$PATH"
 echo "$(age --version 2>&1 | head -n 1), $(sops --version 2>/dev/null | head -n 1)"
 
 echo "== le registre, l'image et les réseaux du tunnel"
-docker run -d -p 5001:5000 --name "$REGISTRE" "$REGISTRE_IMAGE" >/dev/null
+docker run -d -p 127.0.0.1:5001:5000 --name "$REGISTRE" "$REGISTRE_IMAGE" >/dev/null
 REGISTRE_LANCE=1
 docker tag "$IMAGE_CI" "$DEPOT:epreuve"
 ETIQUETTE_POSEE=1
@@ -359,8 +359,10 @@ done
   echo "épreuve : le registre ne répond pas sur localhost:5001" >&2
   exit 1
 }
+# Sous pipefail, un grep sans ligne fait échouer l'affectation : IMAGE reste alors vide, et le
+# message ci-dessous dit pourquoi.
 IMAGE="$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$DEPOT:epreuve" \
-  | grep "^$DEPOT@sha256:" | head -n 1)"
+  | grep "^$DEPOT@sha256:" | head -n 1)" || IMAGE=""
 [[ "$IMAGE" =~ ^$DEPOT@sha256:[0-9a-f]{64}$ ]] || {
   echo "épreuve : pas d'empreinte pour $DEPOT:epreuve après le push" >&2
   exit 1

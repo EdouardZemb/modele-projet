@@ -11,7 +11,8 @@ Conforme, pour la fausse app : un dossier, pas un lien, qui porte `version`, la 
 une que l'app connaît, et pages/, au moins une page : pages/<identifiant>.txt, un fichier de texte
 non vide. L'identifiant d'une page est définitif : une page du contenu en service qui manque au
 contenu visé le rend non conforme. Le contenu en service, quand il est donné, doit être un dossier :
-sinon, c'est une erreur d'usage.
+sinon, c'est une erreur d'usage. Quand il est donné, la ligne « conforme » le dit, avec le nombre de
+ses pages.
 """
 
 import sys
@@ -77,7 +78,15 @@ def main(arguments):
     if raisons:
         print(f"non conforme : {' ; '.join(raisons)}")
         return 2
-    print("conforme")
+    if en_service is None:
+        print("conforme")
+    else:
+        # deployer.sh relaie cette ligne au journal : elle dit que le contenu en service a été lu.
+        nombre = len(pages(en_service))
+        print(
+            f"conforme, contenu en service comparé : {nombre} page{'s' if nombre > 1 else ''}, "
+            "aucune disparue"
+        )
     return 0
 
 
