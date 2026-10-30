@@ -13,6 +13,7 @@ from conftest import (
     CLE_HORS_LIGNE_DE_TEST,
     CLE_SERVEUR_DE_TEST,
     RACINE,
+    RENVOI_AU_PLAN,
     REPONSES_SERVEUR,
     REPONSES_SERVEUR_CODE,
     fichiers_texte,
@@ -986,8 +987,7 @@ def test_compte_rendu_partout(rendre):
 
 # Lot 12 : le runbook dit le couple, l'étiquette de données, l'instantané monté, les données
 # refusées et les anomalies du clone des données, chacun dans le mode où il joue. Les numéros du
-# plan n'entrent pas dans un fichier rendu.
-RENVOI_AU_PLAN = re.compile(r"\b(?:Ruling|ruling) \d|\bP[1-8]\b|\btâche \d|\bdécision \d du lot")
+# plan n'entrent pas dans un fichier rendu (RENVOI_AU_PLAN, dans conftest).
 
 
 @pytest.mark.parametrize("sauvegardes", [True, False])
@@ -1004,8 +1004,13 @@ def test_exploitation_dit_le_couple_et_les_deux_modes(rendre, mode, sauvegardes)
 
     # Ce qui tourne : le mode, les clones des données, les instantanés, l'état en couple.
     tourne = a_plat(section(texte, "Ce qui tourne"))
-    assert ("| Clone des données | `~/essai-donnees` | `~/essai-donnees-staging` |" in tourne) is deux
+    clones = "| Clone des données | `~/essai-donnees` | `~/essai-donnees-staging` |"
+    assert (clones in tourne) is deux
     assert ("la plus haute étiquette de données `donnees-AAAA.MM.JJ.n`" in tourne) is deux
+    assert ("la branche des données que nomme `ESSAI_BRANCHE_DONNEES`" in tourne) is deux
+    # le terme, défini une fois
+    commande = "Une commande de l'instance est `VERIFIER_CONFIG` ou `VERIFIER_CONTENU`"
+    assert f"{commande}, déclarée dans `deploiement/projet.env`" in tourne
     assert "`~/.local/state/essai/prod/instantanes/`" in tourne
     assert "donne l'image, la version et le commit de données du couple en service" in tourne
     assert "`echec` nomme un couple, son image et son commit" in tourne
@@ -1017,13 +1022,24 @@ def test_exploitation_dit_le_couple_et_les_deux_modes(rendre, mode, sauvegardes)
     assert ("une PR du dépôt de données `essai-donnees`" in mise_en_service) is deux
     assert ("tire l'image `:main`, sans jeton" in mise_en_service) is deux
     assert ("Cette fusion publie la première image" in mise_en_service) is not deux
+    # le dépôt de code est public dès l'étape 3 : le chemin d'un dépôt privé ne vaut qu'à un dépôt
+    assert ("Le dépôt de code est public avant cette étape" in mise_en_service) is deux
+    prive = "s'il est privé, elle crée d'abord une clé de déploiement"
+    assert (prive in mise_en_service) is not deux
+    # à deux dépôts, une première étiquette de données dans tous les cas : sans elle, la prod ne
+    # prend aucun env ni secret du dépôt de données après le clonage
+    assert ("une première étiquette de données, dans tous les cas" in mise_en_service) is deux
+    sans_elle = "la prod ne prend aucun env ni secret du dépôt de données après son clonage"
+    assert (sans_elle in mise_en_service) is deux
 
     # Mettre en ligne : l'étiquette de données (👤), ou son absence à un dépôt.
     en_ligne = a_plat(section(texte, "Mettre en ligne"))
     assert ("git tag -a donnees-AAAA.MM.JJ.n" in en_ligne) is deux
     assert ("git push origin donnees-AAAA.MM.JJ.n" in en_ligne) is deux
     assert ("« aucune version des données »" in en_ligne) is deux
-    assert ("n'entre en service qu'avec la version suivante du code" in en_ligne) is deux
+    # sans commande, un env ou un secret n'entre en prod qu'avec deux gestes 👤
+    deux_gestes = "une étiquette de données sur le commit qui le porte, puis une étiquette du code"
+    assert (deux_gestes in en_ligne) is deux
     assert ("Dans l'intervalle, la CI du dépôt de données refuse" in en_ligne) is deux
     assert ("Il n'y a pas d'étiquette de données" in en_ligne) is not deux
     assert "**Un couple dont la santé échoue**" in en_ligne
@@ -1060,9 +1076,15 @@ def test_exploitation_dit_le_couple_et_les_deux_modes(rendre, mode, sauvegardes)
         "**La vérification n'a pas eu lieu.**",
         "`<dossier> sans <commande> (commit de données <sha>)`",
         "l'image ne connaît pas la commande",
+        # les lignes du journal, telles que lib.sh les écrit
+        "<CLÉ> de projet.env : <sortie>`",
+        "`vérification impossible (<CLÉ> : code <n>) : <sortie>`",
         "bash ~/essai/deploiement/deployer.sh prod <image@sha256:…> <X.Y.Z> --commit-donnees <sha>",
+        # le participe se rapporte au déploiement
+        "Quand la sonde lance le déploiement, chaque refus s'écrit",
     ):
         assert fragment in debloquer, fragment
+    assert "Un autre code donne la même ligne" not in debloquer
     for fragment in (
         "**Le clone des données.**",
         "**« clone des données absent »**",
@@ -1073,7 +1095,8 @@ def test_exploitation_dit_le_couple_et_les_deux_modes(rendre, mode, sauvegardes)
     ):
         assert (fragment in debloquer) is deux, fragment
     if sauvegardes:
-        assert "Le couple du geste est marqué en échec : la sonde attend un nouveau couple" in debloquer
+        geste = "Le couple du geste est marqué en échec : la sonde attend un nouveau couple"
+        assert geste in debloquer
         assert "ajouter `--commit-donnees <sha>`, celui de `deploye`" in debloquer
 
         # Restaurer : le couple de l'archive se rapatrie avec elle, et la restauration le dit.
@@ -1088,7 +1111,10 @@ def test_exploitation_dit_le_couple_et_les_deux_modes(rendre, mode, sauvegardes)
     assert ("secrets.ps1 refaire secrets/<env>.env.enc" in secrets) is deux
     assert ("secrets.ps1 refaire deploiement/secrets/<env>.env.enc" in secrets) is not deux
     assert ("`modele-donnees.yml`" in secrets) is deux
-    assert ("n'entre en service qu'avec la version suivante du code" in secrets) is deux
+    deux_gestes = "une étiquette de données sur le commit qui la porte, puis une étiquette du code"
+    assert (deux_gestes in secrets) is deux
+    correctif = "Une rotation urgente se publie par une étiquette de correctif"
+    assert (correctif in secrets) is not deux
 
     # Unités : la sonde suit un couple.
     unites = a_plat(section(texte, "Unités"))

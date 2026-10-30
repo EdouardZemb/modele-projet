@@ -271,9 +271,9 @@ qu'au §1, dans un worktree `<dépôt>.worktrees\modele-serveur`.
 - [ ] **Les secrets avant `serveur`.** 👤 `secrets.ps1 refaire` pour chaque environnement, puis 🤖
       la PR des deux `.enc`, fusionnée **avant** la PR de `serveur` qui déclare le projet : la
       sonde d'un projet sans ses secrets alerte (code 3). À deux dépôts, cette PR est celle du dépôt
-      de données ; sa CI tire l'image `:main` du code, qui doit donc être publiée et publique
-      avant elle. L'ordre complet est celui de
-      `docs/exploitation.md`, « La mise en service ». Pour un projet déjà en service,
+      de données ; sa CI clone le dépôt de code sans jeton et tire son image `:main` : le dépôt de
+      code est donc public, et son image publiée et publique, avant elle. L'ordre complet est celui
+      de `docs/exploitation.md`, « La mise en service ». Pour un projet déjà en service,
       `projets/<nom>.env` déclare ce qui existe, et la sonde de `serveur` n'y crée rien.
 - [ ] `gh pr checks` entièrement vert : `socle`, `verifier`, `deploiement` et `image`.
 

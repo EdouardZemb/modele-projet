@@ -344,11 +344,21 @@ def test_liste_d_alignement():
         "**Ses clés publiques ne servent qu'au premier rendu**",
         "sans entrer dans `.copier-answers.yml`",
         "**Une application qui lit son instance**",
-        "`exemple/` ou",
         "`instance/config/` et `instance/contenu/`",
         "**La règle des paires**",
     ):
         assert fragment in texte, fragment
+    a_plat = " ".join(texte.split())
+    for regle in (
+        # la CI du code exige l'exemple de chaque commande déclarée
+        "La CI du code y lance la commande, et refuse une commande déclarée sans son exemple",
+        # à deux dépôts, la CI des données clone le code sans jeton : il est public avant elle
+        (
+            "sa CI clone le dépôt de code sans jeton et tire son image `:main` : le dépôt de code "
+            "est donc public, et son image publiée et publique, avant elle"
+        ),
+    ):
+        assert regle in a_plat, regle
     # un --data d'une question que le projet ne se voit pas poser n'entre pas dans ses réponses :
     # le bloc de ports ne s'ajoute qu'aux dépôts qui portent leur instance (lot 12)
     assert "--data cible=serveur --data bloc_ports=<bloc>" not in texte
