@@ -470,9 +470,9 @@ messages_du_journal() {
   done
 }
 
-# La règle des paires : un dossier de l'instance présent dans le commit (git ne connaît pas de
-# dossier vide) va avec sa commande, et une commande avec son dossier. Chaque paire en défaut est
-# dite ; un commit illisible refuse aussi.
+# La règle des paires : un dossier de l'instance présent dans le commit (un fichier au moins, autre
+# que son README.md : voir le test suivant) va avec sa commande, et une commande avec son dossier.
+# Chaque paire en défaut est dite ; un commit illisible refuse aussi.
 @test "paires : un dossier sans sa commande, une commande sans son dossier" {
   local cas fichiers commandes attendus message attendu
   local -a messages
@@ -516,6 +516,39 @@ messages_du_journal() {
   [[ "$output" == *"commit de données illisible"* ]]
   avec_lib 'charger_env prod; controler_paires {{ branche_principale }}'
   [ "$status" -eq 64 ]
+}
+
+# Décision 6 du lot 12 : un dossier de l'instance qui ne porte que le README.md de sa racine (celui
+# que sème le gabarit du dépôt de données) compte comme absent, dans les deux sens de la règle. Un
+# autre fichier à côté, ou un README.md plus bas, le rend présent.
+@test "paires : un dossier qui ne porte que son README.md compte comme absent" {
+  local cas fichiers commandes attendu
+  # <fichiers du commit>|<commandes déclarées>|<message attendu, vide quand il n'y a rien à dire>
+  for cas in \
+    "$SOUS_CONFIG/README.md||" \
+    "$SOUS_CONFIG/README.md $SOUS_CONTENU/README.md||" \
+    "$SOUS_CONFIG/README.md $SOUS_CONTENU/page.md|VERIFIER_CONTENU|" \
+    "$SOUS_CONFIG/README.md|VERIFIER_CONFIG|VERIFIER_CONFIG sans $SOUS_CONFIG" \
+    "$SOUS_CONTENU/README.md|VERIFIER_CONTENU|VERIFIER_CONTENU sans $SOUS_CONTENU" \
+    "$SOUS_CONFIG/README.md $SOUS_CONFIG/a.yaml||$SOUS_CONFIG sans VERIFIER_CONFIG" \
+    "$SOUS_CONFIG/a/README.md||$SOUS_CONFIG sans VERIFIER_CONFIG" \
+    "$SOUS_CONFIG/README.md $SOUS_CONFIG/été.yml||$SOUS_CONFIG sans VERIFIER_CONFIG" \
+    "$SOUS_CONFIG/README.md $SOUS_CONFIG/a.yaml|VERIFIER_CONFIG|"; do
+    echo "cas : $cas"
+    IFS='|' read -r fichiers commandes attendu <<<"$cas"
+    # shellcheck disable=SC2086  # listes séparées par des espaces, voulues
+    commit_de_donnees $fichiers
+    # shellcheck disable=SC2086
+    declarer $commandes
+    avec_lib 'charger_env prod; controler_paires '"$COMMIT"
+    if [ -z "$attendu" ]; then
+      [ "$status" -eq 0 ]
+      [ -z "$output" ]
+    else
+      [ "$status" -eq 1 ]
+      [ "$(messages_du_journal)" = "$attendu (commit de données $COMMIT)" ]
+    fi
+  done
 }
 
 # Review Focus 4 : un .partiel laissé par un essai coupé (en lecture seule, s'il a été coupé après
@@ -562,11 +595,13 @@ messages_du_journal() {
 }
 
 # L'instantané vient du commit, pas de la copie de travail du clone ; il ne porte que les dossiers
-# déclarés, chacun sous son nom final, et rien n'y est inscriptible.
+# déclarés, chacun sous son nom final et en entier (son README.md compris), et rien n'y est
+# inscriptible.
 @test "instantané : en lecture seule, et seulement les dossiers déclarés" {
   local instantane
   declarer VERIFIER_CONTENU
-  commit_de_donnees "$SOUS_CONFIG/profil.yml" "$SOUS_CONTENU/page.md" "$SOUS_CONTENU/sous/profond.md"
+  commit_de_donnees "$SOUS_CONFIG/profil.yml" "$SOUS_CONTENU/page.md" "$SOUS_CONTENU/sous/profond.md" \
+    "$SOUS_CONTENU/README.md"
   echo "modifié après le commit" >"$CLONE_DONNEES/$SOUS_CONTENU/page.md"
   avec_lib 'charger_env staging; preparer_instantane '"$COMMIT"'; echo "INSTANTANE=$INSTANTANE"'
   [ "$status" -eq 0 ]
@@ -575,6 +610,7 @@ messages_du_journal() {
   [ "$(find "$instantane" -mindepth 1 -maxdepth 1 -printf '%f')" = contenu ]
   [ "$(cat "$instantane/contenu/page.md")" = "fichier d'exemple $SOUS_CONTENU/page.md" ]
   [ "$(cat "$instantane/contenu/sous/profond.md")" = "fichier d'exemple $SOUS_CONTENU/sous/profond.md" ]
+  [ "$(cat "$instantane/contenu/README.md")" = "fichier d'exemple $SOUS_CONTENU/README.md" ]
   [ -z "$(find "$instantane" -perm /222)" ]
   # chaque environnement a les siens
   [ ! -e "${{ prefixe }}RACINE_ETAT/prod/instantanes" ]
