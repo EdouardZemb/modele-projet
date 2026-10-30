@@ -2086,17 +2086,23 @@ cle_non_repetee() {
 # l'entrée standard, elle, ne se lit qu'une fois, en mémoire (« restaurer : dit le couple de
 # l'instantané »).
 @test "restaurer : une identité chiffrée par phrase de passe, dans un fichier" {
-  local autre d cle="$BATS_TEST_TMPDIR/hors-ligne.age"
+  local autre d cle="$BATS_TEST_TMPDIR/hors-ligne.age" tentative=0
   autre="ghcr.io/{{ compte | lower }}/{{ nom }}@sha256:$(printf '2%.0s' {1..64})"
   d="$(printf 'd%.0s' {1..40})"
   export PHRASE=phrase-de-test-seulement CLE_CHIFFREE="$cle" ARCHIVE="$BATS_TEST_TMPDIR/$SNAPSHOT.tar.age"
   archive_chiffree
   donnees_courantes
   printf '%s\n' "$autre 0.0.8 $d" | chiffrer "$BATS_TEST_TMPDIR/$SNAPSHOT.couple.age"
-  printf '%s\n%s\n' "$PHRASE" "$PHRASE" | script -qec "age -p -o '$cle' '$AGE_IDENTITE_HORS_LIGNE'" /dev/null >/dev/null
-  # le format binaire : l'en-tête d'age, et des octets nuls
+  # le format binaire : l'en-tête d'age, et des octets nuls. Le chiffré est aléatoire : un octet nul
+  # n'y est pas toujours (une fois sur deux environ, pour une identité de cette taille), et le test
+  # rechiffre jusqu'à en avoir un
+  until [ -s "$cle" ] && [ "$(tr -dc '\000' <"$cle" | wc -c)" -gt 0 ]; do
+    tentative=$((tentative + 1))
+    [ "$tentative" -le 40 ]
+    rm -f "$cle"
+    printf '%s\n%s\n' "$PHRASE" "$PHRASE" | script -qec "age -p -o '$cle' '$AGE_IDENTITE_HORS_LIGNE'" /dev/null >/dev/null
+  done
   [ "$(head -c 21 "$cle")" = age-encryption.org/v1 ]
-  [ "$(tr -dc '\000' <"$cle" | wc -c)" -gt 0 ]
   cat >"$BATS_TEST_TMPDIR/restaurer-au-terminal" <<'SCRIPT'
 #!/usr/bin/env bash
 exec bash "$CLONE/deploiement/restaurer.sh" prod "$ARCHIVE" --oui --cle "$CLE_CHIFFREE"
