@@ -8,7 +8,12 @@
 #                            dépôts) : un appel `-C <ce dossier> …` est noté, puis passé au vrai git,
 #                            et les autres variables n'y ont pas cours
 #   DOUBLE_GIT_STATUS        sortie de `status --porcelain` (défaut : vide, clone propre)
-#   DOUBLE_GIT_ECHEC         sous-commande qui échoue (fetch, merge, checkout, tag ou cat-file)
+#   DOUBLE_GIT_ECHEC         sous-commande qui échoue (fetch, merge, checkout, tag, cat-file ou show)
+#   DOUBLE_GIT_ARBRE         dossier qui tient lieu de l'arbre de toute révision du clone :
+#                            `show <rév>:<chemin>` imprime son fichier <chemin> (code 128 s'il n'y
+#                            est pas), et `cat-file -e <rév>:<chemin>` dit s'il y est. Défaut : la
+#                            copie de travail du clone (celui de `-C`). Tout autre objet de
+#                            `cat-file -e` (un `<sha>^{commit}`) existe.
 #   DOUBLE_GIT_ETIQUETTES    étiquettes du clone, séparées par des espaces, pour `tag --list`.
 #                            Avec --sort=-v:refname, elles sortent dans l'ordre de version
 #                            décroissant, comme le fait git (sort -rV : même ordre que git sur
@@ -49,13 +54,16 @@ mettre_a_jour_les_etiquettes() {
   fi
 }
 
+dossier=.
 if [ "${1:-}" = -C ]; then
   if [ -n "${DOUBLE_GIT_REEL_DANS:-}" ] && [ "${2:-}" = "$DOUBLE_GIT_REEL_DANS" ]; then
     # Le vrai git : le premier du PATH, hors du dossier des doubles.
     exec "$(PATH="${PATH//"$(dirname "$0")":/}" command -v git)" "$@"
   fi
+  dossier="$2"
   shift 2
 fi
+ARBRE="${DOUBLE_GIT_ARBRE:-$dossier}"
 sous_commande="${1:-}"
 
 if [ -n "${DOUBLE_GIT_ECHEC:-}" ] && [ "$DOUBLE_GIT_ECHEC" = "$sous_commande" ]; then
@@ -77,6 +85,20 @@ case "$sous_commande" in
       sort -rV <<<"$liste"
     else
       printf '%s\n' "$liste"
+    fi
+    ;;
+  show)
+    objet="${2:-}"
+    if [[ "$objet" != *:* ]] || [ ! -f "$ARBRE/${objet#*:}" ]; then
+      echo "fatal: path '${objet#*:}' does not exist in '${objet%%:*}'" >&2
+      exit 128
+    fi
+    cat "$ARBRE/${objet#*:}"
+    ;;
+  cat-file)
+    objet="${!#}"
+    if [[ "$objet" == *:* ]] && [ ! -f "$ARBRE/${objet#*:}" ]; then
+      exit 128
     fi
     ;;
   merge | checkout)

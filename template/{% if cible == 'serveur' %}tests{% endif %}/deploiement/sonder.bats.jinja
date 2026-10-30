@@ -96,6 +96,20 @@ avec_donnees() {
 appels_git_dans() {
   appels_de git | grep -F "git -C $1 " || true
 }
+
+# arbre_vise [<commande…>] : l'arbre de l'étiquette visée du code, que le double de git sert à
+# `show` et à `cat-file -e` (DOUBLE_GIT_ARBRE) : son deploiement/projet.env est celui de la copie
+# de travail, sans commande de l'instance, avec ces commandes.
+arbre_vise() {
+  local arbre="$BATS_TEST_TMPDIR/arbre-vise" commande
+  mkdir -p "$arbre/deploiement"
+  sed '/^VERIFIER_CONFIG=/d; /^VERIFIER_CONTENU=/d' "$CLONE/deploiement/projet.env" \
+    >"$arbre/deploiement/projet.env"
+  for commande in "$@"; do
+    printf '%s=outil %s\n' "$commande" "${commande,,}" >>"$arbre/deploiement/projet.env"
+  done
+  export DOUBLE_GIT_ARBRE="$arbre"
+}
 {%- if nature == 'code' %}
 
 # git_poste <args…> : le vrai git dans le poste, un autre clone de l'origine des données.
@@ -1024,9 +1038,110 @@ etiqueter_les_donnees() {
   sonder prod
   [ "$status" -eq 0 ]
   [ "$(appels_de deployer.sh)" = "deployer.sh prod $EMPREINTE 0.2.0" ]
-  [ "$(appels_de git | grep -c cat-file)" -eq 0 ]
+  [ "$(appels_de git | grep -cF '^{commit}')" -eq 0 ]
 }
 {%- endif %}
+
+# Ruling 13 du lot 12 : la déclaration qui fixe le commit du couple visé est celle de la version du
+# code visée, jamais celle qu'on quitte. En prod, le clone du code ne passe sur l'étiquette qu'avant
+# deployer.sh : la sonde lit le projet.env de l'étiquette sans checkout (le double de git le sert
+# depuis DOUBLE_GIT_ARBRE). Une version qui commence ou cesse de déclarer une commande se déploie
+# donc au premier passage, avec ou sans --commit-donnees, au lieu d'un refus de deployer.sh (64).
+@test "sonder : en prod, une étiquette qui se met à déclarer VERIFIER_CONFIG se déploie au premier passage" {
+  local commit
+  preparer prod
+  export DOUBLE_GIT_ETIQUETTES='v0.1.0 v0.2.0'
+  # 0.1.0 en service, sans commande : la copie de travail du clone est encore la sienne
+  en_service prod "$AUTRE" 0.1.0
+  arbre_vise VERIFIER_CONFIG
+{%- if nature == 'code' %}
+  # sans étiquette de données, la version qui se met à déclarer attend, sans rien tirer ni changer
+  sonder prod
+  [ "$status" -eq 0 ]
+  [ "$(signaux)" = "$(signal 'aucune version des données') $HC" ]
+  [ "$(nombre_d_appels docker)" -eq 0 ]
+  [ "$(appels_de git | grep -c checkout)" -eq 0 ]
+  [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
+  pousser_des_donnees config/profil.yml
+  etiqueter_les_donnees donnees-2026.11.03.1
+  commit="$COMMIT"
+{%- else %}
+  # la révision que le double de docker donne à EMPREINTE
+  commit="$(printf 'a%.0s' {1..40})"
+{%- endif %}
+  : >"$APPELS"
+  sonder prod
+  [ "$status" -eq 0 ]
+  [ "$(appels_de deployer.sh)" = "deployer.sh prod $EMPREINTE 0.2.0 --commit-donnees $commit" ]
+  # le projet.env de l'étiquette, lu avant tout checkout
+  [ "$(ligne_de "git -C $CLONE show v0.2.0:deploiement/projet.env")" -lt "$(ligne_de "git -C $CLONE checkout --quiet v0.2.0")" ]
+
+  # le couple ainsi visé, en échec : il attend ; déployé : en service, configuration montee
+  echo "$EMPREINTE $commit" >"$ETAT/echec"
+  : >"$APPELS"
+  sonder prod
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"couple en échec, attente d'un nouveau : 0.2.0 ($EMPREINTE, données $commit)"* ]]
+  [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
+  rm "$ETAT/echec"
+  echo "$EMPREINTE 0.2.0 $commit" >"$ETAT/deploye"
+  export DOUBLE_CURL_PUBLIC_CORPS='{"statut":"ok","environnement":"prod","configuration":"montee"}'
+  : >"$APPELS"
+  sonder prod
+  [ "$status" -eq 0 ]
+  [ "$(signaux)" = "$(signal "0.2.0 en service, données ${commit:0:12}") $HC" ]
+  [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
+}
+
+@test "sonder : en prod, une étiquette qui cesse de déclarer se déploie au premier passage, sans l'option" {
+  preparer prod
+  export DOUBLE_GIT_ETIQUETTES='v0.1.0 v0.2.0'
+  # la copie de travail, celle de 0.1.0 en service, déclare VERIFIER_CONTENU ; l'étiquette, rien
+  avec_donnees VERIFIER_CONTENU
+{%- if nature == 'code' %}
+  pousser_des_donnees contenu/page.md
+  etiqueter_les_donnees donnees-2026.11.03.1
+  echo "$AUTRE 0.1.0 $COMMIT" >"$ETAT/deploye"
+{%- else %}
+  echo "$AUTRE 0.1.0 $(printf 'b%.0s' {1..40})" >"$ETAT/deploye"
+{%- endif %}
+  arbre_vise
+  sonder prod
+  [ "$status" -eq 0 ]
+  [ "$(appels_de deployer.sh)" = "deployer.sh prod $EMPREINTE 0.2.0" ]
+  # aucun commit de données cherché
+  [ "$(appels_de git | grep -cF '^{commit}')" -eq 0 ]
+{%- if nature == 'code' %}
+  # le clone des données passe quand même sur l'étiquette de données : l'env et les secrets
+  appels_de git | grep -Fx "git -C $CLONE_DONNEES checkout --quiet donnees-2026.11.03.1"
+{%- endif %}
+
+  # un projet.env absent de l'étiquette ne déclare rien, comme un clone sans projet.env
+  rm "$DOUBLE_GIT_ARBRE/deploiement/projet.env"
+  : >"$APPELS"
+  sonder prod
+  [ "$status" -eq 0 ]
+  [ "$(appels_de deployer.sh)" = "deployer.sh prod $EMPREINTE 0.2.0" ]
+  [ "$(appels_de git | grep -c ' show ')" -eq 0 ]
+
+  # illisible (git show en échec, ou une ligne invalide) : anomalie, rien n'est tiré
+  local cas
+  for cas in show ligne; do
+    arbre_vise
+    unset DOUBLE_GIT_ECHEC
+    if [ "$cas" = show ]; then
+      export DOUBLE_GIT_ECHEC=show
+    else
+      echo 'VERIFIER_CONTENU=outil;verifier' >>"$DOUBLE_GIT_ARBRE/deploiement/projet.env"
+    fi
+    : >"$APPELS"
+    sonder prod
+    [ "$status" -eq 1 ]
+    [ "$(signaux)" = "$(signal 'deploiement/projet.env de v0.2.0 illisible') $HC/fail" ]
+    [ "$(nombre_d_appels docker)" -eq 0 ]
+    [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
+  done
+}
 
 # --- verrou, réécriture, secrets, usage ------------------------------------------------------
 
