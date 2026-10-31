@@ -52,20 +52,63 @@ M-0006 (« Le code et les données »), étiquetée `v0.6.0`.
 - **Le domaine n'a plus de défaut.** Edouard a étendu sa liste privée ; le dépôt modèle passe sa
   porte dessus, avec trois constats anciens acceptés.
 
-Versions des projets au 29/10 : `ancrage`, `serveur` et `veille-emploi` en `v0.3.0`
-(`veille-emploi` en cible `serveur`, avec `fusion=session`), `pupitre` en `v0.2.3`. Chacun monte
-par `copier update`, au choix d'Edouard, après le 01/11 pour le quota d'Actions. Tous sont privés :
-leur nature se déduit seule en `donnees`, sans `--data`. Après la mise à jour, un
-`gh workflow run modele-historique.yml` doit dire « historique relu par gitleaks seul ». `ancrage`
-passe directement en `v0.6.0`, avec l'essai du ménage (lot 9). Avant, une lecture sur le serveur
-vérifie que son dossier de données n'est vide dans aucun des deux environnements.
+Lot 12 fait le 31/10/2026 : le contrat de `/config` et la chaîne à deux dépôts (#64), seconde étape
+de M-0006 (§ 5 et 6), étiquetée `v0.7.0`. En cible `serveur` :
+- **Les deux modes de la chaîne** suivent la nature, sans réponse de plus. À deux dépôts, pour un
+  dépôt de code né après M-0006, l'instance vit à la racine du dépôt de données `<nom>-donnees`
+  (`env/`, `secrets/`, `.sops.yaml`, `cles/`, `config/`, `contenu/`) ; le staging suit une branche
+  des données, la prod leur plus haute étiquette. À un dépôt, pour un dépôt de nature `donnees`
+  jusqu'à sa scission, tout reste dans le même dépôt, l'instance sous `instance/config/` et
+  `instance/contenu/`, et la prod prend le commit de la plus haute `vX.Y.Z`.
+- **L'état déployé est un couple**, l'image et le commit de données (`-` sans données montées) :
+  `deploye` et `precedent` gagnent un troisième champ, `echec` devient `<image> <commit>`. Un état
+  d'avant se relit, et les scripts d'avant relisent le nouveau. Le retour arrière revient à un
+  couple entier, et l'instantané de `/donnees` note à côté de lui le couple en service (`.couple`).
+- **L'instantané des données**, extrait du commit sous l'état et figé, est monté en lecture seule
+  sur `/config` et `/contenu`, jamais le clone ; le staging ne monte jamais `/config`. Le ménage
+  retire, par environnement, ceux que ni l'état ni la marge des 3 plus récents ne gardent.
+- **`VERIFIER_CONFIG` et `VERIFIER_CONTENU`**, déclarées dans `deploiement/projet.env`, vérifient
+  les données dans un conteneur jetable de l'image visée, avant tout changement, par paires avec
+  leurs dossiers ; la santé dit `configuration` (`exemple` ou `montee`). La CI du code les lance
+  sur `exemple/` et `exemple-contenu/`, et, à un dépôt, sur `instance/` (LE-37). Un projet qui
+  n'en déclare aucune ne voit aucun changement.
+- **Les étiquettes de données** `donnees-AAAA.MM.JJ.n` sont à Edouard, comme les `vX.Y.Z` : le
+  garde refuse leur envoi.
+- **La CI des données**, `modele-donnees.yml`, rendue pour `cible: donnees` avec
+  `cible_code: serveur`, contrôle les secrets contre le `.cles` du dépôt de code, et les données
+  contre l'image de la prod et `:main`.
+- **La réponse `compte`** (`EdouardZemb` par défaut) donne `ghcr.io/<compte>/<nom>`. L'instance
+  n'est posée que là où elle vit : un dépôt de code n'a ni domaine, ni bloc de ports, ni clé du
+  parc, et la porte y refuse l'instance par ses chemins. Les clés sortent de l'arbre du modèle.
+- **Une épreuve sur un vrai Docker**, dans la CI du modèle, déploie un couple, change son seul
+  commit de données, fait refuser une configuration, revient en arrière et fait le ménage.
 
-Prochain, au choix d'Edouard : le lot 12 (la chaîne à deux dépôts, M-0006 § 5 à 7), le lot 3 (la
-cible `statique`) ou un autre lot. Le lot 12 ne retire le repli `VISIBILITE = "prive"` de la
-porte qu'une fois que la branche par défaut de chaque projet porte `NATURE`. `pupitre` est encore
-en `v0.2.3` : s'il sautait directement à une version sans repli, la PR de sa mise à jour serait lue
-en `code`. Le cadrage est dans `docs/cadrage.md` ; ce que les lots ont appris, dans
-`docs/registre.md`.
+Versions des projets au 31/10, inchangées depuis le 29/10 : `ancrage`, `serveur` et
+`veille-emploi` en `v0.3.0` (`veille-emploi` en cible `serveur`, avec `fusion=session`), `pupitre`
+en `v0.2.3`. Chacun monte directement en `v0.7.0` par `copier update`, au choix d'Edouard, après
+le 01/11 pour le quota d'Actions : le message de la `v0.7.0` remplace celui de la `v0.6.0`. Tous
+sont privés : leur nature se déduit seule en `donnees`, sans `--data`, et `ancrage` comme
+`veille-emploi` déploient à un dépôt jusqu'à leur scission. Après la mise à jour, un
+`gh workflow run modele-historique.yml` doit dire « historique relu par gitleaks seul ». `ancrage`
+fait l'essai du ménage (lot 9). Avant la mise à jour d'`ancrage` et de `veille-emploi`, une lecture
+sur le serveur vérifie que leur dossier de données n'est vide dans aucun des deux environnements.
+`veille-emploi` ne déclare `VERIFIER_CONFIG`, et n'étiquette la prod de veille-emploi#22, qu'une
+fois la `v0.7.0` en service dans ses deux environnements.
+
+Prochain, au choix d'Edouard :
+- le lot 13 : la naissance d'un projet en deux dépôts, par le script de création du poste (geste
+  👤) ; dans `serveur`, la déclaration des deux dépôts d'un projet et la création des clones des
+  données par sa sonde, avec la clé de déploiement du dépôt de données ; puis le premier essai réel
+  sur le serveur (spec du lot 12, § 12) ;
+- la scission de `veille-emploi`, puis celle d'`ancrage`, chacune dans son propre lot ;
+- le lot 3 (la cible `statique`) ;
+- la porte due par LE-37, au 3e constat du motif « écart à la spec mal pesé » : sa forme revient à
+  Edouard, et le registre en propose une ;
+- le retrait du repli `VISIBILITE = "prive"` de la porte, qui reste tant que la branche par défaut
+  de chaque projet ne porte pas `NATURE`. La `v0.7.0` le garde : `pupitre` y saute depuis la
+  `v0.2.3`, et la PR de sa mise à jour est lue en `donnees`.
+
+Le cadrage est dans `docs/cadrage.md` ; ce que les lots ont appris, dans `docs/registre.md`.
 
 ## Commandes
 
