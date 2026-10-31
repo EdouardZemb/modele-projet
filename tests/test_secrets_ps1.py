@@ -469,7 +469,10 @@ def test_secrets_cree_se_retire_si_sops_echoue(rendre, tmp_path, env_isole):
     if WINDOWS:
         (faux / "sops.cmd").write_text("@echo sops en echec 1>&2\r\n@exit /b 1\r\n", encoding="utf-8")
     else:
-        (faux / "sops").write_text("#!/bin/sh\necho 'sops en echec' >&2\nexit 1\n", encoding="utf-8")
+        # Il lit son entrée, comme le vrai sops : sorti sans la lire, il casserait le tube, et
+        # l'écriture de secrets.ps1 échouerait avant d'avoir vu le code de sortie.
+        faux_sops = "#!/bin/sh\ncat >/dev/null\necho 'sops en echec' >&2\nexit 1\n"
+        (faux / "sops").write_text(faux_sops, encoding="utf-8")
         (faux / "sops").chmod(0o755)
     env["PATH"] = str(faux) + os.pathsep + env["PATH"]
     code, sortie, erreur = appeler(
