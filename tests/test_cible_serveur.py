@@ -257,10 +257,16 @@ def test_projet_env_dit_les_commandes_de_l_instance(rendre, reponses, config, co
         "sans réseau",
         "lecture seule",
         "0 conforme, 2 non conforme, 64 usage, tout autre code refuse",
-        "refuse le déploiement",
+        # la règle des paires, comme M-0003 § 6 la dit
+        (
+            "Dès que le projet déclare une commande, un dossier présent sans sa commande, ou une "
+            "commande sans son dossier, refuse le déploiement."
+        ),
+        "Sans aucune commande, le déploiement ne lit pas les dossiers.",
         "Un dossier qui ne porte que son README.md compte comme absent",
     ):
         assert fragment in plat, fragment
+    assert "Un dossier sans sa commande" not in plat
 
 
 # C0 : le crochet de restauration reste générique. Ni la base d'un projet, ni un projet, ni son
