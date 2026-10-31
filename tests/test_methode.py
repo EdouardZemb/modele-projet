@@ -662,3 +662,36 @@ def test_methode_dit_les_deux_modes_et_les_etiquettes_de_donnees():
     ):
         assert fragment in texte, fragment
     assert not RENVOI_AU_PLAN.search(texte)
+
+
+def blocs(texte):
+    """Les paragraphes et les éléments de liste du Markdown, chacun en ses lignes."""
+    resultat, courant = [], []
+    for ligne in texte.splitlines():
+        if not ligne.strip() or re.match(r"\s*(?:[-*] |\d+\. |#)", ligne):
+            if courant:
+                resultat.append(courant)
+            courant = [ligne] if ligne.strip() else []
+        else:
+            courant.append(ligne)
+    if courant:
+        resultat.append(courant)
+    return resultat
+
+
+def test_les_phrases_recoupees_tiennent_en_100_caracteres():
+    """La revue finale du lot de la chaîne : trois phrases dépassaient 100 caractères, ou étaient
+    coupées par un retour à la ligne au milieu de leur élément. Chaque élément qui les porte tient
+    en 100 caractères par ligne, et seule sa dernière ligne est courte."""
+    (m0005,) = DECISIONS.glob("*M-0005-sauvegardes-et-restauration.md*")
+    cas = (
+        (m0005, "**Le couple ne décide de rien**"),
+        (METHODE, "`secrets.ps1 refaire` y prend le `.cles` du clone voisin du dépôt de code"),
+        (DECISIONS / "M-0006-code-et-donnees.md", "La prod y prend le commit de la plus haute"),
+    )
+    for chemin, phrase in cas:
+        trouves = [b for b in blocs(lire(chemin)) if phrase in " ".join(" ".join(b).split())]
+        assert len(trouves) == 1, phrase
+        (bloc,) = trouves
+        assert max(len(ligne) for ligne in bloc) <= 100, phrase
+        assert min(len(ligne) for ligne in bloc[:-1]) >= 70, phrase
