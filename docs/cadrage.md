@@ -118,6 +118,53 @@
 > - **la liste privée** s'étend au domaine, au foyer, aux employeurs, aux lieux, aux courriels et
 >   aux téléphones. Le dépôt modèle y passe sa porte : deux valeurs de ce cadrage ont été
 >   remplacées par leur rôle, et trois constats anciens de l'historique sont acceptés.
+>
+> **Amendé le 2026-10-31, à la clôture du lot 12, de la même façon.** Le lot 12 fait la seconde
+> étape de M-0006 (§ 5 et 6) : le contrat de `/config` et la chaîne à deux dépôts, en cible
+> `serveur`. M-0002 à M-0006, `methode.md` et le runbook sont amendés.
+>
+> - **§3** : la réponse `compte` (`EdouardZemb` par défaut) donne `ghcr.io/<compte>/<nom>`, en
+>   minuscules. `domaine`, `sous_domaine` et `bloc_ports` ne sont posés que là où vit l'instance :
+>   un projet `serveur` de nature `donnees`, ou le dépôt de données d'un projet `serveur`, que
+>   désigne sa réponse `cible_code`. Les clés du parc sortent de l'arbre du modèle et deviennent
+>   les réponses `cle_serveur` et `cle_hors_ligne` ;
+> - **§4 et §8** : `.sops.yaml` et `deploiement/cles/*.pub` deviennent semés : un projet à un
+>   dépôt garde les siens. Un dépôt de code `serveur` ne reçoit ni `.sops.yaml`, ni
+>   `deploiement/env/`, ni clés ; le dépôt de données d'un projet `serveur` reçoit `env/`,
+>   `.sops.yaml`, `cles/` et sa CI, `modele-donnees.yml`. Deux fichiers compose gérés,
+>   `deploiement/compose.config.yml` et `compose.contenu.yml`, décrivent les montages ;
+> - **§5.5 et §5.6** : le garde refuse l'envoi d'une étiquette de données `donnees-…`, à Edouard
+>   comme les `vX.Y.Z`. Dans un dépôt de code, la porte refuse l'instance par ses chemins (`*.enc`,
+>   `.sops.yaml`, `cles/*.pub`, et un premier segment `instance/`, `config/` ou `contenu/`) et
+>   toute clé publique `age` (M-0002, amendé) ;
+> - **§6.1** : une application peut lire sa configuration sur `/config` et son contenu sur
+>   `/contenu`, en lecture seule. `VERIFIER_CONFIG` et `VERIFIER_CONTENU`, déclarées dans
+>   `deploiement/projet.env`, les vérifient, par paires avec leurs dossiers ; la santé gagne le
+>   champ `configuration` (`exemple` ou `montee`). Le staging ne monte jamais `/config`. La CI du
+>   code lance chaque commande sur son exemple, `exemple/` ou `exemple-contenu/` (M-0003, amendé) ;
+> - **§6.2 et §6.3** : la chaîne a deux modes, selon la nature. À deux dépôts, l'instance vit dans
+>   `<nom>-donnees`, cloné sur le serveur en `~/<nom>-donnees` et `~/<nom>-donnees-staging` ; le
+>   staging en suit la branche que nomme `env/staging.env`, la principale à la création, et la prod
+>   la plus haute étiquette `donnees-AAAA.MM.JJ.n`, avec la plus haute `vX.Y.Z` du code. À un
+>   dépôt, jusqu'à la scission, l'instance est sous `instance/`, et la prod prend le commit de la
+>   plus haute `vX.Y.Z`. L'état déployé est un couple, l'image et le commit de données (`-` sans
+>   commande déclarée) : dès qu'une commande est déclarée, un commit de données seul redéploie, et
+>   le retour arrière revient à un couple entier. Les données se montent depuis un instantané figé
+>   du commit, sous l'état, jamais depuis le clone, et se vérifient sur lui avant tout changement
+>   (M-0004, amendé) ;
+> - **§6.4** : à deux dépôts, les secrets chiffrés vivent dans le dépôt de données, dont la CI les
+>   contrôle contre le `.cles` du dépôt de code ; `secrets.ps1` y lit le `.cles` du clone voisin ;
+> - **§6.6** : chaque instantané de `/donnees` note à côté de lui le couple en service, `.couple`
+>   en local et `.couple.age` au distant (M-0005, amendé) ;
+> - **trois écarts**, décidés pendant les revues du lot. Le ménage des instantanés des données se
+>   fait par environnement : chacun garde ceux que nomme son propre état, et non l'état des deux
+>   environnements, que disait la spec. Le dépôt de code garde gitleaks et le contrôle de ses
+>   `.cles`, quand la spec lui retirait le contrôle des secrets. La mise en service d'un projet à
+>   deux dépôts (§6.8) attend le lot 13 : la sonde de `serveur` ne crée pas encore le clone des
+>   données ni sa clé de déploiement, et aucun geste 👤 ne s'y substitue ;
+> - **un écart, puis un retour à la spec** : à un dépôt, la CI du code ne vérifiait que l'exemple,
+>   et non `instance/`. La revue finale l'a trouvé (LE-37) : elle vérifie désormais `instance/`
+>   comme le déploiement, qui la revérifie.
 
 Ce cadrage est la partie publique de la spec de conception du modèle, issue d'une séance de questions avec Edouard : 12 questions, puis 5 parties de design validées une à une. La partie qui nomme le serveur est privée et n'est pas reproduite ici.
 
