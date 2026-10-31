@@ -298,7 +298,7 @@ aucune_copie_jetable() {
 @test "sauvegarde_dossier_instantane" {
   sauvegarder prod
   [ "$status" -eq 0 ]
-  # l'instantané, et son couple à côté (P3 du lot 12)
+  # l'instantané, et son couple à côté (M-0005, § 2)
   local instantanes=("$SAUVEGARDES"/quotidiennes/*)
   [ "{% raw %}${#instantanes[@]}{% endraw %}" -eq 2 ]
   [ "${instantanes[1]}" = "${instantanes[0]}.couple" ]
@@ -335,7 +335,7 @@ aucune_copie_jetable() {
   [ -z "$(appels_de rclone)" ]
 }
 
-# R31 : seule la dernière sauvegarde en échec garde son .partiel. Chaque nuit en échec laisserait
+# Seule la dernière sauvegarde en échec garde son .partiel. Chaque nuit en échec laisserait
 # sinon une copie en clair de plus, que la rétention, qui ne tourne qu'après un envoi réussi,
 # n'efface jamais. Avant chaque instantané, les .partiel de quotidiennes/ sont retirés. Une
 # sauvegarde complète, ou un nom d'une autre forme, ne part jamais, et un lien n'est pas suivi.
@@ -502,8 +502,8 @@ aucune_copie_jetable() {
   [ -z "$(tar -tvf "$BATS_TEST_TMPDIR/clair.tar" | cut -c1 | grep -v '^[-d]$' || true)" ]
 }
 
-# P3 du lot 12 : l'instantané note le couple en service, celui de deploye au moment de l'instantané
-# (Ruling 16), dans <nom>.couple, à côté de lui et jamais dedans : son contenu et les membres de son
+# M-0005, § 2 : l'instantané note le couple en service, celui de deploye au moment de
+# l'instantané, dans <nom>.couple, à côté de lui et jamais dedans : son contenu et les membres de son
 # archive ne changent pas. La sauvegarde l'envoie chiffré pour la clé hors ligne, <nom>.couple.age,
 # à la date de l'archive : la purge distante les voit du même âge. Un état d'avant la v0.7.0 donne
 # le commit « - » ; sans deploye, ou s'il ne se lit pas, aucun couple n'est noté, et la sauvegarde
@@ -1382,7 +1382,7 @@ aucune_copie_jetable() {
   [ "$(cat "$BATS_TEST_TMPDIR/verifie/donnees.txt")" = "instantané de test $SNAPSHOT" ]
 }
 
-# P3 du lot 12 : un .couple, ou un .couple.age, n'est jamais pris pour une sauvegarde, même plus
+# Un .couple, ou un .couple.age, n'est jamais pris pour une sauvegarde, même plus
 # récent par son nom et par sa date : le test de restauration prend le dernier instantané, le
 # retrait des .partiel n'y touche pas, et restaurer.sh refuse de le restaurer.
 @test "sauvegarde : un .couple n'est jamais pris pour une sauvegarde" {
@@ -2006,7 +2006,7 @@ cle_non_repetee() {
   aucun_temporaire
 }
 
-# P3 du lot 12 : restaurer.sh lit le couple voisin de la source, <dossier>.couple, ou, pour une
+# M-0005, § 6 : restaurer.sh lit le couple voisin de la source, <dossier>.couple, ou, pour une
 # archive, <archive sans .tar.age>.couple.age, déchiffré avec la même clé. Il dit « couple de
 # l'instantané : … » quand il diffère du couple déployé, rien quand c'est le même, « couple de
 # l'instantané inconnu » quand il ne se lit pas. La restauration a lieu dans tous les cas. La clé
@@ -2300,7 +2300,7 @@ APPELS_DOCKER
   aucun_temporaire
 }
 
-# I3 : l'instantané ne ressort pas des données. L'ancien contenu est alors entier dans
+# L'instantané ne ressort pas des données. L'ancien contenu est alors entier dans
 # avant-restauration-*/, et ce qui reste dans les données n'est fait que de copies de l'instantané. La
 # consigne le dit, et ne prescrit jamais de vider quoi que ce soit.
 @test "restaurer_intervention_si_l_instantane_ne_ressort_pas" {
@@ -2325,7 +2325,7 @@ APPELS_DOCKER
   aucun_temporaire
 }
 
-# I3 : l'ancien contenu ne revient qu'en partie. Il est réparti entre les données et
+# L'ancien contenu ne revient qu'en partie. Il est réparti entre les données et
 # avant-restauration-*/, et rien de l'instantané ne reste dans les données : la consigne dit de ne
 # rien supprimer et de remettre ce qui manque.
 @test "restaurer_intervention_si_l_ancien_contenu_revient_en_partie" {
@@ -2398,7 +2398,7 @@ OPTIONS_JETABLES="--user 1000:1000 --read-only --tmpfs /tmp --cap-drop ALL --sec
 
 # Sans REPORTER, la restauration est celle d'avant le crochet, à l'octet près : le plan, le journal
 # et les appels de Docker. Le projet.env du setup ne le déclare pas. Seul ajout au journal depuis,
-# le couple de l'instantané (P3 du lot 12), inconnu ici : l'instantané n'a pas de .couple.
+# le couple de l'instantané, inconnu ici : l'instantané n'a pas de .couple.
 @test "restaurer_sans_reporter_ne_change_rien" {
   instantane "$SNAPSHOT" 1
   donnees_courantes

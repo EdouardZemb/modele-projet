@@ -367,10 +367,9 @@ _exiger_commit() {
 # porte, dans ce commit, au moins un fichier autre que le README.md de sa racine
 # (<dossier>/README.md, que sème le gabarit du dépôt de données) ; un README.md plus bas compte comme
 # un fichier. Un dossier qui ne porte que ce README.md compte comme absent, dans les deux sens de la
-# règle (décision 6 du lot 12). Un dossier présent sans sa commande, ou une commande sans son
-# dossier, refuse : code 1, et une ligne « <dossier> sans <commande> » ou « <commande> sans
-# <dossier> » au journal pour chaque paire en défaut. Code 1 aussi, journalisé, si projet.env ou le
-# commit ne se lit pas ; 0 sinon.
+# règle. Un dossier présent sans sa commande, ou une commande sans son dossier, refuse : code 1, et
+# une ligne « <dossier> sans <commande> » ou « <commande> sans <dossier> » au journal pour chaque
+# paire en défaut. Code 1 aussi, journalisé, si projet.env ou le commit ne se lit pas ; 0 sinon.
 controler_paires() {
   local commit="${1:-}" paire dossier commande declaree sortie chemin present code=0
   _exiger_commit "$commit" controler_paires
@@ -409,7 +408,7 @@ controler_paires() {
 # preparer_instantane <commit> : INSTANTANE ← ${{ prefixe }}ETAT/instantanes/<commit>, l'instantané des
 # dossiers déclarés du commit de données <commit>, chacun sous son nom final (config/, contenu/, quel
 # que soit le mode). En staging, config/ n'est jamais extrait, même quand VERIFIER_CONFIG est
-# déclarée : le staging ne monte ni ne vérifie jamais /config (décision 7 du lot 12). Complet (il a
+# déclarée : le staging ne monte ni ne vérifie jamais /config (M-0003, § 6). Complet (il a
 # chaque dossier à extraire, selon la même règle), il se réutilise tel quel. Sinon, il se fait sous
 # <commit>.partiel : le .partiel d'un essai coupé est retiré (_retirer_fige), chaque dossier y est
 # extrait du commit (`git archive`, jamais de la copie de travail du clone), les droits passent en
@@ -767,10 +766,10 @@ verifier_copie() {
 }
 
 # noter_couple <instantané> : écrit <instantané>.couple, à côté de l'instantané de /donnees et jamais
-# dedans (son contenu et les membres de son archive ne changent pas, P3 du lot 12), une ligne
+# dedans (son contenu et les membres de son archive ne changent pas, M-0005, § 2), une ligne
 # « <image> <version> <commit> » : le couple de ${{ prefixe }}ETAT/deploye à cet instant, lu par
 # lire_version (le commit d'un état d'avant la v0.7.0 vaut « - »). Pour l'instantané d'avant un
-# déploiement, c'est le couple que le déploiement quitte (Ruling 16). Sans deploye (un premier
+# déploiement, c'est le couple que le déploiement quitte (M-0005, § 3). Sans deploye (un premier
 # déploiement), aucun .couple, et le journal le dit : restaurer.sh dira « couple de l'instantané
 # inconnu ». L'écriture passe par un fichier temporaire du même dossier (mktemp, qui le crée
 # lui-même), puis `mv -T` : un lien planté à la place du .couple est remplacé, jamais suivi, et un
@@ -827,7 +826,7 @@ purger_par_nom() {
 # retirer_partiels <dossier> <regex> : retire de <dossier> les instantanés en échec, les entrées
 # dont le nom suit <regex> et finit par .partiel, dossiers emportés en entier. À appeler juste
 # avant un nouvel instantané : il ne reste alors que le .partiel de la dernière tentative, pour le
-# diagnostic (R13), et non un par tentative (R31). Ni un lien (jamais suivi), ni un nom d'une autre
+# diagnostic, et non un par tentative. Ni un lien (jamais suivi), ni un nom d'une autre
 # forme, ni un instantané complet. Chaque entrée est tentée ; échec si l'une n'a pas pu partir.
 # Utilisée par deployer.sh (pre-deploiement/) et sauvegarder.sh (quotidiennes/).
 retirer_partiels() {

@@ -37,7 +37,7 @@
 #      étiquettes, une par appel (`docker image rm <dépôt>:<étiquette>`), car docker refuse sans -f
 #      le retrait par l'identifiant d'une image qui en porte plusieurs, et la dernière emporte
 #      l'image et ses empreintes. Un retrait en échec est journalisé, et l'image suivante est tentée ;
-#   7. les instantanés des données de cet environnement, et de lui seul (P2 du lot 12) :
+#   7. les instantanés des données de cet environnement, et de lui seul (M-0004, § 8) :
 #      ${{ prefixe }}ETAT/instantanes/, toujours, même quand le ménage des images est sauté ou annulé.
 #      Voir « Les instantanés », plus bas.
 #
@@ -193,7 +193,7 @@ abandonner_instantanes() {
 }
 
 # menage_instantanes : l'étape 7, les instantanés des données de ${{ prefixe }}ETAT/instantanes/, ceux
-# de cet environnement seulement (P2 du lot 12) ; voir « Les instantanés », en tête. Rend toujours
+# de cet environnement seulement (M-0004, § 8) ; voir « Les instantanés », en tête. Rend toujours
 # 0 : une surprise ou un retrait impossible ne se disent qu'au journal.
 menage_instantanes() {
   local etat="${{ prefixe }}ETAT" dossier="${{ prefixe }}ETAT/instantanes" fichier chemin nom modifie

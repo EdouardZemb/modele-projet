@@ -14,6 +14,7 @@ from conftest import (
     CLE_SERVEUR_DE_TEST,
     RACINE,
     RENVOI_AU_PLAN,
+    REPONSES_DONNEES_SERVEUR,
     REPONSES_SERVEUR,
     REPONSES_SERVEUR_CODE,
     fichiers_texte,
@@ -983,6 +984,40 @@ def test_compte_rendu_partout(rendre):
         texte = chemin.read_bytes().decode("utf-8", errors="replace")
         assert "ghcr.io/edouardzemb" not in texte, chemin
         assert "/edouardzemb/" not in texte, chemin
+
+
+# Les numéros du plan d'un lot ne vivent que dans le plan, qui disparaît à la clôture : aucun
+# fichier rendu de la chaîne (scripts, bancs bats, doubles, documents), ni les épreuves du modèle,
+# ne les citent (RENVOI_AU_PLAN, dans conftest). Les quatre rendus du banc de la mécanique, et le
+# dépôt de données d'un projet `serveur`.
+RENDUS_DE_LA_CHAINE = {
+    "un-depot-avec-sauvegardes": REPONSES_SERVEUR,
+    "un-depot-sans-sauvegardes": {**REPONSES_SERVEUR, "sauvegardes": False},
+    "deux-depots-avec-sauvegardes": REPONSES_SERVEUR_CODE,
+    "deux-depots-sans-sauvegardes": {**REPONSES_SERVEUR_CODE, "sauvegardes": False},
+    "depot-de-donnees": REPONSES_DONNEES_SERVEUR,
+}
+
+
+def renvois_au_plan(racine):
+    """Les lignes des fichiers texte de `racine` qui citent un numéro du plan."""
+    return [
+        f"{chemin.relative_to(racine).as_posix()}:{numero}: {ligne.strip()}"
+        for chemin in fichiers_texte(racine)
+        for numero, ligne in enumerate(
+            chemin.read_bytes().decode("utf-8", errors="replace").splitlines(), start=1
+        )
+        if RENVOI_AU_PLAN.search(ligne)
+    ]
+
+
+@pytest.mark.parametrize("reponses", RENDUS_DE_LA_CHAINE.values(), ids=RENDUS_DE_LA_CHAINE.keys())
+def test_aucun_renvoi_au_plan_dans_un_rendu(rendre, reponses):
+    assert renvois_au_plan(rendre(**reponses)) == []
+
+
+def test_aucun_renvoi_au_plan_dans_les_epreuves():
+    assert renvois_au_plan(RACINE / "tests/modele") == []
 
 
 # Lot 12 : le runbook dit le couple, l'étiquette de données, l'instantané monté, les données

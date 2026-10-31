@@ -18,7 +18,7 @@
 #      d'attente au plus) : pendant un déploiement ou une restauration, les données bougent ;
 #   2. nom {{ nom }}-<AAAAMMJJTHHMMSSZ> (UTC) ; un dossier déjà présent à ce nom, ou à ce nom suivi
 #      de .partiel, est une erreur : rien n'est écrasé. Puis les .partiel des sauvegardes en échec
-#      sont retirés de quotidiennes/ : il n'en reste que celui de la dernière (R31). Puis les restes
+#      sont retirés de quotidiennes/ : il n'en reste que celui de la dernière. Puis les restes
 #      d'une restauration tuée de force (SIGKILL, plantage de l'hôte), hors de portée de son trap :
 #      ses copies jetables ${{ prefixe }}SAUVEGARDES/report-<AAAAMMJJTHHMMSSZ>, des copies en clair des
 #      données en service, et sa copie de travail ${{ prefixe }}DONNEES.nouvelle. La restauration tient
@@ -33,8 +33,8 @@
 #      jusqu'à la suivante (étape 2) : le test de restauration et la restauration ne le prennent
 #      jamais, et la rétention l'efface comme les autres. Puis, toujours sous le verrou, le couple
 #      en service, celui de ${{ prefixe }}ETAT/deploye, est noté à côté de l'instantané, jamais
-#      dedans : <nom>.couple, une ligne « <image> <version> <commit> » (noter_couple, lib.sh ; P3
-#      du lot 12). Sans deploye, ou s'il ne se lit pas, pas de .couple, et la sauvegarde continue :
+#      dedans : <nom>.couple, une ligne « <image> <version> <commit> » (noter_couple, lib.sh).
+#      Sans deploye, ou s'il ne se lit pas, pas de .couple, et la sauvegarde continue :
 #      restaurer.sh dira le couple inconnu. Le verrou est relâché dès que l'instantané est en
 #      place : la suite (chiffrement, envoi, rétention) ne lit plus les données, et un déploiement
 #      ou la sonde n'ont pas à attendre les quotas et les reprises du distant ;
@@ -194,12 +194,12 @@ main() {
   if [ -e "$instantane" ] || [ -L "$instantane" ] || [ -e "$partiel" ] || [ -L "$partiel" ]; then
     echouer "$instantane existe déjà (ou $partiel) : rien n'est écrasé, rien n'est sauvegardé"
   fi
-  # R31 : la rétention ne tourne qu'après un envoi réussi ; sans ce retrait, chaque nuit en échec
+  # La rétention ne tourne qu'après un envoi réussi ; sans ce retrait, chaque nuit en échec
   # laisserait son .partiel, une copie en clair des données.
   if ! retirer_partiels "$quotidiennes" '^{{ nom }}-[0-9]{8}T[0-9]{6}Z\.partiel$'; then
     journal "sauvegardes en échec de $quotidiennes : retrait impossible, plus d'un .partiel y reste ; la sauvegarde se fait quand même"
   fi
-  # R67 : les restes d'une restauration tuée de force (SIGKILL, plantage de l'hôte), que son trap
+  # Les restes d'une restauration tuée de force (SIGKILL, plantage de l'hôte), que son trap
   # n'a pas retirés. La restauration tient ce verrou de bout en bout : ils ne sont à aucune
   # restauration en cours. La copie jetable du report n'a pas d'autre rétention. Un retrait
   # impossible est journalisé, et la sauvegarde se fait quand même.

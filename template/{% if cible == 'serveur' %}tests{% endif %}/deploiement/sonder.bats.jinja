@@ -656,7 +656,7 @@ etiqueter_les_donnees() {
 # couples : deploye (premier et troisième champs), echec (premier et deuxième), « - » quand le
 # commit manque.
 
-# Review Focus 1 du lot 12 : au premier passage après la mise à jour, un état d'avant la v0.7.0
+# Au premier passage après la mise à jour, un état d'avant la v0.7.0
 # (deploye à deux champs, echec à un champ) se lit comme un couple sans données : un projet sans
 # données ne se redéploie pas, et rien n'est signalé en échec.
 @test "sonder : un état d'avant la v0.7.0 ne redéploie pas un projet sans données" {
@@ -751,7 +751,7 @@ etiqueter_les_donnees() {
 }
 {%- if nature == 'code' %}
 
-# Review Focus 3 du lot 12 : la prod vise la plus haute étiquette de données de la forme
+# La prod vise la plus haute étiquette de données de la forme
 # donnees-AAAA.MM.JJ.n (n sans zéro en tête), en ordre de version : .10 passe devant .9. Toute autre
 # forme est ignorée, même plus haute dans ce tri, et une étiquette retirée de l'origine disparaît du
 # clone (--prune-tags), comme pour le code. Le vrai git, sur un vrai clone.
@@ -976,7 +976,7 @@ etiqueter_les_donnees() {
   done
 }
 
-# Ruling 17 du lot 12 : en prod, une version du code qui déclare une commande attend sa première
+# En prod, une version du code qui déclare une commande attend sa première
 # étiquette de données. Pendant l'attente, la sonde contrôle le couple en service comme quand rien
 # n'est nouveau (l'état après échec, les unités, l'adresse publique), puis dit l'attente par un
 # signal ok. Le champ configuration exigé suit le couple en service, pas la déclaration visée :
@@ -1050,7 +1050,7 @@ etiqueter_les_donnees() {
   [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
 }
 
-# Ruling 19 du lot 12 : pendant l'attente des données, un deploye présent mais illisible n'est pas
+# Pendant l'attente des données, un deploye présent mais illisible n'est pas
 # « aucune version des données » : rien ne dirait plus ce qui sert la prod. Anomalie, code 1, sans
 # signal ok, et rien n'est contrôlé ni déployé. Hors de l'attente, deployer.sh s'en charge.
 @test "sonder : pendant l'attente des données, un deploye illisible est une anomalie" {
@@ -1083,7 +1083,7 @@ etiqueter_les_donnees() {
 }
 {%- else %}
 
-# Un dépôt (P1 du lot 12) : l'instance est dans le clone du projet, et le commit des données est la
+# Un dépôt (M-0006, § 6) : l'instance est dans le clone du projet, et le commit des données est la
 # révision de l'image visée (son label org.opencontainers.image.revision), qui doit exister dans ce
 # clone. Pas d'autre clone à contrôler ni à mettre à jour.
 @test "sonder : en mode un dépôt, le commit est la révision de l'image" {
@@ -1148,7 +1148,7 @@ etiqueter_les_donnees() {
 }
 {%- endif %}
 
-# Ruling 13 du lot 12 : la déclaration qui fixe le commit du couple visé est celle de la version du
+# La déclaration qui fixe le commit du couple visé est celle de la version du
 # code visée, jamais celle qu'on quitte. En prod, le clone du code ne passe sur l'étiquette qu'avant
 # deployer.sh : la sonde lit le projet.env de l'étiquette sans checkout (le double de git le sert
 # depuis DOUBLE_GIT_ARBRE). Une version qui commence ou cesse de déclarer une commande se déploie
@@ -1162,7 +1162,7 @@ etiqueter_les_donnees() {
   arbre_vise VERIFIER_CONFIG
 {%- if nature == 'code' %}
   # sans étiquette de données, la version qui se met à déclarer attend, sans rien tirer ni changer ;
-  # 0.1.0, en service, est contrôlée pendant ce temps (ruling 17 : voir plus haut)
+  # 0.1.0, en service, est contrôlée pendant ce temps (voir plus haut)
   sonder prod
   [ "$status" -eq 0 ]
   [ "$(signaux)" = "$(signal '0.2.0 attend une version des données') $HC" ]

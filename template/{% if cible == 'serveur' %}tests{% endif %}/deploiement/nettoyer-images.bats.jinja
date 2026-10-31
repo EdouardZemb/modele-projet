@@ -2,7 +2,7 @@
 #!/usr/bin/env bats
 # nettoyer-images.sh : ce qui est une image du projet, ce qui est gardé (l'état des deux
 # environnements, les conteneurs, la marge), les verrous, les retraits, les abstentions ; puis le
-# ménage des instantanés des données de l'environnement (P2 du lot 12).
+# ménage des instantanés des données de l'environnement (M-0004, § 8).
 #
 # docker est un double (tests/deploiement/doubles/docker) : son stock d'images et de conteneurs est
 # posé par poser_image et poser_conteneur (aide.bash). Il refuse, et le note dans refus-images, tout
@@ -535,7 +535,7 @@ bilan() {
 # --- les instantanés des données -------------------------------------------------------------
 #
 # Après celui des images, sous le même verrou, le ménage des instantanés des données de
-# l'environnement, dans son seul ${{ prefixe }}ETAT/instantanes/ (P2 du lot 12) : il garde ceux que
+# l'environnement, dans son seul ${{ prefixe }}ETAT/instantanes/ (M-0004, § 8) : il garde ceux que
 # nomment son deploye et son precedent, plus les 3 plus récents des autres par leur date de
 # modification, et retire le reste, ainsi que tout .partiel de plus d'un jour. Les instantanés sont
 # figés en lecture seule, comme ceux que fait preparer_instantane (lib.sh).
@@ -591,7 +591,7 @@ instantanes_de() {
   # déploiement peut être en train de construire
   poser_instantane prod "$neuf" '25 hours ago'
   poser_instantane prod "$huit" '23 hours ago'
-  # le staging a les siens, et son état nomme d : ni l'un ni l'autre ne compte pour la prod (P2)
+  # le staging a les siens, et son état nomme d : ni l'un ni l'autre ne compte pour la prod
   etat staging deploye "$(empreinte_de 3) main $d"
   for x in 1 2 3 4 5; do
     poser_instantane staging "$(commit_de "$x")" "$((x + 20)) days ago"
@@ -674,7 +674,7 @@ instantanes_de() {
 # Le ménage des images annulé (arreter, dans son sous-shell) n'annule pas celui des instantanés :
 # un echec illisible de l'environnement, un état illisible de l'autre, ou son verrou qui ne s'ouvre
 # pas. Le code de sortie reste celui des images, 1. L'autre environnement ne décide de rien pour
-# les instantanés de celui-ci (P2).
+# les instantanés de celui-ci.
 @test "ménage : des images annulées laissent faire celui des instantanés" {
   local I="${{ prefixe }}RACINE_ETAT/prod/instantanes" cas x
   for cas in echec-illisible autre-illisible autre-verrou; do
