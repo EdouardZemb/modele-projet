@@ -5,7 +5,7 @@ import shutil
 import subprocess
 
 import pytest
-from conftest import SCRIPTS, depot, exiger, git
+from conftest import REPONSES_DONNEES_SERVEUR, SCRIPTS, depot, exiger, git
 
 SCRIPT = SCRIPTS / "secrets.ps1"
 WINDOWS = os.name == "nt"
@@ -404,3 +404,91 @@ def test_refaire_dans_un_depot_de_donnees_sans_le_cles_du_code(tmp_path, env_iso
     assert f"le fichier des clés est absent : {attendu}" in sortie
     assert "clone le dépôt de code" not in sortie
     assert enc.read_bytes() == b"ancien contenu\n"
+
+
+def rendre_donnees_neuf(rendre, tmp_path, env, *, cles_code="HC_SONDE\nAUTRE\n"):
+    """Un dépôt de données neuf, rendu par le modèle pour un projet `serveur` : `.sops.yaml` chiffre
+    pour une clé jetable (la clé du serveur) et pour la clé hors ligne, et aucun `secrets/`. À côté,
+    le clone du dépôt de code, `essai`, porte la liste des clés de la prod."""
+    exiger("sops", "age-keygen")
+    cle = tmp_path / "jetable.txt"
+    subprocess.run(["age-keygen", "-o", str(cle)], check=True, capture_output=True)
+    pub = subprocess.run(
+        ["age-keygen", "-y", str(cle)], check=True, capture_output=True, text=True
+    ).stdout.strip()
+    d = rendre(**{**REPONSES_DONNEES_SERVEUR, "cle_serveur": pub})
+    assert not (d / "secrets").exists()
+    git(d, env, "init", "-q", "-b", "main")
+    git(d, env, "config", "core.autocrlf", "false")
+    git(d, env, "add", "-A")
+    git(d, env, "commit", "-q", "-m", "chore: naissance")
+    code = d.parent / "essai/deploiement/secrets"
+    code.mkdir(parents=True)
+    if cles_code is not None:
+        (code / "prod.cles").write_text(cles_code, encoding="utf-8")
+    return d, cle
+
+
+def test_premier_secret_d_un_depot_de_donnees_neuf(rendre, tmp_path, env_isole):
+    """Le gabarit de données ne rend pas secrets/ : le premier `refaire` le crée, et y écrit le .enc."""
+    env = env_isole()
+    d, cle = rendre_donnees_neuf(rendre, tmp_path, env)
+    enc = d / "secrets/prod.env.enc"
+    code, sortie, erreur = appeler(tmp_path, d, env, {"HC_SONDE": VALEUR_1, "AUTRE": VALEUR_2}, enc)
+    assert code == 0, sortie + erreur
+    assert dechiffrer(enc, cle, env) == f"HC_SONDE={VALEUR_1}\nAUTRE={VALEUR_2}\n".encode()
+    assert sorted(p.name for p in (d / "secrets").iterdir()) == ["prod.env.enc"]
+    statut = git(d, env, "status", "--porcelain", "--untracked-files=all").splitlines()
+    assert statut == ["?? secrets/prod.env.enc"]
+
+
+def test_seul_secrets_se_cree_dans_un_depot_de_donnees(rendre, tmp_path, env_isole):
+    """Un autre dossier absent refuse toujours, et un refus avant sops ne laisse pas secrets/."""
+    env = env_isole()
+    d, _cle = rendre_donnees_neuf(rendre, tmp_path, env, cles_code="")
+    valeurs = {"HC_SONDE": VALEUR_1, "AUTRE": VALEUR_2}
+    for relatif in ("autre/prod.env.enc", "secrets/sous/prod.env.enc", "Secrets/prod.env.enc"):
+        code, sortie, erreur = appeler(tmp_path, d, env, valeurs, d / relatif)
+        assert code == 64, (relatif, sortie + erreur)
+        assert "dossier introuvable" in sortie, relatif
+    # secrets/prod.env.enc, mais la liste des clés du code est vide : rien n'est créé
+    code, sortie, erreur = appeler(tmp_path, d, env, valeurs, d / "secrets/prod.env.enc")
+    assert code == 64, sortie + erreur
+    assert "ne nomme aucune clé" in sortie
+    assert not (d / "secrets").exists()
+    assert not (d / "autre").exists()
+    assert git(d, env, "status", "--porcelain", "--untracked-files=all") == ""
+
+
+def test_secrets_cree_se_retire_si_sops_echoue(rendre, tmp_path, env_isole):
+    """secrets/ se crée juste avant sops : si sops échoue, il est retiré, et rien ne reste."""
+    env = env_isole()
+    d, _cle = rendre_donnees_neuf(rendre, tmp_path, env)
+    faux = tmp_path / "faux-sops"
+    faux.mkdir()
+    if WINDOWS:
+        (faux / "sops.cmd").write_text("@echo sops en echec 1>&2\r\n@exit /b 1\r\n", encoding="utf-8")
+    else:
+        (faux / "sops").write_text("#!/bin/sh\necho 'sops en echec' >&2\nexit 1\n", encoding="utf-8")
+        (faux / "sops").chmod(0o755)
+    env["PATH"] = str(faux) + os.pathsep + env["PATH"]
+    code, sortie, erreur = appeler(
+        tmp_path, d, env, {"HC_SONDE": VALEUR_1, "AUTRE": VALEUR_2}, d / "secrets/prod.env.enc"
+    )
+    assert code == 1, sortie + erreur
+    assert "dossier créé" in sortie
+    assert "sops a échoué (code 1)" in sortie
+    assert not (d / "secrets").exists()
+    assert git(d, env, "status", "--porcelain", "--untracked-files=all") == ""
+
+
+def test_secrets_ne_se_cree_pas_dans_un_depot_de_code(tmp_path, env_isole):
+    """Hors d'un dépôt de données (pas de DEPOT_CODE), un dossier absent refuse, secrets/ compris."""
+    env = env_isole()
+    d, _cle, _enc = monter(tmp_path, env)
+    code, sortie, erreur = appeler(
+        tmp_path, d, env, {"HC_SONDE": VALEUR_1, "AUTRE": VALEUR_2}, d / "secrets/prod.env.enc"
+    )
+    assert code == 64, sortie + erreur
+    assert "dossier introuvable" in sortie
+    assert not (d / "secrets").exists()

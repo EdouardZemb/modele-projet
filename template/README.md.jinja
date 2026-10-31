@@ -9,6 +9,11 @@ Ce dépôt est le dépôt de données de `{{ nom | regex_replace('-donnees$', ''
 - [`CLAUDE.md`](CLAUDE.md) : ce que ce dépôt porte, ses règles, ce qui fait foi.
 - [`config/`](config/) : la configuration personnelle de l'application.
 - [`contenu/`](contenu/) : le contenu de l'instance.
+{%- if cible_code == 'serveur' %}
+- [`env/`](env/) : l'environnement de la prod et du staging, sur le serveur.
+- [`cles/`](cles/) : les clés publiques age du serveur et de la clé hors ligne.
+- `secrets/` : les secrets chiffrés, `<env>.env.enc`, que crée le premier `secrets.ps1 refaire`.
+{%- endif %}
 
 Né du modèle `EdouardZemb/modele-projet` ; se met à jour par `copier update`.
 {% else %}# {{ nom }}
