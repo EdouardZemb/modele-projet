@@ -154,9 +154,11 @@ nom_de() {
 }
 
 # lire_etat <dossier> : NOMMEE ← les images que nomment les fichiers d'état de ce dossier, lus,
-# jamais sourcés : deploye et precedent ("<image@sha256:…> <version>", par lire_version de lib.sh,
-# comme deployer.sh les lit), echec ("<image@sha256:…>"), et la ligne {{ prefixe }}IMAGE= de
-# compose.env et de compose.env.precedent. Un fichier absent (ou un dossier absent) ne protège
+# jamais sourcés : deploye et precedent (« <image@sha256:…> <version> <commit|-> », par lire_version
+# de lib.sh, comme deployer.sh les lit, qui contrôle la forme des trois champs), echec
+# (« <image@sha256:…> <commit|-> », dont seul le premier champ est lu), et la ligne
+# {{ prefixe }}IMAGE= de compose.env et de compose.env.precedent. Seule l'image compte : la version et
+# le commit de données ne gardent aucune image. Un fichier absent (ou un dossier absent) ne protège
 # rien ; un fichier présent qui ne se lit pas, ou qui n'a pas la forme qu'écrit deployer.sh, annule
 # le ménage.
 lire_etat() {

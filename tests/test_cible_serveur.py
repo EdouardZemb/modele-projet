@@ -464,6 +464,32 @@ def test_motifs_de_l_etat_definis_une_seule_fois(rendre, sauvegardes):
     assert "$MOTIF_VERSION" in lire(rendu, "deploiement/deployer.sh")
 
 
+def commentaire_de(texte, fonction):
+    """Le commentaire qui précède `<fonction>() {`, ses lignes sans « # », mises à plat."""
+    lignes = texte.split(f"\n{fonction}() {{", 1)[0].splitlines()
+    bloc = []
+    for ligne in reversed(lignes):
+        if not ligne.startswith("#"):
+            break
+        bloc.insert(0, ligne.lstrip("#").strip())
+    return " ".join(" ".join(bloc).split())
+
+
+# Le ménage des images lit l'état en couple : le commentaire de lire_etat dit la forme qu'écrit
+# deployer.sh (M-0004, § 8), et que seule l'image compte.
+def test_lire_etat_du_menage_dit_le_couple(rendre):
+    commentaire = commentaire_de(
+        lire(rendre(**REPONSES_SERVEUR_CODE), "deploiement/nettoyer-images.sh"), "lire_etat"
+    )
+    for fragment in (
+        "deploye et precedent (« <image@sha256:…> <version> <commit|-> », par lire_version",
+        "echec (« <image@sha256:…> <commit|-> », dont seul le premier champ est lu)",
+        "Seule l'image compte : la version et le commit de données ne gardent aucune image.",
+    ):
+        assert fragment in commentaire, fragment
+    assert '("<image@sha256:…> <version>"' not in commentaire
+
+
 # Review Focus 2 du lot 12 (M-0004, amendé) : un retour par une étiquette du code vers une version
 # d'avant la v0.7.0 relit l'état que la v0.7.0 écrit. deploye et precedent y ont un troisième champ,
 # le commit de données, et echec un second : les scripts de la v0.6.0 n'en lisent que les premiers,
