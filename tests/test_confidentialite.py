@@ -1,5 +1,7 @@
 """Tests de la porte de confidentialité. Aucun faux secret n'est écrit en clair : tout est construit."""
 
+import inspect
+import re
 import shutil
 import subprocess
 import sys
@@ -521,6 +523,15 @@ NATURES_ILLISIBLES = "confidentialité : nature illisible sur la branche par dé
 )
 def test_nature_du_texte(texte, attendu):
     assert c.nature_du_texte(texte) == attendu
+
+
+def test_le_repli_visibilite_dit_sa_condition_sans_promettre_de_lot():
+    # Le repli `VISIBILITE = "prive"` reste tant que la branche par défaut de chaque projet ne porte
+    # pas `NATURE` : son commentaire dit cette condition, et aucun numéro de lot, qui passerait sans
+    # qu'elle soit remplie.
+    source = " ".join(inspect.getsource(c.nature_du_texte).split())
+    assert "tant que la branche par défaut de chaque projet ne porte pas `NATURE`" in source
+    assert not re.search(r"\blots? \d", source), source
 
 
 def depot_de_nature(tmp_path, env, sur_la_branche, dans_la_copie, branche="main"):

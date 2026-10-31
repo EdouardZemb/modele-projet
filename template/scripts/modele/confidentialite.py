@@ -531,8 +531,9 @@ def nature_du_texte(texte: str | None) -> str:
     """La nature (`code` ou `donnees`) que dit un texte de reglages.py, lu sans l'exécuter.
 
     Une ligne `NATURE = "donnees"` donne `donnees`. Sans ligne `NATURE`, une ligne
-    `VISIBILITE = "prive"` donne `donnees` : c'est le repli d'une version, à retirer au lot 12.
-    Tout autre cas, dont un texte absent ou des apostrophes, donne `code`."""
+    `VISIBILITE = "prive"` donne `donnees` : c'est le repli d'un projet pas encore mis à jour, qui
+    reste tant que la branche par défaut de chaque projet ne porte pas `NATURE`. Tout autre cas,
+    dont un texte absent ou des apostrophes, donne `code`."""
     if not texte:
         return "code"
     ligne = _LIGNE_NATURE.search(texte)
