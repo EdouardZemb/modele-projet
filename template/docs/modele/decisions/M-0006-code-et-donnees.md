@@ -143,11 +143,13 @@ décrivent l'instance et le parc, pas l'auteur.
   Elle ne porte ni le compte GitHub ni le nom qu'il affiche (§ 2). Un motif s'y écrit de façon à ne
   pas prendre un mot pour un autre : `re:` et des bornes de mot quand le texte est court.
 - **L'historique d'un dépôt de code est relu chaque semaine par la porte**, dans
-  `modele-historique.yml`, et plus seulement par gitleaks : `--exiger-prives --public` sur tout
-  l'historique exporté. Un constat ancien se reconnaît, il ne s'efface pas. Une liste versionnée
-  nomme chaque constat accepté par son commit et son chemin, le motif en commentaire, jamais par sa
-  valeur, et Edouard la relit. Rien d'autre n'est toléré. Un dépôt de code né après M-0006 part d'un commit
-  propre et n'a pas de liste.
+  `modele-historique.yml`, et plus seulement par gitleaks :
+  `--exiger-prives --historique --acceptes .github/constats-acceptes.txt`, qui relit tout
+  l'historique (`git log --all -p`), messages des commits compris. Dans un dépôt de données, la
+  porte ne relit rien, et gitleaks seul lit l'historique. Un constat ancien se reconnaît, il ne
+  s'efface pas. Une liste versionnée nomme chaque constat accepté par son commit et son chemin, le
+  motif en commentaire, jamais par sa valeur, et Edouard la relit. Rien d'autre n'est toléré. Un
+  dépôt de code né après M-0006 part d'un commit propre et n'a pas de liste.
 - **Avec la chaîne à deux dépôts**, la porte refuse dans un dépôt de code tout fichier `*.enc`, tout
   `.sops.yaml` et tout `cles/*.pub`, à n'importe quelle profondeur, et tout fichier sous un dossier
   de premier niveau `instance/`, `config/` ou `contenu/` : un `src/…/config/` reste du code

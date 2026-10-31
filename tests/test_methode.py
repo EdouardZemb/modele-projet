@@ -130,8 +130,14 @@ def test_m0006_fixe_le_contrat_de_l_app():
             "change quand la liste privée se réordonne."
         ),
         "nomme chaque constat accepté par son commit et son chemin, le motif en commentaire",
+        # la relecture hebdomadaire telle que modele-historique.yml la lance
+        (
+            "`--exiger-prives --historique --acceptes .github/constats-acceptes.txt`, qui relit "
+            "tout l'historique (`git log --all -p`)"
+        ),
     ):
         assert attendu in texte, attendu
+    assert "`--exiger-prives --public` sur tout l'historique exporté" not in texte
 
 
 def test_skill_consigner():
