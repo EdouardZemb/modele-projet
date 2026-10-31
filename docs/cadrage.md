@@ -593,8 +593,15 @@ Dans la CI de `modele-projet` :
 2. **La mécanique serveur.** Les tests bats d'`ancrage`, paramétrés par `nom`, dans l'image de
    test qui contient `age` et `sops` aux sommes vérifiées.
 3. **Une fausse app.** Dans `tests/modele/fausse-app/`, quelques lignes de Python qui respectent
-   le contrat : la route de santé, `sauvegarder`, `verifier`. La CI d'image tourne sur elle de
-   bout en bout : construction, santé, révision, sauvegarde, vérification.
+   le contrat : la route de santé, `sauvegarder`, `verifier`. Depuis le lot 12, elle lit aussi son
+   instance (M-0003, § 6) : `/config` et `/contenu`, chacun avec sa version de schéma, les
+   commandes `verifier-config` et `verifier-contenu`, et le champ `configuration` de la santé
+   (`exemple` ou `montee`) ; son exemple est dans `exemple/` et `exemple-contenu/`. Le job
+   `fausse-app` rend un projet `serveur` de nature `code` qui déclare les deux commandes, et la CI
+   d'image tourne sur elle de bout en bout : construction, santé, révision, sauvegarde,
+   vérification, l'exemple de l'instance. Puis deux épreuves sur le Docker du job : le ménage des
+   images (`tests/modele/epreuve-menage.sh`) et la chaîne à deux dépôts
+   (`tests/modele/epreuve-donnees.sh`), de `deployer.sh` aux montages et à la santé.
 4. **La mise à jour.** On rend la version précédente du modèle, on la met à jour vers la nouvelle,
    et on vérifie qu'aucun conflit n'apparaît sur un projet resté intact.
 5. **Les versions du modèle** : des étiquettes `vX.Y.Z` sur `modele-projet`, avec Release et

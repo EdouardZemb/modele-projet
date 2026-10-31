@@ -4,6 +4,9 @@
 - **Amende** M-0002 (la porte de confidentialité), M-0003 (le contrat de l'image) et M-0004 (la
   chaîne de livraison)
 - **Amendé** le 2026-10-29, avec le lot 11 : la liste des constats acceptés nomme un constat par son commit et son chemin, le motif en commentaire ; le numéro d'un motif change quand la liste privée se réordonne.
+- **Amendé** le 2026-10-29, avec le lot 12 : la seconde étape est faite. La porte d'un dépôt de
+  code suit le premier segment du chemin (§ 3), et la chaîne garde les deux modes, à deux dépôts et
+  à un dépôt (§ 6).
 - **S'applique en deux temps.** D'abord la porte par nature et le gabarit de données (§ 1 à 4).
   Ensuite la chaîne à deux dépôts et les règles de chemins (§ 3, dernier point, § 5 à 7). Entre les
   deux, la chaîne lit encore tout dans le clone du code, comme avant.
@@ -146,8 +149,10 @@ décrivent l'instance et le parc, pas l'auteur.
   valeur, et Edouard la relit. Rien d'autre n'est toléré. Un dépôt de code né après M-0006 part d'un commit
   propre et n'a pas de liste.
 - **Avec la chaîne à deux dépôts**, la porte refuse dans un dépôt de code tout fichier `*.enc`, tout
-  `.sops.yaml`, tout `cles/*.pub` et tout `contenu/`, à n'importe quelle profondeur. Une clé
-  publique `age` y devient un constat, où qu'elle soit écrite. Avant, ces règles refuseraient le
+  `.sops.yaml` et tout `cles/*.pub`, à n'importe quelle profondeur, et tout fichier sous un dossier
+  de premier niveau `instance/`, `config/` ou `contenu/` : un `src/…/config/` reste du code
+  (amendement du 2026-10-29 ; M-0002). Un gabarit `….jinja` n'est pas le fichier qu'il rend. Une
+  clé publique `age` y devient un constat, où qu'elle soit écrite. Avant, ces règles refuseraient le
   premier commit de tout projet `serveur`, dont la chaîne lit encore ces fichiers dans le clone du
   code.
 
@@ -207,8 +212,8 @@ décrivent l'instance et le parc, pas l'auteur.
   `config/` et `contenu/` dans un instantané immuable, sous l'état du déploiement, et c'est lui qu'elle
   monte. Le chemin de l'instantané nomme le commit. Un nouveau commit change donc le montage et
   recrée le conteneur. Le déploiement vérifie que le conteneur en service monte l'instantané visé.
-  Le ménage retire les instantanés que ni l'état des deux environnements ni la marge ne gardent,
-  comme pour les images.
+  Chaque environnement a ses instantanés : le ménage retire ceux que ni son état ni la marge ne
+  gardent, comme pour les images (amendement du 2026-10-29 ; M-0004, § 8).
 - **Le contrôle des secrets passe au dépôt de données.** Sa CI compare chaque fichier chiffré aux
   `.cles` du dépôt de code, qui est public, et aux destinataires de son `.sops.yaml`. Le dépôt de
   code garde gitleaks.
@@ -236,6 +241,15 @@ décrivent l'instance et le parc, pas l'auteur.
   décision, pas une perte.
 - **Un projet né avant M-0006 garde la chaîne à un dépôt jusqu'à sa scission.** Le lot de la chaîne
   décide si elle garde les deux modes, ou si ce projet attend sa scission pour monter de version.
+  **Le lot de la chaîne a gardé les deux modes** (amendement du 2026-10-29). Le mode suit la nature,
+  sans réponse de plus : un dépôt de nature `donnees` en cible `serveur` déploie à un dépôt. Il
+  passe aux versions suivantes du modèle sans attendre sa scission et garde ses réponses. Il monte
+  déjà sa configuration et son contenu depuis `instance/config/` et `instance/contenu/`, à côté de
+  son code. La prod y prend
+  le commit de la plus haute `vX.Y.Z`, sans série d'étiquettes de données. La scission ne fait
+  ensuite que déplacer ces dossiers, avec `deploiement/env/`, les secrets chiffrés, `.sops.yaml` et
+  `deploiement/cles/`, vers le dépôt de données : le contrat de l'application ne change pas
+  (M-0004, § 8).
 
 ### 7. La naissance et la scission
 

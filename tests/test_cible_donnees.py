@@ -169,21 +169,25 @@ def test_textes_du_depot_de_donnees(rendre):
             "mode `session` par défaut",
             "avertit sur ce qui identifie",
             "refuse les secrets",
-            "(`env/`, secrets, clés) arrive au lot 12",
+            "Son application n'est pas en cible `serveur`",
         ],
         "config/README.md": [
-            "monté en lecture seule sur `/config`",
-            "jamais en staging",
+            "Pour une application en cible `serveur`",
+            "monté en lecture seule sur `/config`, en prod seulement",
+            "Le staging ne le monte jamais",
             "version de schéma",
-            "À partir du lot 12 du modèle, ce dossier est monté",
-            "à partir du lot 12 du modèle, la chaîne refuse un dossier sans sa commande",
+            "la chaîne refuse un dossier présent sans sa commande",
+            "au moins un fichier autre que ce `README.md`",
+            "`donnees-AAAA.MM.JJ.n`",
         ],
         "contenu/README.md": [
+            "Pour une application en cible `serveur`",
             "monté en lecture seule sur `/contenu`",
             "en staging comme en prod",
             "version de schéma",
-            "À partir du lot 12 du modèle, ce dossier est monté",
-            "à partir du lot 12 du modèle, la chaîne refuse un dossier sans sa commande",
+            "la chaîne refuse un dossier présent sans sa commande",
+            "au moins un fichier autre que ce `README.md`",
+            "sur `/en-service`, le contenu en service",
         ],
     }
     for fichier, phrases in attendus.items():
@@ -191,6 +195,25 @@ def test_textes_du_depot_de_donnees(rendre):
         for phrase in phrases:
             assert phrase in texte, (fichier, phrase)
         assert "{%" not in texte and "{{" not in texte, fichier
+        # les textes semés disent ce qui est, sans renvoyer au lot qui l'a apporté
+        assert "lot 12" not in texte, fichier
+    # ce qui ne vaut qu'avec un serveur vient sous son en-tête, le reste avant lui
+    for fichier, avant in (
+        ("config/README.md", "Ce qui se règle au téléphone vit en base"),
+        ("contenu/README.md", "Les mentions que la loi oblige"),
+    ):
+        texte = aplati(rendu / fichier)
+        general, serveur = texte.split("Pour une application en cible `serveur` :", 1)
+        assert avant in general, fichier
+        assert "`modele-donnees.yml`" in serveur, fichier
+        assert "`modele-donnees.yml`" not in general, fichier
+    serveur = aplati(rendre(**REPONSES_DONNEES_SERVEUR) / "CLAUDE.md")
+    assert "L'instance du serveur : `env/`, les secrets chiffrés dans `secrets/`" in serveur
+    assert "`ESSAI_BRANCHE_DONNEES` dans `env/staging.env`, `main` à la création" in serveur
+    assert "la plus haute étiquette de données, `donnees-AAAA.MM.JJ.n`" in serveur
+    assert "`modele-donnees.yml`" in serveur
+    assert "Son application n'est pas en cible `serveur`" not in serveur
+    assert "lot 12" not in serveur
 
 
 def test_claude_md_du_depot_de_donnees_dit_la_fusion_reelle(rendre):

@@ -1,8 +1,12 @@
 # M-0003 — Contrat de l'image : ce que le projet fournit pour que la mécanique le déploie sans le connaître
 
 - **Statut** : accepté le 2026-10-18
+- **Amendé** le 2026-10-29, avec le lot 12 : l'application peut lire son instance, sa
+  configuration dans `/config` et son contenu dans `/contenu` ; deux commandes la vérifient, et la
+  santé dit quelle configuration sert (§ 2 et § 6, M-0006 § 5)
 - **Contexte amont** : la chaîne de livraison d'`ancrage`, d'où vient la mécanique de la cible
-  `serveur` ; M-0004 (la chaîne de livraison){% if sauvegardes %} ; M-0005 (les sauvegardes){% endif %}
+  `serveur` ; M-0004 (la chaîne de livraison){% if sauvegardes %} ; M-0005 (les sauvegardes){% endif %} ;
+  M-0006 (le code et les données)
 
 ## Contexte
 
@@ -52,11 +56,14 @@ revision}`, ou un 503 avec `{statut: "ko"}`.
   en staging, puis `X.Y.Z` en prod, et une étiquette de retour la redéploie sous un autre numéro
   (M-0004). Absente, en CI, elle a une valeur par défaut.
 - `revision` est le SHA du commit construit, celui du label.
+- `configuration`, pour un projet qui lit son instance (amendement du 2026-10-29) : `exemple` ou
+  `montee` (§ 6).
 
 Trois contrôles la lisent : la CI (`deploiement/ci/verifier-image.sh` : statut `ok`, la révision du
 commit, l'environnement `ci`) ; le déploiement, sur le port local (statut `ok`, la version et la
 révision attendues) ; la sonde, sur l'adresse publique (HTTP 200 sans redirection, statut `ok`,
-l'environnement servi).
+l'environnement servi). Quand le projet déclare `VERIFIER_CONFIG`, le déploiement et la sonde
+lisent aussi `configuration` (§ 6).
 
 ### 3. Les données
 
@@ -141,6 +148,64 @@ ajoute deux commandes à ce contrat, `SAUVEGARDER` et `VERIFIER`, et l'ADR M-000
 - Les secrets de son app, nommés dans `deploiement/secrets/<env>.cles` (M-0004).
 - Ses vérifications dans le job `verifier` de `ci.yml`, et ses tests de bout en bout contre l'image,
   entre `modele-image-construire` et `modele-image-publier`.
+- S'il lit une instance : ses deux commandes de vérification, `exemple/` et `exemple-contenu/`, et
+  le champ `configuration` de sa santé (§ 6).
+
+### 6. L'instance : `/config` et `/contenu`
+
+Amendement du 2026-10-29 (M-0006, § 5). Une application peut lire une instance : sa configuration
+dans `/config`, son contenu dans `/contenu`. Ce sont deux montages en lecture seule d'un instantané
+du commit de données, jamais le clone des données (M-0004, § 8). Les dossiers vivent, selon le
+mode, dans `config/` et `contenu/` du dépôt de données, à deux dépôts, ou dans `instance/config/`
+et `instance/contenu/` du dépôt lui-même, à un dépôt.
+
+- **Les deux commandes**, facultatives, se déclarent dans `deploiement/projet.env`, en mots séparés
+  par des espaces, comme `VERIFIER` :
+  - `VERIFIER_CONFIG=<mots>` : lancée en `<mots> /config` ;
+  - `VERIFIER_CONTENU=<mots>` : lancée en `<mots> /contenu`, ou en `<mots> /contenu /en-service`
+    quand un contenu est en service. `/en-service` est le contenu du couple en service : il permet
+    de refuser un changement qui défait un identifiant définitif.
+
+  Codes : 0 conforme, 2 non conforme, 64 usage ; tout autre code refuse. Seul le code fait foi ; la
+  sortie va au journal. Elles ne modifient jamais leur argument. Elles tournent dans un conteneur
+  jetable de l'image visée (`docker run --rm`), sans réseau (`--network none`), avec les options
+  des conteneurs jetables (l'uid 1000, un système de fichiers en lecture seule, aucune capacité,
+  384 Mo), et ne voient que leurs dossiers, en lecture seule. Comme pour `VERIFIER`, une image dont
+  l'`ENTRYPOINT` ne lance pas ses arguments les fait échouer.
+- **La configuration et le contenu portent leur version de schéma** (M-0006, § 5) : une image qui
+  ne connaît pas celle du couple les dit non conformes (code 2).
+- **Ils vont par paires** : la configuration avec `VERIFIER_CONFIG`, le contenu avec
+  `VERIFIER_CONTENU`. Dès que le projet déclare une commande, un dossier présent sans sa commande,
+  ou une commande sans son dossier, refuse le déploiement. Un projet qui n'en déclare aucune a un
+  couple sans commit de données : le déploiement ne lit pas ses dossiers. À deux dépôts, la CI du
+  dépôt de données vérifie la règle dans tous les cas, et refuse aussi ; à un dépôt, la CI ne lit
+  pas `instance/`. Un dossier est présent quand il porte, dans le commit de données, au moins un
+  fichier autre que le `README.md` de sa racine ; un `README.md` plus bas compte comme un fichier.
+- **La santé dit quelle configuration sert** : le champ `configuration` vaut `exemple` ou `montee`.
+  Quand le projet déclare `VERIFIER_CONFIG`, le déploiement exige `exemple` en staging et `montee`
+  en prod, et la sonde le contrôle à chaque passage, sur l'adresse publique. Sinon, le champ n'est
+  pas lu.
+- **Le staging ne monte jamais `/config`** et n'y lance jamais `VERIFIER_CONFIG`, quoi que porte le
+  commit de données : il sert l'exemple. Il monte `/contenu`, et y lance `VERIFIER_CONTENU`.
+- **La prod ne se replie pas sur l'exemple** : c'est l'application qui refuse de démarrer sans
+  `/config` (M-0006, § 5). La chaîne, elle, garantit que la prod d'un projet qui déclare
+  `VERIFIER_CONFIG` reçoit le montage, et que sa santé dit `montee`. Deux exceptions, où la prod
+  sert sans `/config`, toutes deux vers une version d'avant ses données, qui ne monte rien et dont
+  le champ n'est pas lu :
+  - un retour arrière par `--retour` vers un couple précédent sans commit de données ;
+  - le retour automatique qui suit l'échec de la première version qui déclare `VERIFIER_CONFIG` :
+    la version d'avant revient, telle qu'elle était (M-0004, § 8).
+- **L'exemple.** Le dépôt de code porte sa configuration d'exemple dans `exemple/` et son contenu
+  d'exemple dans `exemple-contenu/`, à sa racine ; l'image les embarque. La CI lance chaque commande
+  déclarée sur son exemple, par `docker run` sur l'image construite, comme le serveur la lance
+  (`deploiement/ci/verifier-image.sh`) : elle prouve à la fois l'exemple et la clause de
+  l'`ENTRYPOINT`. Avant tout conteneur, une commande déclarée sans son dossier d'exemple refuse ;
+  un dossier d'exemple sans sa commande n'est pas vérifié, et le journal le dit. La règle du
+  `README.md` vaut aussi pour l'exemple. Un projet à un dépôt porte lui aussi son exemple, à côté
+  d'`instance/` : la CI l'exige dès qu'une commande est déclarée, et le staging sert `exemple/`.
+- **Un projet qui ne déclare ni l'une ni l'autre ne voit aucun changement** : rien n'est monté, rien
+  n'est vérifié, le champ `configuration` n'est pas lu, et le commit de données de son couple vaut
+  `-` (M-0004, § 8).
 
 ## Conséquences
 
@@ -148,6 +213,9 @@ ajoute deux commandes à ce contrat, `SAUVEGARDER` et `VERIFIER`, et l'ADR M-000
 - À chaque PR, la CI lance l'image comme en production et contrôle sa santé, sa révision et son
   environnement{% if sauvegardes %}, puis lance `SAUVEGARDER` et `VERIFIER` dans le conteneur, par `docker exec`{% endif %}.
   Une image qui échoue n'est jamais publiée.
+- **La CI prouve la clause de l'`ENTRYPOINT` pour `VERIFIER_CONFIG` et `VERIFIER_CONTENU`**
+  (amendement du 2026-10-29) : `deploiement/ci/verifier-image.sh` les lance par `docker run` sur
+  l'exemple, comme le serveur les lance (§ 6).
 {%- if sauvegardes %}
 - **La CI ne prouve pas la clause de l'`ENTRYPOINT`** : `docker exec` le contourne, alors que le
   serveur lance `VERIFIER` par `docker run`. C'est le test de restauration qui la prouve : la mise
@@ -171,6 +239,8 @@ Cet ADR doit être rouvert si :
 
 - une app doit écrire hors de `/donnees`, ou a besoin d'un second service (une base à part) que
   `compose.projet.yml` ne suffit pas à décrire ;
+- une app doit écrire dans `/config` ou `/contenu`, ou lire une instance qui change plus vite
+  qu'une étiquette ;
 {%- if sauvegardes %}
 - l'instantané complet de chaque nuit devient trop gros ou trop long à prendre ;
 {%- endif %}

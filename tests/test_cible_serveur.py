@@ -13,6 +13,7 @@ from conftest import (
     CLE_HORS_LIGNE_DE_TEST,
     CLE_SERVEUR_DE_TEST,
     RACINE,
+    RENVOI_AU_PLAN,
     REPONSES_SERVEUR,
     REPONSES_SERVEUR_CODE,
     fichiers_texte,
@@ -624,7 +625,8 @@ def test_secrets_exiges_rendus(rendre):
 
 
 # Le runbook (semé) : les sections génériques de celui d'`ancrage`. Sans sauvegardes, il n'y a
-# rien à restaurer ni d'exercice trimestriel.
+# rien à restaurer ni d'exercice trimestriel. « Débloquer un déploiement » est toujours là : les
+# données d'un couple peuvent bloquer un déploiement, avec ou sans sauvegardes (lot 12).
 SECTIONS_EXPLOITATION = [
     "Ce qui tourne",
     "La mise en service",
@@ -639,7 +641,7 @@ SECTIONS_EXPLOITATION = [
     "Unités",
     "Tout arrêter",
 ]
-SECTIONS_DES_SAUVEGARDES = ("Débloquer un déploiement", "Restaurer", "Exercice trimestriel")
+SECTIONS_DES_SAUVEGARDES = ("Restaurer", "Exercice trimestriel")
 
 
 def section(texte, titre):
@@ -824,14 +826,16 @@ def test_restaurer_ne_garde_pas_la_cle_hors_ligne_dans_un_fichier(rendre):
 # I4 (R30) : un instantané impossible (une app qui redémarre en boucle) bloque tout déploiement,
 # retour compris, puisque tous deux le prennent d'abord. Le runbook donne le geste : arrêter l'app,
 # avec les fichiers, le fichier d'environnement et le projet que compose `dc` (lib.sh) ; la sonde
-# suivante déploie sans instantané. Sans sauvegardes, pas d'instantané, donc pas de section.
+# suivante déploie sans instantané. Sans sauvegardes, pas d'instantané de /donnees : la section ne
+# garde que les données du couple (lot 12).
 @pytest.mark.parametrize("sauvegardes", [True, False])
 def test_exploitation_debloquer_un_deploiement(rendre, sauvegardes):
     texte = lire(rendre(**{**REPONSES_SERVEUR, "sauvegardes": sauvegardes}), "docs/exploitation.md")
-    assert ("Débloquer un déploiement" in texte) is sauvegardes
+    debloquer = a_plat(section(texte, "Débloquer un déploiement"))
+    assert ("stop app" in debloquer) is sauvegardes
+    assert ("L'instantané de `/donnees` est impossible." in debloquer) is sauvegardes
     if not sauvegardes:
         return
-    debloquer = a_plat(section(texte, "Débloquer un déploiement"))
     environnements = (("prod", "essai", "~/essai"), ("staging", "essai-staging", "~/essai-staging"))
     for env, projet, clone in environnements:
         geste = (
@@ -856,7 +860,8 @@ def test_exploitation_le_retour_attend_une_nouvelle_image(rendre):
     texte = lire(rendre(**REPONSES_SERVEUR), "docs/exploitation.md")
     retour = a_plat(section(texte, "Revenir en arrière"))
     assert "attend une nouvelle étiquette" not in retour
-    assert "attend une nouvelle image" in retour
+    # Lot 12 : l'échec se note sur le couple ; à un dépôt, un nouveau couple est une nouvelle image.
+    assert "attend un nouveau couple" in retour
     assert "même empreinte" in retour
     assert "un nouveau commit" in retour
     # le seul geste des scripts qui efface la marque : un déploiement réussi de cette image
@@ -978,3 +983,139 @@ def test_compte_rendu_partout(rendre):
         texte = chemin.read_bytes().decode("utf-8", errors="replace")
         assert "ghcr.io/edouardzemb" not in texte, chemin
         assert "/edouardzemb/" not in texte, chemin
+
+
+# Lot 12 : le runbook dit le couple, l'étiquette de données, l'instantané monté, les données
+# refusées et les anomalies du clone des données, chacun dans le mode où il joue. Les numéros du
+# plan n'entrent pas dans un fichier rendu (RENVOI_AU_PLAN, dans conftest).
+
+
+@pytest.mark.parametrize("sauvegardes", [True, False])
+@pytest.mark.parametrize("mode", ["un", "deux"])
+def test_exploitation_dit_le_couple_et_les_deux_modes(rendre, mode, sauvegardes):
+    reponses = REPONSES_SERVEUR if mode == "un" else REPONSES_SERVEUR_CODE
+    texte = lire(rendre(**{**reponses, "sauvegardes": sauvegardes}), "docs/exploitation.md")
+    deux = mode == "deux"
+    assert re.findall(r"^## (.+)$", texte, flags=re.MULTILINE) == [
+        s for s in SECTIONS_EXPLOITATION if sauvegardes or s not in SECTIONS_DES_SAUVEGARDES
+    ]
+    assert not RENVOI_AU_PLAN.search(texte)
+    assert not sans_bash(texte, CHEMIN_DE_SCRIPT)
+
+    # Ce qui tourne : le mode, les clones des données, les instantanés, l'état en couple.
+    tourne = a_plat(section(texte, "Ce qui tourne"))
+    clones = "| Clone des données | `~/essai-donnees` | `~/essai-donnees-staging` |"
+    assert (clones in tourne) is deux
+    assert ("la plus haute étiquette de données `donnees-AAAA.MM.JJ.n`" in tourne) is deux
+    assert ("la branche des données que nomme `ESSAI_BRANCHE_DONNEES`" in tourne) is deux
+    # le terme, défini une fois
+    commande = "Une commande de l'instance est `VERIFIER_CONFIG` ou `VERIFIER_CONTENU`"
+    assert f"{commande}, déclarée dans `deploiement/projet.env`" in tourne
+    assert "`~/.local/state/essai/prod/instantanes/`" in tourne
+    assert "donne l'image, la version et le commit de données du couple en service" in tourne
+    assert "`echec` nomme un couple, son image et son commit" in tourne
+    assert ("sont ceux de l'exemple" in tourne) is deux
+    assert ("`instance/config/` et `instance/contenu/`" in tourne) is not deux
+
+    # La mise en service : à deux dépôts, la CI des données tire l'image publique du code.
+    mise_en_service = a_plat(section(texte, "La mise en service"))
+    assert ("une PR du dépôt de données `essai-donnees`" in mise_en_service) is deux
+    assert ("tire l'image `:main`, sans jeton" in mise_en_service) is deux
+    assert ("Cette fusion publie la première image" in mise_en_service) is not deux
+    # le dépôt de code est public dès l'étape 3 : le chemin d'un dépôt privé ne vaut qu'à un dépôt
+    assert ("Le dépôt de code est public avant cette étape" in mise_en_service) is deux
+    prive = "s'il est privé, elle crée d'abord une clé de déploiement"
+    assert (prive in mise_en_service) is not deux
+    # à deux dépôts, une première étiquette de données dans tous les cas : sans elle, la prod ne
+    # prend aucun env ni secret du dépôt de données après le clonage
+    assert ("une première étiquette de données, dans tous les cas" in mise_en_service) is deux
+    sans_elle = "la prod ne prend aucun env ni secret du dépôt de données après son clonage"
+    assert (sans_elle in mise_en_service) is deux
+
+    # Mettre en ligne : l'étiquette de données (👤), ou son absence à un dépôt.
+    en_ligne = a_plat(section(texte, "Mettre en ligne"))
+    assert ("git tag -a donnees-AAAA.MM.JJ.n" in en_ligne) is deux
+    assert ("git push origin donnees-AAAA.MM.JJ.n" in en_ligne) is deux
+    assert ("« aucune version des données »" in en_ligne) is deux
+    # sans commande, un env ou un secret n'entre en prod qu'avec deux gestes 👤
+    deux_gestes = "une étiquette de données sur le commit qui le porte, puis une étiquette du code"
+    assert (deux_gestes in en_ligne) is deux
+    assert ("Dans l'intervalle, la CI du dépôt de données refuse" in en_ligne) is deux
+    assert ("Il n'y a pas d'étiquette de données" in en_ligne) is not deux
+    assert "**Un couple dont la santé échoue**" in en_ligne
+
+    # Revenir en arrière : le couple entier, et les deux cas de transition.
+    retour = a_plat(section(texte, "Revenir en arrière"))
+    assert "Il revient au couple de `~/.local/state/essai/prod/precedent`" in retour
+    assert "suivi de `--commit-donnees <sha>` quand `echec` nomme un commit de données" in retour
+    assert "Un `precedent` dont le commit est `-`" in retour
+    assert "est refusé (code 64) quand `deploiement/projet.env` ne déclare plus rien" in retour
+    assert ("l'ancienne image et le commit de données en service" in retour) is deux
+    assert ("**Revenir à une configuration antérieure**" in retour) is deux
+    assert ("ramène ensemble l'image et l'instance de ce commit" in retour) is not deux
+
+    # Les images, et à côté le ménage des instantanés des données.
+    images = a_plat(section(texte, "Les images"))
+    for fragment in (
+        "**Les instantanés des données.**",
+        "`~/.local/state/essai/<env>/instantanes/<commit>/`",
+        "les 3 plus récents des autres",
+        "tout `<commit>.partiel` de plus d'un jour",
+        "`ménage des instantanés annulé, rien n'est retiré : <raison>`",
+        "`ménage des instantanés : <n> retirés, <n> gardés (…)`",
+    ):
+        assert fragment in images, fragment
+    assert ("leurs `.couple`" in images) is sauvegardes
+
+    # Débloquer : les données refusées, la vérification impossible, et le clone des données.
+    debloquer = a_plat(section(texte, "Débloquer un déploiement"))
+    for fragment in (
+        "**Des données refusées.**",
+        "`données non conformes avant <version>, couple marqué en échec (voir le journal)`",
+        "`configuration non conforme (VERIFIER_CONFIG : code 2) : …`",
+        "**La vérification n'a pas eu lieu.**",
+        "`<dossier> sans <commande> (commit de données <sha>)`",
+        "l'image ne connaît pas la commande",
+        # les lignes du journal, telles que lib.sh les écrit
+        "<CLÉ> de projet.env : <sortie>`",
+        "`vérification impossible (<CLÉ> : code <n>) : <sortie>`",
+        "bash ~/essai/deploiement/deployer.sh prod <image@sha256:…> <X.Y.Z> --commit-donnees <sha>",
+        # le participe se rapporte au déploiement
+        "Quand la sonde lance le déploiement, chaque refus s'écrit",
+    ):
+        assert fragment in debloquer, fragment
+    assert "Un autre code donne la même ligne" not in debloquer
+    for fragment in (
+        "**Le clone des données.**",
+        "**« clone des données absent »**",
+        "seule l'absence du signal ok avertit",
+        "**« clone des données modifié »**",
+        "**« mise à jour du clone des données impossible »**",
+        "`ESSAI_BRANCHE_DONNEES`",
+    ):
+        assert (fragment in debloquer) is deux, fragment
+    if sauvegardes:
+        geste = "Le couple du geste est marqué en échec : la sonde attend un nouveau couple"
+        assert geste in debloquer
+        assert "ajouter `--commit-donnees <sha>`, celui de `deploye`" in debloquer
+
+        # Restaurer : le couple de l'archive se rapatrie avec elle, et la restauration le dit.
+        restaurer = a_plat(section(texte, "Restaurer"))
+        couple = "essai-<horodatage>.couple.age"
+        assert f"rclone copy sauvegardes:essai-sauvegardes/{couple} ~/backups/essai/" in restaurer
+        assert f"~/backups/essai/{couple}" in restaurer.split("retirer l'archive", 1)[1]
+        assert "« couple de l'instantané inconnu »" in restaurer
+
+    # Secrets : où ils vivent selon le mode, et quand une valeur entre en service.
+    secrets = a_plat(section(texte, "Secrets"))
+    assert ("secrets.ps1 refaire secrets/<env>.env.enc" in secrets) is deux
+    assert ("secrets.ps1 refaire deploiement/secrets/<env>.env.enc" in secrets) is not deux
+    assert ("`modele-donnees.yml`" in secrets) is deux
+    deux_gestes = "une étiquette de données sur le commit qui la porte, puis une étiquette du code"
+    assert (deux_gestes in secrets) is deux
+    correctif = "Une rotation urgente se publie par une étiquette de correctif"
+    assert (correctif in secrets) is not deux
+
+    # Unités : la sonde suit un couple.
+    unites = a_plat(section(texte, "Unités"))
+    assert "déploie tout nouveau couple" in unites
