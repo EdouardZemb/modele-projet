@@ -8,7 +8,9 @@ Usage :
 Pour chaque `*.env.enc` (hors `.git/`), on compare :
   - ses clés à celles de son `.cles` (même nom, suffixe `.env.enc` remplacé par `.cles`) ;
   - ses destinataires age à ceux de `.sops.yaml`.
-Un `.cles` sans `.enc` avertit seulement : un projet neuf n'a pas encore ses secrets.
+Un `.cles` sans `.enc` avertit seulement : un projet neuf n'a pas encore ses secrets. Il ne dit
+rien dans le dépôt de code d'un projet `serveur` à deux dépôts (`MODE_DONNEES="deux"` dans
+`deploiement/lib.sh`) : ses `.enc` vivent dans le dépôt de données, dont la CI les contrôle.
 `reglages.SECRETS_EXIGES` (chemin du `.cles` -> clés exigées) ajoute les clés dont la mécanique a besoin.
 
 Le dépôt de données d'un projet `serveur` (M-0006, § 8) porte ses `secrets/<env>.env.enc`, mais la
@@ -49,6 +51,10 @@ DOSSIER_PUB = "cles"
 DOSSIER_SECRETS = "secrets"
 WORKFLOW_DONNEES = ".github/workflows/modele-donnees.yml"
 MESSAGE_DONNEES = "secrets : contrôlés par modele-donnees.yml, contre le .cles du dépôt de code"
+# Le mode des données d'un projet `serveur`, défini dans deploiement/lib.sh seulement : lu, jamais
+# recalculé.
+LIB_DU_SERVEUR = "deploiement/lib.sh"
+MODE_A_DEUX_DEPOTS = re.compile(r'^MODE_DONNEES="deux"\r?$', re.MULTILINE)
 
 
 class Illisible(Exception):
@@ -227,13 +233,15 @@ def verifier(racine: Path, exiges: dict[str, list[str]], cles: Path | None = Non
             constats.append(Constat("refus", rel, "aucun destinataire age"))
 
     noms_enc = {p.name for p in enc}
+    # Dans le dépôt de code à deux dépôts, un .cles n'a jamais de .enc voisin : rien à en dire.
+    enc_ailleurs = cles is None and _a_deux_depots(racine)
     for chemin in cles_fichiers:
         voisin = chemin.with_name(chemin.name[: -len(SUFFIXE_CLES)] + SUFFIXE_ENC)
         if cles is None:
             sans_enc = not voisin.is_file()
         else:  # le .enc est dans le dépôt de données, sous le même nom
             sans_enc = voisin.name not in noms_enc
-        if sans_enc:
+        if sans_enc and not enc_ailleurs:
             constats.append(
                 Constat("avertissement", _relatif(racine, chemin), f"pas de {voisin.name} : secrets pas encore posés")
             )
@@ -253,6 +261,15 @@ def verifier(racine: Path, exiges: dict[str, list[str]], cles: Path | None = Non
             constats.append(Constat("refus", rel_cles, f"clés exigées par la mécanique du modèle : {_noms(absentes)}"))
 
     return constats
+
+
+def _a_deux_depots(racine: Path) -> bool:
+    """Vrai si <racine> est le dépôt de code d'un projet `serveur` à deux dépôts, d'après
+    MODE_DONNEES de deploiement/lib.sh ; faux sans lib.sh lisible (un projet sans serveur)."""
+    try:
+        return bool(MODE_A_DEUX_DEPOTS.search((racine / LIB_DU_SERVEUR).read_text(encoding="utf-8")))
+    except (OSError, UnicodeDecodeError):
+        return False
 
 
 def _reglages():
