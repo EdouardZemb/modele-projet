@@ -57,9 +57,9 @@
 # GHCR du projet), MODE_DONNEES (« un » ou « deux » dépôts, M-0006 § 6), SOUS_DOSSIER_ENV,
 # SOUS_DOSSIER_SECRETS, SOUS_DOSSIER_CLES, SOUS_DOSSIER_CONFIG et SOUS_DOSSIER_CONTENU (les chemins de
 # l'instance dans le clone des données), MOTIF_REFERENCE, MOTIF_VERSION et MOTIF_COMMIT (la forme de
-# l'image, de la version et du commit de données dans l'état) et {{ prefixe }}OPTIONS_JETABLES (options
-# des conteneurs jetables). charger_env pose en plus {{ prefixe }}CLONE_DONNEES, la racine du clone des
-# données de l'environnement.
+# l'image, de la version et du commit de données dans l'état), MOTIF_SHA (un sha de commit, sans
+# « - ») et {{ prefixe }}OPTIONS_JETABLES (options des conteneurs jetables). charger_env pose en plus
+# {{ prefixe }}CLONE_DONNEES, la racine du clone des données de l'environnement.
 #
 # Codes de sortie : 64 = usage (environnement inconnu, argument invalide), 3 = secrets absents,
 # 1 = toute autre erreur.

@@ -431,18 +431,32 @@ def test_motifs_de_l_etat_definis_une_seule_fois(rendre, sauvegardes):
         "MOTIF_REFERENCE": re.compile(r"^MOTIF_REFERENCE=", re.MULTILINE),
         "MOTIF_VERSION": re.compile(r"^MOTIF_VERSION=", re.MULTILINE),
         "MOTIF_COMMIT": re.compile(r"^MOTIF_COMMIT=", re.MULTILINE),
+        "MOTIF_SHA": re.compile(r"^MOTIF_SHA=", re.MULTILINE),
         "lire_version": re.compile(r"^\s*(?:function\s+)?lire_version\s*\(\)", re.MULTILINE),
         # le motif de la référence en toutes lettres, en ligne comme dans une définition
         "motif en ligne": re.compile(re.escape("[a-z0-9][a-z0-9._/:-]*@sha256:[0-9a-f]{64}")),
     }
+    # Le sha de 40 caractères en toutes lettres : dans MOTIF_COMMIT et MOTIF_SHA seulement.
+    sha_en_ligne = re.compile(re.escape("[0-9a-f]{40}"))
     trouvees = {nom: [] for nom in definitions}
+    shas = []
     for chemin in sorted((rendu / "deploiement").rglob("*.sh")):
         texte = chemin.read_text(encoding="utf-8")
         for nom, motif in definitions.items():
             trouvees[nom] += [chemin.name] * len(motif.findall(texte))
+        shas += [chemin.name] * len(sha_en_ligne.findall(texte))
     assert trouvees == {nom: ["lib.sh"] for nom in definitions}
+    assert shas == ["lib.sh", "lib.sh"]
     lib = lire(rendu, "deploiement/lib.sh")
     assert '[[ "$DEPLOYE_IMAGE" =~ $MOTIF_REFERENCE ]]' in lib
+    assert "MOTIF_COMMIT='^([0-9a-f]{40}|-)$'" in lib
+    assert "MOTIF_SHA='^[0-9a-f]{40}$'" in lib
+    for chemin, attendu in (
+        ("deploiement/deployer.sh", '[[ "${reste%%/*}" =~ $MOTIF_SHA ]]'),
+        ("deploiement/sonder.sh", '[[ "$commit" =~ $MOTIF_SHA ]]'),
+        ("deploiement/ci/verifier-image.sh", '[[ "$revision" =~ $MOTIF_SHA ]]'),
+    ):
+        assert attendu in lire(rendu, chemin), chemin
     for chemin in ("deploiement/deployer.sh", "deploiement/nettoyer-images.sh"):
         texte = lire(rendu, chemin)
         assert "$MOTIF_REFERENCE" in texte, chemin

@@ -157,7 +157,7 @@ main() {
   local conteneur="$1" revision="$2"
   local attente="${ {{- prefixe }}SANTE_ATTENTE:-90}" delai="${ {{- prefixe }}SANTE_DELAI:-2}"
   [[ "$conteneur" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]] || arreter 64 "conteneur invalide : '$conteneur' ($USAGE)"
-  [[ "$revision" =~ ^[0-9a-f]{40}$ ]] \
+  [[ "$revision" =~ $MOTIF_SHA ]] \
     || arreter 64 "révision invalide : '$revision' (attendu : les 40 caractères hexadécimaux du commit)"
   [[ "$attente" =~ ^[0-9]+$ ]] || arreter 64 "{{ prefixe }}SANTE_ATTENTE invalide : '$attente'"
 

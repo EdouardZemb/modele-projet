@@ -575,7 +575,7 @@ commit_des_montages() {
   for cle in {{ prefixe }}CONFIG {{ prefixe }}CONTENU; do
     chemin="$(valeur_de "$cle" "$1")" || continue
     reste="${chemin#"${{ prefixe }}ETAT/instantanes/"}"
-    if [ "$reste" != "$chemin" ] && [[ "${reste%%/*}" =~ ^[0-9a-f]{40}$ ]]; then
+    if [ "$reste" != "$chemin" ] && [[ "${reste%%/*}" =~ $MOTIF_SHA ]]; then
       printf '%s\n' "${reste%%/*}"
       return 0
     fi
