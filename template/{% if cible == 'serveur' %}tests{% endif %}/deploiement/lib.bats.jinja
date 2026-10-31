@@ -1096,6 +1096,21 @@ messages_du_journal() {
     [ "$status" -eq 1 ]
     [[ "$output" == *"deploye illisible"* ]]
   done
+  # présent sans être un fichier (un dossier, un lien mort) : illisible, comme le dit le signal de
+  # la sonde, et non absent
+  local present
+  for present in dossier lien-mort; do
+    rm -rf "$etat/deploye"
+    if [ "$present" = dossier ]; then
+      mkdir "$etat/deploye"
+    else
+      ln -s "$etat/nulle-part" "$etat/deploye"
+    fi
+    avec_lib 'charger_env prod; lire_deploye'
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"deploye illisible : ce n'est pas un fichier"* ]]
+    [[ "$output" != *"aucune version déployée"* ]]
+  done
 }
 
 # L'état en couple (M-0004, amendé) : deploye et precedent gagnent un troisième champ, le commit de

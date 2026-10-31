@@ -1072,12 +1072,14 @@ etiqueter_les_donnees() {
     [ "$(nombre_d_appels docker)" -eq 0 ]
     [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
   done
-  # présent, mais pas un fichier : illisible aussi
+  # présent, mais pas un fichier : illisible aussi, au journal comme au signal, jamais absent
   rm "$ETAT/deploye"
   mkdir "$ETAT/deploye"
   : >"$APPELS"
   sonder prod
   [ "$status" -eq 1 ]
+  [[ "$output" == *"$ETAT/deploye illisible : ce n'est pas un fichier"* ]]
+  [[ "$output" != *"aucune version déployée"* ]]
   [ "$(signaux)" = "$(signal "$ETAT/deploye illisible") $HC/fail" ]
   [ "$(nombre_d_appels deployer.sh)" -eq 0 ]
 }

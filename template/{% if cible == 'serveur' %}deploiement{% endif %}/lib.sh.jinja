@@ -697,12 +697,18 @@ lire_version() {
 
 # lire_deploye : l'image, la version et le commit de données de ${{ prefixe }}ETAT/deploye, écrit par
 # deployer.sh, dans DEPLOYE_IMAGE, DEPLOYE_VERSION et DEPLOYE_COMMIT (« - » quand le champ manque).
-# Échec, journalisé, si le fichier manque, si l'image n'a pas la forme que deployer.sh écrit
-# (MOTIF_REFERENCE) ou le commit non plus (MOTIF_COMMIT) ; la version doit seulement ne pas être vide.
+# Échec, journalisé, si le fichier manque (« aucune version déployée »), s'il est là sans être un
+# fichier (un dossier, un lien mort : « illisible », comme le signal de la sonde), si l'image n'a pas
+# la forme que deployer.sh écrit (MOTIF_REFERENCE) ou le commit non plus (MOTIF_COMMIT) ; la version
+# doit seulement ne pas être vide.
 lire_deploye() {
   DEPLOYE_IMAGE="" DEPLOYE_VERSION="" DEPLOYE_COMMIT=""
-  if [ ! -f "${{ prefixe }}ETAT/deploye" ]; then
+  if [ ! -e "${{ prefixe }}ETAT/deploye" ] && [ ! -L "${{ prefixe }}ETAT/deploye" ]; then
     journal "aucune version déployée (${{ prefixe }}ETAT/deploye absent) : rien sur quoi s'appuyer"
+    return 1
+  fi
+  if [ ! -f "${{ prefixe }}ETAT/deploye" ]; then
+    journal "${{ prefixe }}ETAT/deploye illisible : ce n'est pas un fichier"
     return 1
   fi
   { read -r DEPLOYE_IMAGE DEPLOYE_VERSION DEPLOYE_COMMIT _ || true; } <"${{ prefixe }}ETAT/deploye"
