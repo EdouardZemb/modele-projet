@@ -37,7 +37,7 @@
 #      étiquettes, une par appel (`docker image rm <dépôt>:<étiquette>`), car docker refuse sans -f
 #      le retrait par l'identifiant d'une image qui en porte plusieurs, et la dernière emporte
 #      l'image et ses empreintes. Un retrait en échec est journalisé, et l'image suivante est tentée ;
-#   7. les instantanés des données de cet environnement, et de lui seul (P2 du lot 12) :
+#   7. les instantanés des données de cet environnement, et de lui seul (M-0004, § 8) :
 #      ${{ prefixe }}ETAT/instantanes/, toujours, même quand le ménage des images est sauté ou annulé.
 #      Voir « Les instantanés », plus bas.
 #
@@ -154,9 +154,11 @@ nom_de() {
 }
 
 # lire_etat <dossier> : NOMMEE ← les images que nomment les fichiers d'état de ce dossier, lus,
-# jamais sourcés : deploye et precedent ("<image@sha256:…> <version>", par lire_version de lib.sh,
-# comme deployer.sh les lit), echec ("<image@sha256:…>"), et la ligne {{ prefixe }}IMAGE= de
-# compose.env et de compose.env.precedent. Un fichier absent (ou un dossier absent) ne protège
+# jamais sourcés : deploye et precedent (« <image@sha256:…> <version> <commit|-> », par lire_version
+# de lib.sh, comme deployer.sh les lit, qui contrôle la forme des trois champs), echec
+# (« <image@sha256:…> <commit|-> », dont seul le premier champ est lu), et la ligne
+# {{ prefixe }}IMAGE= de compose.env et de compose.env.precedent. Seule l'image compte : la version et
+# le commit de données ne gardent aucune image. Un fichier absent (ou un dossier absent) ne protège
 # rien ; un fichier présent qui ne se lit pas, ou qui n'a pas la forme qu'écrit deployer.sh, annule
 # le ménage.
 lire_etat() {
@@ -193,7 +195,7 @@ abandonner_instantanes() {
 }
 
 # menage_instantanes : l'étape 7, les instantanés des données de ${{ prefixe }}ETAT/instantanes/, ceux
-# de cet environnement seulement (P2 du lot 12) ; voir « Les instantanés », en tête. Rend toujours
+# de cet environnement seulement (M-0004, § 8) ; voir « Les instantanés », en tête. Rend toujours
 # 0 : une surprise ou un retrait impossible ne se disent qu'au journal.
 menage_instantanes() {
   local etat="${{ prefixe }}ETAT" dossier="${{ prefixe }}ETAT/instantanes" fichier chemin nom modifie

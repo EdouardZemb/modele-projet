@@ -172,8 +172,8 @@ toléré. Dans un dépôt de données, la porte dit que gitleaks seul relit l'hi
   (`…_BRANCHE_DONNEES`), la principale à la création ; la prod suit la plus haute `vX.Y.Z` du code
   et la plus haute étiquette de données. Les secrets du dépôt de données sont contrôlés par
   `modele-donnees.yml`, contre le `.cles` du dépôt de code, et ses destinataires contre
-  `cles/*.pub`. `secrets.ps1 refaire` y prend le `.cles` du clone voisin du dépôt de code : le dépôt de code se
-  clone à côté. Le dépôt de code garde gitleaks et le contrôle de ses `.cles`.
+  `cles/*.pub`. `secrets.ps1 refaire` y prend le `.cles` du clone voisin du dépôt de code : le dépôt
+  de code se clone à côté. Le dépôt de code garde gitleaks et le contrôle de ses `.cles`.
 - **À un dépôt**, pour un dépôt de nature `donnees`, d'avant M-0006, jusqu'à sa scission. Tout est
   dans le même dépôt : `deploiement/env/`, `deploiement/secrets/`, `deploiement/cles/`,
   `.sops.yaml`, puis `instance/config/` et `instance/contenu/`. Le staging suit la branche

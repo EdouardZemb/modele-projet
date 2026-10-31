@@ -234,8 +234,9 @@ qu'au §1, dans un worktree `<dépôt>.worktrees\modele-serveur`.
     et sa santé dit `configuration` `exemple`.
   - **Ses données, à un dépôt** (nature `donnees`) : `instance/config/` et `instance/contenu/`, à la
     racine du dépôt, que le déploiement lit dans le commit que l'image désigne, sa révision. La CI
-    ne lit pas `instance/` : `instance/contenu/` se vérifie au déploiement du staging, et
-    `instance/config/` à celui de la prod seulement.
+    du code vérifie `instance/` comme le fera le déploiement : la règle des paires, puis chaque
+    commande déclarée sur son dossier ; le déploiement revérifie, `instance/contenu/` en staging
+    comme en prod, `instance/config/` en prod seulement.
   - **Ses données, à deux dépôts** (nature `code`) : `config/` et `contenu/`, à la racine du dépôt
     de données, que sa CI, `modele-donnees.yml`, vérifie contre les images du code. La porte du
     dépôt de code refuse ces dossiers à sa racine.

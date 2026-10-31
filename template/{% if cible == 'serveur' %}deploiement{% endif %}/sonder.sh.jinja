@@ -327,7 +327,7 @@ donnees_visees() {
         return 1
       fi
       [ "$DECLAREE" -eq 1 ] || return 0
-      if ! commit="$(git -C "$donnees" rev-parse HEAD)" || ! [[ "$commit" =~ ^[0-9a-f]{40}$ ]]; then
+      if ! commit="$(git -C "$donnees" rev-parse HEAD)" || ! [[ "$commit" =~ $MOTIF_SHA ]]; then
         anomalie "commit du clone des données illisible"
         return 1
       fi
@@ -357,7 +357,7 @@ donnees_visees() {
       fi
       # Le commit de l'étiquette, sans checkout : le clone n'y passe qu'avant deployer.sh.
       if ! commit="$(git -C "$donnees" rev-parse "$ETIQUETTE_DONNEES^{commit}")" \
-        || ! [[ "$commit" =~ ^[0-9a-f]{40}$ ]]; then
+        || ! [[ "$commit" =~ $MOTIF_SHA ]]; then
         anomalie "commit de $ETIQUETTE_DONNEES illisible"
         return 1
       fi
@@ -370,7 +370,7 @@ donnees_visees() {
 # attendre_les_donnees <env> <version> : la version visée déclare une commande, mais aucune version
 # des données n'existe encore (donnees_visees). Sans couple en service (deploye absent), le signal
 # ok « aucune version des données ». Un deploye présent mais illisible est une anomalie : rien ne
-# dirait plus ce qui sert la prod (ruling 19 du lot 12 ; hors de l'attente, deployer.sh s'en
+# dirait plus ce qui sert la prod (hors de l'attente, deployer.sh s'en
 # charge). Avec un couple en service, il se contrôle comme quand rien n'est nouveau
 # (rien_de_nouveau), et le signal ok dit l'attente. Le champ configuration exigé suit ce couple, pas
 # la déclaration visée : montee si son compose.env monte /config, rien sinon.
@@ -482,7 +482,7 @@ main() {
   cible="$DEPOT_IMAGE:$version"
 
   # 4. Les données du couple visé. Sans version des données, la version visée attend, et le couple
-  # en service se contrôle (ruling 17 du lot 12).
+  # en service se contrôle (M-0004, § 8).
   donnees_visees "$nom_env" "$etiquette" || return 1
   if [ "$ATTENTE_DONNEES" -eq 1 ]; then
     if ! attendre_les_donnees "$nom_env" "$version"; then

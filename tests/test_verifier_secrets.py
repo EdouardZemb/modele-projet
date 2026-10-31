@@ -7,7 +7,7 @@ import sys
 
 import pytest
 import verifier_secrets
-from conftest import SCRIPTS, exiger
+from conftest import REPONSES_SERVEUR, REPONSES_SERVEUR_CODE, SCRIPTS, exiger
 
 SCRIPT = SCRIPTS / "verifier_secrets.py"
 TEMOIN = "TEMOIN-NE-PAS-AFFICHER"
@@ -106,6 +106,38 @@ def test_cles_sans_enc_avertit(tmp_path):
     r = lancer(monter(tmp_path, chiffre=False))
     assert r.returncode == 0
     assert "avertissement" in sortie(r)
+
+
+@pytest.mark.parametrize(("mode", "avertit"), [("deux", False), ("un", True), (None, True)])
+def test_cles_sans_enc_selon_le_mode_des_donnees(tmp_path, mode, avertit):
+    """À deux dépôts (MODE_DONNEES de deploiement/lib.sh), les .enc vivent dans le dépôt de
+    données : le dépôt de code, qui n'a que ses .cles, ne dit rien d'un .enc absent, à chaque CI.
+    À un dépôt, ou sans lib.sh, l'avertissement reste. Les autres contrôles ne changent pas."""
+    d = monter(tmp_path, chiffre=False)
+    if mode is not None:
+        (d / "deploiement/lib.sh").write_text(f'#!/usr/bin/env bash\nMODE_DONNEES="{mode}"\n', encoding="utf-8")
+    r = lancer(d)
+    assert r.returncode == 0, sortie(r)
+    assert ("avertissement : deploiement/secrets/prod.cles : pas de prod.env.enc" in sortie(r)) is avertit
+    # une clé exigée par la mécanique manque : le refus reste, à deux dépôts comme ailleurs
+    constats = verifier_secrets.verifier(d, {"deploiement/secrets/prod.cles": ["HC_ABSENTE"]})
+    assert [(c.niveau, c.chemin) for c in constats if c.niveau == "refus"] == [
+        ("refus", "deploiement/secrets/prod.cles")
+    ]
+
+
+@pytest.mark.parametrize(
+    ("reponses", "avertit"),
+    [(REPONSES_SERVEUR_CODE, False), (REPONSES_SERVEUR, True)],
+    ids=["deux-depots", "un-depot"],
+)
+def test_cles_sans_enc_dans_un_rendu(rendre, reponses, avertit):
+    """Le contrôle du socle sur un projet `serveur` rendu, sans secrets posés : le dépôt de code à
+    deux dépôts se tait, le projet à un dépôt avertit."""
+    r = lancer_dans(rendre(**reponses))
+    assert r.returncode == 0, sortie(r)
+    assert ("pas encore posés" in sortie(r)) is avertit
+    assert "avertissement" in sortie(r) or not avertit
 
 
 def test_sans_sops_yaml(tmp_path):

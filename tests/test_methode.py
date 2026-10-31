@@ -130,8 +130,14 @@ def test_m0006_fixe_le_contrat_de_l_app():
             "change quand la liste privée se réordonne."
         ),
         "nomme chaque constat accepté par son commit et son chemin, le motif en commentaire",
+        # la relecture hebdomadaire telle que modele-historique.yml la lance
+        (
+            "`--exiger-prives --historique --acceptes .github/constats-acceptes.txt`, qui relit "
+            "tout l'historique (`git log --all -p`)"
+        ),
     ):
         assert attendu in texte, attendu
+    assert "`--exiger-prives --public` sur tout l'historique exporté" not in texte
 
 
 def test_skill_consigner():
@@ -463,8 +469,15 @@ def test_m0003_dit_le_contrat_de_l_instance(rendre, sauvegardes):
         "un dossier d'exemple sans sa commande n'est pas vérifié, et le journal le dit",
         "Un projet à un dépôt porte lui aussi son exemple, à côté d'`instance/`",
         "**Un projet qui ne déclare ni l'une ni l'autre ne voit aucun changement**",
+        # à un dépôt, la CI du code vérifie instance/ comme le fera le déploiement
+        (
+            "À un dépôt, la CI du code vérifie `instance/` comme le fera le déploiement, dès qu'une "
+            "commande est déclarée"
+        ),
+        "et le déploiement revérifie",
     ):
         assert fragment in texte, fragment
+    assert "la CI ne lit pas `instance/`" not in texte
     assert "Une seule exception" not in texte
     # La route de santé du § 2 annonce le champ, et la CI prouve la clause de l'ENTRYPOINT pour
     # les deux commandes de l'instance, qu'elle lance par docker run.
@@ -515,6 +528,14 @@ def test_m0004_dit_le_couple_et_les_deux_modes(rendre, reponses, mode):
         # le retour arrière et ses deux cas de transition
         "ne monte ni ne vérifie rien, même si `projet.env` déclare une commande",
         "pas de retour arrière après une version qui retire ses commandes",
+        # le cas général : --retour vérifie precedent avec la déclaration de la version quittée
+        (
+            "`--retour` vérifie le couple de `precedent` avec la déclaration de la version qu'il "
+            "quitte, le `projet.env` du clone en service. Après une version qui ajoute ou retire "
+            "une commande, le retour peut donc être refusé : par la règle des paires, ou par le "
+            "code 64 de l'ancienne image, qui ne connaît pas la commande. Le refus ne change rien. "
+            "Le remède est une étiquette (§ 2), qui remet en service un couple vérifié."
+        ),
         "forme un couple nouveau : l'ancienne image et le commit de données en service",
         # les clones des données
         "« clone des données absent »",
@@ -641,3 +662,36 @@ def test_methode_dit_les_deux_modes_et_les_etiquettes_de_donnees():
     ):
         assert fragment in texte, fragment
     assert not RENVOI_AU_PLAN.search(texte)
+
+
+def blocs(texte):
+    """Les paragraphes et les éléments de liste du Markdown, chacun en ses lignes."""
+    resultat, courant = [], []
+    for ligne in texte.splitlines():
+        if not ligne.strip() or re.match(r"\s*(?:[-*] |\d+\. |#)", ligne):
+            if courant:
+                resultat.append(courant)
+            courant = [ligne] if ligne.strip() else []
+        else:
+            courant.append(ligne)
+    if courant:
+        resultat.append(courant)
+    return resultat
+
+
+def test_les_phrases_recoupees_tiennent_en_100_caracteres():
+    """La revue finale du lot de la chaîne : trois phrases dépassaient 100 caractères, ou étaient
+    coupées par un retour à la ligne au milieu de leur élément. Chaque élément qui les porte tient
+    en 100 caractères par ligne, et seule sa dernière ligne est courte."""
+    (m0005,) = DECISIONS.glob("*M-0005-sauvegardes-et-restauration.md*")
+    cas = (
+        (m0005, "**Le couple ne décide de rien**"),
+        (METHODE, "`secrets.ps1 refaire` y prend le `.cles` du clone voisin du dépôt de code"),
+        (DECISIONS / "M-0006-code-et-donnees.md", "La prod y prend le commit de la plus haute"),
+    )
+    for chemin, phrase in cas:
+        trouves = [b for b in blocs(lire(chemin)) if phrase in " ".join(" ".join(b).split())]
+        assert len(trouves) == 1, phrase
+        (bloc,) = trouves
+        assert max(len(ligne) for ligne in bloc) <= 100, phrase
+        assert min(len(ligne) for ligne in bloc[:-1]) >= 70, phrase

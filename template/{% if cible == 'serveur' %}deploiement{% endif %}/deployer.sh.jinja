@@ -71,7 +71,7 @@
 #      garde ce nom, pour le diagnostic, jusqu'à la tentative suivante, qui retire les .partiel
 #      avant d'écrire : il n'en reste qu'un, le dernier. Après le renommage, le couple que le
 #      déploiement quitte, celui de deploye, est noté à côté de l'instantané, jamais dedans :
-#      <AAAAMMJJTHHMMSSZ>.couple (noter_couple, lib.sh ; Ruling 16 du lot 12), rien sans deploye.
+#      <AAAAMMJJTHHMMSSZ>.couple (noter_couple, lib.sh ; M-0005, § 3), rien sans deploye.
 #      Puis pre-deploiement/ est purgé des instantanés de plus de 30 jours, d'après leur nom, chacun
 #      avec son .couple ; un couple qui ne se note pas, une purge ou un retrait en échec n'arrêtent
 #      rien ;
@@ -408,19 +408,20 @@ controler_montages() {
 # un nom provisoire, <horodatage>.partiel, renommé après le code 0 : un instantané en échec garde ce
 # nom, et rien ne le prend pour un instantané complet. Une destination déjà présente est un échec.
 # La commande crée son dossier, pas ses parents : pre-deploiement/ est créé ici, sur l'hôte, comme
-# sauvegarder.sh crée quotidiennes/ (R22), et ramené à 700 avec le dossier des sauvegardes, car un
-# instantané est une copie en clair des données (R24). Si l'un ou l'autre échoue, rien n'est lancé.
+# sauvegarder.sh crée quotidiennes/, et ramené à 700 avec le dossier des sauvegardes, car un
+# instantané est une copie en clair des données. Si l'un ou l'autre échoue, rien n'est lancé.
 # Pas d'instantané, et un succès journalisé, si le compose.env en service ne déclare pas (ou vide)
-# {{ prefixe }}SAUVEGARDES : la version en service ne monte pas /sauvegardes (I3).
+# {{ prefixe }}SAUVEGARDES : la version en service ne monte pas /sauvegardes.
 # Juste avant la commande, les .partiel des tentatives précédentes sont retirés : il n'en reste que
-# celui de la dernière (R31). Un retrait impossible est journalisé et n'arrête rien.
+# celui de la dernière. Un retrait impossible est journalisé et n'arrête rien.
 # Après un instantané réussi, le couple que le déploiement quitte, celui de deploye, est noté à côté
-# de lui, <horodatage>.couple (noter_couple, lib.sh ; Ruling 16) : sans deploye, ou s'il ne se lit
+# de lui, <horodatage>.couple (noter_couple, lib.sh ; M-0005, § 3) : sans deploye, ou s'il ne se lit
 # pas, l'instantané reste sans couple, et le déploiement continue. Puis pre-deploiement/ est purgé de
-# ce qui a plus de 30 jours, chaque instantané avec son .couple (R24).
+# ce qui a plus de 30 jours, chaque instantané avec son .couple : la sauvegarde de la nuit, qui le
+# purge aussi, ne tourne qu'en prod.
 instantane() {
   local horodatage destination hote sortie code=0 pre="${{ prefixe }}SAUVEGARDES/pre-deploiement" monte
-  # I3 : le conteneur en service ne monte /sauvegardes que si son compose.env, celui de la version
+  # Le conteneur en service ne monte /sauvegardes que si son compose.env, celui de la version
   # en service, déclare {{ prefixe }}SAUVEGARDES. Sans lui (le projet vient d'activer les sauvegardes),
   # la commande échouerait à chaque passage de la sonde, et plus rien ne se déploierait.
   monte="$(valeur_de {{ prefixe }}SAUVEGARDES "${{ prefixe }}ETAT/compose.env")" || monte=""
@@ -444,7 +445,7 @@ instantane() {
     journal "instantané impossible : $hote existe déjà (ou $hote.partiel), rien n'est écrasé"
     return 1
   fi
-  # R31 : la sonde retente toutes les 5 minutes ; sans ce retrait, chaque tentative en échec
+  # La sonde retente toutes les 5 minutes ; sans ce retrait, chaque tentative en échec
   # laisserait son .partiel, une copie en clair des données.
   if ! retirer_partiels "$pre" '^[0-9]{8}T[0-9]{6}Z\.partiel$'; then
     journal "instantanés en échec de $pre : retrait impossible, plus d'un .partiel y reste ; l'instantané se fait quand même"
@@ -574,7 +575,7 @@ commit_des_montages() {
   for cle in {{ prefixe }}CONFIG {{ prefixe }}CONTENU; do
     chemin="$(valeur_de "$cle" "$1")" || continue
     reste="${chemin#"${{ prefixe }}ETAT/instantanes/"}"
-    if [ "$reste" != "$chemin" ] && [[ "${reste%%/*}" =~ ^[0-9a-f]{40}$ ]]; then
+    if [ "$reste" != "$chemin" ] && [[ "${reste%%/*}" =~ $MOTIF_SHA ]]; then
       printf '%s\n' "${reste%%/*}"
       return 0
     fi
@@ -718,7 +719,8 @@ main() {
     || arreter 1 "{{ prefixe }}URL_PUBLIQUE invalide ou absente de ${{ prefixe }}CLONE_DONNEES/$SOUS_DOSSIER_ENV/$NOM_ENV.env (attendu : http(s)://hôte[:port], sans chemin ni requête). Rien n'a changé"
 
   # Les commandes de l'instance que déclare projet.env, et, pour un déploiement, le commit de données
-  # qui doit aller avec (P4 du lot 12) ; celui d'un retour arrière se lit sous le verrou.
+  # qui doit aller avec : sans --commit-donnees, une commande déclarée refuse (64) ; celui d'un
+  # retour arrière se lit sous le verrou.
   donnees_declarees || arreter 1 "deploiement/projet.env illisible : rien n'a changé"
   if [ "$RETOUR" -eq 0 ]; then
     [ "$DECLARE_CONFIG" -eq 0 ] || declarees="VERIFIER_CONFIG"

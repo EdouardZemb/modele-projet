@@ -109,11 +109,12 @@ sauvegardes. Signal `HC_TEST_RESTAURATION`.
   `VERIFIER`, elle le dit quand il diffère du couple déployé, et ne dit rien quand c'est le même.
   Sans fichier voisin (un instantané d'avant la `v0.7.0` du modèle, ou pris sans couple en
   service), elle dit « couple de l'instantané inconnu » ; un fichier qui ne se lit pas (un lien,
-  jamais suivi, une autre clé, une autre forme) est dit illisible, sur la même ligne. **Le couple ne décide de rien** : les données reviennent sous le
-  couple déployé, que l'invariant 4 rend capable de les lire, et une configuration changée depuis
-  n'est pas défaite (M-0006, § 6). Une identité age chiffrée par une phrase de passe, dans un
-  fichier, demande la phrase deux fois, pour l'archive puis pour son couple : age relit le fichier
-  à chaque fois. C'est accepté ; une clé passée par l'entrée standard, elle, n'est lue qu'une fois.
+  jamais suivi, une autre clé, une autre forme) est dit illisible, sur la même ligne. **Le couple ne
+  décide de rien** : les données reviennent sous le couple déployé, que l'invariant 4 rend capable
+  de les lire, et une configuration changée depuis n'est pas défaite (M-0006, § 6). Une identité age
+  chiffrée par une phrase de passe, dans un fichier, demande la phrase deux fois, pour l'archive
+  puis pour son couple : age relit le fichier à chaque fois. C'est accepté ; une clé passée par
+  l'entrée standard, elle, n'est lue qu'une fois.
 - **Le report.** Restaurer une sauvegarde défait tout ce qui a changé depuis, y compris ce qui ne
   devait pas l'être : un compte supprimé avant la restauration reviendrait. Un projet qui garde un
   tel état (un registre de suppressions, par exemple) déclare `REPORTER` dans

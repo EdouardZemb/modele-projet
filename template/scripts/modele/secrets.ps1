@@ -5,6 +5,9 @@
 # Les cles viennent du .cles voisin du fichier. Dans un depot de donnees (DEPOT_CODE dans
 # scripts/modele/reglages.py), elles viennent du .cles du depot de code, dans son clone voisin :
 # ..\<DEPOT_CODE>\deploiement\secrets\<env>.cles (M-0006, § 8), et le .enc s'ecrit dans secrets/.
+# Le gabarit de donnees ne rend pas secrets/ : pour <racine>/secrets/<env>.env.enc, et pour lui
+# seul, le script le cree juste avant sops, et le retire s'il reste vide. Tout autre dossier absent
+# est refuse.
 # Chaque valeur est saisie en masque et n'est jamais affichee (seule sa longueur l'est, pour
 # qu'une valeur tronquee se voie).
 # Retour : 0 reussite, 1 sops a echoue, 64 usage ou valeur refusee.
@@ -59,6 +62,19 @@ function Get-DepotCode([string]$Racine) {
     $trouve = [regex]::Match($texte, '(?m)^DEPOT_CODE = "([a-z][a-z0-9-]*)"\r?$')
     if ($trouve.Success) { return $trouve.Groups[1].Value }
     return $null
+}
+
+function Test-SecretsACreer([string]$Complet) {
+    # Le premier secret d'un depot de donnees neuf : $Complet est <racine>/secrets/<env>.env.enc,
+    # secrets/ (ce nom exact) est absent, et <racine> porte DEPOT_CODE. Le seul dossier qui se cree.
+    $dossier = [System.IO.Path]::GetDirectoryName($Complet)
+    if ([System.IO.Path]::GetFileName($dossier) -cne 'secrets') { return $false }
+    if ([System.IO.Path]::GetFileName($Complet) -cnotmatch '^[a-z]+\.env\.enc$') { return $false }
+    $racine = [System.IO.Path]::GetDirectoryName($dossier)
+    if ([string]::IsNullOrEmpty($racine) -or -not (Test-Path -LiteralPath $racine -PathType Container)) {
+        return $false
+    }
+    return ($null -ne (Get-DepotCode $racine))
 }
 
 function Test-ValeurSure([string]$Valeur) {
@@ -156,23 +172,40 @@ function Invoke-RefaireInterne([string]$Fichier, [scriptblock]$LireValeur) {
     }
     $complet = [System.IO.Path]::GetFullPath($Fichier)
     $dossier = [System.IO.Path]::GetDirectoryName($complet)
+    # git se lance dans le dossier du .enc, ou, pour le secrets/ a creer, a la racine qui le portera.
+    $origine = $dossier
+    $creerDossier = $false
     if (-not (Test-Path -LiteralPath $dossier -PathType Container)) {
-        Write-Host "dossier introuvable : $dossier"
-        return $script:EXIT_USAGE
+        if (-not (Test-SecretsACreer $complet)) {
+            Write-Host "dossier introuvable : $dossier"
+            return $script:EXIT_USAGE
+        }
+        $creerDossier = $true
+        $origine = [System.IO.Path]::GetDirectoryName($dossier)
     }
     $git = Get-Command git -ErrorAction SilentlyContinue
     if (-not $git) {
         Write-Host 'git est introuvable.'
         return $script:EXIT_USAGE
     }
-    $racine = Invoke-Processus $git.Source 'rev-parse --show-toplevel' $dossier $null
+    $racine = Invoke-Processus $git.Source 'rev-parse --show-toplevel' $origine $null
     if ($racine.Code -ne 0) {
-        Write-Host "$dossier n'est pas dans un dépôt git."
+        Write-Host "$origine n'est pas dans un dépôt git."
         return $script:EXIT_USAGE
     }
-    $prefixe = Invoke-Processus $git.Source 'rev-parse --show-prefix' $dossier $null
+    $prefixe = Invoke-Processus $git.Source 'rev-parse --show-prefix' $origine $null
     $racineDepot = $racine.Sortie.Trim()
-    $relatif = $prefixe.Sortie.Trim() + [System.IO.Path]::GetFileName($complet)
+    if ($creerDossier) {
+        # secrets/ ne se cree qu'a la racine du depot de donnees, pas plus bas.
+        if ($prefixe.Sortie.Trim().Length -ne 0) {
+            Write-Host "dossier introuvable : $dossier"
+            return $script:EXIT_USAGE
+        }
+        $relatif = 'secrets/' + [System.IO.Path]::GetFileName($complet)
+    }
+    else {
+        $relatif = $prefixe.Sortie.Trim() + [System.IO.Path]::GetFileName($complet)
+    }
 
     if (-not (Test-Path -LiteralPath (Join-Path $racineDepot '.sops.yaml') -PathType Leaf)) {
         Write-Host ".sops.yaml est absent à la racine du dépôt ($racineDepot)."
@@ -226,6 +259,14 @@ function Invoke-RefaireInterne([string]$Fichier, [scriptblock]$LireValeur) {
     $octets = ConvertTo-Dotenv $valeurs
     $temporaire = "$complet.tmp-" + [System.Guid]::NewGuid().ToString('N').Substring(0, 8)
     try {
+        if ($creerDossier) {
+            try { [void][System.IO.Directory]::CreateDirectory($dossier) }
+            catch {
+                Write-Host "le dossier $dossier ne se crée pas : $($_.Exception.Message)"
+                return $script:EXIT_ECHEC
+            }
+            Write-Host "dossier créé : $dossier"
+        }
         $arguments = 'encrypt --filename-override "' + $relatif + '" --input-type dotenv --output-type dotenv --output "' + $temporaire + '"'
         $resultat = Invoke-Processus $sops.Source $arguments $racineDepot $octets
         if ($resultat.Code -ne 0) {
@@ -251,6 +292,11 @@ function Invoke-RefaireInterne([string]$Fichier, [scriptblock]$LireValeur) {
     finally {
         [System.Array]::Clear($octets, 0, $octets.Length)
         if (Test-Path -LiteralPath $temporaire) { Remove-Item -LiteralPath $temporaire -Force }
+        if ($creerDossier -and -not (Test-Path -LiteralPath $complet)) {
+            # Le secrets/ cree pour ce .enc ne reste pas vide apres un echec ; Delete refuse un
+            # dossier qui ne l'est pas.
+            try { [System.IO.Directory]::Delete($dossier) } catch { $null = $_ }
+        }
     }
     Write-Host "réécrit : $Fichier ($($cles.Count) clés). À commiter dans une PR."
     return 0

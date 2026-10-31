@@ -216,6 +216,28 @@ def test_textes_du_depot_de_donnees(rendre):
     assert "lot 12" not in serveur
 
 
+# Le README d'un dépôt de données cite chacun de ses dossiers, une ligne chacun : en cible_code
+# `serveur`, aussi env/, cles/ et secrets/, que le gabarit ne rend pas (le premier secret le crée).
+LIGNES_DU_README = [
+    "- [`CLAUDE.md`](CLAUDE.md) : ce que ce dépôt porte, ses règles, ce qui fait foi.",
+    "- [`config/`](config/) : la configuration personnelle de l'application.",
+    "- [`contenu/`](contenu/) : le contenu de l'instance.",
+]
+LIGNES_DU_README_SERVEUR = [
+    "- [`env/`](env/) : l'environnement de la prod et du staging, sur le serveur.",
+    "- [`cles/`](cles/) : les clés publiques age du serveur et de la clé hors ligne.",
+    "- `secrets/` : les secrets chiffrés, `<env>.env.enc`, que crée le premier `secrets.ps1 refaire`.",
+]
+
+
+def test_readme_du_depot_de_donnees_cite_ses_dossiers(rendre):
+    def liste(rendu):
+        return [ligne for ligne in lire(rendu, "README.md").splitlines() if ligne.startswith("- ")]
+
+    assert liste(rendre(**DONNEES)) == LIGNES_DU_README
+    assert liste(rendre(**REPONSES_DONNEES_SERVEUR)) == LIGNES_DU_README + LIGNES_DU_README_SERVEUR
+
+
 def test_claude_md_du_depot_de_donnees_dit_la_fusion_reelle(rendre):
     session = aplati(rendre(**DONNEES) / "CLAUDE.md")
     assert "Il est en mode `session` par défaut" in session

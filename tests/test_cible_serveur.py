@@ -14,6 +14,7 @@ from conftest import (
     CLE_SERVEUR_DE_TEST,
     RACINE,
     RENVOI_AU_PLAN,
+    REPONSES_DONNEES_SERVEUR,
     REPONSES_SERVEUR,
     REPONSES_SERVEUR_CODE,
     fichiers_texte,
@@ -256,10 +257,16 @@ def test_projet_env_dit_les_commandes_de_l_instance(rendre, reponses, config, co
         "sans réseau",
         "lecture seule",
         "0 conforme, 2 non conforme, 64 usage, tout autre code refuse",
-        "refuse le déploiement",
+        # la règle des paires, comme M-0003 § 6 la dit
+        (
+            "Dès que le projet déclare une commande, un dossier présent sans sa commande, ou une "
+            "commande sans son dossier, refuse le déploiement."
+        ),
+        "Sans aucune commande, le déploiement ne lit pas les dossiers.",
         "Un dossier qui ne porte que son README.md compte comme absent",
     ):
         assert fragment in plat, fragment
+    assert "Un dossier sans sa commande" not in plat
 
 
 # C0 : le crochet de restauration reste générique. Ni la base d'un projet, ni un projet, ni son
@@ -430,23 +437,63 @@ def test_motifs_de_l_etat_definis_une_seule_fois(rendre, sauvegardes):
         "MOTIF_REFERENCE": re.compile(r"^MOTIF_REFERENCE=", re.MULTILINE),
         "MOTIF_VERSION": re.compile(r"^MOTIF_VERSION=", re.MULTILINE),
         "MOTIF_COMMIT": re.compile(r"^MOTIF_COMMIT=", re.MULTILINE),
+        "MOTIF_SHA": re.compile(r"^MOTIF_SHA=", re.MULTILINE),
         "lire_version": re.compile(r"^\s*(?:function\s+)?lire_version\s*\(\)", re.MULTILINE),
         # le motif de la référence en toutes lettres, en ligne comme dans une définition
         "motif en ligne": re.compile(re.escape("[a-z0-9][a-z0-9._/:-]*@sha256:[0-9a-f]{64}")),
     }
+    # Le sha de 40 caractères en toutes lettres : dans MOTIF_COMMIT et MOTIF_SHA seulement.
+    sha_en_ligne = re.compile(re.escape("[0-9a-f]{40}"))
     trouvees = {nom: [] for nom in definitions}
+    shas = []
     for chemin in sorted((rendu / "deploiement").rglob("*.sh")):
         texte = chemin.read_text(encoding="utf-8")
         for nom, motif in definitions.items():
             trouvees[nom] += [chemin.name] * len(motif.findall(texte))
+        shas += [chemin.name] * len(sha_en_ligne.findall(texte))
     assert trouvees == {nom: ["lib.sh"] for nom in definitions}
+    assert shas == ["lib.sh", "lib.sh"]
     lib = lire(rendu, "deploiement/lib.sh")
     assert '[[ "$DEPLOYE_IMAGE" =~ $MOTIF_REFERENCE ]]' in lib
+    assert "MOTIF_COMMIT='^([0-9a-f]{40}|-)$'" in lib
+    assert "MOTIF_SHA='^[0-9a-f]{40}$'" in lib
+    for chemin, attendu in (
+        ("deploiement/deployer.sh", '[[ "${reste%%/*}" =~ $MOTIF_SHA ]]'),
+        ("deploiement/sonder.sh", '[[ "$commit" =~ $MOTIF_SHA ]]'),
+        ("deploiement/ci/verifier-image.sh", '[[ "$revision" =~ $MOTIF_SHA ]]'),
+    ):
+        assert attendu in lire(rendu, chemin), chemin
     for chemin in ("deploiement/deployer.sh", "deploiement/nettoyer-images.sh"):
         texte = lire(rendu, chemin)
         assert "$MOTIF_REFERENCE" in texte, chemin
         assert re.search(r"^\s*(?:if )?lire_version ", texte, re.MULTILINE), chemin
     assert "$MOTIF_VERSION" in lire(rendu, "deploiement/deployer.sh")
+
+
+def commentaire_de(texte, fonction):
+    """Le commentaire qui précède `<fonction>() {`, ses lignes sans « # », mises à plat."""
+    lignes = texte.split(f"\n{fonction}() {{", 1)[0].splitlines()
+    bloc = []
+    for ligne in reversed(lignes):
+        if not ligne.startswith("#"):
+            break
+        bloc.insert(0, ligne.lstrip("#").strip())
+    return " ".join(" ".join(bloc).split())
+
+
+# Le ménage des images lit l'état en couple : le commentaire de lire_etat dit la forme qu'écrit
+# deployer.sh (M-0004, § 8), et que seule l'image compte.
+def test_lire_etat_du_menage_dit_le_couple(rendre):
+    commentaire = commentaire_de(
+        lire(rendre(**REPONSES_SERVEUR_CODE), "deploiement/nettoyer-images.sh"), "lire_etat"
+    )
+    for fragment in (
+        "deploye et precedent (« <image@sha256:…> <version> <commit|-> », par lire_version",
+        "echec (« <image@sha256:…> <commit|-> », dont seul le premier champ est lu)",
+        "Seule l'image compte : la version et le commit de données ne gardent aucune image.",
+    ):
+        assert fragment in commentaire, fragment
+    assert '("<image@sha256:…> <version>"' not in commentaire
 
 
 # Review Focus 2 du lot 12 (M-0004, amendé) : un retour par une étiquette du code vers une version
@@ -985,6 +1032,40 @@ def test_compte_rendu_partout(rendre):
         assert "/edouardzemb/" not in texte, chemin
 
 
+# Les numéros du plan d'un lot ne vivent que dans le plan, qui disparaît à la clôture : aucun
+# fichier rendu de la chaîne (scripts, bancs bats, doubles, documents), ni les épreuves du modèle,
+# ne les citent (RENVOI_AU_PLAN, dans conftest). Les quatre rendus du banc de la mécanique, et le
+# dépôt de données d'un projet `serveur`.
+RENDUS_DE_LA_CHAINE = {
+    "un-depot-avec-sauvegardes": REPONSES_SERVEUR,
+    "un-depot-sans-sauvegardes": {**REPONSES_SERVEUR, "sauvegardes": False},
+    "deux-depots-avec-sauvegardes": REPONSES_SERVEUR_CODE,
+    "deux-depots-sans-sauvegardes": {**REPONSES_SERVEUR_CODE, "sauvegardes": False},
+    "depot-de-donnees": REPONSES_DONNEES_SERVEUR,
+}
+
+
+def renvois_au_plan(racine):
+    """Les lignes des fichiers texte de `racine` qui citent un numéro du plan."""
+    return [
+        f"{chemin.relative_to(racine).as_posix()}:{numero}: {ligne.strip()}"
+        for chemin in fichiers_texte(racine)
+        for numero, ligne in enumerate(
+            chemin.read_bytes().decode("utf-8", errors="replace").splitlines(), start=1
+        )
+        if RENVOI_AU_PLAN.search(ligne)
+    ]
+
+
+@pytest.mark.parametrize("reponses", RENDUS_DE_LA_CHAINE.values(), ids=RENDUS_DE_LA_CHAINE.keys())
+def test_aucun_renvoi_au_plan_dans_un_rendu(rendre, reponses):
+    assert renvois_au_plan(rendre(**reponses)) == []
+
+
+def test_aucun_renvoi_au_plan_dans_les_epreuves():
+    assert renvois_au_plan(RACINE / "tests/modele") == []
+
+
 # Lot 12 : le runbook dit le couple, l'étiquette de données, l'instantané monté, les données
 # refusées et les anomalies du clone des données, chacun dans le mode où il joue. Les numéros du
 # plan n'entrent pas dans un fichier rendu (RENVOI_AU_PLAN, dans conftest).
@@ -1042,6 +1123,9 @@ def test_exploitation_dit_le_couple_et_les_deux_modes(rendre, mode, sauvegardes)
     assert (deux_gestes in en_ligne) is deux
     assert ("Dans l'intervalle, la CI du dépôt de données refuse" in en_ligne) is deux
     assert ("Il n'y a pas d'étiquette de données" in en_ligne) is not deux
+    # à un dépôt, la CI du code vérifie l'instance comme le fera le déploiement, qui la revérifie
+    ci_instance = "La CI du code les vérifie comme le fera le déploiement, qui les revérifie"
+    assert (ci_instance in en_ligne) is not deux
     assert "**Un couple dont la santé échoue**" in en_ligne
 
     # Revenir en arrière : le couple entier, et les deux cas de transition.
@@ -1050,6 +1134,15 @@ def test_exploitation_dit_le_couple_et_les_deux_modes(rendre, mode, sauvegardes)
     assert "suivi de `--commit-donnees <sha>` quand `echec` nomme un commit de données" in retour
     assert "Un `precedent` dont le commit est `-`" in retour
     assert "est refusé (code 64) quand `deploiement/projet.env` ne déclare plus rien" in retour
+    # le cas général : --retour vérifie precedent avec la déclaration de la version quittée
+    general = (
+        "**Après une version qui ajoute ou retire une commande**, `--retour` vérifie le couple de "
+        "`precedent` avec la déclaration de la version qu'il quitte, le `deploiement/projet.env` "
+        "du clone en service. Le retour peut donc être refusé : par la règle des paires, ou par le "
+        "code 64 de l'ancienne image, qui ne connaît pas la commande. Le refus ne change rien. Le "
+        "remède est une étiquette, qui remet en service un couple vérifié"
+    )
+    assert general in retour
     assert ("l'ancienne image et le commit de données en service" in retour) is deux
     assert ("**Revenir à une configuration antérieure**" in retour) is deux
     assert ("ramène ensemble l'image et l'instance de ce commit" in retour) is not deux

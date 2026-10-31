@@ -25,7 +25,7 @@
 #   - une copie du code, d'où deployer.sh est lancé ; les données de l'app (/donnees), semées comme
 #     le fait l'image ; HOME, un dossier de l'épreuve ;
 #   - la racine de l'état passe par un lien symbolique, lien-etat -> etat-reel, pendant toute
-#     l'épreuve (Ruling 32) : deployer.sh compare les montages sans résoudre les liens.
+#     l'épreuve : deployer.sh compare les montages sans résoudre les liens.
 #
 # Déroulé, chaque point constaté par docker inspect, par la santé ou par le journal de deployer.sh :
 #   1. le premier couple, l'image et le commit 1, se déploie en prod : VERIFIER_CONTENU a tourné
@@ -273,7 +273,7 @@ meme_instantane() {
 }
 
 # constater_montage <conteneur> <point> <env> <commit> <dossier> : <point> est monté une fois, en
-# lecture seule, depuis instantanes/<commit>/<dossier> de l'état de <env>, sans « // » (Ruling 32).
+# lecture seule, depuis instantanes/<commit>/<dossier> de l'état de <env>, sans « // ».
 constater_montage() {
   local source
   lire_montages "$1"

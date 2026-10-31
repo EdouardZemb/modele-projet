@@ -20,9 +20,12 @@ sys.path.insert(0, str(SCRIPTS))
 
 REGISTRE_ENTETE = "| N° | Famille | Date | Constat | Motif | Prévention | Critère de sortie | État |"
 
-# Les numéros du plan d'un lot (ses décisions, ses tâches) ne vivent que dans le plan, qui
-# disparaît à la clôture : aucun fichier distribué ne les cite.
-RENVOI_AU_PLAN = re.compile(r"\b(?:Ruling|ruling) \d|\bP[1-8]\b|\btâche \d|\bdécision \d du lot")
+# Les numéros du plan d'un lot (ses décisions, ses tâches, les points de ses revues) ne vivent que
+# dans le plan, qui disparaît à la clôture : aucun fichier distribué ne les cite.
+RENVOI_AU_PLAN = re.compile(
+    r"\b(?:Ruling|ruling) \d|\bP[1-8]\b|\btâche \d|\b[Dd]écision \d+ du lot|\bReview Focus\b"
+    r"|\bconstat \d"
+)
 
 REPONSES_PAR_DEFAUT = {
     "nom": "essai",

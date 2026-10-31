@@ -172,7 +172,7 @@ nombre_de_lancements() {
   [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 -" ]
 }
 
-# I3 : `sauvegardes` passe de non à oui sur un projet en service. La version en service a été
+# `sauvegardes` passe de non à oui sur un projet en service. La version en service a été
 # lancée sans le montage /sauvegardes, et son compose.env n'a pas {{ prefixe }}SAUVEGARDES (ou l'a
 # vide) : la commande SAUVEGARDER, lancée dans son conteneur, échouerait à chaque passage de la
 # sonde, et plus rien ne se déploierait. Pas d'instantané, et le journal le dit ; la version qui
@@ -245,7 +245,7 @@ nombre_de_lancements() {
   deployer prod "$NOUVELLE" 0.2.0
   [ "$status" -eq 0 ]
   [ -d "$pre" ]
-  # un seul instantané, un dossier sous son nom définitif, et son couple à côté (P3 du lot 12)
+  # un seul instantané, un dossier sous son nom définitif, et son couple à côté (M-0005, § 3)
   [ "$(find "$pre" -mindepth 1 -maxdepth 1 | wc -l)" -eq 2 ]
   instantane="$(find "$pre" -mindepth 1 -maxdepth 1 -type d)"
   [[ "$(basename "$instantane")" =~ ^[0-9]{8}T[0-9]{6}Z$ ]]
@@ -255,7 +255,7 @@ nombre_de_lancements() {
   [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 -" ]
 }
 
-# R24 : l'instantané d'avant déploiement est une copie en clair des données. Comme sauvegarder.sh
+# L'instantané d'avant déploiement est une copie en clair des données. Comme sauvegarder.sh
 # pour quotidiennes/, le script ramène le dossier des sauvegardes et pre-deploiement/ à 700, même
 # s'ils existaient déjà avec des droits plus larges.
 @test "deployer_protege_pre_deploiement" {
@@ -269,7 +269,7 @@ nombre_de_lancements() {
   [ "$(stat -c %a "$pre")" = 700 ]
 }
 
-# R24 : la sauvegarde de la nuit, qui purge pre-deploiement/, ne tourne qu'en prod, alors que le
+# La sauvegarde de la nuit, qui purge pre-deploiement/, ne tourne qu'en prod, alors que le
 # staging se déploie à chaque fusion. Le déploiement purge donc son propre pre-deploiement/ après un
 # instantané réussi : 30 jours, d'après le nom (la regex de sauvegarder.sh), jamais un autre nom.
 @test "deployer_purge_ses_instantanes_de_plus_de_30_jours" {
@@ -314,7 +314,7 @@ nombre_de_lancements() {
   [ "$(signaux)" = "$(signal 'déployé 0.2.0') $HC" ]
 }
 
-# P3 et Ruling 16 du lot 12 : l'instantané d'avant le déploiement note, à côté de lui et jamais
+# M-0005, § 3 : l'instantané d'avant le déploiement note, à côté de lui et jamais
 # dedans, <horodatage>.couple, le couple de deploye au moment de l'instantané : celui que le
 # déploiement quitte. Un état d'avant la v0.7.0 donne le commit « - ». La purge de pre-deploiement/
 # retire le couple avec son instantané, et un couple seul de plus de 30 jours.
@@ -349,7 +349,7 @@ nombre_de_lancements() {
 }
 
 # Le retour arrière manuel prend son instantané comme un déploiement : son .couple nomme le couple
-# qu'il quitte, celui de deploye avant le retour, et non celui vers lequel il revient (Ruling 16).
+# qu'il quitte, celui de deploye avant le retour, et non celui vers lequel il revient (M-0005, § 3).
 @test "deployer : le retour arrière note le couple qu'il quitte" {
   local pre="${{ prefixe }}RACINE_SAUVEGARDES/pre-deploiement" instantanes
   deux_versions
@@ -365,7 +365,7 @@ nombre_de_lancements() {
   [ "$(cd "${instantanes[1]}" && find . -mindepth 1 | LC_ALL=C sort)" = "$(printf '%s\n' ./.cachee ./donnees.txt ./sous ./sous/profond.txt)" ]
 }
 
-# R31 : un instantané en échec garde son nom provisoire, pour le diagnostic (R13), mais la sonde
+# Un instantané en échec garde son nom provisoire, pour le diagnostic, mais la sonde
 # retente le déploiement toutes les 5 minutes, et chaque tentative laisserait le sien : 12 copies
 # en clair par heure. Avant chaque instantané, les .partiel de pre-deploiement/ sont retirés ; seul
 # reste celui de la dernière tentative. Un instantané complet, ou un nom d'une autre forme, ne part
@@ -1734,7 +1734,7 @@ $(verification contenu "$NOUVELLE" "$vise" "$service")" ]
   [ "$(signaux)" = "$(signal 'retour à 0.2.0 effectué (depuis 0.2.0)') $HC" ]
 }
 
-# Le retour d'un couple en échec (relecture de la tâche 5, constat 1) : le couple remis en service
+# Le retour d'un couple en échec : le couple remis en service
 # se contrôle comme à l'aller, ses montages après son `up` (ceux de compose.env.precedent) et, aux
 # conditions de l'aller, le champ configuration de sa santé. Un conteneur que compose ne recrée pas
 # monterait encore l'instantané en échec, et le signal dirait le retour réussi.
@@ -1794,7 +1794,7 @@ container inspect" ]
   [ "$(signaux)" = "$(signal 'échec 0.2.0, retour à 0.2.0 en échec') $HC/fail" ]
 }
 
-# Relecture de la tâche 5, constat 2 : docker rend la source d'un montage nettoyée. Un $ETAT qui
+# Docker rend la source d'un montage nettoyée. Un $ETAT qui
 # porte « // » (une racine de l'état avec un « / » final) se compare sous sa forme canonique, sans
 # résoudre les liens.
 @test "deployer : les montages se comparent sous leur forme canonique" {
@@ -1817,7 +1817,7 @@ container inspect" ]
   [ "$(signaux)" = "$(signal "déployé 0.2.0, données ${COMMIT:0:12}") $HC" ]
 }
 
-# Relecture de la tâche 5, constat 3 : l'instantané du couple en service, que VERIFIER_CONTENU
+# L'instantané du couple en service, que VERIFIER_CONTENU
 # reçoit sur /en-service, se refait s'il manque. S'il ne se refait pas (son commit n'est plus dans
 # le clone des données), le refus reste : la vérification n'a pas lieu, et rien ne change.
 @test "deployer : l'instantané du couple en service se refait s'il manque" {
@@ -1855,7 +1855,7 @@ container inspect" ]
   rien_n_a_change "vérification des données impossible avant 0.3.0, rien n'a changé (voir le journal)"
 }
 
-# Relecture de la tâche 5, constat 4 : --retour refuse (64), sans rien toucher, le commit de données
+# --retour refuse (64), sans rien toucher, le commit de données
 # de precedent que projet.env (plus aucune commande déclarée) ou le clone des données (commit absent)
 # refusent.
 @test "deployer : --retour refuse un commit que projet.env ou le clone refusent" {
@@ -1889,7 +1889,7 @@ container inspect" ]
   diff -r "$BATS_TEST_TMPDIR/etat-avant" "$ETAT"
 }
 
-# P4 du lot 12 : sans --commit-donnees, un projet qui déclare une commande de l'instance refuse (64),
+# Sans --commit-donnees, un projet qui déclare une commande de l'instance refuse (64),
 # et un projet qui n'en déclare aucune prend « - ».
 @test "deployer : sans --commit-donnees" {
   local commande
@@ -1925,7 +1925,7 @@ container inspect" ]
   diff -r "$BATS_TEST_TMPDIR/etat-avant" "$ETAT"
 }
 
-# Review Focus 5 du lot 12 : le staging d'un projet qui déclare VERIFIER_CONFIG, dont les données
+# Le staging d'un projet qui déclare VERIFIER_CONFIG, dont les données
 # portent une configuration, ne monte jamais /config : ni dans compose.env, ni dans la vérification,
 # ni dans le contrôle des montages après le `up` ; sa santé doit dire exemple.
 @test "deployer : le staging ne monte jamais /config" {
@@ -2278,7 +2278,7 @@ stock_a_nettoyer() {
   [[ "$output" == *"ménage des images : 1 retirée, 5 gardées (2 par l'état, 0 par un conteneur, 3 en marge)"* ]]
 }
 
-# Le ménage des instantanés des données suit celui des images, sous le même verrou (P2 du lot 12).
+# Le ménage des instantanés des données suit celui des images, sous le même verrou (M-0004, § 8).
 # Une surprise l'annule sans rien retirer, et le déploiement reste réussi, son signal compris.
 @test "deployer : une surprise du ménage des instantanés ne change pas le résultat" {
   deja_en_service "$ANCIENNE" 0.1.0

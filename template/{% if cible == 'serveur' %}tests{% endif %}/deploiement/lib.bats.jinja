@@ -484,7 +484,7 @@ messages_du_journal() {
 }
 
 # donnees_declarees lit le projet.env du clone ; donnees_declarees_dans, le fichier qu'on lui donne :
-# sonder.sh y passe celui de l'étiquette visée du code, lu sans checkout (ruling 13 du lot 12). Un
+# sonder.sh y passe celui de l'étiquette visée du code, lu sans checkout. Un
 # fichier absent ne déclare rien ; le fichier donné se contrôle comme celui du clone. Un nom vide ou
 # manquant n'est pas le projet.env du clone : il arrête le script, sans rien lire.
 @test "donnees_declarees : le projet.env du clone, ou celui qu'on lui donne" {
@@ -556,7 +556,7 @@ messages_du_journal() {
   [ "$status" -eq 64 ]
 }
 
-# Décision 6 du lot 12 : un dossier de l'instance qui ne porte que le README.md de sa racine (celui
+# Un dossier de l'instance qui ne porte que le README.md de sa racine (celui
 # que sème le gabarit du dépôt de données) compte comme absent, dans les deux sens de la règle. Un
 # autre fichier à côté, ou un README.md plus bas, le rend présent.
 @test "paires : un dossier qui ne porte que son README.md compte comme absent" {
@@ -589,7 +589,7 @@ messages_du_journal() {
   done
 }
 
-# Review Focus 4 : un .partiel laissé par un essai coupé (en lecture seule, s'il a été coupé après
+# Un .partiel laissé par un essai coupé (en lecture seule, s'il a été coupé après
 # chmod) se retire et l'instantané se refait ; un instantané complet se réutilise sans git archive.
 @test "instantané : un .partiel se refait, un complet se réutilise" {
   local instantanes="${{ prefixe }}RACINE_ETAT/prod/instantanes"
@@ -660,7 +660,7 @@ messages_du_journal() {
   instantane="${{ prefixe }}RACINE_ETAT/prod/instantanes/$COMMIT"
   [ "$(find "$instantane" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort | tr '\n' ' ')" = "config contenu " ]
   [ -z "$(find "$instantane" -perm /222)" ]
-  # décision 7 : le staging ne monte ni ne vérifie jamais /config, et son instantané n'en porte pas
+  # le staging ne monte ni ne vérifie jamais /config, et son instantané n'en porte pas
   # de copie, même quand VERIFIER_CONFIG est déclarée ; complet sans lui, il se réutilise
   avec_lib 'charger_env staging; preparer_instantane '"$COMMIT"
   [ "$status" -eq 0 ]
@@ -1095,6 +1095,21 @@ messages_du_journal() {
     avec_lib 'charger_env prod; lire_deploye'
     [ "$status" -eq 1 ]
     [[ "$output" == *"deploye illisible"* ]]
+  done
+  # présent sans être un fichier (un dossier, un lien mort) : illisible, comme le dit le signal de
+  # la sonde, et non absent
+  local present
+  for present in dossier lien-mort; do
+    rm -rf "$etat/deploye"
+    if [ "$present" = dossier ]; then
+      mkdir "$etat/deploye"
+    else
+      ln -s "$etat/nulle-part" "$etat/deploye"
+    fi
+    avec_lib 'charger_env prod; lire_deploye'
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"deploye illisible : ce n'est pas un fichier"* ]]
+    [[ "$output" != *"aucune version déployée"* ]]
   done
 }
 
