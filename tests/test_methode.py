@@ -528,6 +528,14 @@ def test_m0004_dit_le_couple_et_les_deux_modes(rendre, reponses, mode):
         # le retour arrière et ses deux cas de transition
         "ne monte ni ne vérifie rien, même si `projet.env` déclare une commande",
         "pas de retour arrière après une version qui retire ses commandes",
+        # le cas général : --retour vérifie precedent avec la déclaration de la version quittée
+        (
+            "`--retour` vérifie le couple de `precedent` avec la déclaration de la version qu'il "
+            "quitte, le `projet.env` du clone en service. Après une version qui ajoute ou retire "
+            "une commande, le retour peut donc être refusé : par la règle des paires, ou par le "
+            "code 64 de l'ancienne image, qui ne connaît pas la commande. Le refus ne change rien. "
+            "Le remède est une étiquette (§ 2), qui remet en service un couple vérifié."
+        ),
         "forme un couple nouveau : l'ancienne image et le commit de données en service",
         # les clones des données
         "« clone des données absent »",

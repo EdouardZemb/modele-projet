@@ -1128,6 +1128,15 @@ def test_exploitation_dit_le_couple_et_les_deux_modes(rendre, mode, sauvegardes)
     assert "suivi de `--commit-donnees <sha>` quand `echec` nomme un commit de données" in retour
     assert "Un `precedent` dont le commit est `-`" in retour
     assert "est refusé (code 64) quand `deploiement/projet.env` ne déclare plus rien" in retour
+    # le cas général : --retour vérifie precedent avec la déclaration de la version quittée
+    general = (
+        "**Après une version qui ajoute ou retire une commande**, `--retour` vérifie le couple de "
+        "`precedent` avec la déclaration de la version qu'il quitte, le `deploiement/projet.env` "
+        "du clone en service. Le retour peut donc être refusé : par la règle des paires, ou par le "
+        "code 64 de l'ancienne image, qui ne connaît pas la commande. Le refus ne change rien. Le "
+        "remède est une étiquette, qui remet en service un couple vérifié"
+    )
+    assert general in retour
     assert ("l'ancienne image et le commit de données en service" in retour) is deux
     assert ("**Revenir à une configuration antérieure**" in retour) is deux
     assert ("ramène ensemble l'image et l'instance de ce commit" in retour) is not deux
