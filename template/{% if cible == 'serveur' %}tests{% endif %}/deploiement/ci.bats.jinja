@@ -7,6 +7,9 @@
 {%- else %}
 # modele-image-construire) : santé, révision et environnement, puis l'exemple du dépôt.
 {%- endif %}
+{%- if nature == 'donnees' %}
+# À un dépôt, l'instance du dépôt suit l'exemple, comme le déploiement la vérifiera.
+{%- endif %}
 #
 # curl et docker sont des doubles : curl répond SANTE_CORPS (connexion refusée s'il est vide)
 {%- if sauvegardes %}
@@ -16,6 +19,10 @@
 {%- else %}
 # et docker simule les commandes de l'image, `docker run … {{ nom }}:ci <commande…> <point de
 # montage>`, avec les codes de DOUBLE_CONFIG_CODE et DOUBLE_CONTENU_CODE.
+{%- endif %}
+{%- if nature == 'donnees' %}
+# Sur l'instance (instance/config, instance/contenu), ce sont ceux de DOUBLE_INSTANCE_CONFIG_CODE et
+# DOUBLE_INSTANCE_CONTENU_CODE.
 {%- endif %}
 
 # Chaque test tourne dans son propre processus : ses `export` ne fuient pas (SC2030, SC2031). Le
@@ -63,6 +70,13 @@ printf "%s\n" "$SANTE_CORPS"'
 {%- endif %}
   run)
     case "$*" in
+{%- if nature == 'donnees' %}
+      *"/instance/config:/config:ro {{ nom }}:ci outil verifier_config /config")
+        [ -z "${DOUBLE_INSTANCE_SORTIE:-}" ] || printf "%s\n" "$DOUBLE_INSTANCE_SORTIE"
+        exit "${DOUBLE_INSTANCE_CONFIG_CODE:-0}"
+        ;;
+      *"/instance/contenu:/contenu:ro {{ nom }}:ci outil verifier_contenu /contenu") exit "${DOUBLE_INSTANCE_CONTENU_CODE:-0}" ;;
+{%- endif %}
       *" {{ nom }}:ci outil verifier_config /config")
         [ -z "${DOUBLE_CONFIG_SORTIE:-}" ] || printf "%s\n" "$DOUBLE_CONFIG_SORTIE"
         exit "${DOUBLE_CONFIG_CODE:-0}"
@@ -82,6 +96,11 @@ verifier_image() {
 # declarer_commandes <commande…> : deploiement/projet.env ne déclare que ces commandes de l'instance,
 # chacune avec des mots d'exemple (VERIFIER_CONFIG=outil verifier_config…){% if sauvegardes %}, à côté
 # des commandes de sauvegarde du test{% endif %}.
+{%- if nature == 'donnees' %}
+# À un dépôt, l'instance du dépôt les suit, selon la règle des paires que l'étape 5 applique : un
+# fichier dans instance/config/ pour VERIFIER_CONFIG, dans instance/contenu/ pour VERIFIER_CONTENU,
+# et rien d'autre (instance_de).
+{%- endif %}
 declarer_commandes() {
   local commande
   local -a lignes=({% if sauvegardes %}'SAUVEGARDER=outil sauvegarder --forme dossier' 'VERIFIER=outil verifier'{% endif %})
@@ -89,6 +108,16 @@ declarer_commandes() {
     lignes+=("$commande=outil ${commande,,}")
   done
   printf '%s\n' "# Réglages du test" "${lignes[@]}" >"$CLONE/deploiement/projet.env"
+{%- if nature == 'donnees' %}
+  local -a fichiers=()
+  for commande in "$@"; do
+    case "$commande" in
+      VERIFIER_CONFIG) fichiers+=("$SOUS_CONFIG/profil.yml") ;;
+      VERIFIER_CONTENU) fichiers+=("$SOUS_CONTENU/page.md") ;;
+    esac
+  done
+  instance_de "${fichiers[@]}"
+{%- endif %}
 }
 
 # exemple_de <chemin…> : les dossiers d'exemple du dépôt (exemple/, exemple-contenu/) ne portent que
@@ -101,11 +130,42 @@ exemple_de() {
     echo "fichier d'exemple $chemin" >"$CLONE/$chemin"
   done
 }
+{%- if nature == 'donnees' %}
 
-# lances_par_docker : les appels `docker run` du double, un par ligne (l'exemple ; l'instantané passe
-# par `docker exec`).
+# instance_de <chemin…> : les dossiers de l'instance du dépôt (instance/config/, instance/contenu/)
+# ne portent que ces fichiers, relatifs à la racine du dépôt.
+instance_de() {
+  local chemin
+  rm -rf "${CLONE:?}/$SOUS_CONFIG" "${CLONE:?}/$SOUS_CONTENU"
+  for chemin in "$@"; do
+    mkdir -p "$(dirname "$CLONE/$chemin")"
+    echo "fichier de l'instance $chemin" >"$CLONE/$chemin"
+  done
+}
+{%- endif %}
+
+# lances_par_docker : les appels `docker run` du double, un par ligne (l'exemple{% if nature == 'donnees' %}, puis l'instance{% endif %} ;
+# l'instantané passe par `docker exec`).
 lances_par_docker() {
   appels_de docker | grep '^docker run ' || true
+}
+
+# sur_l_instance <commande…> : ce que l'étape 5 lance après l'exemple quand ces commandes sont
+# déclarées et que l'instance suit la règle des paires, une ligne par commande, chacune précédée
+# d'un saut de ligne, pour suivre les lancements de l'exemple : à un dépôt, chaque commande sur son
+# dossier de l'instance ; à deux dépôts, rien.
+sur_l_instance() {
+{%- if nature == 'donnees' %}
+  local commande
+  for commande in "$@"; do
+    case "$commande" in
+      VERIFIER_CONFIG) printf '\n%s' "docker run --rm --network none $JETABLES -v $CLONE/$SOUS_CONFIG:/config:ro {{ nom }}:ci outil verifier_config /config" ;;
+      VERIFIER_CONTENU) printf '\n%s' "docker run --rm --network none $JETABLES -v $CLONE/$SOUS_CONTENU:/contenu:ro {{ nom }}:ci outil verifier_contenu /contenu" ;;
+    esac
+  done
+{%- else %}
+  :
+{%- endif %}
 }
 
 @test "verifier_image_conforme" {
@@ -262,7 +322,7 @@ printf "%s\n" "$SANTE_CORPS"'
   exemple_de exemple/profil.yml
   verifier_image {{ nom }} "$REVISION"
   [ "$status" -eq 0 ]
-  [ "$(lances_par_docker)" = "$config" ]
+  [ "$(lances_par_docker)" = "$config$(sur_l_instance VERIFIER_CONFIG)" ]
   [[ "$output" == *"exemple de configuration conforme (VERIFIER_CONFIG : code 0)"* ]]
   [[ "$output" == *"image conforme"* ]]
 {%- if sauvegardes %}
@@ -278,7 +338,7 @@ docker exec {{ nom }} outil verifier /tmp/instantane" ]
   verifier_image {{ nom }} "$REVISION"
   [ "$status" -eq 0 ]
   [ "$(lances_par_docker)" = "$config
-$contenu" ]
+$contenu$(sur_l_instance VERIFIER_CONFIG VERIFIER_CONTENU)" ]
   [[ "$output" == *"exemple de contenu conforme (VERIFIER_CONTENU : code 0)"* ]]
 
   # 2 : l'exemple n'est pas conforme, et la sortie de la commande le dit
@@ -375,7 +435,7 @@ $contenu" ]
     [[ "$output" == *"image conforme"* ]]
     # seule une commande déclarée, sur son dossier, lance un conteneur
     if [ "$lance" = config ]; then
-      [ "$(lances_par_docker)" = "$config" ]
+      [ "$(lances_par_docker)" = "$config$(sur_l_instance VERIFIER_CONFIG)" ]
     else
       [ -z "$(lances_par_docker)" ]
     fi
@@ -389,3 +449,143 @@ $contenu" ]
   [[ "$output" != *"non vérifié"* ]]
   [ -z "$(lances_par_docker)" ]
 }
+{%- if nature == 'donnees' %}
+
+# lances_sur_l_instance : les appels `docker run` du double qui montent un dossier de l'instance.
+lances_sur_l_instance() {
+  lances_par_docker | grep -F -e "-v $CLONE/$SOUS_CONFIG:" -e "-v $CLONE/$SOUS_CONTENU:" || true
+}
+
+# À un dépôt, l'étape 5 : l'instance du dépôt, instance/config et instance/contenu de la copie de
+# travail, se vérifie après l'exemple comme le déploiement la vérifiera, chaque commande déclarée sur
+# son dossier, dans le même conteneur jetable de l'image construite. 0 exigé. Sans commande
+# déclarée, le déploiement ne lit pas l'instance, et la CI non plus.
+@test "ci : à un dépôt, une instance conforme passe" {
+  local exemple_config="docker run --rm --network none $JETABLES -v $CLONE/exemple:/config:ro {{ nom }}:ci outil verifier_config /config"
+  local exemple_contenu="docker run --rm --network none $JETABLES -v $CLONE/exemple-contenu:/contenu:ro {{ nom }}:ci outil verifier_contenu /contenu"
+  local instance_config="docker run --rm --network none $JETABLES -v $CLONE/$SOUS_CONFIG:/config:ro {{ nom }}:ci outil verifier_config /config"
+  local instance_contenu="docker run --rm --network none $JETABLES -v $CLONE/$SOUS_CONTENU:/contenu:ro {{ nom }}:ci outil verifier_contenu /contenu"
+  declarer_commandes VERIFIER_CONFIG VERIFIER_CONTENU
+  exemple_de exemple/profil.yml exemple-contenu/page.md
+  verifier_image {{ nom }} "$REVISION"
+  [ "$status" -eq 0 ]
+  [ "$(lances_par_docker)" = "$exemple_config
+$exemple_contenu
+$instance_config
+$instance_contenu" ]
+  [[ "$output" == *"configuration de l'instance conforme (VERIFIER_CONFIG : code 0)"* ]]
+  [[ "$output" == *"contenu de l'instance conforme (VERIFIER_CONTENU : code 0)"* ]]
+  [[ "$output" == *"image conforme"* ]]
+
+  # une seule commande, sur son seul dossier ; un README.md plus bas compte comme un fichier
+  : >"$APPELS"
+  declarer_commandes VERIFIER_CONTENU
+  exemple_de exemple-contenu/page.md
+  instance_de "$SOUS_CONTENU/pages/README.md"
+  verifier_image {{ nom }} "$REVISION"
+  [ "$status" -eq 0 ]
+  [ "$(lances_par_docker)" = "$exemple_contenu
+$instance_contenu" ]
+
+  # aucune commande déclarée : l'instance n'est pas lue, même hors de la règle des paires
+  : >"$APPELS"
+  declarer_commandes
+  exemple_de
+  instance_de "$SOUS_CONFIG/profil.yml"
+  verifier_image {{ nom }} "$REVISION"
+  [ "$status" -eq 0 ]
+  [ -z "$(lances_par_docker)" ]
+  [[ "$output" != *"$SOUS_CONFIG"* ]]
+}
+
+@test "ci : à un dépôt, une instance refusée fait échouer la CI" {
+  local exemple_config="docker run --rm --network none $JETABLES -v $CLONE/exemple:/config:ro {{ nom }}:ci outil verifier_config /config"
+  local exemple_contenu="docker run --rm --network none $JETABLES -v $CLONE/exemple-contenu:/contenu:ro {{ nom }}:ci outil verifier_contenu /contenu"
+  local instance_config="docker run --rm --network none $JETABLES -v $CLONE/$SOUS_CONFIG:/config:ro {{ nom }}:ci outil verifier_config /config"
+  local instance_contenu="docker run --rm --network none $JETABLES -v $CLONE/$SOUS_CONTENU:/contenu:ro {{ nom }}:ci outil verifier_contenu /contenu"
+  local code
+  declarer_commandes VERIFIER_CONFIG VERIFIER_CONTENU
+  exemple_de exemple/profil.yml exemple-contenu/page.md
+
+  # 2 : la configuration de l'instance n'est pas conforme, et la sortie de la commande le dit ;
+  # l'exemple est passé avant, et le contenu de l'instance ne se lance pas
+  export DOUBLE_INSTANCE_CONFIG_CODE=2 DOUBLE_INSTANCE_SORTIE="version de schéma inconnue"
+  verifier_image {{ nom }} "$REVISION"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"configuration de l'instance non conforme (VERIFIER_CONFIG : code 2) : version de schéma inconnue"* ]]
+  [[ "$output" == *"instance non conforme : $SOUS_CONFIG/ non conforme (VERIFIER_CONFIG : code 2)"* ]]
+  [[ "$output" != *"image conforme"* ]]
+  [ "$(lances_par_docker)" = "$exemple_config
+$exemple_contenu
+$instance_config" ]
+  # 64 (l'image ne connaît pas la commande) ou tout autre code : la vérification n'a pas eu lieu
+  for code in 64 1 125; do
+    export DOUBLE_INSTANCE_CONFIG_CODE="$code"
+    verifier_image {{ nom }} "$REVISION"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"vérification impossible (VERIFIER_CONFIG : code $code)"* ]]
+    [[ "$output" == *"instance non conforme : vérification de $SOUS_CONFIG/ impossible (VERIFIER_CONFIG)"* ]]
+  done
+
+  # le contenu, de même
+  : >"$APPELS"
+  export DOUBLE_INSTANCE_CONFIG_CODE=0 DOUBLE_INSTANCE_CONTENU_CODE=2
+  verifier_image {{ nom }} "$REVISION"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"instance non conforme : $SOUS_CONTENU/ non conforme (VERIFIER_CONTENU : code 2)"* ]]
+  [ "$(lances_par_docker)" = "$exemple_config
+$exemple_contenu
+$instance_config
+$instance_contenu" ]
+}
+
+# La règle des paires du déploiement (controler_paires, lib.sh), sur la copie de travail : dès
+# qu'une commande est déclarée, une commande sans son dossier, ou un dossier présent sans sa
+# commande, refuse avant tout conteneur sur l'instance. Un dossier qui ne porte que son README.md
+# compte comme absent.
+@test "ci : à un dépôt, l'instance suit la règle des paires du déploiement" {
+  local cas fichiers commandes attendu
+  # <fichiers de l'instance>|<commandes déclarées>|<défauts attendus>
+  for cas in \
+    "|VERIFIER_CONFIG|VERIFIER_CONFIG sans $SOUS_CONFIG/" \
+    "|VERIFIER_CONTENU|VERIFIER_CONTENU sans $SOUS_CONTENU/" \
+    "|VERIFIER_CONFIG VERIFIER_CONTENU|VERIFIER_CONFIG sans $SOUS_CONFIG/ ; VERIFIER_CONTENU sans $SOUS_CONTENU/" \
+    "$SOUS_CONFIG/README.md|VERIFIER_CONFIG|VERIFIER_CONFIG sans $SOUS_CONFIG/" \
+    "$SOUS_CONFIG/profil.yml $SOUS_CONTENU/page.md|VERIFIER_CONFIG|$SOUS_CONTENU/ sans VERIFIER_CONTENU" \
+    "$SOUS_CONTENU/page.md|VERIFIER_CONFIG|VERIFIER_CONFIG sans $SOUS_CONFIG/ ; $SOUS_CONTENU/ sans VERIFIER_CONTENU" \
+    "$SOUS_CONFIG/profil.yml|VERIFIER_CONTENU|$SOUS_CONFIG/ sans VERIFIER_CONFIG ; VERIFIER_CONTENU sans $SOUS_CONTENU/"; do
+    IFS='|' read -r fichiers commandes attendu <<<"$cas"
+    # shellcheck disable=SC2086  # listes séparées par des espaces, voulues
+    declarer_commandes $commandes
+    exemple_de exemple/profil.yml exemple-contenu/page.md
+    # shellcheck disable=SC2086
+    instance_de $fichiers
+    : >"$APPELS"
+    verifier_image {{ nom }} "$REVISION"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"instance non conforme, règle des paires du déploiement : $attendu"* ]]
+    # l'exemple est passé, et rien ne tourne sur l'instance
+    [ -n "$(lances_par_docker)" ]
+    [ -z "$(lances_sur_l_instance)" ]
+  done
+}
+{%- else %}
+
+# À deux dépôts, l'instance est dans le dépôt de données, dont la CI la vérifie : l'étape 5 ne tourne
+# pas, même quand un dossier du même nom traîne dans le dépôt de code.
+@test "ci : à deux dépôts, l'instance n'est pas lue" {
+  local config="docker run --rm --network none $JETABLES -v $CLONE/exemple:/config:ro {{ nom }}:ci outil verifier_config /config"
+  local contenu="docker run --rm --network none $JETABLES -v $CLONE/exemple-contenu:/contenu:ro {{ nom }}:ci outil verifier_contenu /contenu"
+  declarer_commandes VERIFIER_CONFIG VERIFIER_CONTENU
+  exemple_de exemple/profil.yml exemple-contenu/page.md
+  mkdir -p "$CLONE/$SOUS_CONFIG" "$CLONE/instance/config"
+  echo "fichier hors du dépôt de données" >"$CLONE/$SOUS_CONFIG/profil.yml"
+  echo "fichier hors du dépôt de données" >"$CLONE/instance/config/profil.yml"
+  verifier_image {{ nom }} "$REVISION"
+  [ "$status" -eq 0 ]
+  [ "$(lances_par_docker)" = "$config
+$contenu" ]
+  [[ "$output" != *"de l'instance"* ]]
+  [[ "$output" == *"image conforme"* ]]
+}
+{%- endif %}

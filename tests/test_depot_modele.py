@@ -357,8 +357,14 @@ def test_liste_d_alignement():
             "sa CI clone le dépôt de code sans jeton et tire son image `:main` : le dépôt de code "
             "est donc public, et son image publiée et publique, avant elle"
         ),
+        # à un dépôt, la CI du code vérifie instance/ comme le fera le déploiement
+        (
+            "La CI du code vérifie `instance/` comme le fera le déploiement : la règle des paires, "
+            "puis chaque commande déclarée sur son dossier ; le déploiement revérifie"
+        ),
     ):
         assert regle in a_plat, regle
+    assert "ne lit pas `instance/`" not in a_plat
     # un --data d'une question que le projet ne se voit pas poser n'entre pas dans ses réponses :
     # le bloc de ports ne s'ajoute qu'aux dépôts qui portent leur instance (lot 12)
     assert "--data cible=serveur --data bloc_ports=<bloc>" not in texte

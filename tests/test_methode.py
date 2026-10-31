@@ -463,8 +463,15 @@ def test_m0003_dit_le_contrat_de_l_instance(rendre, sauvegardes):
         "un dossier d'exemple sans sa commande n'est pas vérifié, et le journal le dit",
         "Un projet à un dépôt porte lui aussi son exemple, à côté d'`instance/`",
         "**Un projet qui ne déclare ni l'une ni l'autre ne voit aucun changement**",
+        # à un dépôt, la CI du code vérifie instance/ comme le fera le déploiement
+        (
+            "À un dépôt, la CI du code vérifie `instance/` comme le fera le déploiement, dès qu'une "
+            "commande est déclarée"
+        ),
+        "et le déploiement revérifie",
     ):
         assert fragment in texte, fragment
+    assert "la CI ne lit pas `instance/`" not in texte
     assert "Une seule exception" not in texte
     # La route de santé du § 2 annonce le champ, et la CI prouve la clause de l'ENTRYPOINT pour
     # les deux commandes de l'instance, qu'elle lance par docker run.

@@ -178,9 +178,12 @@ et `instance/contenu/` du dépôt lui-même, à un dépôt.
   `VERIFIER_CONTENU`. Dès que le projet déclare une commande, un dossier présent sans sa commande,
   ou une commande sans son dossier, refuse le déploiement. Un projet qui n'en déclare aucune a un
   couple sans commit de données : le déploiement ne lit pas ses dossiers. À deux dépôts, la CI du
-  dépôt de données vérifie la règle dans tous les cas, et refuse aussi ; à un dépôt, la CI ne lit
-  pas `instance/`. Un dossier est présent quand il porte, dans le commit de données, au moins un
-  fichier autre que le `README.md` de sa racine ; un `README.md` plus bas compte comme un fichier.
+  dépôt de données vérifie la règle dans tous les cas, et refuse aussi. À un dépôt, la CI du code
+  vérifie `instance/` comme le fera le déploiement, dès qu'une commande est déclarée : la règle,
+  puis chaque commande sur son dossier, dans un conteneur jetable de l'image construite
+  (`deploiement/ci/verifier-image.sh`), et le déploiement revérifie. Un dossier est présent quand
+  il porte, dans le commit de données, au moins un fichier autre que le `README.md` de sa racine ;
+  un `README.md` plus bas compte comme un fichier.
 - **La santé dit quelle configuration sert** : le champ `configuration` vaut `exemple` ou `montee`.
   Quand le projet déclare `VERIFIER_CONFIG`, le déploiement exige `exemple` en staging et `montee`
   en prod, et la sonde le contrôle à chaque passage, sur l'adresse publique. Sinon, le champ n'est

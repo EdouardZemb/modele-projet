@@ -1077,6 +1077,9 @@ def test_exploitation_dit_le_couple_et_les_deux_modes(rendre, mode, sauvegardes)
     assert (deux_gestes in en_ligne) is deux
     assert ("Dans l'intervalle, la CI du dépôt de données refuse" in en_ligne) is deux
     assert ("Il n'y a pas d'étiquette de données" in en_ligne) is not deux
+    # à un dépôt, la CI du code vérifie l'instance comme le fera le déploiement, qui la revérifie
+    ci_instance = "La CI du code les vérifie comme le fera le déploiement, qui les revérifie"
+    assert (ci_instance in en_ligne) is not deux
     assert "**Un couple dont la santé échoue**" in en_ligne
 
     # Revenir en arrière : le couple entier, et les deux cas de transition.
