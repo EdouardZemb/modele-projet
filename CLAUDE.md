@@ -92,20 +92,24 @@ d'une version plus ancienne ignore). En `--verifier`, l'installeur n'écrit que 
 résumé : la sonde de `serveur` lit cette sortie strictement. Né de serveur#22, qui déclarait ainsi
 `veille-emploi` : son staging n'avait aucune unité (LE-39).
 
-Versions des projets au 01/11, inchangées depuis le 29/10 : `ancrage`, `serveur` et
-`veille-emploi` en `v0.3.0` (`veille-emploi` en cible `serveur`, avec `fusion=session`), `pupitre`
-en `v0.2.3`. Chacun monte directement en `v0.7.1` par `copier update`, au choix d'Edouard : le
-message de la `v0.7.1` remplace ceux de la `v0.6.0` et de la `v0.7.0`. Tous sont privés : leur
-nature se déduit seule en `donnees`, sans `--data`, et `ancrage` comme `veille-emploi` déploient à
-un dépôt jusqu'à leur scission. Après la mise à jour, un `gh workflow run modele-historique.yml`
-doit dire « historique relu par gitleaks seul ». `ancrage` fait l'essai du ménage (lot 9). Avant la
-mise à jour d'`ancrage` et de `veille-emploi`, une lecture sur le serveur vérifie que leur dossier
-de données n'est vide dans aucun environnement en service. Après la mise à jour de `veille-emploi`,
-👤 un `git -C ~/veille-emploi pull --ff-only` sur le serveur : la sonde de `serveur` installe ses
-unités depuis ce clone, qu'elle ne met pas à jour. `veille-emploi` déclare `VERIFIER_CONFIG` dans
+Versions des projets au 01/11 : `pupitre` en `v0.7.1` (pupitre#15, depuis la `v0.2.3`) ;
+`ancrage`, `serveur` et `veille-emploi` en `v0.3.0` (`veille-emploi` en cible `serveur`, avec
+`fusion=session`). Ces trois-là montent directement en `v0.7.1` par `copier update`, au choix
+d'Edouard : le message de la `v0.7.1` remplace ceux de la `v0.6.0` et de la `v0.7.0`, et `ancrage`
+comme `veille-emploi` ont reçu le leur le 01/11. Tous sont privés : leur nature se déduit seule en
+`donnees`, sans `--data`, et `ancrage` comme `veille-emploi` déploient à un dépôt jusqu'à leur
+scission. Après la mise à jour, un `gh workflow run modele-historique.yml` doit dire « historique
+relu par gitleaks seul ». `ancrage` fait l'essai du ménage (lot 9). Avant la mise à jour d'`ancrage`
+et de `veille-emploi`, une lecture sur le serveur vérifie que leur dossier de données n'est vide
+dans aucun environnement en service. serveur#23 retire la déclaration de `veille-emploi` ; une PR
+de `serveur` la remet après sa mise à jour, et la sonde de `serveur` reclone alors `~/veille-emploi`
+à jour pour en installer les unités (👤 un `git -C ~/veille-emploi pull --ff-only` sur le serveur,
+seulement si ce clone a été gardé). `veille-emploi` déclare `VERIFIER_CONFIG` dans
 une PR qui suit sa mise à jour, une fois la `v0.7.1` en service en staging. Sa prod n'a jamais rien
 déployé : sa première étiquette porte la mise à jour, son lot #22 et la commande, juste après la
-déclaration des heures de ses sauvegardes dans `serveur`.
+déclaration des heures de ses sauvegardes dans `serveur`. `pupitre` se scinde dans son propre lot,
+avec l'accord d'Edouard : l'actuel devient `pupitre-donnees`, et un dépôt public `pupitre` naît du
+modèle en `v0.7.1`, en nature `code`.
 
 Prochain, au choix d'Edouard :
 - le lot 13 : la naissance d'un projet en deux dépôts, par le script de création du poste (geste
@@ -120,8 +124,9 @@ Prochain, au choix d'Edouard :
 - la porte due par LE-40, au 3e constat du motif « délai mesuré à vide » : sa forme revient à
   Edouard, et le registre en propose une ;
 - le retrait du repli `VISIBILITE = "prive"` de la porte, qui reste tant que la branche par défaut
-  de chaque projet ne porte pas `NATURE`. La `v0.7.1` le garde : `pupitre` y saute depuis la
-  `v0.2.3`, et la PR de sa mise à jour est lue en `donnees`.
+  de chaque projet ne porte pas `NATURE`. La `v0.7.1` le garde : grâce à lui, la PR de mise à jour
+  d'`ancrage`, de `serveur` et de `veille-emploi` est lue en `donnees`, comme l'a été celle de
+  `pupitre` (pupitre#15).
 
 Le cadrage est dans `docs/cadrage.md` ; ce que les lots ont appris, dans `docs/registre.md`.
 
