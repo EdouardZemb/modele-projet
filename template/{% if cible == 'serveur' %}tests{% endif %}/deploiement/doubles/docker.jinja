@@ -15,8 +15,12 @@
 # poser_conteneur (aide.bash). Le fichier images porte une ligne « <id>|<créée>|<noms>|<empreintes> »
 # par image (noms et empreintes séparés par des espaces), le fichier conteneurs une ligne « <id du
 # conteneur> <id de l'image> » par conteneur, arrêté ou non. Un fichier absent vaut un stock vide.
-#   image ls --no-trunc --quiet          l'identifiant de chaque image, une fois par nom, comme
-#                                        docker (une fois pour une image sans nom)
+#   image ls [--all] --no-trunc --quiet  l'identifiant de chaque image, une fois par nom, comme
+#                                        docker. Sans --all, comme un Docker 29 récent (constaté en
+#                                        29.5.3, magasin classique), seulement les images qui ont un
+#                                        nom ; avec, aussi celles qui n'en ont aucun, une
+#                                        fois chacune (les anciennes :main que la sonde a tirées par
+#                                        empreinte, et les intermédiaires)
 #   image inspect --format <format> <id…>  la ligne du stock de chaque image : le format est celui
 #                                        du ménage, {% raw %}{{.Id}}|{{.Created}}|{{range .RepoTags}}{{.}} {{end}}|{{range .RepoDigests}}{{.}} {{end}}{% endraw %}
 #                                        (code 1, « No such image », pour un identifiant absent)
@@ -343,7 +347,11 @@ case "${1:-}" in
         esac
         ;;
       ls)
-        [ "$ARGUMENTS" = "image ls --no-trunc --quiet" ] || refuser "image ls : attendu « image ls --no-trunc --quiet »"
+        case "$ARGUMENTS" in
+          "image ls --all --no-trunc --quiet") tout=1 ;;
+          "image ls --no-trunc --quiet") tout=0 ;;
+          *) refuser "image ls : attendu « image ls [--all] --no-trunc --quiet »" ;;
+        esac
         if [ -n "${DOUBLE_DOCKER_IMAGE_LS_ECHEC:-}" ]; then
           echo "Cannot connect to the Docker daemon. Is the docker daemon running?" >&2
           exit 1
@@ -352,7 +360,10 @@ case "${1:-}" in
         while IFS='|' read -r id _ noms _; do
           [ -n "$id" ] || continue
           read -r -a liste <<<"$noms"
-          [ -n "${liste[*]}" ] || liste=(sans-nom)
+          if [ -z "${liste[*]}" ]; then
+            [ "$tout" -eq 1 ] || continue
+            liste=(sans-nom)
+          fi
           for _ in "${liste[@]}"; do
             printf '%s\n' "$id"
           done

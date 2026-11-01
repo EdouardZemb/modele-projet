@@ -25,6 +25,9 @@
 #      et MOTIF_VERSION, lire_version : lib.sh) ;
 #   4. les conteneurs, même arrêtés, et l'image de chacun ;
 #   5. les images, chacune une fois, et leur tri :
+#      - la liste passe par `docker image ls --all`. Sans --all, un Docker 29 récent (constaté en
+#        29.5.3, magasin classique) cache les images sans étiquette, dont les anciennes :main que
+#        la sonde a tirées par empreinte. --all montre aussi les intermédiaires, sans référence ;
 #      - une image est du projet si toutes ses références, noms et empreintes, portent exactement
 #        le dépôt (DEPOT_IMAGE, de lib.sh) : ni <dépôt>-autre, ni <dépôt>/sous-image. Une image sans
 #        aucune référence, ou qui en a une ailleurs, n'est jamais touchée ;
@@ -350,8 +353,8 @@ menage_images() {
   fi
 
   # 5. Les images : chaque identifiant une fois (une image à deux noms est listée deux fois), puis
-  # leur inspection, et le tri.
-  sortie="$(docker image ls --no-trunc --quiet)" \
+  # leur inspection, et le tri. --all, pour les images sans étiquette (étape 5, en tête).
+  sortie="$(docker image ls --all --no-trunc --quiet)" \
     || annuler "liste des images impossible (docker image ls : code $?)"
   while IFS= read -r ligne; do
     [ -n "$ligne" ] || continue

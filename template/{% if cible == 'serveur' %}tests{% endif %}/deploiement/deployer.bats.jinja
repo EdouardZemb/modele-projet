@@ -2214,7 +2214,7 @@ stock_a_nettoyer() {
   stock_a_nettoyer
   deployer prod "$NOUVELLE" 0.2.0
   [ "$status" -eq 0 ]
-  appels_de docker | grep -Fx 'docker image ls --no-trunc --quiet'
+  appels_de docker | grep -Fx 'docker image ls --all --no-trunc --quiet'
   aucune_ligne "^$(image_de 9)\|" "$BATS_TEST_TMPDIR/images"
   grep -q "^$(image_de 8)|" "$BATS_TEST_TMPDIR/images"
 }
@@ -2224,7 +2224,7 @@ stock_a_nettoyer() {
   stock_a_nettoyer
   deployer prod --retour
   [ "$status" -eq 0 ]
-  appels_de docker | grep -Fx 'docker image ls --no-trunc --quiet'
+  appels_de docker | grep -Fx 'docker image ls --all --no-trunc --quiet'
   aucune_ligne "^$(image_de 9)\|" "$BATS_TEST_TMPDIR/images"
   grep -q "^$(image_de 8)|" "$BATS_TEST_TMPDIR/images"
 }

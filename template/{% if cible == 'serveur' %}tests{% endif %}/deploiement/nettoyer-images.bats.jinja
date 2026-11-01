@@ -183,11 +183,13 @@ bilan() {
   poser_image 2 2026-10-02T10:00:00Z "" "$(empreinte_de 2)"
   poser_image 3 2026-10-03T10:00:00Z "" "$(empreinte_de 3)"
   poser_image 4 2026-10-04T10:00:00Z "$DEPOT_DU_PROJET:0.2.0 $DEPOT_DU_PROJET:main" "$(empreinte_de 4)"
-  # le double, comme docker, liste une image une fois par nom (hors du journal des appels)
+  # le double, comme docker, liste une image une fois par nom, et une fois une image sans nom (hors
+  # du journal des appels)
   local liste
   liste="$(APPELS="$BATS_TEST_TMPDIR/hors-journal.log" DOCKER_CONFIG="$BATS_TEST_TMPDIR/docker" \
-    docker image ls --no-trunc --quiet)"
+    docker image ls --all --no-trunc --quiet)"
   [ "$(grep -cx "$(image_de 1)" <<<"$liste")" -eq 2 ]
+  [ "$(grep -cx "$(image_de 2)" <<<"$liste")" -eq 1 ]
   [ "$(grep -cx "$(image_de 4)" <<<"$liste")" -eq 2 ]
   nettoyer prod
   [ "$status" -eq 0 ]
@@ -205,6 +207,32 @@ bilan() {
   [ "$(grep -c 'image retirée : ' <<<"$output")" -eq 1 ]
   journal_dit "image retirée : 111111111111 ($DEPOT_DU_PROJET:0.1.0 $DEPOT_DU_PROJET:0.1.1 $(empreinte_de 1))"
   bilan "1 retirée, 3 gardées (0 par l'état, 0 par un conteneur, 3 en marge)"
+}
+
+@test "les_images_sans_etiquette_se_voient_meme_quand_docker_les_cache" {
+  # Sans --all, un Docker 29 récent (constaté en 29.5.3) cache les images sans étiquette : les
+  # anciennes :main que la sonde de staging a tirées par empreinte. Le double fait de même. Le cas d'un projet en service : le
+  # precedent du staging, sans nom, et des images sans nom au-delà de la marge.
+  local c
+  for c in 1 2 3 4 5; do
+    poser_image "$c" "2026-10-0${c}T10:00:00Z" "" "$(empreinte_de "$c")"
+  done
+  poser_image 6 2026-10-06T10:00:00Z "$DEPOT_DU_PROJET:main" "$(empreinte_de 6)"
+  etat staging deploye "$(empreinte_de 6) main -"
+  etat staging precedent "$(empreinte_de 5) main -"
+  # sans --all, le double ne liste que 6, la seule qui a un nom (hors du journal des appels)
+  local liste
+  liste="$(APPELS="$BATS_TEST_TMPDIR/hors-journal.log" DOCKER_CONFIG="$BATS_TEST_TMPDIR/docker" \
+    docker image ls --no-trunc --quiet)"
+  [ "$liste" = "$(image_de 6)" ]
+  nettoyer staging
+  [ "$status" -eq 0 ]
+  # 5 et 6 gardées par l'état, 2 à 4 en marge ; 1, la plus ancienne, part par son identifiant
+  [ "$(retraits)" = "$(retrait_de 1)" ]
+  parties 1
+  restent 2 3 4 5 6
+  [ ! -e "$REFUS" ]
+  bilan "1 retirée, 5 gardées (2 par l'état, 0 par un conteneur, 3 en marge)"
 }
 
 @test "un_retrait_par_etiquette_en_echec_passe_a_l_image_suivante" {
