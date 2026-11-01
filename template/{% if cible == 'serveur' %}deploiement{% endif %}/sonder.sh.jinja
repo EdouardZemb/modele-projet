@@ -77,7 +77,12 @@
 #        configuration montee en prod, exemple en staging ; signal ok ;
 #      - sinon : le clone passe sur l'étiquette (canal etiquette), le clone des données sur
 #        l'étiquette de données s'il y en a une (même sans commande déclarée : l'env et les secrets
+{%- if sauvegardes %}
+#        de la prod suivent la série) et, en prod, les unités sont réinstallées
+#        ({{ prefixe }}AVANT_DEPLOIEMENT=1 : « non » aux heures des sauvegardes y refuse) ; puis
+{%- else %}
 #        de la prod suivent la série) et, en prod, les unités sont réinstallées ; puis
+{%- endif %}
 #        `deployer.sh <env> <référence> <version> --commit-donnees <commit>` (sans l'option pour
 #        « - »), qui envoie ses propres signaux, et dont le code est renvoyé.
 #
@@ -564,7 +569,7 @@ main() {
     return 1
   fi
   if [ "$nom_env" = prod ]; then
-    if ! bash "$clone/deploiement/installer-unites.sh"; then
+    if ! {% if sauvegardes %}{{ prefixe }}AVANT_DEPLOIEMENT=1 {% endif %}bash "$clone/deploiement/installer-unites.sh"; then
       anomalie "installation des unités impossible avant $version"
       return 1
     fi

@@ -46,9 +46,11 @@ tenu=non
 flock -n "${{ prefixe }}RACINE_ETAT/$1/verrou" true || tenu=oui
 echo "pendant le déploiement : verrou tenu=$tenu {{ prefixe }}VERROU_TENU=${ {{- prefixe }}VERROU_TENU:-}" >>"$APPELS"
 exit "${DOUBLE_DEPLOYER_CODE:-0}"'
+  # Celui d'installer-unites.sh note, à l'installation, si la sonde dit qu'elle va déployer.
   # shellcheck disable=SC2016
   remplacer_par_un_double installer-unites.sh '
 [ "${1:-}" != --verifier ] || exit "${DOUBLE_UNITES_ECART:-0}"
+echo "installation des unités : {{ prefixe }}AVANT_DEPLOIEMENT=${ {{- prefixe }}AVANT_DEPLOIEMENT:-}" >>"$APPELS"
 exit "${DOUBLE_UNITES_INSTALLATION_CODE:-0}"'
 }
 
@@ -443,8 +445,14 @@ etiqueter_les_donnees() {
   appels_de git | grep -Fx "git -C $CLONE fetch --prune --prune-tags --tags origin"
   appels_de docker | grep -Fx 'docker pull -q ghcr.io/{{ compte | lower }}/{{ nom }}:0.10.0'
   [ "$(appels_de deployer.sh)" = "deployer.sh prod $EMPREINTE 0.10.0" ]
+{%- if sauvegardes %}
+  # le clone passe sur l'étiquette, les unités sont réinstallées (la variable y refuse « non » aux
+  # heures des sauvegardes), puis on déploie
+{%- else %}
   # le clone passe sur l'étiquette, les unités sont réinstallées, puis on déploie
+{%- endif %}
   [ "$(appels_de installer-unites.sh)" = installer-unites.sh ]
+  grep -Fx 'installation des unités : {{ prefixe }}AVANT_DEPLOIEMENT={% if sauvegardes %}1{% endif %}' "$APPELS"
   [ "$(ligne_de "git -C $CLONE checkout --quiet v0.10.0")" -lt "$(ligne_de installer-unites.sh)" ]
   [ "$(ligne_de installer-unites.sh)" -lt "$(ligne_de 'deployer.sh prod')" ]
   # la prod ne suit pas main

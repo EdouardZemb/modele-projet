@@ -83,17 +83,29 @@ de M-0006 (§ 5 et 6), étiquetée `v0.7.0`. En cible `serveur` :
 - **Une épreuve sur un vrai Docker**, dans la CI du modèle, déploie un couple, change son seul
   commit de données, fait refuser une configuration, revient en arrière et fait le ménage.
 
-Versions des projets au 31/10, inchangées depuis le 29/10 : `ancrage`, `serveur` et
+Correctif du 01/11 : « non » aux sauvegardes tant que la prod n'a rien déployé (#77), étiqueté
+`v0.7.1`. En cible `serveur` avec sauvegardes, la déclaration du projet dans `serveur` peut dire
+`SAUVEGARDE=non` et `TEST_RESTAURATION=non`, ensemble : ni la sauvegarde ni son test ne
+s'installent, et le staging tourne. « non » refuse dès que la prod a un état déployé, et quand la
+sonde de prod va y déployer une version (`…AVANT_DEPLOIEMENT=1`, une variable, que l'installeur
+d'une version plus ancienne ignore). En `--verifier`, l'installeur n'écrit que des écarts et leur
+résumé : la sonde de `serveur` lit cette sortie strictement. Né de serveur#22, qui déclarait ainsi
+`veille-emploi` : son staging n'avait aucune unité (LE-39).
+
+Versions des projets au 01/11, inchangées depuis le 29/10 : `ancrage`, `serveur` et
 `veille-emploi` en `v0.3.0` (`veille-emploi` en cible `serveur`, avec `fusion=session`), `pupitre`
-en `v0.2.3`. Chacun monte directement en `v0.7.0` par `copier update`, au choix d'Edouard, après
-le 01/11 pour le quota d'Actions : le message de la `v0.7.0` remplace celui de la `v0.6.0`. Tous
-sont privés : leur nature se déduit seule en `donnees`, sans `--data`, et `ancrage` comme
-`veille-emploi` déploient à un dépôt jusqu'à leur scission. Après la mise à jour, un
-`gh workflow run modele-historique.yml` doit dire « historique relu par gitleaks seul ». `ancrage`
-fait l'essai du ménage (lot 9). Avant la mise à jour d'`ancrage` et de `veille-emploi`, une lecture
-sur le serveur vérifie que leur dossier de données n'est vide dans aucun des deux environnements.
-`veille-emploi` ne déclare `VERIFIER_CONFIG`, et n'étiquette la prod de veille-emploi#22, qu'une
-fois la `v0.7.0` en service dans ses deux environnements.
+en `v0.2.3`. Chacun monte directement en `v0.7.1` par `copier update`, au choix d'Edouard : le
+message de la `v0.7.1` remplace ceux de la `v0.6.0` et de la `v0.7.0`. Tous sont privés : leur
+nature se déduit seule en `donnees`, sans `--data`, et `ancrage` comme `veille-emploi` déploient à
+un dépôt jusqu'à leur scission. Après la mise à jour, un `gh workflow run modele-historique.yml`
+doit dire « historique relu par gitleaks seul ». `ancrage` fait l'essai du ménage (lot 9). Avant la
+mise à jour d'`ancrage` et de `veille-emploi`, une lecture sur le serveur vérifie que leur dossier
+de données n'est vide dans aucun environnement en service. Après la mise à jour de `veille-emploi`,
+👤 un `git -C ~/veille-emploi pull --ff-only` sur le serveur : la sonde de `serveur` installe ses
+unités depuis ce clone, qu'elle ne met pas à jour. `veille-emploi` déclare `VERIFIER_CONFIG` dans
+une PR qui suit sa mise à jour, une fois la `v0.7.1` en service en staging. Sa prod n'a jamais rien
+déployé : sa première étiquette porte la mise à jour, son lot #22 et la commande, juste après la
+déclaration des heures de ses sauvegardes dans `serveur`.
 
 Prochain, au choix d'Edouard :
 - le lot 13 : la naissance d'un projet en deux dépôts, par le script de création du poste (geste
@@ -103,9 +115,10 @@ Prochain, au choix d'Edouard :
 - la scission de `veille-emploi`, puis celle d'`ancrage`, chacune dans son propre lot ;
 - le lot 3 (la cible `statique`) ;
 - la porte due par LE-37, au 3e constat du motif « écart à la spec mal pesé » : sa forme revient à
-  Edouard, et le registre en propose une ;
+  Edouard, et le registre en propose une. À peser avec la piste du workflow `publier`, qui ferait
+  publier Edouard depuis son téléphone ;
 - le retrait du repli `VISIBILITE = "prive"` de la porte, qui reste tant que la branche par défaut
-  de chaque projet ne porte pas `NATURE`. La `v0.7.0` le garde : `pupitre` y saute depuis la
+  de chaque projet ne porte pas `NATURE`. La `v0.7.1` le garde : `pupitre` y saute depuis la
   `v0.2.3`, et la PR de sa mise à jour est lue en `donnees`.
 
 Le cadrage est dans `docs/cadrage.md` ; ce que les lots ont appris, dans `docs/registre.md`.
