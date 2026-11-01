@@ -211,8 +211,9 @@ bilan() {
 
 @test "les_images_sans_etiquette_se_voient_meme_quand_docker_les_cache" {
   # Sans --all, un Docker 29 récent (constaté en 29.5.3) cache les images sans étiquette : les
-  # anciennes :main que la sonde de staging a tirées par empreinte. Le double fait de même. Le cas d'un projet en service : le
-  # precedent du staging, sans nom, et des images sans nom au-delà de la marge.
+  # anciennes :main que la sonde de staging a tirées par empreinte. Le double fait de même. Le cas
+  # d'un projet en service : le precedent du staging, sans nom, et des images sans nom au-delà de
+  # la marge.
   local c
   for c in 1 2 3 4 5; do
     poser_image "$c" "2026-10-0${c}T10:00:00Z" "" "$(empreinte_de "$c")"
