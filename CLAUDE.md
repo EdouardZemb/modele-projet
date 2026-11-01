@@ -117,6 +117,8 @@ Prochain, au choix d'Edouard :
 - la porte due par LE-37, au 3e constat du motif « écart à la spec mal pesé » : sa forme revient à
   Edouard, et le registre en propose une. À peser avec la piste du workflow `publier`, qui ferait
   publier Edouard depuis son téléphone ;
+- la porte due par LE-40, au 3e constat du motif « délai mesuré à vide » : sa forme revient à
+  Edouard, et le registre en propose une ;
 - le retrait du repli `VISIBILITE = "prive"` de la porte, qui reste tant que la branche par défaut
   de chaque projet ne porte pas `NATURE`. La `v0.7.1` le garde : `pupitre` y saute depuis la
   `v0.2.3`, et la PR de sa mise à jour est lue en `donnees`.
