@@ -27,7 +27,8 @@ Lot 9 fait le 28/10/2026 : le ménage des images (#19), étiqueté `v0.4.0`. En 
 `deployer.sh` lance `deploiement/nettoyer-images.sh` après chaque déploiement ou retour arrière
 réussi. Le script retire les images du projet que ni l'état des deux environnements, ni un
 conteneur, ni la marge des 3 plus récentes ne gardent, sans jamais `-f` ; une surprise annule
-tout. Une épreuve sur un vrai Docker, dans la CI, le prouve. Le hook `SessionStart` a 30 s (#45).
+tout. Une épreuve sur un vrai Docker, dans la CI, le prouve, sur le moteur 28 du runner (LE-41).
+Le hook `SessionStart` a 30 s (#45).
 
 Lot 10 fait le 28/10/2026 : la garde du dossier de données (#49), étiquetée `v0.5.0`. En cible
 `serveur` avec sauvegardes, `deployer.sh` refuse un déploiement ou un retour arrière quand une
@@ -92,24 +93,31 @@ d'une version plus ancienne ignore). En `--verifier`, l'installeur n'écrit que 
 résumé : la sonde de `serveur` lit cette sortie strictement. Né de serveur#22, qui déclarait ainsi
 `veille-emploi` : son staging n'avait aucune unité (LE-39).
 
-Versions des projets au 01/11 : `pupitre` en `v0.7.1` (pupitre#15, depuis la `v0.2.3`) ;
-`ancrage`, `serveur` et `veille-emploi` en `v0.3.0` (`veille-emploi` en cible `serveur`, avec
-`fusion=session`). Ces trois-là montent directement en `v0.7.1` par `copier update`, au choix
-d'Edouard : le message de la `v0.7.1` remplace ceux de la `v0.6.0` et de la `v0.7.0`, et `ancrage`
-comme `veille-emploi` ont reçu le leur le 01/11. Tous sont privés : leur nature se déduit seule en
+Second correctif du 01/11 : le ménage voit les images sans étiquette (#80), étiqueté `v0.7.2`. Sous
+un Docker 29 récent (constaté en 29.5.3, magasin classique, celui du serveur ; un 29.0.0 les liste
+encore), `docker image ls` cache sans `--all` les images sans étiquette, dont les anciennes `:main`
+que la sonde de staging tire par empreinte : `nettoyer-images.sh` ne les voyait pas, et retirait
+moins qu'il ne devait. Il liste désormais par `--all`, et le double de `docker` du banc fait comme
+ce Docker. `ancrage` l'a relevé à l'essai du ménage du lot 9 ; le runner de la CI, en moteur 28,
+ne le montrait pas (LE-41).
+
+Versions des projets au 01/11 : `ancrage`, `veille-emploi` et `pupitre-donnees` en `v0.7.1`
+(ancrage#143, veille-emploi#26, pupitre-donnees#15), `serveur` en `v0.3.0`. `ancrage` et
+`veille-emploi` montent en `v0.7.2` par `copier update`, chacun par son message de la `v0.7.2` ;
+`serveur` y monte directement, au choix d'Edouard, son message remplaçant ceux de la `v0.6.0` à la
+`v0.7.1`. La `v0.7.2` ne change rien pour la cible `aucune` : `pupitre` et `pupitre-donnees` n'ont
+pas à monter pour elle. Ces dépôts d'avant M-0006 sont privés : leur nature se déduit seule en
 `donnees`, sans `--data`, et `ancrage` comme `veille-emploi` déploient à un dépôt jusqu'à leur
-scission. Après la mise à jour, un `gh workflow run modele-historique.yml` doit dire « historique
-relu par gitleaks seul ». `ancrage` fait l'essai du ménage (lot 9). Avant la mise à jour d'`ancrage`
-et de `veille-emploi`, une lecture sur le serveur vérifie que leur dossier de données n'est vide
-dans aucun environnement en service. serveur#23 retire la déclaration de `veille-emploi` ; une PR
-de `serveur` la remet après sa mise à jour, et la sonde de `serveur` reclone alors `~/veille-emploi`
-à jour pour en installer les unités (👤 un `git -C ~/veille-emploi pull --ff-only` sur le serveur,
-seulement si ce clone a été gardé). `veille-emploi` déclare `VERIFIER_CONFIG` dans
-une PR qui suit sa mise à jour, une fois la `v0.7.1` en service en staging. Sa prod n'a jamais rien
-déployé : sa première étiquette porte la mise à jour, son lot #22 et la commande, juste après la
-déclaration des heures de ses sauvegardes dans `serveur`. `pupitre` se scinde dans son propre lot,
-avec l'accord d'Edouard : l'actuel devient `pupitre-donnees`, et un dépôt public `pupitre` naît du
-modèle en `v0.7.1`, en nature `code`.
+scission. Après la mise à jour qui apporte la `v0.6.0`, un `gh workflow run modele-historique.yml`
+doit dire « historique relu par gitleaks seul ». L'essai du
+ménage du lot 9, par `ancrage`, a trouvé LE-41 : il se refait après sa mise à jour en `v0.7.2`,
+sans aucun retrait à la main. `veille-emploi`, redéclaré par serveur#24, tourne en staging en
+`v0.7.1` depuis le 01/11, sans sauvegarde ; il déclare `VERIFIER_CONFIG` dans une PR qui suit. Sa
+prod n'a jamais rien déployé : sa première étiquette porte la mise à jour, son lot #22 et la
+commande, juste après la déclaration des heures de ses sauvegardes dans `serveur`. `pupitre` s'est
+scindé le 01/11, dans son propre lot et avec l'accord d'Edouard : l'ancien dépôt est devenu
+`pupitre-donnees`, privé, et le dépôt public `pupitre` est né du modèle en `v0.7.1`, en nature
+`code`.
 
 Prochain, au choix d'Edouard :
 - le lot 13 : la naissance d'un projet en deux dépôts, par le script de création du poste (geste
@@ -123,10 +131,12 @@ Prochain, au choix d'Edouard :
   publier Edouard depuis son téléphone ;
 - la porte due par LE-40, au 3e constat du motif « délai mesuré à vide » : sa forme revient à
   Edouard, et le registre en propose une ;
+- la porte due par LE-41, au 3e constat du motif « version d'outil du poste différente de la
+  cible » : sa forme revient à Edouard, et le registre en propose une ;
 - le retrait du repli `VISIBILITE = "prive"` de la porte, qui reste tant que la branche par défaut
-  de chaque projet ne porte pas `NATURE`. La `v0.7.1` le garde : grâce à lui, la PR de mise à jour
-  d'`ancrage`, de `serveur` et de `veille-emploi` est lue en `donnees`, comme l'a été celle de
-  `pupitre` (pupitre#15).
+  de chaque projet ne porte pas `NATURE`. La `v0.7.2` le garde : grâce à lui, la PR de mise à jour
+  de `serveur`, le dernier sans `NATURE`, est lue en `donnees`, comme l'ont été celles d'`ancrage`,
+  de `veille-emploi` et de `pupitre-donnees`.
 
 Le cadrage est dans `docs/cadrage.md` ; ce que les lots ont appris, dans `docs/registre.md`.
 

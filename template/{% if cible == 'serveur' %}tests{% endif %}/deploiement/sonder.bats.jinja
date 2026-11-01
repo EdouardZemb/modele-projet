@@ -206,7 +206,7 @@ etiqueter_les_donnees() {
   sonder staging
   [ "$status" -eq 0 ]
   [ "$(cat "$ETAT/deploye")" = "$EMPREINTE main -" ]
-  appels_de docker | grep -Fx 'docker image ls --no-trunc --quiet'
+  appels_de docker | grep -Fx 'docker image ls --all --no-trunc --quiet'
   [[ "$output" != *"toujours pris"* ]]
   aucune_ligne "^$(image_de 9)\|" "$BATS_TEST_TMPDIR/images"
 }
