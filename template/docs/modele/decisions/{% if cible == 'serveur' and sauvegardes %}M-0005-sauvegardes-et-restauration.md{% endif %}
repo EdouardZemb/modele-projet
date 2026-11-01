@@ -6,6 +6,8 @@
 - **Amendé** le 2026-10-29, avec le lot 12 : chaque instantané de `/donnees` note le couple en
   service dans un fichier voisin, chiffré et envoyé avec l'archive, et la restauration le dit
   (§ 2, § 3 et § 6, M-0004 § 8)
+- **Amendé** le 2026-11-01, avec la v0.7.1 : tant que la prod n'a rien déployé, `serveur` peut
+  dire « non » aux heures des sauvegardes (§ 2)
 - **Contexte amont** : les sauvegardes d'`ancrage` (son ADR-0007, §4 et §5), dont la mécanique
   est extraite ; M-0003 (le contrat de l'instantané) ; M-0004 (la chaîne de livraison)
 
@@ -26,6 +28,10 @@ Le staging n'a que des données factices (M-0001). `sauvegarder.sh`, `tester-res
 
 ### 2. Chaque nuit, `sauvegarder.sh prod`
 
+- Une prod qui n'a encore rien déployé n'a rien à sauvegarder. Jusque-là, et seulement jusque-là,
+  `serveur` peut déclarer `SAUVEGARDE=non` et `TEST_RESTAURATION=non` : ni la sauvegarde ni son
+  test ne s'installent. `installer-unites.sh` refuse « non » dès que la prod a un état déployé, et
+  quand la sonde de prod va y déployer une version (amendement du 2026-11-01).
 - Lancé par `<nom>-sauvegarde.timer`, à l'heure que le dépôt `serveur` donne au projet
   (`projets/<nom>.env`) : deux sauvegardes du parc ne se chevauchent pas.
 - Sous le verrou que partagent la sonde, le déploiement et la restauration, `SAUVEGARDER` écrit

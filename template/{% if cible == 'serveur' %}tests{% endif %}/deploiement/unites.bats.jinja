@@ -38,6 +38,12 @@ setup() {
     {{ nom }}-sonde-staging.service {{ nom }}-sonde-staging.timer
     {{ nom }}-test-restauration.service {{ nom }}-test-restauration.timer
   )
+  # Les cinq rendues quand serveur déclare « non » : ni la sauvegarde ni son test.
+  SANS_SAUVEGARDE=(
+    {{ nom }}-alerte@.service
+    {{ nom }}-sonde-prod.service {{ nom }}-sonde-prod.timer
+    {{ nom }}-sonde-staging.service {{ nom }}-sonde-staging.timer
+  )
 {%- else %}
   # Les cinq unités rendues : deux services, deux minuteries, un modèle d'alerte.
   ATTENDUES=(
@@ -220,10 +226,11 @@ declarer_projet() {
     [ ! -e "$UNITES" ]
     [ "$(nombre_d_appels systemctl)" -eq 0 ]
   done
-  # une clé absente, la valeur « non » (pas de sauvegarde), ou une clé déclarée deux fois
+  # une clé absente, « non » sur une seule des deux clés, ou une clé déclarée deux fois
   local cas
-  for cas in "SAUVEGARDE=02:45" "TEST_RESTAURATION=Sun 04:15" \
-    "SAUVEGARDE=non|TEST_RESTAURATION=non" \
+  for cas in "SAUVEGARDE=02:45" "TEST_RESTAURATION=Sun 04:15" "SAUVEGARDE=non" "TEST_RESTAURATION=non" \
+    "SAUVEGARDE=non|TEST_RESTAURATION=Sun 04:15" "SAUVEGARDE=02:45|TEST_RESTAURATION=non" \
+    "SAUVEGARDE=non|TEST_RESTAURATION=non|SAUVEGARDE=non" \
     "SAUVEGARDE=02:45|TEST_RESTAURATION=Sun 04:15|SAUVEGARDE=03:00"; do
     local lignes=()
     IFS='|' read -r -a lignes <<<"$cas"
@@ -238,7 +245,7 @@ declarer_projet() {
 
 @test "unites_heures_mal_formees_refusent" {
   local valeur
-  for valeur in 2:45 25:00 02:60 02:45:00 ' 02:45' '02:45 ' 0245 $'02:45\r' ''; do
+  for valeur in 2:45 25:00 02:60 02:45:00 ' 02:45' '02:45 ' 0245 $'02:45\r' '' Non NON 'non ' $'non\r'; do
     declarer_projet "SAUVEGARDE=$valeur" "TEST_RESTAURATION=Sun 04:15"
     installer
     [ "$status" -eq 1 ]
@@ -291,6 +298,137 @@ Persistent=true
 WantedBy=timers.target
 FIN
 }
+
+# --- « non » : pas de sauvegarde tant que la prod n'a rien déployé ---------------------------
+
+# prod_deployee : l'état d'une prod qui a déjà déployé une version.
+prod_deployee() {
+  mkdir -p "${{ prefixe }}RACINE_ETAT/prod"
+  echo "sha256:0 0.1.0 -" >"${{ prefixe }}RACINE_ETAT/prod/deploye"
+}
+
+# serveur déclare « non » pour un projet dont la prod n'existe pas encore : la sonde et l'alerte
+# s'installent, pas la sauvegarde ni son test, qui échoueraient chaque nuit sans conteneur de prod.
+@test "unites_non_sans_prod_deployee_installe_sans_les_sauvegardes" {
+  declarer_projet SAUVEGARDE=non TEST_RESTAURATION=non
+  installer
+  [ "$status" -eq 0 ]
+  [ "$(find "$UNITES" -mindepth 1 -printf '%f\n' | sort)" = "$(printf '%s\n' "${SANS_SAUVEGARDE[@]}" | sort)" ]
+  [[ "$stderr" == *"SAUVEGARDE=non"* ]]
+  [ "$(appels_de systemctl | sed -n 2p)" = "systemctl --user enable --now {{ nom }}-sonde-prod.timer {{ nom }}-sonde-staging.timer" ]
+  # le contrôle ne compte pas les unités de la sauvegarde comme absentes
+  installer --verifier
+  [ "$status" -eq 0 ]
+}
+
+# La sonde de serveur lit la sortie de --verifier strictement : des lignes « écart : … » et leur
+# résumé, rien d'autre, sans quoi elle refuse de réparer. « non » n'y ajoute aucune ligne.
+@test "unites_non_verifier_ne_dit_que_les_ecarts" {
+  declarer_projet SAUVEGARDE=non TEST_RESTAURATION=non
+  installer
+  [ "$status" -eq 0 ]
+  rm "$UNITES/{{ nom }}-sonde-prod.timer"
+  printf '# modifiée\n' >>"$UNITES/{{ nom }}-sonde-staging.service"
+  installer --verifier
+  [ "$status" -eq 1 ]
+  local ligne nombre=0
+  while IFS= read -r ligne; do
+    nombre=$((nombre + 1))
+    case "$ligne" in
+      "écart : {{ nom }}-sonde-prod.timer : absente (le dépôt la prévoit)") ;;
+      "écart : {{ nom }}-sonde-staging.service : différente de son rendu") ;;
+      *" 2 écart(s) entre les unités installées dans $UNITES et deploiement/systemd : "*) ;;
+      *)
+        echo "ligne inattendue : $ligne" >&2
+        return 1
+        ;;
+    esac
+  done <<<"$stderr"
+  [ "$nombre" -eq 3 ]
+}
+
+# Des heures, puis « non » : les unités de la sauvegarde deviennent des orphelines, que le contrôle
+# signale et que l'installation désactive avant de les retirer.
+@test "unites_non_retire_les_unites_de_sauvegarde_deja_installees" {
+  installer
+  [ "$status" -eq 0 ]
+  : >"$APPELS"
+  declarer_projet SAUVEGARDE=non TEST_RESTAURATION=non
+  installer --verifier
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"{{ nom }}-sauvegarde.timer : orpheline"* ]]
+  [[ "$stderr" == *"{{ nom }}-test-restauration.service : orpheline"* ]]
+  installer
+  [ "$status" -eq 0 ]
+  [ "$(find "$UNITES" -mindepth 1 -printf '%f\n' | sort)" = "$(printf '%s\n' "${SANS_SAUVEGARDE[@]}" | sort)" ]
+  [ -n "$(ligne_de 'systemctl --user disable --now {{ nom }}-sauvegarde.timer')" ]
+  [ -n "$(ligne_de 'systemctl --user disable --now {{ nom }}-test-restauration.timer')" ]
+  installer --verifier
+  [ "$status" -eq 0 ]
+}
+
+# Une prod qui a déployé a des données : « non » refuse, en installation comme en contrôle, sans
+# rien toucher. La sonde de prod, qui contrôle les unités à chaque passage, alerte donc jusqu'à ce
+# que serveur déclare les heures. Un fichier deploye vide, ou un lien brisé, n'est pas une prod
+# vierge : « non » y refuse aussi.
+@test "unites_non_refuse_quand_la_prod_a_deploye" {
+  installer
+  [ "$status" -eq 0 ]
+  local avant
+  avant="$(find "$UNITES" -mindepth 1 -printf '%f\n' | sort)"
+  : >"$APPELS"
+  declarer_projet SAUVEGARDE=non TEST_RESTAURATION=non
+  local deploye="${{ prefixe }}RACINE_ETAT/prod/deploye" forme option
+  for forme in version vide lien; do
+    prod_deployee
+    case "$forme" in
+      vide) : >"$deploye" ;;
+      lien) rm "$deploye" && ln -s "$BATS_TEST_TMPDIR/absent" "$deploye" ;;
+    esac
+    for option in "" --verifier; do
+      # shellcheck disable=SC2086  # sans option, aucun argument
+      installer $option
+      [ "$status" -eq 1 ]
+      [[ "$stderr" == *"SAUVEGARDE=non, mais la prod a déployé ($deploye)"* ]]
+    done
+    rm -f "$deploye"
+  done
+  [ "$(find "$UNITES" -mindepth 1 -printf '%f\n' | sort)" = "$avant" ]
+  [ "$(nombre_d_appels systemctl)" -eq 0 ]
+}
+
+# Sur le serveur, rien ne pose {{ prefixe }}RACINE_ETAT : l'état de la prod se lit à son emplacement
+# par défaut, celui de lib.sh.
+@test "unites_non_lit_l_etat_de_la_prod_a_son_emplacement_par_defaut" {
+  declarer_projet SAUVEGARDE=non TEST_RESTAURATION=non
+  mkdir -p "$HOME/.local/state/{{ nom }}/prod"
+  echo "sha256:0 0.1.0 -" >"$HOME/.local/state/{{ nom }}/prod/deploye"
+  {{ prefixe }}RACINE_ETAT='' installer
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"la prod a déployé ($HOME/.local/state/{{ nom }}/prod/deploye)"* ]]
+  [ ! -e "$UNITES" ]
+  # l'état d'ailleurs ne compte pas
+  {{ prefixe }}RACINE_ETAT="$BATS_TEST_TMPDIR/autre-etat" installer
+  [ "$status" -eq 0 ]
+}
+
+# La sonde de prod installe les unités avec {{ prefixe }}AVANT_DEPLOIEMENT=1 juste avant de déployer :
+# « non » refuse alors, même si la prod n'a encore rien déployé, et la première version de prod
+# attend les heures. Avec des heures, la variable ne change rien.
+@test "unites_avant_deploiement_refuse_non" {
+  declarer_projet SAUVEGARDE=non TEST_RESTAURATION=non
+  {{ prefixe }}AVANT_DEPLOIEMENT=1 installer
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"SAUVEGARDE=non"* ]]
+  [ ! -e "$UNITES" ]
+  [ "$(nombre_d_appels systemctl)" -eq 0 ]
+  declarer_projet SAUVEGARDE=02:45 "TEST_RESTAURATION=Sun 04:15"
+  {{ prefixe }}AVANT_DEPLOIEMENT=1 installer
+  [ "$status" -eq 0 ]
+  [ "$(find "$UNITES" -mindepth 1 -printf '%f\n' | sort)" = "$(printf '%s\n' "${ATTENDUES[@]}" | sort)" ]
+  installer --verifier
+  [ "$status" -eq 0 ]
+}
 {%- else %}
 
 # --- pas d'heures sans sauvegardes ------------------------------------------------------------
@@ -310,6 +448,12 @@ FIN
   installer --verifier
   [ "$status" -eq 0 ]
   {{ prefixe }}PROJET_SERVEUR="$BATS_TEST_TMPDIR/absent.env" installer
+  [ "$status" -eq 0 ]
+  # la variable de la sonde, avant un déploiement de prod, ne change rien
+  printf '%s\n' SAUVEGARDE=non TEST_RESTAURATION=non >"$HOME/serveur/projets/{{ nom }}.env"
+  {{ prefixe }}AVANT_DEPLOIEMENT=1 installer
+  [ "$status" -eq 0 ]
+  installer --verifier
   [ "$status" -eq 0 ]
 }
 {%- endif %}

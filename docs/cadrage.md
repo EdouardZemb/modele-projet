@@ -165,6 +165,14 @@
 > - **un écart, puis un retour à la spec** : à un dépôt, la CI du code ne vérifiait que l'exemple,
 >   et non `instance/`. La revue finale l'a trouvé (LE-37) : elle vérifie désormais `instance/`
 >   comme le déploiement, qui la revérifie.
+>
+> **Amendé le 2026-11-01, par la v0.7.1, de la même façon** (#77). **§6.6** : tant que la prod
+> d'un projet avec sauvegardes n'a rien déployé, la déclaration du projet dans `serveur` peut dire
+> `SAUVEGARDE=non` et `TEST_RESTAURATION=non`, ensemble. Ni la sauvegarde ni son test ne
+> s'installent alors, et le staging tourne. « non » refuse dès que la prod a un état déployé, et
+> quand sa sonde va y déployer une version : la première version de prod attend les heures. La
+> réponse `sauvegardes` dit toujours si le projet a des données à sauvegarder ; qu'une prod
+> n'existe pas encore est un état de l'instance (M-0005, amendé ; LE-39).
 
 Ce cadrage est la partie publique de la spec de conception du modèle, issue d'une séance de questions avec Edouard : 12 questions, puis 5 parties de design validées une à une. La partie qui nomme le serveur est privée et n'est pas reproduite ici.
 
