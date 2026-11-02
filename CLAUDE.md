@@ -27,8 +27,8 @@ Lot 9 fait le 28/10/2026 : le ménage des images (#19), étiqueté `v0.4.0`. En 
 `deployer.sh` lance `deploiement/nettoyer-images.sh` après chaque déploiement ou retour arrière
 réussi. Le script retire les images du projet que ni l'état des deux environnements, ni un
 conteneur, ni la marge des 3 plus récentes ne gardent, sans jamais `-f` ; une surprise annule
-tout. Une épreuve sur un vrai Docker, dans la CI, le prouve, sur le moteur 28 du runner (LE-41).
-Le hook `SessionStart` a 30 s (#45).
+tout. Une épreuve sur un vrai Docker, dans la CI, le prouve, sur le moteur 28 du runner (LE-41) ;
+l'essai sur le serveur, par `ancrage`, est tenu en `v0.7.2`. Le hook `SessionStart` a 30 s (#45).
 
 Lot 10 fait le 28/10/2026 : la garde du dossier de données (#49), étiquetée `v0.5.0`. En cible
 `serveur` avec sauvegardes, `deployer.sh` refuse un déploiement ou un retour arrière quand une
@@ -101,23 +101,20 @@ moins qu'il ne devait. Il liste désormais par `--all`, et le double de `docker`
 ce Docker. `ancrage` l'a relevé à l'essai du ménage du lot 9 ; le runner de la CI, en moteur 28,
 ne le montrait pas (LE-41).
 
-Versions des projets au 01/11 : `ancrage`, `veille-emploi` et `pupitre-donnees` en `v0.7.1`
-(ancrage#143, veille-emploi#26, pupitre-donnees#15), `serveur` en `v0.3.0`. `ancrage` et
-`veille-emploi` montent en `v0.7.2` par `copier update`, chacun par son message de la `v0.7.2` ;
-`serveur` y monte directement, au choix d'Edouard, son message remplaçant ceux de la `v0.6.0` à la
-`v0.7.1`. La `v0.7.2` ne change rien pour la cible `aucune` : `pupitre` et `pupitre-donnees` n'ont
-pas à monter pour elle. Ces dépôts d'avant M-0006 sont privés : leur nature se déduit seule en
-`donnees`, sans `--data`, et `ancrage` comme `veille-emploi` déploient à un dépôt jusqu'à leur
-scission. Après la mise à jour qui apporte la `v0.6.0`, un `gh workflow run modele-historique.yml`
-doit dire « historique relu par gitleaks seul ». L'essai du
-ménage du lot 9, par `ancrage`, a trouvé LE-41 : il se refait après sa mise à jour en `v0.7.2`,
-sans aucun retrait à la main. `veille-emploi`, redéclaré par serveur#24, tourne en staging en
-`v0.7.1` depuis le 01/11, sans sauvegarde ; il déclare `VERIFIER_CONFIG` dans une PR qui suit. Sa
-prod n'a jamais rien déployé : sa première étiquette porte la mise à jour, son lot #22 et la
-commande, juste après la déclaration des heures de ses sauvegardes dans `serveur`. `pupitre` s'est
-scindé le 01/11, dans son propre lot et avec l'accord d'Edouard : l'ancien dépôt est devenu
-`pupitre-donnees`, privé, et le dépôt public `pupitre` est né du modèle en `v0.7.1`, en nature
-`code`.
+Versions des projets au 02/11 : `ancrage`, `veille-emploi` et `serveur` en `v0.7.2` (ancrage#150,
+veille-emploi#28, serveur#26) ; `pupitre` et `pupitre-donnees` en `v0.7.1`, que la `v0.7.2`, sans
+effet en cible `aucune`, ne fait pas monter. Les dépôts d'avant M-0006 sont privés et de nature
+`donnees` ; `ancrage` comme `veille-emploi` déploient à un dépôt jusqu'à leur scission. L'essai du
+ménage du lot 9 est tenu. Au premier déploiement du staging d'`ancrage` en `v0.7.2`, le ménage dit
+« 12 retirées, 7 gardées (4 par l'état, 0 par un conteneur, 3 en marge) » : son `precedent`, sans
+étiquette, est compté par l'état (LE-41). `veille-emploi`, redéclaré par serveur#24, tourne en
+staging depuis le 01/11, sans sauvegarde, et déclare `VERIFIER_CONFIG` (veille-emploi#30). À un
+dépôt, le commit de données d'un couple est la révision de l'image, `-` sans commande déclarée :
+cette déclaration a redéployé une fois l'image en service, sous un nouveau couple. Sa prod n'a
+jamais rien déployé : sa première étiquette porte son lot #22 et la commande, juste après la
+déclaration des heures de ses sauvegardes dans `serveur`. `pupitre` s'est scindé le 01/11, dans
+son propre lot et avec l'accord d'Edouard : l'ancien dépôt est devenu `pupitre-donnees`, privé, et
+le dépôt public `pupitre` est né du modèle en `v0.7.1`, en nature `code`.
 
 Prochain, au choix d'Edouard :
 - le lot 13 : la naissance d'un projet en deux dépôts, par le script de création du poste (geste
@@ -133,10 +130,9 @@ Prochain, au choix d'Edouard :
   Edouard, et le registre en propose une ;
 - la porte due par LE-41, au 3e constat du motif « version d'outil du poste différente de la
   cible » : sa forme revient à Edouard, et le registre en propose une ;
-- le retrait du repli `VISIBILITE = "prive"` de la porte, qui reste tant que la branche par défaut
-  de chaque projet ne porte pas `NATURE`. La `v0.7.2` le garde : grâce à lui, la PR de mise à jour
-  de `serveur`, le dernier sans `NATURE`, est lue en `donnees`, comme l'ont été celles d'`ancrage`,
-  de `veille-emploi` et de `pupitre-donnees`.
+- le retrait du repli `VISIBILITE = "prive"` de la porte. Il ne sert plus : depuis serveur#26, le
+  01/11, la branche par défaut de chaque projet en service porte `NATURE`. Son retrait change la
+  porte, dans un correctif à part.
 
 Le cadrage est dans `docs/cadrage.md` ; ce que les lots ont appris, dans `docs/registre.md`.
 
