@@ -41,6 +41,48 @@ function Lancer-Enfant([string[]] $Arguments) {
     return $sortie
 }
 
+function Fabriquer-Cle {
+    # Une clé age de test, tirée au hasard à chaque lancement : jamais une vraie, jamais écrite ici.
+    $alphabet = '0123456789abcdefghijklmnopqrstuvwxyz'
+    return 'age1' + (-join (1..58 | ForEach-Object { $alphabet[(Get-Random -Maximum 36)] }))
+}
+
+function Lire-HorsContexte([object[]] $Liste) {
+    # Une action ne voit que le contexte de son étape, recopié par Import-Ctx : toute variable
+    # qu'elle lit sans l'affecter elle-même doit y figurer (le 17/10, « mdl » manquait : copier a reçu « gh: »).
+    $automatiques = @('true', 'false', 'null', 'HOME', 'Matches', '_', 'LASTEXITCODE')
+    $absentes = @()
+    for ($n = 0; $n -lt $Liste.Count; $n++) {
+        $ast = $Liste[$n].Action.Ast
+        $affectees = @($ast.FindAll({ $args[0] -is [System.Management.Automation.Language.AssignmentStatementAst] }, $true) |
+            Where-Object { $_.Left -is [System.Management.Automation.Language.VariableExpressionAst] } |
+            ForEach-Object { $_.Left.VariablePath.UserPath })
+        $affectees += @($ast.FindAll({ $args[0] -is [System.Management.Automation.Language.ForEachStatementAst] }, $true) |
+            ForEach-Object { $_.Variable.VariablePath.UserPath })
+        $lues = @($ast.FindAll({ $args[0] -is [System.Management.Automation.Language.VariableExpressionAst] }, $true) |
+            ForEach-Object { $_.VariablePath.UserPath } | Sort-Object -Unique)
+        $ctxEtape = $Liste[$n].Ctx
+        foreach ($v in $lues) {
+            if ($v -notin $affectees -and $v -notin $automatiques -and -not ($ctxEtape -and $ctxEtape.ContainsKey($v))) {
+                $absentes += "étape $($n + 1) : `$$v"
+            }
+        }
+    }
+    return $absentes
+}
+
+function Indice([object[]] $Liste, [string] $Motif, [switch] $Dernier) {
+    # L'indice de la première (ou de la dernière) étape dont la description commence par le motif.
+    $trouve = -1
+    for ($n = 0; $n -lt $Liste.Count; $n++) {
+        if ($Liste[$n].Description.StartsWith($Motif, [StringComparison]::Ordinal)) {
+            $trouve = $n
+            if (-not $Dernier) { break }
+        }
+    }
+    return $trouve
+}
+
 # ------------------------------------------------------------ encodage du script
 Write-Host 'Encodage'
 $octets = if (Test-Path $script) { [IO.File]::ReadAllBytes($script) } else { @() }
@@ -51,6 +93,11 @@ Write-Host 'Nom invalide'
 $sortie = Lancer-Enfant @('-Nom', 'Mauvais_Nom', '-Description', 'x', '-ABlanc')
 Verifier 'le message contient « minuscules »' ($sortie -match 'minuscules') $sortie
 Verifier 'aucune étape n''a commencé' ($sortie -notmatch 'préalables') $sortie
+# Le nom d'un dépôt de données est celui que le script donne lui-même au second dépôt.
+$sortie = Lancer-Enfant @('-Nom', 'essai-donnees', '-Description', 'x', '-Version', 'v0.1.0', '-ABlanc')
+# Le message d'erreur est coupé à la largeur de la console : on compare sur des blancs réduits.
+Verifier 'nom en -donnees : refus' (($sortie -replace '\s+', ' ') -match 'r.serv. au d.p.t de donn.es') $sortie
+Verifier 'nom en -donnees : aucune étape n''a commencé' ($sortie -notmatch '\[1/\d+\]') $sortie
 
 # ------------------------------------------------------------ à blanc et fusion
 # Ces lancements exécutent l'étape 1 pour de vrai (gh, liste privée) : le poste seulement.
@@ -88,12 +135,18 @@ Write-Host 'Fonctions'
 Verifier 'Get-LigneIndex est chargée' ($null -ne (Get-Command Get-LigneIndex -ErrorAction SilentlyContinue))
 Verifier 'Add-LigneIndex est chargée' ($null -ne (Get-Command Add-LigneIndex -ErrorAction SilentlyContinue))
 Verifier 'Get-Etapes est chargée'     ($null -ne (Get-Command Get-Etapes -ErrorAction SilentlyContinue))
+Verifier 'Get-BlocLibre est chargée'  ($null -ne (Get-Command Get-BlocLibre -ErrorAction SilentlyContinue))
+Verifier 'Invoke-Etapes est chargée'  ($null -ne (Get-Command Invoke-Etapes -ErrorAction SilentlyContinue))
+Verifier 'Assert-Parametres est chargée' ($null -ne (Get-Command Assert-Parametres -ErrorAction SilentlyContinue))
 
 if ((Get-Command Get-LigneIndex -ErrorAction SilentlyContinue) -and (Get-Command Add-LigneIndex -ErrorAction SilentlyContinue)) {
     $ligne = Get-LigneIndex -Nom 'essai-fonctions' -Version 'v0.1.0' -Visibilite 'public' -Date '2026-10-16'
     Verifier 'ligne publique : gabarit' ($ligne -eq '| essai-fonctions | code | `C:\src\github.com\EdouardZemb\essai-fonctions` — né de modele-projet v0.1.0 le 2026-10-16 | EdouardZemb/essai-fonctions | OUI | 2026-10-16 |') $ligne
     $lignePrive = Get-LigneIndex -Nom 'essai-fonctions' -Version 'v0.1.0' -Visibilite 'prive' -Date '2026-10-16'
     Verifier 'ligne privée : mention (privé)' ($lignePrive -match '\(privé\)') $lignePrive
+    $ligneDonnees = $null
+    try { $ligneDonnees = Get-LigneIndex -Nom 'essai-fonctions-donnees' -Version 'v0.1.0' -Visibilite 'prive' -Date '2026-10-16' -Type donnees } catch { $ligneDonnees = "$_" }
+    Verifier 'ligne de données : gabarit, de type données' ($ligneDonnees -eq '| essai-fonctions-donnees | données | `C:\src\github.com\EdouardZemb\essai-fonctions-donnees` — né de modele-projet v0.1.0 le 2026-10-16 | EdouardZemb/essai-fonctions-donnees (privé) | OUI | 2026-10-16 |') $ligneDonnees
     $ligneAilleurs = Get-LigneIndex -Nom 'essai-fonctions' -Version 'v0.1.0' -Visibilite 'public' -Date '2026-10-16' -RacineCode 'D:\code\'
     Verifier 'ligne : le chemin suit -RacineCode' ($ligneAilleurs.Contains('`D:\code\github.com\EdouardZemb\essai-fonctions`')) $ligneAilleurs
 
@@ -182,30 +235,169 @@ if ((Get-Command Get-LigneIndex -ErrorAction SilentlyContinue) -and (Get-Command
     }
 }
 
-if (Get-Command Get-Etapes -ErrorAction SilentlyContinue) {
-    $etapes = @(Get-Etapes)
-    Verifier 'Get-Etapes rend onze étapes' ($etapes.Count -eq 11) "$($etapes.Count)"
-    Verifier 'chaque étape a Description, Commande, Action' (@($etapes | Where-Object { $_.Description -and $_.Commande -and $_.Action }).Count -eq $etapes.Count)
+# ------------------------------------------------------------ les étapes, en trois formes
+# Un faux clone de serveur, dans un dossier temporaire : deux projets y prennent 4310 et 4320 ; un
+# second prend tous les blocs. Le vrai clone n'est jamais lu ici.
+$racineFaux  = Join-Path ([IO.Path]::GetTempPath()) ("faux-serveur-{0}" -f [guid]::NewGuid())
+$fauxServeur = Join-Path $racineFaux 'serveur'
+$fauxPlein   = Join-Path $racineFaux 'plein'
+$cleTest1 = Fabriquer-Cle
+$cleTest2 = Fabriquer-Cle
+try {
+    New-Item -ItemType Directory -Path (Join-Path $fauxServeur 'projets') -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $fauxPlein 'projets') -Force | Out-Null
+    [IO.File]::WriteAllText((Join-Path $fauxServeur 'projets\a.env'), "NOM=a`nBLOC_PORTS=4310`n")
+    [IO.File]::WriteAllText((Join-Path $fauxServeur 'projets\b.env'), "NOM=b`nBLOC_PORTS=4320`n")
+    [IO.File]::WriteAllText((Join-Path $fauxPlein 'projets\tous.env'), ((0..68 | ForEach-Object { "BLOC_PORTS=$(4310 + 10 * $_)" }) -join "`n"))
+    $argsServeur = @{ Cible = 'serveur'; Domaine = 'exemple.org'; CleServeur = $cleTest1; CleHorsLigne = $cleTest2; RacineServeur = $fauxServeur }
+    $etapesA = @(); $etapesB = @(); $etapesS = @()
 
-    # Une action ne voit que le contexte recopié par Import-Ctx : toute variable qu'elle lit
-    # sans l'affecter elle-même doit y figurer (le 17/10, « mdl » manquait : copier a reçu « gh: »).
-    $automatiques = @('true', 'false', 'null', 'HOME', 'Matches', '_', 'LASTEXITCODE')
-    $absentes = @()
-    for ($n = 0; $n -lt $etapes.Count; $n++) {
-        $ast = $etapes[$n].Action.Ast
-        $affectees = @($ast.FindAll({ $args[0] -is [System.Management.Automation.Language.AssignmentStatementAst] }, $true) |
-            Where-Object { $_.Left -is [System.Management.Automation.Language.VariableExpressionAst] } |
-            ForEach-Object { $_.Left.VariablePath.UserPath })
-        $lues = @($ast.FindAll({ $args[0] -is [System.Management.Automation.Language.VariableExpressionAst] }, $true) |
-            ForEach-Object { $_.VariablePath.UserPath } | Sort-Object -Unique)
-        foreach ($v in $lues) {
-            if ($v -notin $affectees -and $v -notin $automatiques -and -not $script:Ctx.ContainsKey($v)) {
-                $absentes += "étape $($n + 1) : `$$v"
-            }
-        }
+    # -- aucune : le dépôt de code seul, les onze étapes d'aujourd'hui
+    Write-Host 'Etapes : aucune'
+    try { . $script -Nom 'essai-fonctions' -Description 'Essai' -Version 'v0.1.0' } catch { Write-Host "  point-source : $_" -ForegroundColor Red }
+    try { $etapesA = @(Get-Etapes) } catch { Write-Host "  Get-Etapes : $_" -ForegroundColor Red }
+    $ordreA = @('préalables', 'copier copy', 'git init', 'premier commit', 'gh repo create EdouardZemb/essai-fonctions --public',
+                'réglages de fusion', 'secret MOTIFS_INTERDITS', 'premier envoi', 'règle de protection', 'dossier .worktrees', "ligne d'index")
+    $ordreOkA = ($etapesA.Count -eq $ordreA.Count)
+    if ($ordreOkA) { for ($n = 0; $n -lt $ordreA.Count; $n++) { if (-not $etapesA[$n].Description.StartsWith($ordreA[$n], [StringComparison]::Ordinal)) { $ordreOkA = $false } } }
+    Verifier 'aucune : onze étapes, dans l''ordre d''aujourd''hui' $ordreOkA (($etapesA | ForEach-Object { $_.Description }) -join "`n")
+    $copierA = if ($etapesA.Count -gt 1) { $etapesA[1].Commande } else { '' }
+    Verifier 'la commande copier ne porte plus visibilite' ($copierA -and $copierA -notmatch 'visibilite') $copierA
+    Verifier 'la commande copier porte nature=code' ($copierA -match '--data nature=code ') $copierA
+    Verifier 'la commande copier part de gh:EdouardZemb/modele-projet par défaut' ($copierA -match ' gh:EdouardZemb/modele-projet ') $copierA
+    $ghA = (@($etapesA | ForEach-Object { $_.GitHub -eq $true }) -join ',')
+    Verifier 'aucune : les étapes GitHub sont de la 5e à la 9e' ($ghA -eq 'False,False,False,False,True,True,True,True,True,False,False') $ghA
+
+    # -- aucune -Donnees : deux dépôts, les données en cible donnees
+    Write-Host 'Etapes : aucune -Donnees'
+    try { . $script -Nom 'essai' -Description 'Essai' -Version 'v0.1.0' -Donnees -Fusion edouard } catch { Write-Host "  point-source : $_" -ForegroundColor Red }
+    try { $etapesB = @(Get-Etapes) } catch { Write-Host "  Get-Etapes : $_" -ForegroundColor Red }
+    Verifier 'aucune -Donnees : 21 étapes' ($etapesB.Count -eq 21) "$($etapesB.Count)"
+    $creationsB = @($etapesB | Where-Object { $_.Description -like 'gh repo create*' })
+    Verifier 'aucune -Donnees : deux dépôts, le code public, les données privées' ($creationsB.Count -eq 2 -and $creationsB[0].Commande -match 'EdouardZemb/essai --public ' -and $creationsB[1].Commande -match 'EdouardZemb/essai-donnees --private ') (($creationsB | ForEach-Object { $_.Commande }) -join "`n")
+    $copiesB = @($etapesB | Where-Object { $_.Description -like 'copier copy*' })
+    $codeB    = if ($copiesB.Count -eq 2) { $copiesB[0].Commande } else { '' }
+    $donneesB = if ($copiesB.Count -eq 2) { $copiesB[1].Commande } else { '' }
+    Verifier 'aucune -Donnees : deux dépôts ; les données en cible donnees, cible_code aucune, fusion session' ($donneesB -match '--data nom=essai-donnees ' -and $donneesB -match '--data cible=donnees ' -and $donneesB -match '--data cible_code=aucune ' -and $donneesB -match '--data fusion=session ' -and $donneesB -match '"description=Données de essai"') $donneesB
+    Verifier 'aucune -Donnees : le code garde sa fusion (edouard), cible aucune, nature code' ($codeB -match '--data fusion=edouard ' -and $codeB -match '--data cible=aucune ' -and $codeB -match '--data nature=code ') $codeB
+    Verifier 'aucune -Donnees : les données sans instance (ni domaine, ni bloc, ni clé)' ($donneesB -and $donneesB -notmatch 'domaine=|bloc_ports|cle_serveur|cle_hors_ligne') $donneesB
+
+    # -- serveur : toujours les deux dépôts ; les données portent l'instance
+    Write-Host 'Etapes : serveur'
+    try { . $script -Nom 'essai' -Description 'Essai' -Version 'v0.1.0' @argsServeur } catch { Write-Host "  point-source : $_" -ForegroundColor Red }
+    $refusS = $null
+    try { Assert-Parametres } catch { $refusS = $_.Exception.Message }
+    Verifier 'serveur : les paramètres passent, le bloc est le premier libre (4330)' ($null -eq $refusS -and $BlocPorts -eq 4330) "$refusS / bloc $BlocPorts"
+    try { $etapesS = @(Get-Etapes) } catch { Write-Host "  Get-Etapes : $_" -ForegroundColor Red }
+    Verifier 'serveur : 21 étapes' ($etapesS.Count -eq 21) "$($etapesS.Count)"
+    $premierGH = -1
+    for ($n = 0; $n -lt $etapesS.Count; $n++) { if ($etapesS[$n].GitHub -eq $true) { $premierGH = $n; break } }
+    $dernierCommit    = Indice $etapesS 'premier commit' -Dernier
+    $premiereCreation = Indice $etapesS 'gh repo create'
+    Verifier 'serveur : aucune étape GitHub avant le dernier premier commit' ($dernierCommit -ge 0 -and $premiereCreation -gt $dernierCommit -and $premierGH -eq $premiereCreation) "dernier premier commit $dernierCommit, première gh repo create $premiereCreation, première étape GitHub $premierGH"
+    $copiesS = @($etapesS | Where-Object { $_.Description -like 'copier copy*' })
+    $codeS    = if ($copiesS.Count -eq 2) { $copiesS[0].Commande } else { '' }
+    $donneesS = if ($copiesS.Count -eq 2) { $copiesS[1].Commande } else { '' }
+    Verifier 'serveur : le code porte nature=code et cible=serveur' ($codeS -match '--data nature=code ' -and $codeS -match '--data cible=serveur ' -and $codeS -match '--data port_app=3000 ' -and $codeS -match '--data chemin_sante=/api/sante ' -and $codeS -match '--data sauvegardes=true ' -and $codeS -notmatch 'domaine|bloc_ports|cle_|visibilite') $codeS
+    Verifier 'serveur : les données portent cible_code=serveur, domaine, bloc_ports, les deux clés et fusion=session' ($donneesS -match '--data cible=donnees ' -and $donneesS -match '--data cible_code=serveur ' -and $donneesS -match '--data domaine=exemple\.org ' -and $donneesS -match '--data sous_domaine=essai ' -and $donneesS -match '--data bloc_ports=4330 ' -and $donneesS.Contains("--data cle_serveur=$cleTest1 ") -and $donneesS.Contains("--data cle_hors_ligne=$cleTest2 ") -and $donneesS -match '--data fusion=session ' -and $donneesS -notmatch 'port_app|chemin_sante|sauvegardes|nature') $donneesS
+    $reglesS = @($etapesS | Where-Object { $_.Description -like 'règle de protection*' })
+    Verifier 'serveur : la règle de protection pour le code public, sans objet pour les données' ($reglesS.Count -eq 2 -and $reglesS[0].Commande -match 'repos/EdouardZemb/essai/rulesets' -and $reglesS[1].Description -match 'sans objet') (($reglesS | ForEach-Object { "$($_.Description) > $($_.Commande)" }) -join "`n")
+    $lignesS = @($etapesS | Where-Object { $_.Description -like "ligne d'index*" })
+    Verifier 'serveur : deux lignes d''index, la seconde de type données' ($lignesS.Count -eq 2 -and $lignesS[0].Commande.Contains('| essai | code |') -and $lignesS[1].Commande.Contains('| essai-donnees | données |') -and $lignesS[1].Commande.Contains('EdouardZemb/essai-donnees (privé)')) (($lignesS | ForEach-Object { $_.Commande }) -join "`n")
+    $ghFaux = @($etapesS | Where-Object { ($_.GitHub -eq $true) -ne [bool]($_.Description -match '^(gh repo create|réglages de fusion|secret MOTIFS_INTERDITS|premier envoi|règle de protection)') })
+    Verifier 'serveur : GitHub vrai pour la création, la fusion, le secret, l''envoi et la règle, seulement' ($etapesS.Count -gt 0 -and $ghFaux.Count -eq 0) (($ghFaux | ForEach-Object { $_.Description }) -join "`n")
+    $sansNom = @($etapesS | Select-Object -Skip 1 | Where-Object { $_.Description -notmatch '\((essai|essai-donnees)\) : ' })
+    $deDonnees = @($etapesS | Where-Object { $_.Description -match '\(essai-donnees\) : ' })
+    Verifier 'serveur : chaque description nomme son dépôt (dix pour les données)' ($etapesS.Count -gt 0 -and $sansNom.Count -eq 0 -and $deDonnees.Count -eq 10) (($sansNom | ForEach-Object { $_.Description }) -join "`n")
+    $sansSauv = ''
+    try {
+        . $script -Nom 'essai' -Description 'Essai' -Version 'v0.1.0' -SansSauvegardes -BlocPorts 4330 @argsServeur
+        $sansSauv = @(Get-Etapes | Where-Object { $_.Description -like 'copier copy*' })[0].Commande
+    } catch { $sansSauv = "$_" }
+    Verifier 'serveur -SansSauvegardes : sauvegardes=false' ($sansSauv -match '--data sauvegardes=false ') $sansSauv
+
+    # -- les trois formes
+    foreach ($forme in @(@{ Nom = 'aucune'; Etapes = $etapesA }, @{ Nom = 'aucune -Donnees'; Etapes = $etapesB }, @{ Nom = 'serveur'; Etapes = $etapesS })) {
+        $liste = @($forme.Etapes)
+        Verifier "$($forme.Nom) : chaque étape a Description, Commande, Action, Ctx et GitHub" ($liste.Count -gt 0 -and @($liste | Where-Object { $_.Description -and $_.Commande -and $_.Action -and ($_.Ctx -is [hashtable]) -and ($_.GitHub -is [bool]) }).Count -eq $liste.Count)
+        $hors = @(Lire-HorsContexte $liste)
+        Verifier "chaque variable lue par une action est dans le contexte ($($forme.Nom))" ($liste.Count -gt 0 -and $hors.Count -eq 0) ($hors -join ', ')
     }
-    Verifier 'chaque variable lue par une action est dans le contexte' ($absentes.Count -eq 0) ($absentes -join ', ')
-    Verifier 'le contexte nomme le modèle EdouardZemb/modele-projet' ($script:Ctx['mdl'] -eq 'EdouardZemb/modele-projet') "$($script:Ctx['mdl'])"
+
+    # -- les refus, avant toute étape : dans un enfant, à blanc, sur le faux clone
+    Write-Host 'Refus avant toute étape'
+    $baseEnfant = @('-Nom', 'essai', '-Description', 'Essai', '-Version', 'v0.1.0', '-Cible', 'serveur',
+                    '-RacineCode', (Join-Path $racineFaux 'code'), '-RacineServeur', $fauxServeur, '-ABlanc')
+    foreach ($cas in @(
+            @{ Nom = 'serveur sans -Domaine';      Args = @('-CleServeur', $cleTest1, '-CleHorsLigne', $cleTest2);                          Attendu = '-Domaine est obligatoire' },
+            @{ Nom = 'serveur sans -CleServeur';   Args = @('-Domaine', 'exemple.org', '-CleHorsLigne', $cleTest2);                         Attendu = '-CleServeur est obligatoire' },
+            @{ Nom = 'serveur sans -CleHorsLigne'; Args = @('-Domaine', 'exemple.org', '-CleServeur', $cleTest1);                           Attendu = '-CleHorsLigne est obligatoire' },
+            @{ Nom = 'une clé mal formée';         Args = @('-Domaine', 'exemple.org', '-CleServeur', 'age1-pas-une-cle', '-CleHorsLigne', $cleTest2); Attendu = '-CleServeur mal form' },
+            @{ Nom = 'un domaine mal formé';       Args = @('-Domaine', 'Exemple.ORG', '-CleServeur', $cleTest1, '-CleHorsLigne', $cleTest2); Attendu = 'un nom de domaine en minuscules' },
+            @{ Nom = 'un -BlocPorts déjà pris';    Args = @('-Domaine', 'exemple.org', '-CleServeur', $cleTest1, '-CleHorsLigne', $cleTest2, '-BlocPorts', '4320'); Attendu = 'bloc de ports 4320' })) {
+        $sortie = Lancer-Enfant ($baseEnfant + $cas.Args)
+        Verifier "$($cas.Nom) : refus avant toute étape" (($sortie -replace '\s+', ' ') -match [regex]::Escape($cas.Attendu) -and $sortie -notmatch '\[1/\d+\]') $sortie
+    }
+
+    # -- Get-BlocLibre, sur le faux clone
+    Write-Host 'Get-BlocLibre'
+    $blocLibre = $null
+    try { $blocLibre = Get-BlocLibre $fauxServeur } catch { $blocLibre = "$_" }
+    Verifier 'Get-BlocLibre : 4310 et 4320 pris donnent 4330' ($blocLibre -is [int] -and $blocLibre -eq 4330) "$blocLibre"
+    $erreurPlein = $null
+    try { $null = Get-BlocLibre $fauxPlein } catch { $erreurPlein = $_ }
+    Verifier 'Get-BlocLibre : tout pris, une erreur' ($null -ne $erreurPlein -and "$erreurPlein" -match '4990') "$erreurPlein"
+    $erreurAbsent = $null
+    try { $null = Get-BlocLibre (Join-Path $racineFaux 'absent') } catch { $erreurAbsent = $_ }
+    Verifier 'Get-BlocLibre : un clone illisible, une erreur' ($null -ne $erreurAbsent -and "$erreurAbsent" -match 'serveur') "$erreurAbsent"
+
+    # -- Invoke-Etapes, sur de fausses étapes
+    Write-Host 'Invoke-Etapes'
+    $script:troisJouee = $false
+    $fausses = @(
+        [pscustomobject]@{ Description = 'fausse un';    Commande = 'commande-un';    Action = { };                             Ctx = @{}; GitHub = $true },
+        [pscustomobject]@{ Description = 'fausse deux';  Commande = 'commande-deux';  Action = { throw 'boum' };                Ctx = @{}; GitHub = $true },
+        [pscustomobject]@{ Description = 'fausse trois'; Commande = 'commande-trois'; Action = { $script:troisJouee = $true }; Ctx = @{}; GitHub = $false })
+    $flux = @()
+    try { $flux = @(Invoke-Etapes -Etapes $fausses 6>&1) } catch { $flux = @("$_") }
+    $codeInv  = @($flux | Where-Object { $_ -is [int] })
+    $texteInv = (@($flux | Where-Object { $_ -isnot [int] } | ForEach-Object { "$_" }) -join "`n")
+    Verifier 'Invoke-Etapes : un échec affiche les commandes restantes' ($texteInv.Contains('Reste à faire') -and $texteInv.Contains('commande-trois') -and $texteInv.Contains('Fait :') -and $texteInv.Contains('fausse un')) $texteInv
+    Verifier 'Invoke-Etapes : l''échec rend 1 et arrête tout' ($codeInv.Count -eq 1 -and $codeInv[0] -eq 1 -and -not $script:troisJouee) "code $($codeInv -join ',') ; trois jouée : $script:troisJouee"
+    $locales = @(
+        [pscustomobject]@{ Description = 'locale'; Commande = 'commande-locale'; Action = { throw 'boum' }; Ctx = @{}; GitHub = $false },
+        [pscustomobject]@{ Description = 'distante'; Commande = 'commande-distante'; Action = { }; Ctx = @{}; GitHub = $true })
+    $flux = @()
+    try { $flux = @(Invoke-Etapes -Etapes $locales 6>&1) } catch { $flux = @("$_") }
+    $texteInv = (@($flux | Where-Object { $_ -isnot [int] } | ForEach-Object { "$_" }) -join "`n")
+    Verifier 'Invoke-Etapes : un échec avant toute étape GitHub n''affiche pas de reste' ($texteInv.Contains('ECHEC') -and -not $texteInv.Contains('Reste à faire')) $texteInv
+
+    # -- rendu réel, cible serveur : copier seul, les deux dépôts, dans un dossier temporaire
+    # Le script passe nature (v0.6.0) et les réponses du dépôt de données d'un projet serveur
+    # (v0.7.0) : sans -SansPoste, on rend v0.7.0, la première version qui les a.
+    Write-Host 'Rendu serveur (copier copy seul, dossier temporaire)'
+    $versionRenduServeur = if ($versionTest) { $versionTest } else { 'v0.7.0' }
+    $racineRenduServeur = Join-Path $racineFaux 'rendu'
+    $erreurRendu = $null
+    try {
+        . $script -Nom 'essai' -Description 'Essai' -Version $versionRenduServeur -SourceModele $sourceTest -RacineCode $racineRenduServeur @argsServeur
+        Assert-Parametres
+        foreach ($e in @(Get-Etapes | Where-Object { $_.Description -like 'copier copy*' })) {
+            $script:Ctx = $e.Ctx
+            $null = & $e.Action
+        }
+    } catch { $erreurRendu = $_.Exception.Message }
+    $dossierCode    = "$script:Chemin"
+    $dossierDonnees = "$script:CheminDonnees"
+    $reponsesCode    = if ($dossierCode)    { Join-Path $dossierCode '.copier-answers.yml' } else { '' }
+    $reponsesDonnees = if ($dossierDonnees) { Join-Path $dossierDonnees '.copier-answers.yml' } else { '' }
+    $texteCode    = if ($reponsesCode -and (Test-Path -LiteralPath $reponsesCode)) { [IO.File]::ReadAllText($reponsesCode) } else { '' }
+    $texteDonnees = if ($reponsesDonnees -and (Test-Path -LiteralPath $reponsesDonnees)) { [IO.File]::ReadAllText($reponsesDonnees) } else { '' }
+    Verifier 'rendu serveur : le code dit nature: code, cible: serveur, et n''a pas domaine' ($texteCode -match '(?m)^nature: code\s*$' -and $texteCode -match '(?m)^cible: serveur\s*$' -and $texteCode -notmatch '(?m)^domaine:') "$erreurRendu`n$texteCode"
+    Verifier 'rendu serveur : les données disent cible: donnees, cible_code: serveur, bloc_ports: 4330, domaine: exemple.org' ($texteDonnees -match '(?m)^cible: donnees\s*$' -and $texteDonnees -match '(?m)^cible_code: serveur\s*$' -and $texteDonnees -match '(?m)^bloc_ports: 4330\s*$' -and $texteDonnees -match '(?m)^domaine: exemple\.org\s*$') "$erreurRendu`n$texteDonnees"
+    Verifier 'rendu serveur : les données ont env/prod.env' ($dossierDonnees -and (Test-Path -LiteralPath (Join-Path $dossierDonnees 'env\prod.env'))) "$erreurRendu"
+} finally {
+    if (Test-Path -LiteralPath $racineFaux) { Remove-Item -LiteralPath $racineFaux -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
 # ------------------------------------------------------------ rendu réel de la fusion
@@ -221,7 +413,7 @@ try {
         . $script -Nom $cas.Nom -Description 'Essai' -Version $versionRendu -SourceModele $sourceTest -RacineCode $racineRendu @argsCas
         $etapesRendu = @(Get-Etapes)
         $erreurRendu = $null
-        try { & $etapesRendu[1].Action } catch { $erreurRendu = $_.Exception.Message }
+        try { $script:Ctx = $etapesRendu[1].Ctx; $null = & $etapesRendu[1].Action } catch { $erreurRendu = $_.Exception.Message }
         $reponses = Join-Path $script:Chemin '.copier-answers.yml'
         $texteRendu = if (Test-Path -LiteralPath $reponses) { [IO.File]::ReadAllText($reponses) } else { '' }
         Verifier "rendu $($cas.Nom) : .copier-answers.yml porte fusion: $($cas.Attendu)" ($texteRendu -match "(?m)^fusion: $($cas.Attendu)\s*$") "$erreurRendu`n$texteRendu"
