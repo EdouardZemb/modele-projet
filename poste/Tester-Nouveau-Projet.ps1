@@ -71,6 +71,21 @@ function Lire-HorsContexte([object[]] $Liste) {
     return $absentes
 }
 
+function Lire-Commande([string] $Commande) {
+    # Ce que PowerShell ferait de la commande collée, sans l'exécuter : ses erreurs d'analyse, ses
+    # chaînes entre guillemets doubles (qui interpoleraient $ et `) et la valeur de chaque élément.
+    $jetons = $null; $erreurs = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseInput($Commande, [ref] $jetons, [ref] $erreurs)
+    $doubles = @($ast.FindAll({
+        $args[0] -is [System.Management.Automation.Language.ExpandableStringExpressionAst] -or
+        ($args[0] -is [System.Management.Automation.Language.StringConstantExpressionAst] -and
+         $args[0].StringConstantType -ne 'SingleQuoted' -and $args[0].StringConstantType -ne 'BareWord') }, $true))
+    $valeurs = @($ast.FindAll({ $args[0] -is [System.Management.Automation.Language.CommandAst] }, $true) |
+        ForEach-Object { $_.CommandElements } |
+        ForEach-Object { if ($_ -is [System.Management.Automation.Language.StringConstantExpressionAst]) { $_.Value } else { $_.Extent.Text } })
+    return [pscustomobject]@{ Erreurs = @($erreurs).Count; Doubles = $doubles.Count; Valeurs = $valeurs }
+}
+
 function Indice([object[]] $Liste, [string] $Motif, [switch] $Dernier) {
     # L'indice de la première (ou de la dernière) étape dont la description commence par le motif.
     $trouve = -1
@@ -98,6 +113,10 @@ $sortie = Lancer-Enfant @('-Nom', 'essai-donnees', '-Description', 'x', '-Versio
 # Le message d'erreur est coupé à la largeur de la console : on compare sur des blancs réduits.
 Verifier 'nom en -donnees : refus' (($sortie -replace '\s+', ' ') -match 'r.serv. au d.p.t de donn.es') $sortie
 Verifier 'nom en -donnees : aucune étape n''a commencé' ($sortie -notmatch '\[1/\d+\]') $sortie
+# Le sous-domaine des données reprend le nom : copier refuse qu'il finisse par un tiret.
+$sortie = Lancer-Enfant @('-Nom', 'essai-', '-Description', 'x', '-Version', 'v0.1.0', '-ABlanc')
+Verifier 'nom qui finit par - : refus' (($sortie -replace '\s+', ' ') -match 'finir par un tiret') $sortie
+Verifier 'nom qui finit par - : aucune étape n''a commencé' ($sortie -notmatch '\[1/\d+\]') $sortie
 
 # ------------------------------------------------------------ à blanc et fusion
 # Ces lancements exécutent l'étape 1 pour de vrai (gh, liste privée) : le poste seulement.
@@ -256,6 +275,9 @@ try {
     Write-Host 'Etapes : aucune'
     try { . $script -Nom 'essai-fonctions' -Description 'Essai' -Version 'v0.1.0' } catch { Write-Host "  point-source : $_" -ForegroundColor Red }
     try { $etapesA = @(Get-Etapes) } catch { Write-Host "  Get-Etapes : $_" -ForegroundColor Red }
+    $refusA = $null
+    try { Assert-Parametres } catch { $refusA = $_.Exception.Message }
+    Verifier 'aucune sans paramètre de serveur : les paramètres passent' ($null -eq $refusA) "$refusA"
     $ordreA = @('préalables', 'copier copy', 'git init', 'premier commit', 'gh repo create EdouardZemb/essai-fonctions --public',
                 'réglages de fusion', 'secret MOTIFS_INTERDITS', 'premier envoi', 'règle de protection', 'dossier .worktrees', "ligne d'index")
     $ordreOkA = ($etapesA.Count -eq $ordreA.Count)
@@ -278,7 +300,7 @@ try {
     $copiesB = @($etapesB | Where-Object { $_.Description -like 'copier copy*' })
     $codeB    = if ($copiesB.Count -eq 2) { $copiesB[0].Commande } else { '' }
     $donneesB = if ($copiesB.Count -eq 2) { $copiesB[1].Commande } else { '' }
-    Verifier 'aucune -Donnees : deux dépôts ; les données en cible donnees, cible_code aucune, fusion session' ($donneesB -match '--data nom=essai-donnees ' -and $donneesB -match '--data cible=donnees ' -and $donneesB -match '--data cible_code=aucune ' -and $donneesB -match '--data fusion=session ' -and $donneesB -match '"description=Données de essai"') $donneesB
+    Verifier 'aucune -Donnees : deux dépôts ; les données en cible donnees, cible_code aucune, fusion session' ($donneesB -match '--data nom=essai-donnees ' -and $donneesB -match '--data cible=donnees ' -and $donneesB -match '--data cible_code=aucune ' -and $donneesB -match '--data fusion=session ' -and $donneesB.Contains("--data 'description=Données de essai'")) $donneesB
     Verifier 'aucune -Donnees : le code garde sa fusion (edouard), cible aucune, nature code' ($codeB -match '--data fusion=edouard ' -and $codeB -match '--data cible=aucune ' -and $codeB -match '--data nature=code ') $codeB
     Verifier 'aucune -Donnees : les données sans instance (ni domaine, ni bloc, ni clé)' ($donneesB -and $donneesB -notmatch 'domaine=|bloc_ports|cle_serveur|cle_hors_ligne') $donneesB
 
@@ -295,6 +317,9 @@ try {
     $dernierCommit    = Indice $etapesS 'premier commit' -Dernier
     $premiereCreation = Indice $etapesS 'gh repo create'
     Verifier 'serveur : aucune étape GitHub avant le dernier premier commit' ($dernierCommit -ge 0 -and $premiereCreation -gt $dernierCommit -and $premierGH -eq $premiereCreation) "dernier premier commit $dernierCommit, première gh repo create $premiereCreation, première étape GitHub $premierGH"
+    $pre = if ($etapesS.Count) { $etapesS[0].Ctx } else { @{} }
+    Verifier 'serveur : les préalables cherchent essai et essai-donnees sur GitHub et sur le disque' (@($pre.distants) -contains 'EdouardZemb/essai' -and @($pre.distants) -contains 'EdouardZemb/essai-donnees' -and @($pre.chemins) -contains "$script:Chemin" -and @($pre.chemins) -contains "$script:CheminDonnees") "distants : $(@($pre.distants) -join ', ') ; chemins : $(@($pre.chemins) -join ', ')"
+    Verifier 'serveur : les préalables vérifient l''index pour les deux lignes' (@($pre.lignes).Count -eq 2 -and "$(@($pre.lignes)[1])".StartsWith('| essai-donnees | données |')) (@($pre.lignes) -join "`n")
     $copiesS = @($etapesS | Where-Object { $_.Description -like 'copier copy*' })
     $codeS    = if ($copiesS.Count -eq 2) { $copiesS[0].Commande } else { '' }
     $donneesS = if ($copiesS.Count -eq 2) { $copiesS[1].Commande } else { '' }
@@ -324,6 +349,58 @@ try {
         Verifier "chaque variable lue par une action est dans le contexte ($($forme.Nom))" ($liste.Count -gt 0 -and $hors.Count -eq 0) ($hors -join ', ')
     }
 
+    # -- les commandes affichées se collent telles quelles dans PowerShell (« Reste à faire »)
+    Write-Host 'Commandes à coller'
+    $descSpeciale = 'Un $HOME, une apostrophe inverse ` , l''apostrophe et des "guillemets"'
+    $etapesC = @()
+    try { . $script -Nom 'essai' -Description $descSpeciale -Version 'v0.1.0' -BlocPorts 4330 @argsServeur } catch { Write-Host "  point-source : $_" -ForegroundColor Red }
+    try { $etapesC = @(Get-Etapes) } catch { Write-Host "  Get-Etapes : $_" -ForegroundColor Red }
+    $malCollees = @()
+    foreach ($e in @($etapesC | Select-Object -Skip 1 | Where-Object { $_.Commande -ne '(aucune)' -and -not $_.Description.StartsWith("ligne d'index") })) {
+        $lu = Lire-Commande $e.Commande
+        if ($lu.Erreurs -or $lu.Doubles) { $malCollees += "$($e.Description) > $($e.Commande)" }
+    }
+    Verifier 'chaque commande affichée se colle telle quelle (apostrophes simples, rien d''interpolé)' ($etapesC.Count -eq 21 -and $malCollees.Count -eq 0) ($malCollees -join "`n")
+    $descPassee = $descSpeciale -replace '"', '\"'
+    $creationC = @($etapesC | Where-Object { $_.Description -like 'gh repo create*' }) | Select-Object -First 1
+    $valeursGh = if ($creationC) { @((Lire-Commande $creationC.Commande).Valeurs) } else { @() }
+    $iDesc = [array]::IndexOf($valeursGh, '--description')
+    Verifier 'gh repo create : la description collée est celle que passe l''action' ($iDesc -ge 0 -and $valeursGh[$iDesc + 1] -ceq $descPassee) ($valeursGh -join ' | ')
+    $copieC = @($etapesC | Where-Object { $_.Description -like 'copier copy*' }) | Select-Object -First 1
+    $valeursCopier = if ($copieC) { @((Lire-Commande $copieC.Commande).Valeurs) } else { @() }
+    $argsAction = if ($copieC) { @('copier') + @($copieC.Ctx.argsCopier) } else { @('?') }
+    Verifier 'copier copy : la commande collée passe les arguments de l''action' ((($valeursCopier -join "`n") -ceq ($argsAction -join "`n")) -and $valeursCopier -ccontains "description=$descPassee") "collée : $($valeursCopier -join ' | ')`naction : $($argsAction -join ' | ')"
+    $indexC = @($etapesC | Where-Object { $_.Description.StartsWith("ligne d'index") }) | Select-Object -First 1
+    Verifier 'ligne d''index : la commande montre la ligne à ajouter, sans fonction du script' ($indexC -and $indexC.Commande -notmatch 'Add-LigneIndex' -and $indexC.Commande.Contains($indexC.Ctx.ligne)) "$($indexC.Commande)"
+
+    # -- aucune : les paramètres de serveur sont refusés, -Cible serveur manque
+    Write-Host 'Paramètres de serveur hors cible'
+    $acceptes = @()
+    foreach ($p in @(@{ Domaine = 'exemple.org' }, @{ CleServeur = $cleTest1 }, @{ CleHorsLigne = $cleTest2 }, @{ BlocPorts = 4330 },
+                     @{ PortApp = 8080 }, @{ CheminSante = '/sante' }, @{ SansSauvegardes = $true })) {
+        $nomP = @($p.Keys)[0]
+        $refusP = $null
+        try { . $script -Nom 'essai' -Description 'Essai' -Version 'v0.1.0' -Donnees @p; Assert-Parametres } catch { $refusP = $_.Exception.Message }
+        if (-not ($refusP -and $refusP.Contains("-$nomP") -and $refusP.Contains('Ajouter -Cible serveur'))) { $acceptes += "-$nomP : $refusP" }
+    }
+    Verifier 'aucune : chaque paramètre de serveur est refusé (Ajouter -Cible serveur)' ($acceptes.Count -eq 0) ($acceptes -join "`n")
+
+    # -- Assert-Index, sur des index factices
+    Write-Host 'Assert-Index'
+    $idxBon = Join-Path $racineFaux 'index-bon.md'
+    $idxSans = Join-Path $racineFaux 'index-sans.md'
+    [IO.File]::WriteAllText($idxBon, "# Dépôts`n`n| Projet | Type | Chemin |`n|---|---|---|`n| a | code | x |`n", [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText($idxSans, "# rien`n`n| A | B |`n|---|---|`n", [Text.UTF8Encoding]::new($false))
+    $erreurBon = $null
+    try { Assert-Index -Index $idxBon -Lignes @('| b | code | y |', '| b-donnees | données | z |') } catch { $erreurBon = "$_" }
+    Verifier 'Assert-Index : un index avec l''en-tête et sans les lignes passe' ($null -eq $erreurBon) "$erreurBon"
+    $erreurSans = $null
+    try { Assert-Index -Index $idxSans -Lignes @('| b | code | y |') } catch { $erreurSans = "$_" }
+    Verifier 'Assert-Index : sans en-tête, une erreur' ($erreurSans -match 'Projet \| Type \| Chemin') "$erreurSans"
+    $erreurDeja = $null
+    try { Assert-Index -Index $idxBon -Lignes @('| b | code | y |', '| a | code | autre |') } catch { $erreurDeja = "$_" }
+    Verifier 'Assert-Index : une ligne déjà là, une erreur' ($erreurDeja -match '\| a \|') "$erreurDeja"
+
     # -- les refus, avant toute étape : dans un enfant, à blanc, sur le faux clone
     Write-Host 'Refus avant toute étape'
     $baseEnfant = @('-Nom', 'essai', '-Description', 'Essai', '-Version', 'v0.1.0', '-Cible', 'serveur',
@@ -338,6 +415,9 @@ try {
         $sortie = Lancer-Enfant ($baseEnfant + $cas.Args)
         Verifier "$($cas.Nom) : refus avant toute étape" (($sortie -replace '\s+', ' ') -match [regex]::Escape($cas.Attendu) -and $sortie -notmatch '\[1/\d+\]') $sortie
     }
+    $sortie = Lancer-Enfant @('-Nom', 'essai', '-Description', 'Essai', '-Version', 'v0.1.0', '-Domaine', 'exemple.org',
+                              '-RacineCode', (Join-Path $racineFaux 'code'), '-ABlanc')
+    Verifier 'aucune avec -Domaine : refus avant toute étape' (($sortie -replace '\s+', ' ') -match 'Ajouter -Cible serveur' -and $sortie -notmatch '\[1/\d+\]') $sortie
 
     # -- Get-BlocLibre, sur le faux clone
     Write-Host 'Get-BlocLibre'

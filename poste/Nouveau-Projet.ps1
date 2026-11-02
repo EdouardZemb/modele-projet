@@ -51,6 +51,7 @@ param(
     [Parameter(Mandatory)]
     [ValidateScript({
         if ($_ -cnotmatch '^[a-z][a-z0-9-]*$') { throw "Nom invalide « $_ » : il faut des minuscules, des chiffres et des tirets, en commençant par une lettre." }
+        if ($_ -clike '*-') { throw "Nom invalide « $_ » : il ne doit pas finir par un tiret (copier refuserait le sous-domaine des données)." }
         if ($_ -clike '*-donnees') { throw "Nom invalide « $_ » : un nom en -donnees est réservé au dépôt de données, que le script crée lui-même (-Donnees, ou -Cible serveur)." }
         $true
     })]
@@ -111,6 +112,10 @@ $ErrorActionPreference = 'Stop'
 $Organisation = 'EdouardZemb'
 $Modele       = 'EdouardZemb/modele-projet'
 $Hooks        = @('.githooks/pre-commit', '.githooks/commit-msg', '.githooks/pre-push')
+# Les paramètres de la seule cible serveur que l'appel a passés : refusés dans une autre cible, où
+# ils seraient ignorés (un -Cible serveur oublié créerait un seul dépôt).
+$ParamsServeur = @('Domaine', 'CleServeur', 'CleHorsLigne', 'BlocPorts', 'PortApp', 'CheminSante', 'SansSauvegardes' |
+    Where-Object { $PSBoundParameters.ContainsKey($_) })
 
 # ------------------------------------------------------------------ outils
 
@@ -163,6 +168,13 @@ function Protege-Guillemets([string] $Texte) {
     return ($Texte -replace '"', '\"')
 }
 
+function Format-Argument([string] $Texte) {
+    # Un argument d'une commande affichée, qui se colle tel quel dans PowerShell : entre apostrophes,
+    # doublées, dès qu'il contient autre chose que des caractères sûrs. Rien n'y est interpolé.
+    if ($Texte -cmatch '^[A-Za-z0-9_./:=+-]+$') { return $Texte }
+    return "'" + ($Texte -replace "'", "''") + "'"
+}
+
 # ------------------------------------------------------------------ l'index
 
 function Get-LigneIndex {
@@ -211,6 +223,24 @@ function Add-LigneIndex {
     $liste.AddRange([string[]]$lignes)
     $liste.Insert($fin + 1, $Ligne)
     [IO.File]::WriteAllText($Index, ($liste -join "`n"), $utf8)
+}
+
+function Assert-Index {
+    # En lecture seule, dès les préalables : l'index a l'en-tête « | Projet | Type | Chemin | » et
+    # aucune des lignes à ajouter. Sinon Add-LigneIndex échouerait entre deux gestes sur GitHub.
+    param(
+        [Parameter(Mandatory)] [string] $Index,
+        [Parameter(Mandatory)] [string[]] $Lignes
+    )
+    $existantes = [IO.File]::ReadAllText($Index, [Text.UTF8Encoding]::new($false)) -split "`n"
+    if (-not @($existantes | Where-Object { $_.StartsWith('| Projet | Type | Chemin |') }).Count) {
+        throw "En-tête « | Projet | Type | Chemin | » introuvable dans $Index : la ligne d'index ne pourrait pas s'y ajouter."
+    }
+    foreach ($l in $Lignes) {
+        if ($l -notmatch '^\| (.+?) \|') { throw "Ligne d'index mal formée : $l" }
+        $prefixe = "| $($Matches[1]) |"
+        if (@($existantes | Where-Object { $_.StartsWith($prefixe) }).Count) { throw "L'index contient déjà une ligne « $prefixe »." }
+    }
 }
 
 # ------------------------------------------------------------------ l'instance (cible serveur)
@@ -271,8 +301,14 @@ function Assert-Instance {
 
 function Assert-Parametres {
     # Avant toute étape : ce que Copier refuserait, et en cible serveur le bloc de ports, le premier
-    # libre si -BlocPorts manque. Lit les paramètres dans la portée du script appelant.
-    if ($Cible -ne 'serveur') { return }
+    # libre si -BlocPorts manque. Dans une autre cible, les paramètres de serveur sont refusés. Lit
+    # les paramètres dans la portée du script appelant.
+    if ($Cible -ne 'serveur') {
+        if (@($ParamsServeur).Count) {
+            throw "-$(@($ParamsServeur) -join ', -') : pour la cible serveur seulement. Ajouter -Cible serveur, ou retirer ces paramètres."
+        }
+        return
+    }
     Assert-Instance -Domaine $Domaine -CleServeur $CleServeur -CleHorsLigne $CleHorsLigne
     if ($BlocPorts) { Assert-BlocLibre -RacineServeur $RacineServeur -Bloc $BlocPorts }
     else { $script:BlocPorts = Get-BlocLibre $RacineServeur }
@@ -314,16 +350,12 @@ function New-Depot {
     # PowerShell 5.1 abîmerait les accents.
     $ctx.cmdActions    = "gh secret set MOTIFS_INTERDITS --repo $($ctx.depot) < $($Commun.mot)"
     $ctx.cmdDependabot = "gh secret set MOTIFS_INTERDITS --repo $($ctx.depot) --app dependabot < $($Commun.mot)"
-    # copier : l'action reçoit les réponses aux guillemets protégés ; la commande les montre telles quelles.
+    # copier : l'action reçoit les réponses aux guillemets protégés ; la commande affichée, collée
+    # dans PowerShell, passe les mêmes arguments.
     $a = @('copy', '--defaults', '--vcs-ref', $Commun.ver)
-    $cmd = "copier copy --defaults --vcs-ref $($Commun.ver)"
-    foreach ($r in $Reponses) {
-        $a += @('--data', (Protege-Guillemets $r))
-        $morceau = if ($r -match '\s') { " --data `"$r`"" } else { " --data $r" }
-        $cmd += $morceau
-    }
+    foreach ($r in $Reponses) { $a += @('--data', (Protege-Guillemets $r)) }
     $ctx.argsCopier = $a + @($Commun.src, $Dossier)
-    $ctx.cmdCopier  = "$cmd $($Commun.src) `"$Dossier`""
+    $ctx.cmdCopier  = 'copier ' + (($ctx.argsCopier | ForEach-Object { Format-Argument $_ }) -join ' ')
     return $ctx
 }
 
@@ -368,17 +400,19 @@ function Get-Etapes {
     $ctxPre.chemins = $chemins; $ctxPre.distants = $distants; $ctxPre.serveur = $serveur
     $ctxPre.dom = $Domaine; $ctxPre.cleS = $CleServeur; $ctxPre.cleH = $CleHorsLigne
     $ctxPre.bloc = $BlocPorts; $ctxPre.racineSrv = $RacineServeur
+    $ctxPre.lignes = @($depots | ForEach-Object { $_.ligne })
     if ($deux) {
         $descPre = "préalables : copier 9.19 ou plus, gh connecté, python, fichier de motifs, dossiers cibles libres, dépôts distants absents ($(($depots | ForEach-Object { $_.nomDepot }) -join ', '))"
     } else {
         $descPre = 'préalables : copier 9.19 ou plus, gh connecté, python, fichier de motifs, dossier cible libre, dépôt distant absent'
     }
-    $cmdPre = "copier --version ; gh auth status ; python --version ; Test-Path `"$Motifs`""
-    foreach ($c in $chemins)  { $cmdPre += " ; Test-Path `"$c`" (doit être faux)" }
-    foreach ($d in $distants) { $cmdPre += " ; gh repo view $d (doit échouer)" }
+    $cmdPre = "copier --version ; gh auth status ; python --version ; Test-Path $(Format-Argument $Motifs)"
+    $cmdPre += " ; Select-String -LiteralPath $(Format-Argument $Index) -SimpleMatch -Pattern '| Projet | Type | Chemin |' (doit trouver l'en-tête, sans les lignes à ajouter)"
+    foreach ($c in $chemins)  { $cmdPre += " ; Test-Path $(Format-Argument $c) (doit être faux)" }
+    foreach ($d in $distants) { $cmdPre += " ; gh repo view $(Format-Argument $d) (doit échouer)" }
     if ($serveur) {
         $descPre += ", domaine et clés valides, clone de serveur lisible, bloc de ports $BlocPorts libre"
-        $cmdPre  += " ; Get-ChildItem `"$RacineServeur\projets\*.env`" (BLOC_PORTS=$BlocPorts absent)"
+        $cmdPre  += " ; Get-ChildItem $(Format-Argument "$RacineServeur\projets\*.env") (BLOC_PORTS=$BlocPorts absent)"
     }
     $etapes += [pscustomobject]@{
         Description = $descPre
@@ -400,6 +434,7 @@ function Get-Etapes {
             if (-not (Test-Path -LiteralPath $mot)) { throw "Fichier de motifs introuvable : $mot" }
             if ($mot -match '\s') { throw "Le chemin du fichier de motifs ne doit pas contenir d'espace : $mot" }
             if (-not (Test-Path -LiteralPath $idx)) { throw "Index introuvable : $idx" }
+            Assert-Index -Index $idx -Lignes $lignes
             foreach ($c in $chemins) {
                 if (Test-Path -LiteralPath $c) { throw "Le dossier cible existe déjà : $c" }
             }
@@ -434,7 +469,7 @@ function Get-Etapes {
     foreach ($d in $depots) {
         $etapes += [pscustomobject]@{
             Description = "git init$($d.etiq) : dépôt local, branche $Branche, hooks activés"
-            Commande    = "git -C `"$($d.chemin)`" init -b $Branche ; git -C `"$($d.chemin)`" config core.hooksPath .githooks"
+            Commande    = "git -C $(Format-Argument $d.chemin) init -b $(Format-Argument $Branche) ; git -C $(Format-Argument $d.chemin) config core.hooksPath .githooks"
             Ctx         = $d
             GitHub      = $false
             Action      = {
@@ -445,7 +480,7 @@ function Get-Etapes {
         }
         $etapes += [pscustomobject]@{
             Description = "premier commit$($d.etiq) : tout ajouter, hooks exécutables, commit (les hooks du projet tournent sur ce commit)"
-            Commande    = "git -C `"$($d.chemin)`" add -A ; git -C `"$($d.chemin)`" update-index --chmod=+x $($Hooks -join ' ') ; git -C `"$($d.chemin)`" commit -m `"$($d.message)`""
+            Commande    = "git -C $(Format-Argument $d.chemin) add -A ; git -C $(Format-Argument $d.chemin) update-index --chmod=+x $($Hooks -join ' ') ; git -C $(Format-Argument $d.chemin) commit -m $(Format-Argument $d.message)"
             Ctx         = $d
             GitHub      = $false
             Action      = {
@@ -462,7 +497,7 @@ function Get-Etapes {
     foreach ($d in $depots) {
         $etapes += [pscustomobject]@{
             Description = "gh repo create $($d.depot) $($d.pub)$($d.etiq) : créer le dépôt GitHub (sans envoi)"
-            Commande    = "gh repo create $($d.depot) $($d.pub) --description `"$($d.descr)`" --source `"$($d.chemin)`" --remote origin"
+            Commande    = "gh repo create $($d.depot) $($d.pub) --description $(Format-Argument (Protege-Guillemets $d.descr)) --source $(Format-Argument $d.chemin) --remote origin"
             Ctx         = $d
             GitHub      = $true
             Action      = {
@@ -489,7 +524,7 @@ function Get-Etapes {
         # Secret MOTIFS_INTERDITS, deux fois (Actions, Dependabot).
         $etapes += [pscustomobject]@{
             Description = "secret MOTIFS_INTERDITS$($d.etiq) : posé pour Actions et pour Dependabot"
-            Commande    = "cmd /c `"$($d.cmdActions)`" ; cmd /c `"$($d.cmdDependabot)`""
+            Commande    = "cmd /c $(Format-Argument $d.cmdActions) ; cmd /c $(Format-Argument $d.cmdDependabot)"
             Ctx         = $d
             GitHub      = $true
             Action      = {
@@ -505,7 +540,7 @@ function Get-Etapes {
         # envoi direct).
         $etapes += [pscustomobject]@{
             Description = "premier envoi$($d.etiq) : pousser $Branche vers GitHub (--no-verify, seule exception au pre-push)"
-            Commande    = "git -C `"$($d.chemin)`" push --no-verify -u origin $Branche"
+            Commande    = "git -C $(Format-Argument $d.chemin) push --no-verify -u origin $(Format-Argument $Branche)"
             Ctx         = $d
             GitHub      = $true
             Action      = {
@@ -518,7 +553,7 @@ function Get-Etapes {
         if ($d.vis -eq 'public') {
             $etapes += [pscustomobject]@{
                 Description = "règle de protection$($d.etiq) : appliquer ruleset-main.json à $Branche"
-                Commande    = "gh api -X POST repos/$($d.depot)/rulesets --input `"$($d.ruleset)`""
+                Commande    = "gh api -X POST repos/$($d.depot)/rulesets --input $(Format-Argument $d.ruleset)"
                 Ctx         = $d
                 GitHub      = $true
                 Action      = {
@@ -538,7 +573,7 @@ function Get-Etapes {
 
         $etapes += [pscustomobject]@{
             Description = "dossier .worktrees$($d.etiq) : $($d.worktrees)"
-            Commande    = "New-Item -ItemType Directory `"$($d.worktrees)`""
+            Commande    = "New-Item -ItemType Directory -Force -Path $(Format-Argument $d.worktrees)"
             Ctx         = $d
             GitHub      = $false
             Action      = {
@@ -549,7 +584,8 @@ function Get-Etapes {
 
         $etapes += [pscustomobject]@{
             Description = "ligne d'index$($d.etiq) : ajoutée à $Index"
-            Commande    = "Add-LigneIndex -Index `"$Index`" -Ligne `"$($d.ligne)`""
+            # Add-LigneIndex n'existe pas dans le shell d'Edouard : la commande dit la ligne et sa place.
+            Commande    = "(à la main) dans $(Format-Argument $Index), après la dernière ligne du premier tableau « | Projet | Type | Chemin | », ajouter la ligne : $($d.ligne)"
             Ctx         = $d
             GitHub      = $false
             Action      = {
