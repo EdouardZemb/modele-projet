@@ -2,12 +2,30 @@
     Tester-Nouveau-Projet.ps1 — tests de Nouveau-Projet.ps1.
     Ne crée rien de réel : l'index est une copie temporaire, -ABlanc ne fait que lire.
     Usage : powershell -NoProfile -ExecutionPolicy Bypass -File .\Tester-Nouveau-Projet.ps1
+
+    -SansPoste : pour la CI et les machines sans le poste d'Edouard. Saute ce qui lit gh, la liste
+    privée ou l'index réel (les lancements à blanc dans un enfant), prend un index factice et rend
+    le modèle depuis -SourceModele (un dépôt local) à -Version (HEAD par défaut) au lieu de v0.2.0.
 #>
+[CmdletBinding()]
+param(
+    [switch] $SansPoste,
+    [string] $SourceModele = 'gh:EdouardZemb/modele-projet',
+    [string] $Version
+)
 $ErrorActionPreference = 'Stop'
 $ici     = Split-Path -Parent $MyInvocation.MyCommand.Path
 $script  = Join-Path $ici 'Nouveau-Projet.ps1'
 $indexReel = Join-Path $HOME 'Documents\INDEX-PROJETS.md'
 $echecs  = 0
+# Les paramètres du test sont recopiés : le point-source du script écrase $Version et $SourceModele.
+$versionTest = $Version
+$sourceTest  = $SourceModele
+$sansPoste   = [bool] $SansPoste
+if ($SansPoste) {
+    Write-Host 'Mode -SansPoste : pas de lancement à blanc, index factice' -ForegroundColor Yellow
+    if (-not $versionTest) { $versionTest = 'HEAD' }
+}
 $reussis = 0
 
 function Verifier([string] $Nom, [bool] $Condition, [string] $Detail = '') {
@@ -34,7 +52,9 @@ $sortie = Lancer-Enfant @('-Nom', 'Mauvais_Nom', '-Description', 'x', '-ABlanc')
 Verifier 'le message contient « minuscules »' ($sortie -match 'minuscules') $sortie
 Verifier 'aucune étape n''a commencé' ($sortie -notmatch 'préalables') $sortie
 
-# ------------------------------------------------------------ à blanc
+# ------------------------------------------------------------ à blanc et fusion
+# Ces lancements exécutent l'étape 1 pour de vrai (gh, liste privée) : le poste seulement.
+if (-not $sansPoste) {
 Write-Host 'A blanc'
 $cible = 'C:\src\github.com\EdouardZemb\essai-a-blanc'
 $sortie = Lancer-Enfant @('-Nom', 'essai-a-blanc', '-Description', 'Essai à blanc', '-Version', 'v0.1.0', '-ABlanc')
@@ -60,6 +80,7 @@ Verifier 'à blanc -Fusion edouard : la commande copier porte --data fusion=edou
 $sortieAutre = Lancer-Enfant @('-Nom', 'essai-a-blanc', '-Description', 'Essai à blanc', '-Version', 'v0.1.0', '-Fusion', 'autre', '-ABlanc')
 Verifier '-Fusion autre est refusé (ValidateSet)' ($sortieAutre -match 'Fusion' -and $sortieAutre -match 'session' -and $sortieAutre -match 'edouard') $sortieAutre
 Verifier '-Fusion autre : aucune étape n''a commencé' ($sortieAutre -notmatch 'préalables' -and $sortieAutre -notmatch 'copier copy') $sortieAutre
+}
 
 # ------------------------------------------------------------ fonctions, par point-source
 Write-Host 'Fonctions'
@@ -113,7 +134,13 @@ if ((Get-Command Get-LigneIndex -ErrorAction SilentlyContinue) -and (Get-Command
 
     $tmp = Join-Path ([IO.Path]::GetTempPath()) ("index-test-{0}.md" -f [guid]::NewGuid())
     try {
-        Copy-Item $indexReel $tmp
+        if ($sansPoste) {
+            # Index factice : deux tableaux, un paragraphe, pas de donnée réelle.
+            $factice = "# Dépôts`n`n| Projet | Type | Chemin |`n|---|---|---|`n| a | code | ``x`` |`n`nUn paragraphe.`n`n| Dossier | Raison |`n|---|---|`n| z | é |`n"
+            [IO.File]::WriteAllText($tmp, $factice, [Text.UTF8Encoding]::new($false))
+        } else {
+            Copy-Item $indexReel $tmp
+        }
         $avant = [IO.File]::ReadAllBytes($tmp)
         $texteAvant = [IO.File]::ReadAllText($tmp, [Text.UTF8Encoding]::new($false))
         Add-LigneIndex -Index $tmp -Ligne $ligne
@@ -185,12 +212,13 @@ if (Get-Command Get-Etapes -ErrorAction SilentlyContinue) {
 # Seule l'étape « copier copy » est exécutée, dans un dossier temporaire ; rien ne part sur GitHub.
 # v0.1.0 n'a pas la question « fusion » : on rend v0.2.0, la première version qui l'a.
 Write-Host 'Rendu de la fusion (copier copy seul, dossier temporaire)'
+$versionRendu = if ($versionTest) { $versionTest } else { 'v0.2.0' }
 $racineRendu = Join-Path ([IO.Path]::GetTempPath()) ("rendu-fusion-{0}" -f [guid]::NewGuid())
 try {
     foreach ($cas in @(@{ Nom = 'essai-fusion-edouard'; Args = @{ Fusion = 'edouard' }; Attendu = 'edouard' },
                        @{ Nom = 'essai-fusion-defaut';  Args = @{};                    Attendu = 'session' })) {
         $argsCas = $cas.Args
-        . $script -Nom $cas.Nom -Description 'Essai' -Version 'v0.2.0' -RacineCode $racineRendu @argsCas
+        . $script -Nom $cas.Nom -Description 'Essai' -Version $versionRendu -SourceModele $sourceTest -RacineCode $racineRendu @argsCas
         $etapesRendu = @(Get-Etapes)
         $erreurRendu = $null
         try { & $etapesRendu[1].Action } catch { $erreurRendu = $_.Exception.Message }

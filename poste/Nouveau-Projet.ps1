@@ -54,6 +54,9 @@ param(
 
     [string] $Version,
 
+    # D'où copier rend le modèle : GitHub par défaut, un dossier local pour les tests.
+    [string] $SourceModele = 'gh:EdouardZemb/modele-projet',
+
     [string] $RacineCode = 'C:\src',
 
     [string] $Index = (Join-Path $HOME 'Documents\INDEX-PROJETS.md'),
@@ -185,7 +188,7 @@ function Get-Etapes {
     $ruleset = Join-Path $chemin '.github\modele\ruleset-main.json'
     $worktrees = "$chemin.worktrees"
     $nomEtape = $Nom; $descr = $Description; $vis = $Visibilite; $cib = $Cible; $fus = $Fusion; $br = $Branche
-    $ver = $Version; $mot = $Motifs; $idx = $Index; $hooks = $Hooks; $org = $Organisation; $mdl = $Modele
+    $ver = $Version; $mot = $Motifs; $idx = $Index; $hooks = $Hooks; $org = $Organisation; $mdl = $Modele; $src = $SourceModele
 
     $etapes = @()
 
@@ -216,7 +219,7 @@ function Get-Etapes {
     }
 
     # 2. copier copy
-    $cmdCopier = "copier copy --defaults --vcs-ref $ver --data nom=$nomEtape --data `"description=$descr`" --data visibilite=$vis --data cible=$cib --data fusion=$fus --data branche_principale=$br gh:$mdl `"$chemin`""
+    $cmdCopier = "copier copy --defaults --vcs-ref $ver --data nom=$nomEtape --data `"description=$descr`" --data visibilite=$vis --data cible=$cib --data fusion=$fus --data branche_principale=$br $src `"$chemin`""
     $etapes += [pscustomobject]@{
         Description = "copier copy : rendre le modèle $ver dans $chemin"
         Commande    = $cmdCopier
@@ -230,7 +233,7 @@ function Get-Etapes {
                    '--data', "cible=$cib",
                    '--data', "fusion=$fus",
                    '--data', "branche_principale=$br",
-                   "gh:$mdl", $chemin)
+                   $src, $chemin)
             Assert-Natif 'copier copy' (Invoke-Natif $copier $a)
         }
     }
@@ -349,7 +352,7 @@ function Get-Etapes {
     $script:Ctx = @{
         depot = $depot; chemin = $chemin; pub = $pub; message = $message; ruleset = $ruleset
         worktrees = $worktrees; nomEtape = $nomEtape; descr = $descr; vis = $vis; cib = $cib; fus = $fus
-        br = $br; ver = $ver; mot = $mot; idx = $idx; hooks = $hooks; ligne = $ligne; mdl = $mdl
+        br = $br; ver = $ver; mot = $mot; idx = $idx; hooks = $hooks; ligne = $ligne; mdl = $mdl; src = $src
         cmdActions = $cmdActions; cmdDependabot = $cmdDependabot
     }
     return $etapes
