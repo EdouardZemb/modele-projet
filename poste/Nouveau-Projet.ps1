@@ -24,7 +24,8 @@
       .\Nouveau-Projet.ps1 -Nom mon-outil -Description "..." -ABlanc
 
     -Visibilite (public | prive, défaut public) et -Fusion (session | edouard, défaut session)
-    valent pour le dépôt de code.
+    valent pour le dépôt de code. En cible serveur, le code est public : -Visibilite prive y est
+    refusé, la chaîne à deux dépôts ne sait pas lire un code privé.
 
     -Cible serveur : -Domaine, -CleServeur et -CleHorsLigne sont obligatoires, validés comme par
     Copier ; le script n'en porte aucune valeur. -BlocPorts vaut par défaut le premier bloc libre ;
@@ -470,6 +471,11 @@ function Assert-Parametres {
             throw "-$(@($ParamsServeur) -join ', -') : pour la cible serveur seulement. Ajouter -Cible serveur, ou retirer ces paramètres."
         }
         return
+    }
+    # La chaîne à deux dépôts suppose un code public : modele-donnees.yml le clone et tire ses
+    # images sans jeton, et exploitation.md le clone en HTTPS, sans clé.
+    if ($Visibilite -eq 'prive') {
+        throw '-Cible serveur -Visibilite prive : la chaîne à deux dépôts suppose un dépôt de code public (la CI des données le clone et tire ses images sans jeton). Retirer -Visibilite prive.'
     }
     Assert-Instance -Domaine $Domaine -CleServeur $CleServeur -CleHorsLigne $CleHorsLigne
     Assert-NomServeur -Nom $Nom -RacineServeur $RacineServeur

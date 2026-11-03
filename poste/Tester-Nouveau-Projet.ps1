@@ -453,6 +453,9 @@ try {
         $sortie = Lancer-Enfant ($baseEnfant + $cas.Args)
         Verifier "$($cas.Nom) : refus avant toute étape" (($sortie -replace '\s+', ' ') -match [regex]::Escape($cas.Attendu) -and $sortie -notmatch '\[1/\d+\]') $sortie
     }
+    # Un code privé en cible serveur : la chaîne à deux dépôts suppose un dépôt de code public.
+    $sortie = Lancer-Enfant ($baseEnfant + @('-Domaine', 'exemple.org', '-CleServeur', $cleTest1, '-CleHorsLigne', $cleTest2, '-Visibilite', 'prive'))
+    Verifier 'serveur -Visibilite prive : refus avant toute étape (la chaîne suppose un code public)' (($sortie -replace '\s+', ' ') -match 'code public' -and $sortie -notmatch '\[1/\d+\]') $sortie
     $sortie = Lancer-Enfant @('-Nom', 'essai', '-Description', 'Essai', '-Version', 'v0.7.0', '-Domaine', 'exemple.org',
                               '-RacineCode', (Join-Path $racineFaux 'code'), '-ABlanc')
     Verifier 'aucune avec -Domaine : refus avant toute étape' (($sortie -replace '\s+', ' ') -match 'Ajouter -Cible serveur' -and $sortie -notmatch '\[1/\d+\]') $sortie
