@@ -42,9 +42,10 @@ def test_le_script_du_poste_passe_ses_tests():
     )
     sortie = resultat.stdout + resultat.stderr
     assert resultat.returncode == 0, sortie
-    # Le script écrit en page de code OEM : on ne compare pas les accents.
+    # Le script écrit en page de code OEM : on ne compare pas les accents. Des cas ont réussi : un
+    # testeur qui ne vérifierait rien ne passe pas.
     assert "Mode -SansPoste" in sortie, sortie
-    assert re.search(r"(?<![0-9])0 .checs", sortie), sortie
+    assert re.search(r"(?<![0-9])[1-9][0-9]* r.ussis, 0 .checs", sortie), sortie
 
 
 @pytest.mark.parametrize("nom", SCRIPTS)

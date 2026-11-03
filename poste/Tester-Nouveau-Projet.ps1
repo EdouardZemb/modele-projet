@@ -6,6 +6,8 @@
     -SansPoste : pour la CI et les machines sans le poste d'Edouard. Saute ce qui lit gh, la liste
     privée ou l'index réel (les lancements à blanc dans un enfant), prend un index factice et rend
     le modèle depuis -SourceModele (un dépôt local) à -Version (HEAD par défaut) au lieu de v0.7.0.
+    Sans -SansPoste, un -SourceModele local sans -Version rend aussi sa tête (HEAD) : v0.7.0 n'est
+    la version par défaut que du modèle sur GitHub.
 #>
 [CmdletBinding()]
 param(
@@ -26,6 +28,7 @@ if ($SansPoste) {
     Write-Host 'Mode -SansPoste : pas de lancement à blanc, index factice' -ForegroundColor Yellow
     if (-not $versionTest) { $versionTest = 'HEAD' }
 }
+if (-not $versionTest -and $sourceTest -notlike 'gh:*') { $versionTest = 'HEAD' }
 $reussis = 0
 
 function Verifier([string] $Nom, [bool] $Condition, [string] $Detail = '') {
@@ -583,9 +586,10 @@ try {
     # -- rendu réel, cible serveur : le local des deux dépôts (rendu, git init, premier commit, avec
     # les hooks du projet rendu), dans un dossier temporaire ; aucune étape GitHub n'est jouée.
     # Le script passe nature (v0.6.0) et les réponses du dépôt de données d'un projet serveur
-    # (v0.7.0) : sans -SansPoste, on rend v0.7.0, la première version qui les a.
-    Write-Host 'Rendu serveur (le local seulement, dossier temporaire)'
+    # (v0.7.0) : sans -SansPoste, on rend v0.7.0, la première version qui les a, du modèle sur
+    # GitHub ; un -SourceModele local rend sa tête.
     $versionRenduServeur = if ($versionTest) { $versionTest } else { 'v0.7.0' }
+    Write-Host "Rendu serveur (le local seulement, modèle $versionRenduServeur, dossier temporaire)"
     $racineRenduServeur = Join-Path $racineFaux 'rendu'
     # Une liste privée d'essai, hors du chemin par défaut : elle refuse la description du code. Une
     # autre liste dans MOTIFS_INTERDITS : la porte du premier commit doit lire celle de -Motifs.
@@ -658,8 +662,8 @@ try {
 # ------------------------------------------------------------ rendu réel de la fusion
 # Seule l'étape « copier copy » est exécutée, dans un dossier temporaire ; rien ne part sur GitHub.
 # Le script refuse une version antérieure à v0.7.0 : on rend v0.7.0, comme pour la cible serveur.
-Write-Host 'Rendu de la fusion (copier copy seul, dossier temporaire)'
 $versionRendu = if ($versionTest) { $versionTest } else { 'v0.7.0' }
+Write-Host "Rendu de la fusion (copier copy seul, modèle $versionRendu, dossier temporaire)"
 $racineRendu = Join-Path ([IO.Path]::GetTempPath()) ("rendu-fusion-{0}" -f [guid]::NewGuid())
 try {
     foreach ($cas in @(@{ Nom = 'essai-fusion-edouard'; Args = @{ Fusion = 'edouard' }; Attendu = 'edouard' },
