@@ -170,7 +170,10 @@ Ce projet est à un dépôt : sa nature est `donnees`, et il porte son instance 
 - Sinon, à deux dépôts, c'est un commit du clone des données de l'environnement. En staging, la
   tête de la branche que nomme `{{ prefixe }}BRANCHE_DONNEES` dans `env/staging.env` : la variable
   n'a pas de défaut, et le gabarit du dépôt de données y écrit sa branche principale à la création.
-  En prod, la plus haute étiquette de données.
+  La sonde ne change jamais la branche du clone : elle l'avance par `git merge --ff-only`, sur la
+  branche du clonage. Une autre branche ne se suit donc que si elle descend de la tête du clone, et
+  changer de branche n'est pas pris en charge à ce jour. En prod, la plus haute étiquette de
+  données.
 - À un dépôt, c'est la révision de l'image visée, son label `org.opencontainers.image.revision`,
   qui doit exister dans le clone. En prod, c'est le commit que la `vX.Y.Z` désigne : la CI construit
   l'image de ce commit, et l'étiquette la réétiquette sans la reconstruire (§ 1). L'instance va

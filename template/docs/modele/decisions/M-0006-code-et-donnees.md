@@ -7,6 +7,9 @@
 - **Amendé** le 2026-10-29, avec le lot 12 : la seconde étape est faite. La porte d'un dépôt de
   code suit le premier segment du chemin (§ 3), et la chaîne garde les deux modes, à deux dépôts et
   à un dépôt (§ 6).
+- **Amendé** le 2026-11-03, avec le lot 13 : le script de création du poste vit dans
+  `modele-projet`, sous `poste/` (§ 7) ; après un retour arrière par `--retour`, une étiquette de
+  données remettrait en service la version quittée (§ 6).
 - **S'applique en deux temps.** D'abord la porte par nature et le gabarit de données (§ 1 à 4).
   Ensuite la chaîne à deux dépôts et les règles de chemins (§ 3, dernier point, § 5 à 7). Entre les
   deux, la chaîne lit encore tout dans le clone du code, comme avant.
@@ -230,8 +233,11 @@ décrivent l'instance et le parc, pas l'auteur.
   refuse si cette image ne connaît pas la version de schéma en service ; le retour demande alors
   aussi une étiquette sur l'ancien commit de données.
 - **Ce qui déclenche un déploiement** : une nouvelle image, un nouveau commit de données, ou les
-  deux à la fois. Une modification du dépôt de données redéploie la même image, après ses
-  vérifications, avec le même retour arrière qu'une image.
+  deux à la fois. Un nouveau commit de données forme un couple avec l'image visée, la plus haute
+  `vX.Y.Z` en prod : c'est l'image en service, sauf après un retour arrière par `--retour`, qui l'a
+  quittée. Le couple se déploie après ses vérifications, avec le même retour arrière qu'une image.
+  Après un tel retour, une étiquette de données remettrait donc en service la version quittée : il
+  faut d'abord une `vX.Y.Z` plus haute sur le commit de la version gardée.
 - **Les deux clones propres et à jour, ou rien.** Un clone modifié, ou dont la mise à jour échoue,
   arrête la sonde avant tout déploiement, avec une alerte, comme aujourd'hui un clone modifié.
 - **L'échec se note sur le couple.** Une vérification qui refuse, ou un déploiement qui échoue,
@@ -255,7 +261,8 @@ décrivent l'instance et le parc, pas l'auteur.
 ### 7. La naissance et la scission
 
 - **Un projet naît en deux dépôts** : le modèle produit le dépôt de code (`nature` à `code`), puis
-  le dépôt de données (`nature` à `donnees`). Le script de création du poste, `poste/Nouveau-Projet.ps1` dans `modele-projet`, crée les deux.
+  le dépôt de données (`nature` à `donnees`). Le script de création du poste,
+  `poste/Nouveau-Projet.ps1` dans `modele-projet`, crée les deux.
 - **Un dépôt né avant M-0006 ne se réécrit pas.** Il est renommé `<nom>-donnees` et devient le
   dépôt de données : son historique, ses PR, ses issues, ses étiquettes et ses publications restent
   privés. Jusque-là, il a la nature `donnees`. Une PR y retire ensuite le code, qui ne vit plus
