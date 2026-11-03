@@ -720,6 +720,27 @@ exec '$DOUBLES/docker-double' \"\$@\""
   [ "$(signaux)" = "$(signal 'échec 0.2.0, retour à aucun') $HC/fail" ]
 }
 
+# Après un premier déploiement en échec, compose.env est celui du couple en échec, et aucun couple
+# n'est déployé : le premier succès ne parle ni d'interruption, ni d'un compose.env.precedent qui
+# n'existe pas.
+@test "deployer : le succès qui suit un premier déploiement en échec ne parle pas d'interruption" {
+  export DOUBLE_CURL_SANTE_KO="$NOUVELLE"
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 1 ]
+  [ ! -e "$ETAT/deploye" ]
+  unset DOUBLE_CURL_SANTE_KO
+  : >"$APPELS"
+  deployer prod "$SUIVANTE" 0.3.0
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"interrompu"* ]]
+  [[ "$output" == *"aucun couple déployé : le compose.env d'un déploiement en échec n'est pas gardé"* ]]
+  [ "$(cat "$ETAT/deploye")" = "$SUIVANTE 0.3.0 -" ]
+  [ ! -e "$ETAT/precedent" ]
+  [ ! -e "$ETAT/compose.env.precedent" ]
+  [ ! -e "$ETAT/echec" ]
+  [ "$(signaux)" = "$(signal 'déployé 0.3.0') $HC" ]
+}
+
 # Un déploiement coupé (Ctrl-C, arrêt de l'unité) laisse un compose.env qui n'est pas celui de la
 # version déployée. Il ne doit pas devenir la cible du retour arrière suivant.
 @test "un_deploiement_interrompu_ne_devient_pas_la_cible_du_retour_arriere" {
@@ -836,6 +857,62 @@ EOF
   [ "$(cat "$ETAT/precedent")" = "$ANCIENNE 0.1.0 -" ]
   [ ! -e "$ETAT/echec" ]
   [ "$(cat "$ETAT/compose.env.precedent")" = "$(contenu_compose_env prod "$ANCIENNE" 0.1.0)" ]
+}
+
+# Le retour nomme le couple qu'il marque en échec, son image et son commit : seul ce couple attend.
+# Sans commande de l'instance, le commit est « - », et une étiquette de données ne déploie rien.
+@test "deployer : --retour nomme le couple qu'il marque en échec" {
+  deux_versions
+  deployer prod --retour
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"couple $NOUVELLE - (0.2.0) marqué en échec : la sonde ne redéploiera pas ce couple"* ]]
+  [[ "$output" != *"redéploierait"* ]]
+}
+
+# Avec une commande de l'instance, à deux dépôts, la sonde vise toujours la plus haute étiquette, ou
+# `:main` : un nouveau commit de données ferait un couple neuf avec la version quittée, et la
+# remettrait en service. Le retour le dit, et ce qu'il faut faire d'abord.
+@test "deployer : --retour dit ce qui redéploierait la version quittée" {
+  local etat_staging="${{ prefixe }}RACINE_ETAT/staging" premier
+{%- if sauvegardes %}
+  horloge_qui_avance
+{%- endif %}
+  avec_donnees VERIFIER_CONTENU
+  commit_de_donnees "$SOUS_CONTENU/page.md"
+  premier="$COMMIT"
+  deployer prod "$ANCIENNE" 0.1.0 --commit-donnees "$premier"
+  [ "$status" -eq 0 ]
+  poser_donnees prod
+  commit_de_donnees "$SOUS_CONTENU/page.md" "$SOUS_CONTENU/autre.md"
+  deployer prod "$NOUVELLE" 0.2.0 --commit-donnees "$COMMIT"
+  [ "$status" -eq 0 ]
+  deployer prod --retour
+  [ "$status" -eq 0 ]
+  [ "$(cat "$ETAT/echec")" = "$NOUVELLE $COMMIT" ]
+  [[ "$output" == *"couple $NOUVELLE $COMMIT (0.2.0) marqué en échec : la sonde ne redéploiera pas ce couple"* ]]
+{%- if nature == 'code' %}
+  [[ "$output" == *"une nouvelle étiquette de données redéploierait 0.2.0 avec elle : poser d'abord une vX.Y.Z sur le commit de 0.1.0"* ]]
+{%- else %}
+  # À un dépôt, le commit de données est la révision de l'image : il n'y a pas d'étiquette de données.
+  [[ "$output" != *"redéploierait"* ]]
+{%- endif %}
+
+  # Le staging : la sonde vise `:main` et la tête de la branche des données.
+  preparer_secrets_de_test staging JETON=jeton-staging-7 HC_SONDE=https://hc.example/ping/sonde-staging
+  deployer staging "$ANCIENNE" main --commit-donnees "$premier"
+  [ "$status" -eq 0 ]
+  poser_donnees staging
+  deployer staging "$NOUVELLE" main --commit-donnees "$COMMIT"
+  [ "$status" -eq 0 ]
+  deployer staging --retour
+  [ "$status" -eq 0 ]
+  [ "$(cat "$etat_staging/echec")" = "$NOUVELLE $COMMIT" ]
+  [[ "$output" == *"couple $NOUVELLE $COMMIT (main) marqué en échec : la sonde ne redéploiera pas ce couple"* ]]
+{%- if nature == 'code' %}
+  [[ "$output" == *"un nouveau commit de la branche des données redéploierait l'image quittée avec lui : fusionner d'abord le correctif du code"* ]]
+{%- else %}
+  [[ "$output" != *"redéploierait"* ]]
+{%- endif %}
 }
 
 @test "retour_manuel_refuse_sans_version_precedente_et_ne_touche_a_rien" {
