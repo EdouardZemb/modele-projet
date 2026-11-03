@@ -631,6 +631,13 @@ def test_m0006_dit_le_choix_des_deux_modes():
     assert not RENVOI_AU_PLAN.search(texte)
 
 
+def test_m0006_dit_ou_vit_le_script():
+    """M-0006, § 7 : le script de création des deux dépôts est nommé, avec son dépôt."""
+    texte = " ".join(lire(DECISIONS / "M-0006-code-et-donnees.md").split())
+    assert "`poste/Nouveau-Projet.ps1`" in texte
+    assert "`modele-projet`" in texte
+
+
 def test_methode_dit_les_deux_modes_et_les_etiquettes_de_donnees():
     """La méthode : les étiquettes de données sont à Edouard (la table du garde), la porte d'un
     dépôt de code suit les chemins, et les deux modes de la chaîne, avec le contrôle des secrets

@@ -255,7 +255,7 @@ décrivent l'instance et le parc, pas l'auteur.
 ### 7. La naissance et la scission
 
 - **Un projet naît en deux dépôts** : le modèle produit le dépôt de code (`nature` à `code`), puis
-  le dépôt de données (`nature` à `donnees`). Le script de création du poste crée les deux.
+  le dépôt de données (`nature` à `donnees`). Le script de création du poste, `poste/Nouveau-Projet.ps1` dans `modele-projet`, crée les deux.
 - **Un dépôt né avant M-0006 ne se réécrit pas.** Il est renommé `<nom>-donnees` et devient le
   dépôt de données : son historique, ses PR, ses issues, ses étiquettes et ses publications restent
   privés. Jusque-là, il a la nature `donnees`. Une PR y retire ensuite le code, qui ne vit plus
