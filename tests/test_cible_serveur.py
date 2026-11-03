@@ -1112,6 +1112,14 @@ def test_exploitation_dit_le_couple_et_les_deux_modes(rendre, mode, sauvegardes)
     assert ("une première étiquette de données, dans tous les cas" in mise_en_service) is deux
     sans_elle = "la prod ne prend aucun env ni secret du dépôt de données après son clonage"
     assert (sans_elle in mise_en_service) is deux
+    # à deux dépôts, la déclaration dit `DONNEES=oui` et l'étape 4 dit la clé des données
+    for fragment in (
+        "`DONNEES=oui`",
+        "`~/.ssh/depot-essai-donnees`",
+        "en attente de la clé du dépôt de données `essai-donnees`",
+        "ne s'installent qu'une fois ces clones faits",
+    ):
+        assert (fragment in mise_en_service) is deux, fragment
 
     # Mettre en ligne : l'étiquette de données (👤), ou son absence à un dépôt.
     en_ligne = a_plat(section(texte, "Mettre en ligne"))
