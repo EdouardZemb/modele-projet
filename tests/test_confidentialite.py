@@ -513,7 +513,7 @@ NATURES_ILLISIBLES = "confidentialité : nature illisible sur la branche par dé
     [
         ('NATURE = "donnees"\n', "donnees"),
         ('NATURE = "code"\n', "code"),
-        ('VISIBILITE = "prive"\n', "donnees"),
+        ('VISIBILITE = "prive"\n', "code"),
         ('VISIBILITE = "prive"\nNATURE = "code"\n', "code"),
         ('VISIBILITE = "public"\n', "code"),
         (None, "code"),
@@ -525,13 +525,10 @@ def test_nature_du_texte(texte, attendu):
     assert c.nature_du_texte(texte) == attendu
 
 
-def test_le_repli_visibilite_dit_sa_condition_sans_promettre_de_lot():
-    # Le repli `VISIBILITE = "prive"` reste tant que la branche par défaut de chaque projet ne porte
-    # pas `NATURE` : son commentaire dit cette condition, et aucun numéro de lot, qui passerait sans
-    # qu'elle soit remplie.
-    source = " ".join(inspect.getsource(c.nature_du_texte).split())
-    assert "tant que la branche par défaut de chaque projet ne porte pas `NATURE`" in source
-    assert not re.search(r"\blots? \d", source), source
+def test_sans_ligne_nature_la_nature_est_code():
+    # Plus de repli : sans ligne `NATURE`, la plus stricte, quoi que dise le texte d'autre.
+    assert "VISIBILITE" not in inspect.getsource(c.nature_du_texte)
+    assert not hasattr(c, "_LIGNE_VISIBILITE")
 
 
 def depot_de_nature(tmp_path, env, sur_la_branche, dans_la_copie, branche="main"):

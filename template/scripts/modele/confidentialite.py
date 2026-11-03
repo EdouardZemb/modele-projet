@@ -524,22 +524,19 @@ def _ecarter_acceptes(
 
 BRANCHE_DEFAUT_VALIDE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
 _LIGNE_NATURE = re.compile(r'^NATURE = "([^"\n]*)"\s*$', re.MULTILINE)
-_LIGNE_VISIBILITE = re.compile(r'^VISIBILITE = "prive"\s*$', re.MULTILINE)
 
 
 def nature_du_texte(texte: str | None) -> str:
     """La nature (`code` ou `donnees`) que dit un texte de reglages.py, lu sans l'exécuter.
 
-    Une ligne `NATURE = "donnees"` donne `donnees`. Sans ligne `NATURE`, une ligne
-    `VISIBILITE = "prive"` donne `donnees` : c'est le repli d'un projet pas encore mis à jour, qui
-    reste tant que la branche par défaut de chaque projet ne porte pas `NATURE`. Tout autre cas,
-    dont un texte absent ou des apostrophes, donne `code`."""
+    Une ligne `NATURE = "donnees"` donne `donnees`. Tout autre cas, dont un texte sans ligne
+    `NATURE`, un texte absent ou des apostrophes, donne `code`, la nature la plus stricte."""
     if not texte:
         return "code"
     ligne = _LIGNE_NATURE.search(texte)
     if ligne:
         return "donnees" if ligne.group(1) == "donnees" else "code"
-    return "donnees" if _LIGNE_VISIBILITE.search(texte) else "code"
+    return "code"
 
 
 def nature() -> str:
