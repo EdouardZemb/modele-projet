@@ -73,6 +73,17 @@ def test_fusion_dans_un_autre_depot():
     assert "toute fusion qui nomme un dépôt (`-R`, `--repo`, `GH_REPO`, une adresse de PR)" in texte
     assert "`gh pr merge <n>`, depuis le clone" in texte
     assert "en mode `edouard`, toute fusion est refusée de toute façon" in texte
+    # Revue finale du lot 13 (garde-5) : le mode et les contrôles se lisent dans le dossier de la
+    # session, jamais dans celui d'un `cd`, et une fusion qui suit un changement de dossier est
+    # refusée.
+    assert "que du dossier de la session (le `cwd` du hook)" in texte
+    assert "que du dépôt du dossier courant" not in texte
+    assert "ou qui suit, dans la même commande, un changement de dossier" in texte
+    formes = texte.split("ou qui suit, dans la même commande", 1)[1][:300]
+    for forme in ("`cd`", "`popd`", "`Set-Location`", "`env -C`", "`Start-Process -WorkingDirectory`"):
+        assert forme in formes, forme
+    assert "« fusion après un changement de dossier »" in texte
+    assert "`gh pr merge <n>`, depuis le clone, sans `cd`" in texte
 
 
 # Les ADR hérités selon la cible : M-0003 et M-0004 pour `serveur`, M-0005 avec les sauvegardes.
@@ -225,6 +236,11 @@ def test_garde_fous_a_jour():
         "`DEPOT_PRIVE`",
         "`git commit -F <fichier>`",
         "`gh pr create --body-file <fichier>`",
+        # revue finale du lot 13 (garde-5) : les enveloppes à option, lues elles aussi
+        "`nice -n`",
+        "`env -C`",
+        "`Start-Process -WorkingDirectory`",
+        "la branche courante est illisible",
     ):
         assert fragment in section, fragment
     assert "gitleaks sur tout l'historique ;" not in section
