@@ -479,6 +479,24 @@ try {
     }
     Verifier 'Assert-Version : avant v0.7.0, un refus qui dit v0.7.0' ($versionsAcceptees.Count -eq 0) ($versionsAcceptees -join ', ')
 
+    # -- une session de Claude Code (CLAUDECODE posé) ne lance le script qu'à blanc
+    # Le testeur ne lance jamais d'enfant sans -ABlanc, sauf ici : -Domaine hors cible serveur, un
+    # index et une liste absents feraient refuser l'enfant avant toute étape, même sans ce garde.
+    Write-Host 'Session de Claude Code'
+    $claudeAvant = [Environment]::GetEnvironmentVariable('CLAUDECODE', 'Process')
+    $argsSession = @('-Nom', 'essai', '-Description', 'Essai', '-Version', 'v0.7.0', '-Domaine', 'exemple.org',
+                     '-RacineCode', (Join-Path $racineFaux 'code'), '-Index', (Join-Path $racineFaux 'index-absent.md'),
+                     '-Motifs', (Join-Path $racineFaux 'motifs-absents.txt'))
+    try {
+        [Environment]::SetEnvironmentVariable('CLAUDECODE', '1', 'Process')
+        $sortieReelle = Lancer-Enfant $argsSession
+        $sortieABlanc = Lancer-Enfant ($argsSession + '-ABlanc')
+    } finally {
+        [Environment]::SetEnvironmentVariable('CLAUDECODE', $claudeAvant, 'Process')
+    }
+    Verifier 'CLAUDECODE sans -ABlanc : refus avant toute étape, le lancement réel est à Edouard' (($sortieReelle -replace '\s+', ' ') -match 'lancement r.el est . Edouard' -and $sortieReelle -notmatch 'Ajouter -Cible serveur' -and $sortieReelle -notmatch '\[1/\d+\]') $sortieReelle
+    Verifier 'CLAUDECODE avec -ABlanc : le garde laisse passer (refus plus loin, par les paramètres)' (($sortieABlanc -replace '\s+', ' ') -match 'Ajouter -Cible serveur' -and $sortieABlanc -notmatch 'lancement r.el') $sortieABlanc
+
     # -- Get-BlocLibre, sur le faux clone
     Write-Host 'Get-BlocLibre'
     $blocLibre = $null

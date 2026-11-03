@@ -12,7 +12,8 @@
 
     C'est Edouard qui le lance pour de vrai (création de dépôt, secret, règle : ses décisions).
     Une session ne le lance qu'avec -ABlanc : seules des lectures sont faites, chaque étape est
-    décrite et sa commande affichée sans être exécutée.
+    décrite et sa commande affichée sans être exécutée. Sous Claude Code (CLAUDECODE posé), un
+    lancement sans -ABlanc est refusé avant toute étape.
 
     Usage :
       .\Nouveau-Projet.ps1 -Nom mon-outil -Description "Ce que fait l'outil"
@@ -836,6 +837,14 @@ $script:Date          = Get-Date -Format 'yyyy-MM-dd'
 if (-not $RacineServeur) { $RacineServeur = Join-Path $RacineCode "github.com\$Organisation\serveur" }
 
 if ($MyInvocation.InvocationName -ne '.') {
+
+    # Une session de Claude Code (CLAUDECODE posé) ne lance le script qu'à blanc : créer les dépôts,
+    # poser le secret et la règle sont des gestes d'Edouard. Le garde de Claude ne voit que
+    # « powershell -File Nouveau-Projet.ps1 » ; la serrure est ici.
+    if ($env:CLAUDECODE -and -not $ABlanc) {
+        Write-Host "Refus : le lancement réel est à Edouard. Une session de Claude Code ne lance ce script qu'avec -ABlanc." -ForegroundColor Red
+        exit 1
+    }
 
     # Avant toute étape : ce que Copier refuserait, et le bloc de ports.
     try { Assert-Parametres } catch {
