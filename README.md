@@ -10,11 +10,17 @@ Le cadrage est dans [`docs/cadrage.md`](docs/cadrage.md). Les pistes non engagé
 
 ## Créer un projet
 
-Avec le script du poste :
+Avec le script du poste, `poste/Nouveau-Projet.ps1`, qu'Edouard seul lance pour de vrai :
 
 ```powershell
-Nouveau-Projet.ps1
+poste\Nouveau-Projet.ps1 -Nom <nom> -Description "<ce que fait le projet>"
+poste\Nouveau-Projet.ps1 -Nom <nom> -Description "<…>" -Cible serveur -Domaine <domaine> -CleServeur <age1…> -CleHorsLigne <age1…>
 ```
+
+`-Nom` et `-Description` sont obligatoires. `-Cible serveur` crée deux dépôts : le code, et ses
+données dans `<nom>-donnees`, privé (M-0006) ; la mise en service suit ensuite
+`docs/exploitation.md` du projet. `-ABlanc` décrit chaque étape et affiche sa commande, sans rien
+créer. L'usage complet est dans l'en-tête du script.
 
 Ou directement avec Copier, sur une étiquette publiée :
 
