@@ -1,7 +1,6 @@
 """Tests de la porte de confidentialité. Aucun faux secret n'est écrit en clair : tout est construit."""
 
 import inspect
-import re
 import shutil
 import subprocess
 import sys
@@ -529,6 +528,7 @@ def test_sans_ligne_nature_la_nature_est_code():
     # Plus de repli : sans ligne `NATURE`, la plus stricte, quoi que dise le texte d'autre.
     assert "VISIBILITE" not in inspect.getsource(c.nature_du_texte)
     assert not hasattr(c, "_LIGNE_VISIBILITE")
+    assert c.nature_du_texte('VISIBILITE = "prive"\nautre = 1\n') == "code"
 
 
 def depot_de_nature(tmp_path, env, sur_la_branche, dans_la_copie, branche="main"):
