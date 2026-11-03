@@ -275,6 +275,20 @@ def test_construire_lance_l_image_comme_en_production(rendre, env_isole, tmp_pat
     assert (
         verification["run"].strip() == 'bash deploiement/ci/verifier-image.sh essai "$GITHUB_SHA"'
     )
+    # Le volume anonyme de la CI est rempli depuis l'image, au contraire du dossier de l'hôte, vide au
+    # premier déploiement : le commentaire de l'étape le dit, et ce qu'elle ne prouve pas.
+    commentaire = " ".join(
+        ligne.strip().removeprefix("#").strip()
+        for ligne in lire(rendu, CONSTRUIRE).splitlines()
+        if ligne.strip().startswith("#")
+    )
+    for fragment in (
+        "un volume anonyme, que Docker remplit de ce que l'image y a mis",
+        "le dossier de l'hôte que la production monte est vide au premier déploiement",
+        "ce que cette étape ne prouve pas",
+    ):
+        assert fragment in commentaire, fragment
+    assert "comme sur le serveur" not in commentaire
 
     banc = Banc(tmp_path, env_isole())
     options = ("-e", "-o", "pipefail")
@@ -541,6 +555,56 @@ def test_fausse_app_dockerfile():
         assert (
             (FAUSSE_APP / script).read_text(encoding="utf-8").startswith("#!/usr/bin/env python3\n")
         )
+
+
+# Le préfixe FAUSSE_APP_ est celui du projet que rend la CI du modèle (nom=fausse-app) : copiée telle
+# quelle dans un autre projet, l'app ne lit pas les variables que compose lui passe, et sert « dev ».
+COPIER_LA_FAUSSE_APP = (
+    "copier dans un projet <nom> : remplacer FAUSSE_APP_ par son préfixe (<NOM>_, tirets en _)"
+)
+
+
+def test_fausse_app_dit_comment_la_copier():
+    for nom in ("app.py", "sauvegarder", "Dockerfile"):
+        tete = "\n".join((FAUSSE_APP / nom).read_text(encoding="utf-8").splitlines()[:12])
+        assert COPIER_LA_FAUSSE_APP in tete, nom
+
+
+def test_fausse_app_seme_un_dossier_de_donnees_vide(tmp_path):
+    """Sur le serveur, /donnees est un dossier de l'hôte, vide au premier déploiement, monté par-dessus
+    celui de l'image : au démarrage, l'app y sème ce que le Dockerfile sème dans l'image. Un dossier
+    qui n'est pas vide n'est jamais touché ; un semis impossible refuse de démarrer."""
+    temoin = tmp_path / "temoin"
+    semer(temoin)
+
+    # vide : semé, conforme pour verifier, santé ok
+    vide = tmp_path / "donnees"
+    vide.mkdir()
+    with AppLancee(env_de_l_app(tmp_path)) as app:
+        assert app.sante()[0] == 200
+    assert arbre(vide) == arbre(temoin)
+    assert lancer_python("verifier", str(vide)).returncode == 0
+
+    # absent : créé, puis semé
+    absent = tmp_path / "racine" / "donnees"
+    with AppLancee(env_de_l_app(tmp_path, FAUSSE_APP_DONNEES=str(absent))) as app:
+        assert app.sante()[0] == 200
+    assert arbre(absent) == arbre(temoin)
+
+    # non vide, sans MARQUE : intact, et la santé dit ko
+    autre = tmp_path / "autre"
+    autre.mkdir()
+    (autre / "base").write_text("une base\n", encoding="utf-8", newline="\n")
+    avant = arbre(autre)
+    with AppLancee(env_de_l_app(tmp_path, FAUSSE_APP_DONNEES=str(autre))) as app:
+        assert app.sante() == (503, {"statut": "ko"})
+    assert arbre(autre) == avant
+
+    # impossible à semer (un fichier sur le chemin) : refus de démarrer, qui le dit
+    fichier = tmp_path / "un-fichier"
+    fichier.write_text("pas un dossier\n", encoding="utf-8")
+    env = env_de_l_app(tmp_path, FAUSSE_APP_DONNEES=str(fichier / "donnees"))
+    assert "refus de démarrer : données " in demarrage_refuse(env)
 
 
 def test_fausse_app_sauvegarder_et_verifier(tmp_path):

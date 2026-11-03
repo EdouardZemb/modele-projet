@@ -146,6 +146,28 @@ def test_l_epreuve_des_donnees_epingle_sops():
     assert "AGE-SECRET-KEY" not in texte
 
 
+def test_l_epreuve_des_donnees_part_d_un_dossier_vide():
+    """Sur le serveur, le dossier de données de l'hôte est vide au premier déploiement, et cache le
+    /donnees de l'image. L'épreuve ne le sème donc pas : elle constate qu'il est vide avant le
+    premier déploiement de chaque environnement, et que l'app y a semé MARQUE après."""
+    texte = EPREUVE_DONNEES.read_text(encoding="utf-8")
+    assert '/MARQUE"' not in texte.split('echo "== 1.', 1)[0]
+    assert not re.search(r"printf '[^']*' >\"\$TRAVAIL/donnees/", texte)
+    for env in ("prod", "staging"):
+        assert (
+            f'verifier "le dossier de données de {env} est vide avant le premier déploiement"'
+            in texte
+        )
+        assert f'verifier "MARQUE semée par l\'app dans le dossier de données de {env}"' in texte
+    # le constat suit le déploiement de chaque environnement
+    for point, env in (("1", "prod"), ("6", "staging")):
+        bloc = texte.split(f'echo "== {point}.', 1)[1].split("fin_du_point", 1)[0]
+        avant = bloc.index(f'vide avant le premier déploiement" vide "$DONNEES_{env.upper()}"')
+        deploiement = bloc.index(f"deployer {point} {env} ")
+        apres = bloc.index(f"MARQUE semée par l'app dans le dossier de données de {env}")
+        assert avant < deploiement < apres, env
+
+
 def test_sops_a_le_meme_epinglage_dans_l_epreuve_et_dans_le_job_tests():
     """L'épinglage de sops est écrit deux fois : l'épreuve des données et le job tests de la CI. Les
     deux disent la même version et la même empreinte du binaire linux amd64."""

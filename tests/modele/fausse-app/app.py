@@ -1,11 +1,21 @@
 """La fausse app du modèle : le contrat de la cible `serveur` (spec §6.1, M-0006 § 5), en quelques
 lignes.
 
+À copier dans un projet <nom> : remplacer FAUSSE_APP_ par son préfixe (<NOM>_, tirets en _).
+FAUSSE_APP_ est celui du projet que rend la CI du modèle (nom=fausse-app) ; compose ne passe à l'app
+que les variables du préfixe de son projet.
+
 Elle écoute sur $PORT (défaut 3000), sur $HOST (défaut 0.0.0.0). Sa route de santé, /api/sante,
 rend {statut, environnement, version, revision, configuration} : statut `ok` tant que ses données
 (/donnees/MARQUE) sont là, sinon un 503 avec {statut: "ko"}. L'environnement, la version et la
 révision viennent de FAUSSE_APP_ENV, FAUSSE_APP_VERSION et FAUSSE_APP_REVISION ; le Dockerfile
 pose la révision, depuis l'argument de construction REVISION.
+
+Ses données, au premier démarrage : sur un /donnees absent ou vide, l'app sème ce que le Dockerfile
+sème dans l'image (SEMIS), comme une vraie app crée son stockage. Sur le serveur, /donnees est un
+dossier de l'hôte, vide au premier déploiement, monté par-dessus celui de l'image. Un /donnees qui
+n'est pas vide n'est jamais touché : sans MARQUE, il reste non conforme. Un semis impossible refuse
+de démarrer.
 
 L'instance (M-0006, § 5) : sa configuration dans /config, son contenu dans /contenu, deux montages
 en lecture seule. Chacun porte sa version de schéma, dans son fichier `version`. Au démarrage, l'app
@@ -31,10 +41,29 @@ VERSIONS_CONNUES = {"1"}
 ICI = Path(__file__).resolve().parent
 EXEMPLE = ICI / "exemple"
 EXEMPLE_CONTENU = ICI / "exemple-contenu"
+# Ce que l'app sème dans un dossier de données vide : ce que le Dockerfile sème dans l'image.
+SEMIS = {
+    "MARQUE": "fausse-app\n",
+    "notes/premiere.txt": "une note\n",
+    ".cachee": "un fichier caché\n",
+}
 
 
 class RefusDeDemarrer(Exception):
     """L'app ne démarre pas : son message dit pourquoi."""
+
+
+def semer(donnees):
+    """Sur un dossier de données absent ou vide, pose SEMIS ; un dossier non vide n'est pas touché."""
+    try:
+        if donnees.exists() and any(donnees.iterdir()):
+            return
+        for chemin, texte in SEMIS.items():
+            fichier = donnees / chemin
+            fichier.parent.mkdir(parents=True, exist_ok=True)
+            fichier.write_bytes(texte.encode("utf-8"))
+    except OSError as erreur:
+        raise RefusDeDemarrer(f"données {donnees} : {erreur.strerror or erreur}") from None
 
 
 def monte(dossier):
@@ -112,6 +141,7 @@ class Gestionnaire(BaseHTTPRequestHandler):
 
 def main():
     try:
+        semer(Path(os.environ.get("FAUSSE_APP_DONNEES", "/donnees")))
         Gestionnaire.configuration = demarrer(os.environ)
     except RefusDeDemarrer as refus:
         print(f"fausse app : refus de démarrer : {refus}", file=sys.stderr, flush=True)

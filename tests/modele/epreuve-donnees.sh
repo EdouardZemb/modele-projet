@@ -22,15 +22,18 @@
 #     secrets chiffrés pour cette identité, config/ et contenu/ ; deux commits, et l'étiquette
 #     donnees-<AAAA.MM.JJ>.1 sur le premier (deployer.sh ne lit pas les étiquettes : il reçoit le
 #     commit) ;
-#   - une copie du code, d'où deployer.sh est lancé ; les données de l'app (/donnees), semées comme
-#     le fait l'image ; HOME, un dossier de l'épreuve ;
+#   - une copie du code, d'où deployer.sh est lancé ; les dossiers de données de l'app (/donnees),
+#     vides, comme ceux que la sonde de serveur crée : sur le serveur, le dossier de l'hôte cache le
+#     /donnees de l'image, et l'app sème le sien au premier démarrage ; HOME, un dossier de
+#     l'épreuve ;
 #   - la racine de l'état passe par un lien symbolique, lien-etat -> etat-reel, pendant toute
 #     l'épreuve : deployer.sh compare les montages sans résoudre les liens.
 #
 # Déroulé, chaque point constaté par docker inspect, par la santé ou par le journal de deployer.sh :
 #   1. le premier couple, l'image et le commit 1, se déploie en prod : VERIFIER_CONTENU a tourné
 #      (code 0), sans contenu en service ; /config et /contenu montés en lecture seule depuis
-#      instantanes/<commit 1>, sources sans « // », santé « montee » ;
+#      instantanes/<commit 1>, sources sans « // », santé « montee » ; le dossier de données, vide
+#      avant, porte MARQUE après : l'app l'a semé ;
 #   2. seul le commit change (commit 2) : VERIFIER_CONTENU a tourné (code 0) avec /en-service, le
 #      contenu du couple 1 ; le conteneur est recréé sur instantanes/<commit 2>, même image ;
 #   3. un troisième commit porte une configuration que verifier-config refuse, et le journal en dit
@@ -42,7 +45,8 @@
 #      avec ceux des commits 2 et 3, ils dépassent la marge (les 3 plus récents) : le plus ancien
 #      part, le reste demeure ;
 #   6. le staging se déploie sur la tête de la branche des données, le commit 3, dont il ne lit
-#      jamais config/ : il tourne sans /config, /contenu monté, santé « exemple ».
+#      jamais config/ : il tourne sans /config, /contenu monté, santé « exemple » ; son dossier de
+#      données, vide avant, porte MARQUE après.
 #
 # L'uid. Sur le serveur, le compte qui déploie a l'uid 1000, celui du conteneur. Le runner de GitHub
 # a un autre uid : le compose.projet.yml de la copie du code aligne l'app sur le compte qui lance
@@ -127,6 +131,8 @@ ETAT_REEL="$TRAVAIL/etat-reel"
 RACINE_ETAT="$TRAVAIL/lien-etat"
 ETAT_PROD="$RACINE_ETAT/prod"
 ETAT_STAGING="$RACINE_ETAT/staging"
+DONNEES_PROD="$TRAVAIL/donnees/prod/donnees"
+DONNEES_STAGING="$TRAVAIL/donnees/staging/donnees"
 export HOME="$TRAVAIL/home"
 ECHECS=0
 CODE=0
@@ -200,6 +206,7 @@ code_vaut() { [ "$CODE" -eq "$1" ]; }
 fichier_vaut() { [ -f "$1" ] && [ "$(cat -- "$1")" = "$2" ]; }
 absent() { [ ! -e "$1" ] && [ ! -L "$1" ]; }
 dossier_present() { [ -d "$1" ] && [ ! -L "$1" ]; }
+vide() { [ -d "$1" ] && [ -z "$(ls -A -- "$1")" ]; }
 egaux() { [ "$1" = "$2" ]; }
 differents() { [ "$1" != "$2" ]; }
 journal_dit() { grep -qF -- "$2" "$TRAVAIL/journal-$1"; }
@@ -380,11 +387,8 @@ mkdir -p "$CODE_CLONE"
 cp -R "$RENDU/." "$CODE_CLONE/"
 printf 'services:\n  app:\n    user: "%s:%s"\n' "$(id -u)" "$(id -g)" \
   >"$CODE_CLONE/deploiement/compose.projet.yml"
-for nom_env in prod staging; do
-  mkdir -p "$TRAVAIL/donnees/$nom_env/donnees/notes"
-  printf 'fausse-app\n' >"$TRAVAIL/donnees/$nom_env/donnees/MARQUE"
-  printf 'une note\n' >"$TRAVAIL/donnees/$nom_env/donnees/notes/premiere.txt"
-done
+# Les dossiers de données, vides, comme la sonde de serveur les crée : l'épreuve ne les sème pas.
+mkdir -p "$DONNEES_PROD" "$DONNEES_STAGING"
 mkdir -p "$ETAT_REEL"
 ln -s "$ETAT_REEL" "$RACINE_ETAT"
 
@@ -421,8 +425,11 @@ echo "commit 1 : $C1 ($(git_donnees tag --points-at "$C1")), commit 2 : $C2"
 
 POINT=1
 echo "== 1. le premier couple en prod"
+verifier "le dossier de données de prod est vide avant le premier déploiement" vide "$DONNEES_PROD"
 deployer 1 prod "$IMAGE" "$VERSION" --commit-donnees "$C1"
 exiger "code 0 (la racine de l'état passe par un lien, deployer.sh ne le refuse pas)" code_vaut 0
+verifier "MARQUE semée par l'app dans le dossier de données de prod" \
+  fichier_vaut "$DONNEES_PROD/MARQUE" fausse-app
 verifier "VERIFIER_CONTENU a tourné, code 0" journal_dit 1 \
   "contenu conforme (VERIFIER_CONTENU : code 0) : conforme"
 verifier "sans contenu en service à comparer (rien n'est en service)" journal_tait 1 \
@@ -514,8 +521,11 @@ POINT=6
 echo "== 6. le staging, sans /config"
 TETE="$(git_donnees rev-parse main)"
 verifier "la tête de la branche des données est le commit 3" egaux "$TETE" "$C3"
+verifier "le dossier de données de staging est vide avant le premier déploiement" vide "$DONNEES_STAGING"
 deployer 6 staging "$IMAGE" main --commit-donnees "$TETE"
 exiger "code 0" code_vaut 0
+verifier "MARQUE semée par l'app dans le dossier de données de staging" \
+  fichier_vaut "$DONNEES_STAGING/MARQUE" fausse-app
 verifier "deploye du staging porte le couple" fichier_vaut "$ETAT_STAGING/deploye" "$IMAGE main $TETE"
 verifier "le journal dit que VERIFIER_CONFIG n'est pas lancée" journal_dit 6 "staging : VERIFIER_CONFIG n'est pas lancée"
 APP6="$(conteneur_app fausse-app-staging)"
