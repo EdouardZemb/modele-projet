@@ -218,17 +218,23 @@ serait la commande. Écrire le texte dans un fichier, puis `git commit -F <fichi
   ferait d'une modification locale un conflit à chaque `copier update`.
 - Changer de cible, c'est changer une réponse puis lancer `copier update`. Les fichiers gérés de
   l'ancienne cible disparaissent, ceux de la nouvelle arrivent. Les fichiers semés de l'ancienne
-  cible que la nouvelle ne rend pas disparaissent aussi, même retouchés, sans conflit ni `.rej` :
-  ce que le projet y a écrit se reprend dans le commit d'avant (`git show <commit>:<chemin>`).
-  Les semés que les deux cibles rendent gardent leur contenu d'avant, même si la nouvelle cible
-  les rend autrement : le projet les refait à la main, ou les retire par `git rm` dans un commit
-  d'avant la mise à jour, car Copier sème à neuf un semé absent du projet. Quand un projet
-  `serveur` à un dépôt devient un dépôt de données, ce sont `.gitignore`, `CLAUDE.md`,
-  `README.md`, `.sops.yaml`, `.github/workflows/ci.yml` et `.github/dependabot.yml`. Une question
-  nouvelle prend son défaut sous `--defaults` : dans ce passage, `--data cible_code=serveur` est
-  obligatoire. Sans lui, `cible_code` prend `aucune` sans un mot : ni `.sops.yaml`, ni `env/`, ni
-  `cles/`, ni `modele-donnees.yml`, et le domaine, le sous-domaine, le bloc de ports et les clés
-  sortent des réponses.
+  cible que la nouvelle ne rend pas disparaissent aussi, même retouchés, sans conflit ni `.rej` : ce
+  que le projet y a écrit se reprend dans le commit d'avant (`git show <commit>:<chemin>`). Les
+  semés que les deux cibles rendent gardent leur contenu d'avant, même si la nouvelle cible les rend
+  autrement : le projet les refait à la main, ou les retire par `git rm` dans un commit d'avant la
+  mise à jour, car Copier sème à neuf un semé absent du projet. Quand un projet `serveur` à un dépôt
+  devient un dépôt de données, ce sont `.gitignore`, `CLAUDE.md`, `README.md`, `.sops.yaml`,
+  `.github/workflows/ci.yml` et `.github/dependabot.yml`. Sauf `.gitignore`, qui ne se retire
+  jamais : il porte les règles du projet, qui gardent ses fichiers locaux et ses secrets hors du
+  dépôt, et sans lui ces fichiers paraissent en non suivis, ce que Copier refuse comme un arbre
+  sale. Il se corrige à la main : pour un dépôt de données, `secrets/*` puis `!secrets/*.env.enc`,
+  et les exceptions que demande la porte des masqués. Ce que le modèle ne connaît pas reste où il
+  est : les secrets chiffrés de `deploiement/secrets/`, puis `instance/config/` et
+  `instance/contenu/`, se déplacent par `git mv` vers `secrets/`, `config/` et `contenu/`, dans le
+  commit d'avant. Une question nouvelle prend son défaut sous `--defaults` : dans ce passage,
+  `--data cible_code=serveur` est obligatoire. Sans lui, `cible_code` prend `aucune` sans un mot :
+  ni `.sops.yaml`, ni `env/`, ni `cles/`, ni `modele-donnees.yml`, et le domaine, le sous-domaine,
+  le bloc de ports et les clés sortent des réponses.
 
 Dans un fichier géré, un conflit de `copier update` se résout toujours en faveur du modèle. Les PR
 Dependabot qui y montent une version d'action se fusionnent normalement.

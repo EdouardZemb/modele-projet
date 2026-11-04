@@ -17,6 +17,7 @@ from conftest import (
     REPONSES_SERVEUR,
     git,
 )
+from copier.errors import UserMessageError
 
 SH = shutil.which("sh") or (
     r"C:\Program Files\Git\bin\sh.exe" if Path(r"C:\Program Files\Git\bin\sh.exe").exists() else None
@@ -424,8 +425,15 @@ SCISSION = {
     "cle_serveur": CLE_SERVEUR_DE_TEST,
     "cle_hors_ligne": CLE_HORS_LIGNE_DE_TEST,
 }
-# Ce que le modèle ne connaît pas : l'instance et les secrets chiffrés d'un projet à un dépôt.
-HORS_DU_MODELE = ("deploiement/secrets/prod.env.enc", "instance/config/projet.toml")
+# Ce que le modèle ne connaît pas : l'instance et les secrets chiffrés d'un projet à un dépôt, et
+# où la voie préparée les déplace, là où la chaîne à deux dépôts les lit.
+DEPLACES = {
+    "deploiement/secrets/prod.env.enc": "secrets/prod.env.enc",
+    "instance/config/projet.toml": "config/projet.toml",
+}
+HORS_DU_MODELE = tuple(DEPLACES)
+# Des fichiers locaux, que les règles propres du .gitignore du projet gardent hors du dépôt.
+LOCAUX = ("auth.json", "config/.env")
 
 
 def _tous(racine):
@@ -450,16 +458,33 @@ def semes_restes_selon_la_methode():
 
 
 def _projet_a_un_depot(tmp_path, env):
-    """Le projet à un dépôt, retouché par lui et avec ce que le modèle ne connaît pas, commité."""
+    """Le projet à un dépôt, retouché par lui et avec ce que le modèle ne connaît pas, commité ;
+    son .gitignore a ses règles propres, et les fichiers locaux qu'elles masquent sont là."""
     modele = _modele_v1(tmp_path, env)
     projet = _projet_v1(tmp_path, env, modele, REPONSES_A_UN_DEPOT)
     _retoucher(projet / "deploiement/projet.env", projet / "docs/registre.md", projet / "CLAUDE.md")
-    for chemin in HORS_DU_MODELE:
+    with (projet / ".gitignore").open("a", encoding="utf-8", newline="\n") as f:
+        f.write("".join(f"{chemin}\n" for chemin in LOCAUX))
+    for chemin in HORS_DU_MODELE + LOCAUX:
         (projet / chemin).parent.mkdir(parents=True, exist_ok=True)
         (projet / chemin).write_text("hors du modèle\n", encoding="utf-8", newline="\n")
     git(projet, env, "add", "-A")
     git(projet, env, "commit", "-q", "-m", "retouches du projet")
+    assert git(projet, env, "status", "--porcelain").strip() == ""
     return modele, projet
+
+
+def _masque(projet, env, chemin):
+    """Vrai si le .gitignore du projet masque `chemin`, qu'il existe ou non."""
+    r = subprocess.run(
+        ["git", "check-ignore", "-q", "--no-index", "--", chemin],
+        cwd=projet,
+        env=env,
+        capture_output=True,
+        check=False,
+    )
+    assert r.returncode in (0, 1), r.stderr
+    return r.returncode == 0
 
 
 def _rendu_neuf(tmp_path, modele, projet):
@@ -483,10 +508,18 @@ def test_scission_d_un_projet_a_un_depot(tmp_path, env_isole, preparee):
     modele, projet = _projet_a_un_depot(tmp_path, env)
     restes = semes_restes_selon_la_methode()
     if preparee:
-        # La voie préparée de methode.md : les semés retirés avant la mise à jour sont semés à neuf.
-        assert restes, "methode.md ne nomme pas les semés restés"
-        git(projet, env, "rm", "-q", "--", *sorted(restes))
-        git(projet, env, "commit", "-q", "-m", "semés à refaire")
+        # La voie préparée de methode.md : les semés retirés avant la mise à jour sont semés à neuf,
+        # sauf `.gitignore`, corrigé à la main ; ce que le modèle ne connaît pas se déplace.
+        assert ".gitignore" in restes, "methode.md ne nomme pas les semés restés"
+        git(projet, env, "rm", "-q", "--", *sorted(restes - {".gitignore"}))
+        with (projet / ".gitignore").open("a", encoding="utf-8", newline="\n") as f:
+            f.write("secrets/*\n!secrets/*.env.enc\n")
+        for ancien, nouveau in DEPLACES.items():
+            (projet / nouveau).parent.mkdir(parents=True, exist_ok=True)
+            git(projet, env, "mv", "--", ancien, nouveau)
+        git(projet, env, "add", "--", ".gitignore")
+        git(projet, env, "commit", "-q", "-m", "scission préparée")
+    hors = tuple(DEPLACES.values()) if preparee else HORS_DU_MODELE
     avant = {chemin: (projet / chemin).read_bytes() for chemin in _tous(projet)}
 
     copier.run_update(
@@ -509,8 +542,11 @@ def test_scission_d_un_projet_a_un_depot(tmp_path, env_isole, preparee):
         assert question not in reponses, question
     apres = _tous(projet)
     # Le géré de la cible `serveur` part, et ses semés que la cible `donnees` ne rend pas, même
-    # retouchés : rien de `deploiement/` ne reste, que ce que le modèle ne connaît pas.
-    assert sorted(c for c in apres if c.startswith("deploiement/")) == [HORS_DU_MODELE[0]]
+    # retouchés : rien de `deploiement/` ne reste, que ce que le modèle ne connaît pas, et que
+    # Copier ne déplace pas.
+    assert sorted(c for c in apres if c.startswith("deploiement/")) == sorted(
+        c for c in hors if c.startswith("deploiement/")
+    )
     for parti in (
         "deploiement/projet.env",
         "deploiement/compose.projet.yml",
@@ -529,7 +565,8 @@ def test_scission_d_un_projet_a_un_depot(tmp_path, env_isole, preparee):
         "docs/modele/decisions/M-0003-contrat-de-l-image.md",
     ):
         assert not (projet / parti).exists(), parti
-    assert (projet / HORS_DU_MODELE[1]).is_file()
+    for chemin in hors:
+        assert git(projet, env, "ls-files", "--", chemin).strip() == chemin, chemin
     # L'instance du dépôt de données arrive.
     for arrive in (
         "env/prod.env",
@@ -548,14 +585,41 @@ def test_scission_d_un_projet_a_un_depot(tmp_path, env_isole, preparee):
     neuf = _rendu_neuf(tmp_path, modele, projet)
     attendus = _tous(neuf)
     assert sorted(attendus - apres) == []
-    assert sorted(apres - attendus) == sorted(HORS_DU_MODELE)
+    assert sorted(apres - attendus) == sorted(hors + LOCAUX)
     differents = {c for c in attendus if (projet / c).read_bytes() != (neuf / c).read_bytes()}
     if preparee:
-        assert sorted(differents) == []
+        # `.gitignore` seul diffère : ses règles propres restent, et il protège les secrets.
+        assert differents == {".gitignore"}
+        lignes = (projet / ".gitignore").read_text(encoding="utf-8").splitlines()
+        assert set(LOCAUX) <= set(lignes)
+        for masque in (*LOCAUX, "secrets/prod.env", "secrets/age.txt"):
+            assert _masque(projet, env, masque), masque
+        assert not _masque(projet, env, "secrets/prod.env.enc")
     else:
         assert differents == restes
         assert restes
         assert {c: (projet / c).read_bytes() for c in restes} == {c: avant[c] for c in restes}
+
+
+def test_scission_refuse_un_gitignore_retire(tmp_path, env_isole):
+    """Le `git rm` d'avant la mise à jour ne vaut pas pour `.gitignore` : sans lui, les fichiers
+    locaux qu'il masquait paraissent, et Copier refuse l'arbre sale (methode.md, « Changer de
+    cible »)."""
+    env = env_isole()
+    _, projet = _projet_a_un_depot(tmp_path, env)
+    git(projet, env, "rm", "-q", "--", ".gitignore")
+    git(projet, env, "commit", "-q", "-m", "gitignore retiré")
+    assert sorted(git(projet, env, "status", "--porcelain").splitlines()) == [
+        "?? auth.json",
+        "?? config/",
+    ]
+    with pytest.raises(UserMessageError, match="Destination repository is dirty"):
+        copier.run_update(
+            str(projet), data=SCISSION, defaults=True, overwrite=True, vcs_ref="v0.0.1", quiet=True
+        )
+    texte = " ".join(METHODE.read_text(encoding="utf-8").split())
+    assert "Sauf `.gitignore`, qui ne se retire jamais" in texte
+    assert "ce que Copier refuse comme un arbre sale" in texte
 
 
 def test_scission_sans_cible_code_prend_aucune(tmp_path, env_isole):

@@ -805,6 +805,13 @@ def test_changer_de_cible_dit_ce_que_fait_copier():
         "Copier sème à neuf un semé absent du projet",
         "Une question nouvelle prend son défaut sous `--defaults`",
         "`--data cible_code=serveur` est obligatoire",
+        # Revue de #95 : `.gitignore` porte les règles du projet, et son retrait salit l'arbre.
+        "Sauf `.gitignore`, qui ne se retire jamais",
+        "ce que Copier refuse comme un arbre sale",
+        "pour un dépôt de données, `secrets/*` puis `!secrets/*.env.enc`",
+        # Copier ne déplace rien de ce qu'il ne connaît pas.
+        "Ce que le modèle ne connaît pas reste où il est",
+        "se déplacent par `git mv`",
     ):
         assert fragment in texte, fragment
     assert max(len(ligne) for ligne in bloc) <= 100
