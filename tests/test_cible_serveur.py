@@ -1345,6 +1345,21 @@ def test_le_test_de_restauration_suit_son_jour(rendre, reponses):
     assert "puis il tourne chaque semaine, au jour et à l'heure `TEST_RESTAURATION`" in m3
 
 
+# Les deux rendus ci-dessus ne prennent pas toutes les branches du gabarit : sans sauvegardes, la
+# cible `donnees`, un commentaire Jinja. Le gabarit lui-même ne dit « dimanche » nulle part.
+def test_le_gabarit_ne_situe_pas_le_test_de_restauration_un_dimanche():
+    gabarit = RACINE / "template"
+    fichiers = fichiers_texte(gabarit)
+    script = "{% if sauvegardes %}tester-restauration.sh{% endif %}.jinja"
+    assert any(chemin.name == script for chemin in fichiers), "le test passerait à vide"
+    porteurs = [
+        chemin.relative_to(gabarit).as_posix()
+        for chemin in fichiers
+        if "dimanche" in chemin.read_bytes().decode("utf-8", errors="replace").lower()
+    ]
+    assert porteurs == []
+
+
 # « Tout arrêter » ne décrit plus le retrait définitif : il renvoie à la procédure de la notice de
 # `serveur`, qui nomme chaque chose en entier. Un motif comme `<nom>-*` prendrait aussi les fichiers
 # d'un projet `<nom>-…`.
