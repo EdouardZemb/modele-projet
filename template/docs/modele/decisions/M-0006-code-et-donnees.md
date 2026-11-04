@@ -9,8 +9,7 @@
   à un dépôt (§ 6).
 - **Amendé** le 2026-11-03, avec le lot 13 : le script de création du poste vit dans
   `modele-projet`, sous `poste/` (§ 7) ; après un retour arrière par `--retour`, une étiquette de
-  données remettrait en service la version quittée (§ 6) ; en cible `serveur`, le dépôt de code est
-  public (§ 1).
+  données remettrait en service la version quittée (§ 6).
 - **S'applique en deux temps.** D'abord la porte par nature et le gabarit de données (§ 1 à 4).
   Ensuite la chaîne à deux dépôts et les règles de chemins (§ 3, dernier point, § 5 à 7). Entre les
   deux, la chaîne lit encore tout dans le clone du code, comme avant.
@@ -73,9 +72,7 @@ Comment la chaîne combine le code et les données :
 - Un **dépôt de code** porte l'application, ses tests, son jeu factice, sa configuration
   d'exemple (`exemple/`), son contenu d'exemple et sa documentation générique. Il est public par
   défaut. S'il reste privé, la porte le traite comme public : sa visibilité n'est plus qu'un choix,
-  sans travail préalable. En cible `serveur`, ce choix est fait : il est public, puisque la chaîne à
-  deux dépôts le suppose. La CI du dépôt de données le clone sans jeton et tire ses images en
-  anonyme (§ 6).
+  sans travail préalable.
 - Un **dépôt de données** porte ce qui fait d'une instance celle d'Edouard :
   - la configuration personnelle de l'application (`config/`) ;
   - le contenu de l'instance (`contenu/`, § 2) ;

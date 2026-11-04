@@ -1372,18 +1372,3 @@ def test_m0006_dit_l_etiquette_de_donnees_apres_un_retour():
         "il faut d'abord une `vX.Y.Z` plus haute sur le commit de la version gardée",
     ):
         assert fragment in plat, fragment
-
-
-# Décision par défaut du lot 13, en attente d'Edouard : en cible `serveur`, le dépôt de code est
-# public, puisque la chaîne à deux dépôts le suppose. La CI du dépôt de données le clone sans jeton
-# et tire ses images en anonyme.
-def test_m0006_en_cible_serveur_le_depot_de_code_est_public():
-    texte = M0006.read_text(encoding="utf-8")
-    paragraphe_1 = a_plat(texte.split("### 1. Deux natures de dépôt\n", 1)[1].split("\n### ", 1)[0])
-    for fragment in (
-        "En cible `serveur`, ce choix est fait : il est public, puisque la chaîne à deux dépôts le"
-        " suppose",
-        "La CI du dépôt de données le clone sans jeton et tire ses images en anonyme (§ 6)",
-    ):
-        assert fragment in paragraphe_1, fragment
-    assert "en cible `serveur`, le dépôt de code est public (§ 1)" in a_plat(texte)
