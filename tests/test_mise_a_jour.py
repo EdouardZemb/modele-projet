@@ -619,10 +619,14 @@ def test_scission_d_un_projet_a_un_depot(tmp_path, env_isole, capsys, preparee):
         # suivi : elle ne demande que les dotenv de l'instance, que `*.env` masque.
         git(projet, env, "add", "--", ".copier-answers.yml")
         assert masques.main(["--racine", str(projet)]) == 1
-        refuses = re.findall(r" : (\S+) \(règle ", capsys.readouterr().err)
+        err = capsys.readouterr().err
+        refuses = re.findall(r" : (\S+) \(règle ", err)
         assert sorted(refuses) == ["env/prod.env", "env/staging.env"]
+        # Ses remèdes, appliqués à la lettre : des lignes ancrées (#95, ronde 2).
+        remedes = re.findall(r"Ajouter `([^`]+)` à ce fichier", err)
+        assert sorted(remedes) == ["!/env/prod.env", "!/env/staging.env"]
         with (projet / ".gitignore").open("a", encoding="utf-8", newline="\n") as f:
-            f.write("!env/prod.env\n!env/staging.env\n")
+            f.write("".join(f"{ligne}\n" for ligne in remedes))
         assert masques.main(["--racine", str(projet)]) == 0
     else:
         assert differents == restes

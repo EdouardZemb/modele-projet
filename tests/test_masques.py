@@ -78,33 +78,54 @@ def test_fichier_gere_masque_refuse(depot_masque, env, capsys):
     err = capsys.readouterr().err
     assert "scripts/modele/verifier_secrets.py" in err
     assert ".gitignore:1:*secret*" in err
-    assert "!scripts/modele/verifier_secrets.py" in err
-    assert "!scripts/modele/secrets.ps1" in err
+    # Ancrées : `!secrets.ps1`, sans `/`, vaudrait à toute profondeur.
+    assert "Ajouter `!/scripts/modele/verifier_secrets.py` à ce fichier, puis l'indexer." in err
+    assert "Ajouter `!/scripts/modele/secrets.ps1` à ce fichier, puis l'indexer." in err
     # L'autre remède, une seule fois pour deux fichiers, juste avant le renvoi à methode.md.
     lignes = err.splitlines()
     assert lignes.count(AUTRE_REMEDE) == 1
     assert lignes[-2:] == [AUTRE_REMEDE, masques.RENVOI]
 
 
+def remede_attendu(*lignes: str) -> str:
+    """Le remède d'un dossier exclu, tel que la porte l'écrit : ses lignes, dans leur ordre."""
+    cites = [f"`{ligne}`" for ligne in lignes]
+    return (
+        f"Ajouter à la fin de ce fichier {', '.join(cites[:-1])} et {cites[-1]}, dans cet ordre, "
+        f"puis indexer le fichier : ces lignes n'admettent que ce que la porte examine, et "
+        f"{cites[0]} seul ferait entrer tout le dossier."
+    )
+
+
+# `deploiement/env/` est mixte : un fichier local peut y vivre à côté des deux du modèle.
+REMEDE_ENV_A_UN_DEPOT = remede_attendu(
+    "!/deploiement/env/",
+    "/deploiement/env/*",
+    "!/deploiement/env/prod.env",
+    "!/deploiement/env/staging.env",
+)
+
+
 def test_dossier_parent_exclu(depot_masque, env, capsys):
-    """Sous un dossier exclu, `!<fichier>` ne vaut rien : git n'y regarde pas. Le remède lève le
-    dossier."""
+    """Sous un dossier exclu, `!/<fichier>` ne vaut rien : git n'y regarde pas. Le remède lève le
+    dossier, et n'y admet que ce que la porte examine : un fichier local reste masqué."""
     ecrire(depot_masque, ".gitignore", "env/\n")
     ecrire(depot_masque, "deploiement/env/prod.env")
+    ecrire(depot_masque, "deploiement/env/local.env")
     modifier_reponses(depot_masque, env, cible="serveur")
     assert masques.main(["--racine", str(depot_masque)]) == 1
     err = capsys.readouterr().err
-    assert "deploiement/env/prod.env (règle .gitignore:1:env/)" in err
-    assert "Ajouter `!deploiement/env/` à ce fichier, puis indexer le fichier." in err
-    assert "!deploiement/env/prod.env" not in err
-    ecrire(depot_masque, ".gitignore", "env/\n!deploiement/env/\n")
+    assert f"deploiement/env/prod.env (règle .gitignore:1:env/). {REMEDE_ENV_A_UN_DEPOT}" in err
+    assert "local.env" not in err
+    appliquer(depot_masque, "env/\n", REMEDE_ENV_A_UN_DEPOT)
     assert masques.main(["--racine", str(depot_masque)]) == 0
+    assert ignore(depot_masque, env, "deploiement/env/local.env")
 
 
 def test_dossier_parent_exclu_avec_un_fichier_suivi(depot_masque, env, capsys):
     """Un dossier exclu qui contient déjà un fichier suivi reste exclu pour un fichier neuf. Sans
     `--no-index`, git le tiendrait pour suivi et ne le dirait pas exclu : le remède retomberait sur
-    `!<fichier>`, qui ne vaut rien, et le refus reviendrait en boucle."""
+    `!/<fichier>`, qui ne vaut rien, et le refus reviendrait en boucle."""
     ecrire(depot_masque, ".gitignore", "env/\n")
     ecrire(depot_masque, "deploiement/env/staging.env")
     git(depot_masque, env, "add", "-f", "deploiement/env/staging.env")
@@ -113,10 +134,8 @@ def test_dossier_parent_exclu_avec_un_fichier_suivi(depot_masque, env, capsys):
     modifier_reponses(depot_masque, env, cible="serveur")
     assert masques.main(["--racine", str(depot_masque)]) == 1
     err = capsys.readouterr().err
-    assert "deploiement/env/prod.env (règle .gitignore:1:env/)" in err
-    assert "Ajouter `!deploiement/env/` à ce fichier, puis indexer le fichier." in err
-    assert "!deploiement/env/prod.env" not in err
-    ecrire(depot_masque, ".gitignore", "env/\n!deploiement/env/\n")
+    assert f"deploiement/env/prod.env (règle .gitignore:1:env/). {REMEDE_ENV_A_UN_DEPOT}" in err
+    appliquer(depot_masque, "env/\n", REMEDE_ENV_A_UN_DEPOT)
     assert masques.main(["--racine", str(depot_masque)]) == 0
 
 
@@ -126,7 +145,7 @@ def test_dossier_parent_exclu_avec_un_fichier_suivi(depot_masque, env, capsys):
     ids=["env", "secrets"],
 )
 def test_contenu_d_un_dossier_exclu(depot_masque, env, capsys, motif, fichier):
-    """`<dossier>/*` exclut ce que contient le dossier, pas le dossier : `!<dossier>/` n'y vaut
+    """`<dossier>/*` exclut ce que contient le dossier, pas le dossier : `!/<dossier>/` n'y vaut
     rien, et le remède nomme le fichier. Git compare ce motif à `<dossier>/` et le dit exclu :
     un remède sur le dossier reviendrait en boucle."""
     (depot_masque / GERE).unlink()
@@ -136,9 +155,9 @@ def test_contenu_d_un_dossier_exclu(depot_masque, env, capsys, motif, fichier):
     git(depot_masque, env, "add", ".copier-answers.yml")
     assert masques.main(["--racine", str(depot_masque)]) == 1
     err = capsys.readouterr().err
-    assert f"{fichier} (règle .gitignore:1:{motif}). Ajouter `!{fichier}` à ce fichier" in err
-    assert f"`!{fichier.split('/')[0]}/`" not in err
-    ecrire(depot_masque, ".gitignore", f"{motif}\n!{fichier}\n")
+    assert f"{fichier} (règle .gitignore:1:{motif}). Ajouter `!/{fichier}` à ce fichier" in err
+    assert f"`!/{fichier.split('/')[0]}/`" not in err
+    ecrire(depot_masque, ".gitignore", f"{motif}\n!/{fichier}\n")
     assert masques.main(["--racine", str(depot_masque)]) == 0
 
 
@@ -234,21 +253,20 @@ def test_instance_des_donnees_masquee_refuse(depot_masque, env, capsys):
     assert masques.main(["--racine", str(depot_masque)]) == 0
 
 
-# Sous un dossier de secrets exclu (`*secret*` exclut `secrets/` comme `deploiement/secrets/`),
-# `!<dossier>` seul laisserait entrer les secrets en clair : le remède lève le dossier, en exclut le
-# contenu, puis n'admet que ce que la chaîne y lit (M-0002, amendement du 2026-11-04). Ses lignes
-# sont ancrées à la racine : `!secrets/`, sans `/` en tête, vaudrait à toute profondeur, et lèverait
-# le masque de tout dossier `secrets/` imbriqué que `*secret*` exclut.
+# Un dossier de secrets est mixte (`*secret*` exclut `secrets/` comme `deploiement/secrets/`) : le
+# remède le lève, en exclut le contenu, puis n'admet que ce que la porte y examine, par des lignes
+# ancrées (M-0002, amendement du 2026-11-04). `!secrets/`, sans `/` en tête, vaudrait à toute
+# profondeur, et lèverait le masque de tout dossier `secrets/` imbriqué que `*secret*` exclut.
 REMEDE_SECRETS = (
     "Ajouter à la fin de ce fichier `!/secrets/`, `/secrets/*` et `!/secrets/*.env.enc`, dans cet "
-    "ordre, puis indexer le fichier : jamais `!/secrets/` seul, qui laisserait entrer les secrets "
-    "en clair."
+    "ordre, puis indexer le fichier : ces lignes n'admettent que ce que la porte examine, et "
+    "`!/secrets/` seul ferait entrer tout le dossier."
 )
-REMEDE_SECRETS_A_UN_DEPOT = (
-    "Ajouter à la fin de ce fichier `!/deploiement/secrets/`, `/deploiement/secrets/*`, "
-    "`!/deploiement/secrets/*.cles` et `!/deploiement/secrets/*.env.enc`, dans cet ordre, puis "
-    "indexer le fichier : jamais `!/deploiement/secrets/` seul, qui laisserait entrer les secrets "
-    "en clair."
+REMEDE_SECRETS_A_UN_DEPOT = remede_attendu(
+    "!/deploiement/secrets/",
+    "/deploiement/secrets/*",
+    "!/deploiement/secrets/*.cles",
+    "!/deploiement/secrets/*.env.enc",
 )
 # Des dossiers `secrets/` imbriqués, que `*secret*` masque, et que le remède doit laisser masqués.
 SECRETS_IMBRIQUES = (
@@ -308,9 +326,9 @@ CLAIRS_A_UN_DEPOT = (
 
 
 def test_secret_chiffre_d_un_projet_a_un_depot(depot_masque, env, capsys):
-    """En cible `serveur`, `deploiement/secrets/` porte aussi les `.cles` du modèle. La porte examine
-    tout `deploiement/`, mais n'y voit, sous `deploiement/secrets/`, que ce que la chaîne y lit au
-    premier niveau : un secret en clair y reste masqué, sans refus ni remède qui le nomme."""
+    """En cible `serveur`, `deploiement/secrets/` porte aussi les `.cles` du modèle. La porte n'y
+    examine que ce que la chaîne y lit au premier niveau : un secret en clair y reste masqué, sans
+    refus ni remède qui le nomme."""
     (depot_masque / GERE).unlink()
     ecrire(depot_masque, ".gitignore", "*secret*\n")
     for chemin in (
@@ -342,14 +360,29 @@ def test_secret_chiffre_d_un_projet_a_un_depot(depot_masque, env, capsys):
     assert not ignore(depot_masque, env, "deploiement/secrets/prod.env.enc")
 
 
-# Un dossier exclu qui contient un dossier de secrets : `!/deploiement/` seul ferait entrer tout
-# `deploiement/secrets/`. Le remède lève aussi le dossier de secrets, au cas où une autre règle
-# l'exclut, en exclut le contenu, puis n'admet que ce que la chaîne y lit.
-REMEDE_DEPLOIEMENT = (
-    "Ajouter à la fin de ce fichier `!/deploiement/`, `!/deploiement/secrets/`, "
-    "`/deploiement/secrets/*`, `!/deploiement/secrets/*.cles` et "
-    "`!/deploiement/secrets/*.env.enc`, dans cet ordre, puis indexer le fichier : jamais "
-    "`!/deploiement/` seul, qui laisserait entrer les secrets en clair."
+# `deploiement/` est mixte, et l'ancêtre de dossiers mixtes : `!/deploiement/` seul ferait entrer
+# tout le dossier, secrets en clair, clés privées et fichiers locaux compris. Le remède le lève, en
+# exclut le contenu, puis n'admet que ce que la porte y examine, chaque dossier mixte par ses
+# propres lignes, levé au cas où une autre règle l'exclut.
+REMEDE_DEPLOIEMENT = remede_attendu(
+    "!/deploiement/",
+    "/deploiement/*",
+    "!/deploiement/*.sh",
+    "!/deploiement/*.yml",
+    "!/deploiement/projet.env",
+    "!/deploiement/ci/",
+    "!/deploiement/systemd/",
+    "!/deploiement/env/",
+    "/deploiement/env/*",
+    "!/deploiement/env/prod.env",
+    "!/deploiement/env/staging.env",
+    "!/deploiement/cles/",
+    "/deploiement/cles/*",
+    "!/deploiement/cles/*.pub",
+    "!/deploiement/secrets/",
+    "/deploiement/secrets/*",
+    "!/deploiement/secrets/*.cles",
+    "!/deploiement/secrets/*.env.enc",
 )
 
 
@@ -519,9 +552,9 @@ def test_chemins_couvrent_le_rendu(rendre, reponses):
     geres = [g for g in fichiers(rendu) if g not in semes]
     assert geres
     assert [g for g in geres if not couvert(g, chemins)] == []
-    # Sous un dossier de secrets, la porte n'examine que ce que la chaîne y lit : aucun fichier du
-    # rendu, semé ou géré, n'y échappe.
-    assert [f for f in fichiers(rendu) if masques.hors_de_la_chaine(f)] == []
+    # Ce que la porte n'examine pas sous ses chemins (un dossier de secrets ou de clés imbriqué, un
+    # cache) : aucun fichier du rendu, semé ou géré, n'y échappe.
+    assert [f for f in fichiers(rendu) if masques.hors_de_la_porte(f, chemins) is not None] == []
 
 
 @pytest.mark.parametrize(
@@ -541,3 +574,209 @@ def test_chemins_couvrent_les_donnees(rendre, reponses):
         )
         propres += ["secrets/prod.env.enc", "secrets/staging.env.enc"]
     assert [f for f in propres if not couvert(f, chemins)] == []
+
+
+# La matrice des remèdes (#95, ronde 2 après relecture). Le principe : un remède n'admet que ce que
+# la porte examine, toujours par des lignes ancrées. Pour chaque cible et chaque .gitignore, les
+# remèdes appliqués à la lettre, jusqu'au silence, ne font paraître aucun des fichiers plantés à côté
+# des fichiers examinés, et rendent suivable tout ce que la porte examine. Un seul dépôt git par
+# case, sans Copier.
+EXAMINES_COMMUNS = (
+    ".copier-answers.yml",
+    ".githooks/pre-commit",
+    "scripts/modele/verifier_secrets.py",
+    "scripts/modele/secrets.ps1",
+    "docs/modele/methode.md",
+    "docs/modele/decisions/M-0002-garde-fous-et-confidentialite.md",
+    ".github/modele/gitleaks.toml",
+    ".github/workflows/modele-socle.yml",
+    ".github/ISSUE_TEMPLATE/lot.yml",
+    ".github/pull_request_template.md",
+    ".claude/skills/consigner/SKILL.md",
+    ".claude/settings.json",
+)
+EXAMINES_PAR_CIBLE = {
+    "donnees": (
+        *EXAMINES_COMMUNS,
+        "config/README.md",
+        "contenu/README.md",
+        ".sops.yaml",
+        "env/prod.env",
+        "env/staging.env",
+        "cles/serveur.pub",
+        "cles/hors-ligne.pub",
+        "secrets/prod.env.enc",
+        "secrets/staging.env.enc",
+    ),
+    "serveur": (
+        *EXAMINES_COMMUNS,
+        "deploiement/deployer.sh",
+        "deploiement/compose.yml",
+        "deploiement/projet.env",
+        "deploiement/ci/verifier-image.sh",
+        "deploiement/systemd/essai-sonde.timer.in",
+        "deploiement/env/prod.env",
+        "deploiement/env/staging.env",
+        "deploiement/cles/serveur.pub",
+        "deploiement/secrets/prod.cles",
+        "deploiement/secrets/prod.env.enc",
+        "tests/deploiement/secrets.bats",
+        "tests/deploiement/doubles/git",
+        ".sops.yaml",
+        ".github/actions/modele-image-construire/action.yml",
+    ),
+}
+REPONSES_PAR_CIBLE = {
+    "donnees": "cible: donnees\ncible_code: serveur\n",
+    "serveur": "cible: serveur\n",
+}
+# Ce que la porte n'examine pas, à côté de ce qu'elle examine : des clés privées, des secrets en
+# clair, des fichiers locaux, des dossiers de secrets ou d'env imbriqués, un cache.
+PLANTES = (
+    "cles/identite-age.txt",
+    "deploiement/cles/identite-age.txt",
+    "secrets/prod.env",
+    "secrets/ancien/vieux.env.enc",
+    "deploiement/secrets/prod.env",
+    "deploiement/secrets/ancien/vieux.env.enc",
+    "env/local.env",
+    "deploiement/env/local.env",
+    "config/local.env",
+    "config/secrets/jeton.txt",
+    "contenu/brouillons/notes.md",
+    "contenu/brouillons/env/prod.env",
+    "deploiement/outils/secrets/cle.pem",
+    "tests/deploiement/secrets/cle.pem",
+    ".claude/settings.local.json",
+    "scripts/modele/__pycache__/lancer.cpython-312.pyc",
+)
+# Le dossier du .gitignore, et ses règles : celles de `veille-emploi`, des dossiers, des motifs, une
+# liste blanche, et des .gitignore imbriqués.
+REGLES = {
+    "veille-emploi": (".", "*.env\n*secret*\n"),
+    "secrets": (".", "secrets/\n"),
+    "secrets-a-la-racine": (".", "/secrets\n"),
+    "cles": (".", "cles/\n"),
+    "env": (".", "env/\n"),
+    "config": (".", "config/\n"),
+    "contenu": (".", "contenu/\n"),
+    "deploiement": (".", "deploiement/\n"),
+    "deploiement-contenu": (".", "deploiement/*\n"),
+    "deploiement-tout": (".", "deploiement/**\n"),
+    "secret-et-deploiement": (".", "*secret*\ndeploiement/\n"),
+    "pub": (".", "*.pub\n"),
+    "enc": (".", "*.enc\n"),
+    "claude": (".", ".claude/\n"),
+    "liste-blanche": (".", "*\n!*/\n!.gitignore\n"),
+    "imbrique-secrets": ("secrets", "*\n!.gitignore\n"),
+    "imbrique-cles": ("cles", "*\n"),
+    "imbrique-deploiement": ("deploiement", "secrets/\n"),
+}
+REFUS = re.compile(r"\(règle (.+?):\d+:.*?\)\. Ajouter (.+)$")
+
+
+@pytest.fixture
+def git_isole(tmp_path, monkeypatch):
+    """Ni la configuration globale ni le fichier d'exclusion du poste : la porte, qui lance git
+    dans le processus des tests, et les contrôles voient les mêmes règles."""
+    home = tmp_path / "home-vide"
+    home.mkdir()
+    vide = home / "gitconfig"
+    vide.write_text("", encoding="utf-8")
+    for variable in ("HOME", "USERPROFILE", "XDG_CONFIG_HOME"):
+        monkeypatch.setenv(variable, str(home))
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(vide))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+
+def masques_parmi(racine: Path, chemins) -> set[str]:
+    """Ceux des `chemins` que les .gitignore masquent, par un seul `git check-ignore`."""
+    r = subprocess.run(
+        ["git", "check-ignore", "--no-index", "-z", "--stdin"],
+        cwd=racine,
+        input="".join(f"{c}\0" for c in chemins).encode("utf-8"),
+        capture_output=True,
+        check=False,
+    )
+    assert r.returncode in (0, 1), r.stderr
+    return {c for c in r.stdout.decode("utf-8").split("\0") if c}
+
+
+def remedes_a_la_lettre(err: str) -> list[tuple[str, tuple[str, ...]]]:
+    """Chaque remède d'un refus, une fois : le fichier qui porte la règle, et les lignes à y
+    ajouter, dans leur ordre."""
+    remedes = []
+    for ligne in err.splitlines():
+        m = REFUS.search(ligne)
+        if m is None:
+            continue
+        texte = re.split(r", dans cet ordre| à ce fichier", m.group(2), maxsplit=1)[0]
+        remede = (m.group(1), tuple(re.findall(r"`([^`]+)`", texte)))
+        if remede not in remedes:
+            remedes.append(remede)
+    return remedes
+
+
+def depot_de_la_matrice(racine: Path, cible: str) -> tuple[str, ...]:
+    """Un dépôt neuf, ses fichiers examinés et plantés, ses réponses non suivies (le déclencheur)."""
+    racine.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=racine, check=True, capture_output=True)
+    examines = EXAMINES_PAR_CIBLE[cible]
+    for chemin in (*examines, *PLANTES):
+        ecrire(racine, chemin)
+    ecrire(racine, ".copier-answers.yml", REPONSES_PAR_CIBLE[cible])
+    return examines
+
+
+@pytest.mark.parametrize("regle", list(REGLES))
+@pytest.mark.parametrize("cible", list(EXAMINES_PAR_CIBLE))
+def test_matrice_des_remedes(tmp_path, git_isole, capsys, cible, regle):
+    d = tmp_path / "depot"
+    examines = depot_de_la_matrice(d, cible)
+    dossier, regles = REGLES[regle]
+    ecrire(d, ".gitignore" if dossier == "." else f"{dossier}/.gitignore", regles)
+    plantes_masques = masques_parmi(d, PLANTES)
+    for _ in range(3):
+        if masques.main(["--racine", str(d)]) == 0:
+            break
+        for source, lignes in remedes_a_la_lettre(capsys.readouterr().err):
+            with (d / source).open("a", encoding="utf-8", newline="\n") as f:
+                f.write("".join(f"{ligne}\n" for ligne in lignes))
+    assert masques.main(["--racine", str(d)]) == 0, capsys.readouterr().err
+    apres = masques_parmi(d, (*examines, *PLANTES))
+    leves = sorted(plantes_masques - apres)
+    assert not leves, f"plantés levés par un remède : {leves}"
+    encore = sorted(apres & set(examines))
+    assert not encore, f"examinés encore masqués : {encore}"
+
+
+@pytest.mark.parametrize("cible", list(EXAMINES_PAR_CIBLE))
+def test_la_matrice_plante_hors_de_ce_que_la_porte_examine(tmp_path, git_isole, cible):
+    """Sous une liste blanche qui masque tout fichier, la porte voit exactement les fichiers
+    examinés de la matrice : aucun fichier planté n'est examiné."""
+    d = tmp_path / "depot"
+    examines = depot_de_la_matrice(d, cible)
+    ecrire(d, ".gitignore", "*\n!*/\n")
+    assert masques.fichiers_masques(d, masques.chemins_examines(d)) == sorted(examines)
+
+
+@pytest.mark.parametrize(
+    ("source", "dossier"),
+    [
+        (".gitignore", ""),
+        ("secrets/.gitignore", "secrets/"),
+        ("deploiement/secrets/.gitignore", "deploiement/secrets/"),
+        (".git/info/exclude", ""),
+        ("C:/Users/essai/.gitignore", ""),
+        ("/home/essai/.gitignore", ""),
+        ("~/.gitignore", ""),
+    ],
+)
+def test_lignes_d_un_gitignore_imbrique(source, dossier):
+    """Un .gitignore imbriqué lit ses lignes depuis son dossier : le remède y retire ce préfixe et
+    garde le `/` de tête. La racine, `.git/info/exclude` et un fichier hors du dépôt lisent les leurs
+    depuis la racine."""
+    assert masques.dossier_de_la_regle(source) == dossier
+    lignes = ["!/secrets/prod.env.enc", "/secrets/*"]
+    attendu = ["!/prod.env.enc", "/*"] if dossier == "secrets/" else lignes
+    assert [masques.relative(ligne, dossier) for ligne in lignes] == attendu
