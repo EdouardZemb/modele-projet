@@ -177,6 +177,20 @@ M-0006 § 6 et 7, étiquetée `v0.8.0`.
   Le complément de la revue finale, sur les tâches 10 et 11, n'a tourné qu'après la fusion de #92 ;
   ses constats ont fait corriger ces textes (LE-54, LE-55).
 
+Correctif du 04/11 : la scission d'un projet à un dépôt en dépôt de données (#94), étiqueté
+`v0.8.1`. Né de la préparation de la scission de `veille-emploi`, par des essais de Copier 9.19.1
+sur la `v0.8.0`. En cible `donnees`, la porte des masqués examine aussi `config/README.md` et
+`contenu/README.md`, et, avec `cible_code: serveur`, l'instance : `.sops.yaml`, `env/prod.env`,
+`env/staging.env`, `cles/*.pub` et `secrets/*.env.enc`. Un `.gitignore` qui masque `*.env` ou
+`*secret*`, comme celui de `veille-emploi`, fait donc refuser le commit de la mise à jour. Le
+`.gitignore` semé d'un dépôt de données n'admet sous `secrets/` que les `*.env.enc`. « Changer de
+cible », dans `methode.md`, dit enfin ce que fait Copier : les semés que la nouvelle cible ne rend
+pas partent, même retouchés ; ceux que les deux rendent gardent leur contenu d'avant, six pour une
+scission, qu'un `git rm` avant la mise à jour fait semer à neuf ; `--data cible_code=serveur` est
+obligatoire. Un test fait cette scission sur un projet comme `veille-emploi`, seule et préparée.
+`ancrage` l'attend avant sa scission ; `veille-emploi` la prendra si elle paraît avant la PR des
+données de sa V2. Hors de la cible `donnees`, seul change le texte de `methode.md`.
+
 Prochain, au choix d'Edouard :
 - la scission de `veille-emploi`, puis celle d'`ancrage`, chacune dans son propre lot ;
 - le lot 3 (la cible `statique`) ;
