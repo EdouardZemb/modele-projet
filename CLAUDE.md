@@ -126,9 +126,10 @@ M-0006 § 6 et 7, étiquetée `v0.8.0`.
   code est public : le script refuse `-Visibilite prive`, et M-0006 § 1 le dit, puisque la CI du
   dépôt de données le clone et tire ses images sans jeton (#90, #91). La naissance d'`essai-chaine`,
   le 03/11, est la naissance réelle que demande LE-1 ; #90 a changé le script depuis, et Edouard
-  l'a relancé le 04/11 sur `essai-naissance`, jetable, en cible `serveur` : 21 étapes sur 21, les
-  deux dépôts réglés, les 18 scripts du modèle exécutables au premier commit du code, la ligne de
-  l'index, et la CI rouge des deux côtés, faute d'image, comme le dit `exploitation.md`.
+  l'a relancé le 04/11 sur `essai-naissance`, jetable, en cible `serveur`, avec le modèle `v0.7.2` :
+  21 étapes sur 21, les deux dépôts réglés, les 18 scripts du modèle exécutables au premier commit
+  du code, les deux lignes de l'index, et la CI rouge des deux côtés, faute de `Dockerfile` dans le
+  code et donc d'image pour les données, comme le dit désormais `exploitation.md` (`v0.8.0`).
 - **La mise en service à deux dépôts** (`exploitation.md`, semé ; #87). La déclaration dans
   `serveur` porte `DONNEES=oui`. La sonde de `serveur` crée la clé de déploiement
   `depot-<nom>-donnees`, une pour les deux clones, et attend ; 👤 Edouard la pose sur
@@ -159,16 +160,22 @@ M-0006 § 6 et 7, étiquetée `v0.8.0`.
   Le scénario 8 est tenu le 04/11 : la sauvegarde de 03:30 a noté le couple en service en prod et
   envoyé au distant son archive et son couple, chiffrés ; `rclone lsl` y montre que `copy` garde la
   date du fichier et que les `--include` répétés se combinent en OU, ce que seul le double prouvait.
-  Le test de restauration du mercredi 05:30 a réussi sur cet instantané, avec l'image du couple,
-  sans lire la configuration de la prod (une piste).
+  Le test de restauration du mercredi 05:30 a réussi sur cet instantané, avec l'image en service,
+  celle du couple noté ce jour-là : le test prend toujours la première colonne de `deploye`, jamais
+  le `.couple` (M-0005 § 5, LE-54), et ne lit pas la configuration de la prod (une piste).
   Le retrait d'`essai-chaine`, le 04/11, suit la notice de `serveur` (serveur#32). Sur la
   machine, unités, conteneurs, réseaux, clones et dossiers sont retirés sans erreur, les
   instantanés figés compris (serveur#31) ; ses 7 images aussi, dont 4 sans étiquette, sur le
-  magasin classique de la cible (LE-50). La vérification en lecture seule n'a rien trouvé du
-  projet, et le tunnel commun n'a pas été recréé. Les quatre contrôles Healthchecks sont
-  supprimés et `essai-chaine` est archivé. Restent à Edouard : les deux routes Cloudflare, la clé
-  puis l'archivage d'`essai-chaine-donnees`, le paquet GHCR et les sauvegardes distantes. À
-  l'arrêt, l'application d'essai a mis 10 s : elle ignore SIGTERM (une piste).
+  magasin classique de la cible (LE-50). La vérification en lecture seule n'a rien trouvé du projet,
+  et le tunnel commun n'a pas été recréé ; elle ne cherchait pas les horodatages des deux minuteries
+  persistantes, qui restent (serveur#34, une piste). Les quatre contrôles Healthchecks sont
+  supprimés, et les deux routes Cloudflare aussi, leurs CNAME avec elles ; `essai-chaine` est
+  archivé, et `essai-chaine-donnees` aussi, sans sa clé de déploiement. Restent à Edouard : les deux
+  horodatages (geste 👤 de serveur#34), le paquet GHCR `essai-chaine`, l'effacement des sauvegardes
+  distantes, et l'archivage d'`essai-naissance` et d'`essai-naissance-donnees`. À l'arrêt,
+  l'application d'essai a mis 10 s : elle ignore SIGTERM (une piste).
+  Le complément de la revue finale, sur les tâches 10 et 11, n'a tourné qu'après la fusion de #92 ;
+  ses constats ont fait corriger ces textes (LE-54, LE-55).
 
 Prochain, au choix d'Edouard :
 - la scission de `veille-emploi`, puis celle d'`ancrage`, chacune dans son propre lot ;
@@ -182,8 +189,10 @@ Prochain, au choix d'Edouard :
   cible », dont LE-50 est le 4e : sa forme revient à Edouard, et le registre en propose une ;
 - la porte due par LE-46, au 3e constat du motif « décision appliquée sans en chercher les
   effets » : sa forme revient à Edouard, et le registre en propose une ;
-- la porte due par LE-53, au 3e constat du motif « mécanisme décrit sans relire son code » : sa
-  forme revient à Edouard, et le registre en propose une.
+- la porte due par LE-53, au 3e constat du motif « mécanisme décrit sans relire son code », dont
+  LE-54 est le 4e : sa forme revient à Edouard, et le registre en propose une ;
+- la porte due par LE-55, au 3e constat du motif « contrôle passé à vide » : sa forme revient à
+  Edouard, et le registre en propose une.
 
 Le cadrage est dans `docs/cadrage.md` ; ce que les lots ont appris, dans `docs/registre.md`.
 
