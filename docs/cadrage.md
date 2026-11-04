@@ -177,7 +177,8 @@
 > **Amendé le 2026-11-04, à la clôture du lot 13, de la même façon.** Le lot 13 fait la fin de
 > M-0006 (§ 6 et 7) : la naissance d'un projet en deux dépôts par le script du poste, les clones
 > des données par la sonde de `serveur`, puis le premier essai réel de la chaîne à deux dépôts, sur
-> un projet jetable, `essai-chaine`. M-0003 à M-0006, `methode.md` et le runbook sont amendés.
+> un projet jetable, `essai-chaine`. M-0006, `methode.md` et le runbook sont amendés ; M-0003 à
+> M-0005 sont corrigés, pour dire ce que fait déjà la mécanique.
 >
 > - **§1** : le troisième livrable, `Nouveau-Projet.ps1`, vit dans `poste/` de `modele-projet`,
 >   avec son test, hors de `template/` : il n'est pas distribué aux projets. La copie de
@@ -192,11 +193,11 @@
 >   défaut ne porte pas `NATURE` prend la nature `code`, comme toute nature illisible ;
 > - **§6.2, §6.6 et §6.7** : le test de restauration tourne chaque semaine, au jour et à l'heure
 >   `TEST_RESTAURATION` que déclare `serveur`, et non le dimanche ; son contrôle Healthchecks
->   l'attend ce jour-là (M-0003 et M-0005, amendés) ;
+>   l'attend ce jour-là (M-0003 et M-0005, corrigés) ;
 > - **§6.3** : après un retour par `deployer.sh <env> --retour`, seul le couple quitté est en
 >   échec, et la sonde déploie tout couple neuf : un geste qui ne change qu'une moitié de la cible
->   ramène l'autre moitié du couple quitté. `--retour` dit quel geste passe d'abord (M-0004 et
->   M-0006, amendés ; LE-46) ;
+>   ramène l'autre moitié du couple quitté. `--retour` dit quel geste passe d'abord (M-0004,
+>   corrigé ; M-0006, amendé ; LE-46) ;
 > - **§6.8** : la mise en service suit les six étapes du `docs/exploitation.md` du projet, et non
 >   ce tableau. À deux dépôts, la déclaration dans `serveur` porte `DONNEES=oui` ; la sonde de
 >   `serveur` crée la clé de déploiement `depot-<nom>-donnees` et attend ; 👤 Edouard la colle sur

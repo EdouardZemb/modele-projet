@@ -154,7 +154,11 @@ M-0006 § 6 et 7, étiquetée `v0.8.0`.
   des quatre contrôles Healthchecks qu'elle a créés (environ 18 min avec eux), pour une cible de
   15. L'essai a fait corriger la fausse application, son préfixe et le semis de `/donnees`, et les
   textes de la chaîne (#91, LE-42, LE-43).
-  <!-- T10 : à compléter -->
+  Le scénario 8 est tenu le 04/11 : la sauvegarde de 03:30 a noté le couple en service en prod et
+  envoyé au distant son archive et son couple, chiffrés ; `rclone lsl` y montre que `copy` garde la
+  date du fichier et que les `--include` répétés se combinent en OU, ce que seul le double prouvait.
+  Le test de restauration du mercredi 05:30 a réussi sur cet instantané, avec l'image du couple,
+  sans lire la configuration de la prod (une piste).
   <!-- T11 : à compléter -->
 
 Prochain, au choix d'Edouard :
@@ -168,7 +172,9 @@ Prochain, au choix d'Edouard :
 - la porte due par LE-41, au 3e constat du motif « version d'outil du poste différente de la
   cible », dont LE-50 est le 4e : sa forme revient à Edouard, et le registre en propose une ;
 - la porte due par LE-46, au 3e constat du motif « décision appliquée sans en chercher les
-  effets » : sa forme revient à Edouard, et le registre en propose une.
+  effets » : sa forme revient à Edouard, et le registre en propose une ;
+- la porte due par LE-53, au 3e constat du motif « mécanisme décrit sans relire son code » : sa
+  forme revient à Edouard, et le registre en propose une.
 
 Le cadrage est dans `docs/cadrage.md` ; ce que les lots ont appris, dans `docs/registre.md`.
 
@@ -179,11 +185,12 @@ Le cadrage est dans `docs/cadrage.md` ; ce que les lots ont appris, dans `docs/r
   Linux, et il saute sans lui.
 - `ruff check .` : le style.
 - `poste\Tester-Nouveau-Projet.ps1 -SansPoste -SourceModele <ce clone>` : le test du script de
-  création, sans `gh`, sans la liste privée ni l'index réel ; il rend le modèle au `HEAD` validé
-  du clone, sans les changements non validés. Sans `-SansPoste`, il lance aussi le script à blanc,
-  sur le poste d'Edouard. `tests/test_poste.py` le lance, et compare les bits d'exécution du
-  premier commit à ceux du modèle : sous Windows seulement ; ailleurs, seul le contrôle du BOM
-  tourne.
+  création, sans `gh`, sans la liste privée ni l'index réel. Il rend le modèle au `HEAD` du clone,
+  changements non validés et fichiers non suivis compris : Copier les ajoute, avec un
+  `DirtyLocalWarning`. Valider avant, pour éprouver la tête qui part. Sans `-SansPoste`, il lance
+  aussi le script à blanc, sur le poste d'Edouard. `tests/test_poste.py` le lance, et compare les
+  bits d'exécution du premier commit à ceux du modèle : sous Windows seulement ; ailleurs, seul le
+  contrôle du BOM tourne.
 - `copier copy --vcs-ref <étiquette> gh:EdouardZemb/modele-projet <dossier>` : créer un projet.
 - `copier update` : mettre à jour un projet né du modèle (à lancer dans ce projet, pas ici).
 - `git config core.hooksPath .githooks` : à poser dans chaque clone et chaque worktree.
