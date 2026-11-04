@@ -139,9 +139,13 @@
 #     attend alors en silence un nouveau couple.
 {%- endif %}
 {%- if nature == 'code' %}
-#     Seul ce couple attend : avec une commande de l'instance, un nouveau commit de données ferait
-#     un couple neuf avec l'image quittée, et la sonde le déploierait. Le journal le dit : en prod,
-#     une vX.Y.Z sur le commit de la version gardée passe avant toute étiquette de données.
+#     Seul ce couple attend, et la sonde déploie tout couple neuf : avec une commande de l'instance,
+#     changer une moitié de sa cible ramène l'autre moitié du couple quitté. Le journal dit
+#     laquelle, selon ce que le retour change, et ce qui passe d'abord (avertir_apres_retour) : si
+#     seule l'image change, en prod une vX.Y.Z plus haute que la version quittée, sur le commit de
+#     la version gardée (en staging, le correctif du code) ; si seul le commit de données change,
+#     une étiquette de données sur un commit corrigé (en staging, la branche des données corrigée) ;
+#     si les deux changent, la moitié en cause.
 {%- endif %}
 #   - Succès : deploye ← le précédent, `precedent` supprimé (un second --retour ne rebascule pas
 #     vers le couple en échec ; le prochain déploiement le recrée), signal ok « retour à <v>
@@ -588,6 +592,45 @@ commit_des_montages() {
   done
   printf '%s\n' -
 }
+{%- if nature == 'code' %}
+
+# avertir_apres_retour : après le marquage d'un retour arrière, avec une commande de l'instance, ce
+# qui ramènerait une moitié du couple quitté. Seul ce couple attend, et la sonde déploie tout couple
+# neuf : en prod, la plus haute vX.Y.Z avec la plus haute étiquette de données ; en staging, :main
+# avec la tête de la branche des données. Changer une moitié de cette cible fait donc un couple neuf
+# avec l'autre, celle du couple quitté tant qu'elle n'a pas changé. Ce qui passe d'abord dépend de
+# ce que le retour change :
+#   - l'image seule : une étiquette de données (un commit de la branche des données) ramènerait
+#     l'image quittée ; d'abord une vX.Y.Z plus haute que la version quittée, sur le commit de la
+#     version gardée (le correctif du code), qui publie l'image gardée ;
+#   - le commit de données seul : une vX.Y.Z sur un nouveau commit (une fusion dans le code)
+#     ramènerait les données quittées ; d'abord une étiquette de données sur un commit corrigé (la
+#     branche des données corrigée). Une vX.Y.Z sur le commit gardé publie la même image : elle
+#     refait le couple quitté, qui attend encore ;
+#   - les deux : chaque geste ramène une moitié du couple quitté ; d'abord celui qui remplace la
+#     moitié en cause.
+avertir_apres_retour() {
+  local image_quittee="${COUPLE_EN_ECHEC%% *}" commit_quitte="${COUPLE_EN_ECHEC#* }"
+  local image=0 donnees=0
+  [ "$image_quittee" = "$REFERENCE" ] || image=1
+  [ "$commit_quitte" = "$COMMIT_DONNEES" ] || donnees=1
+  if [ "$NOM_ENV" = prod ]; then
+    if [ "$image" -eq 1 ] && [ "$donnees" -eq 1 ]; then
+      journal "une nouvelle étiquette de données redéploierait $VERSION_QUITTEE avec elle, une nouvelle vX.Y.Z les données quittées ($commit_quitte) : poser d'abord celle qui remplace la moitié en cause"
+    elif [ "$image" -eq 1 ]; then
+      journal "une nouvelle étiquette de données redéploierait $VERSION_QUITTEE avec elle : poser d'abord, sur le commit de $VERSION, une vX.Y.Z plus haute que $VERSION_QUITTEE"
+    else
+      journal "une vX.Y.Z sur un nouveau commit redéploierait les données quittées ($commit_quitte) avec elle : poser d'abord une étiquette de données sur un commit corrigé"
+    fi
+  elif [ "$image" -eq 1 ] && [ "$donnees" -eq 1 ]; then
+    journal "un nouveau commit de la branche des données redéploierait l'image quittée avec lui, une fusion dans le code les données quittées ($commit_quitte) : corriger d'abord la moitié en cause"
+  elif [ "$image" -eq 1 ]; then
+    journal "un nouveau commit de la branche des données redéploierait l'image quittée avec lui : fusionner d'abord le correctif du code"
+  else
+    journal "une fusion dans le code redéploierait les données quittées ($commit_quitte) avec elle : corriger d'abord la branche des données"
+  fi
+}
+{%- endif %}
 
 # echouer <raison> : le couple est marqué en échec avant tout le reste, puis retour arrière. En
 # retour arrière manuel, le « couple en échec » est celui qu'on quittait : echec le nomme déjà, et
@@ -805,14 +848,8 @@ main() {
     ecrire_atomique "$etat/echec" "$COUPLE_EN_ECHEC"
     journal "couple $COUPLE_EN_ECHEC ($VERSION_QUITTEE) marqué en échec : la sonde ne redéploiera pas ce couple"
 {%- if nature == 'code' %}
-    # Seul ce couple attend : la sonde vise toujours la plus haute étiquette (ou :main), celle que le
-    # retour quitte, et un nouveau commit de données ferait avec elle un couple neuf.
     if [ "$DECLARE_CONFIG" -eq 1 ] || [ "$DECLARE_CONTENU" -eq 1 ]; then
-      if [ "$NOM_ENV" = prod ]; then
-        journal "une nouvelle étiquette de données redéploierait $VERSION_QUITTEE avec elle : poser d'abord une vX.Y.Z sur le commit de $VERSION"
-      else
-        journal "un nouveau commit de la branche des données redéploierait l'image quittée avec lui : fusionner d'abord le correctif du code"
-      fi
+      avertir_apres_retour
     fi
 {%- endif %}
   fi
@@ -873,7 +910,7 @@ main() {
     ecrire_atomique "$etat/donnees" "$(realpath -- "${{ prefixe }}DONNEES")"
 {%- endif %}
     rm -f -- "$etat/precedent"
-    journal "retour effectué : $VERSION ($REFERENCE, données $COMMIT_DONNEES) ; $VERSION_QUITTEE reste marquée en échec"
+    journal "retour effectué : $VERSION ($REFERENCE, données $COMMIT_DONNEES) ; le couple $COUPLE_EN_ECHEC ($VERSION_QUITTEE) reste marqué en échec"
     signaler_sonde ok "retour à $VERSION effectué (depuis $VERSION_QUITTEE)"
     menage_des_images
     return 0

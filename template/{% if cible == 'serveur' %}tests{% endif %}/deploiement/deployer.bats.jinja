@@ -869,10 +869,25 @@ EOF
   [[ "$output" != *"redéploierait"* ]]
 }
 
-# Avec une commande de l'instance, à deux dépôts, la sonde vise toujours la plus haute étiquette, ou
-# `:main` : un nouveau commit de données ferait un couple neuf avec la version quittée, et la
-# remettrait en service. Le retour le dit, et ce qu'il faut faire d'abord.
-@test "deployer : --retour dit ce qui redéploierait la version quittée" {
+# Avec une commande de l'instance, à deux dépôts, la sonde déploie tout couple neuf : en prod, la
+# plus haute `vX.Y.Z` avec la plus haute étiquette de données ; en staging, `:main` avec la tête de
+# la branche des données. Après un retour, changer une moitié de la cible ramène donc l'autre moitié
+# du couple quitté. Le retour dit laquelle, selon ce qu'il change, et ce qui passe d'abord.
+
+# retour_entre <env> <image> <version> <commit> <image quittée> <version quittée> <commit quitté> :
+# les deux couples déployés pour de bon dans cet environnement, puis le retour du second au premier,
+# qui réussit. La sortie du retour dans output.
+retour_entre() {
+  deployer "$1" "$2" "$3" --commit-donnees "$4"
+  [ "$status" -eq 0 ]
+  poser_donnees "$1"
+  deployer "$1" "$5" "$6" --commit-donnees "$7"
+  [ "$status" -eq 0 ]
+  deployer "$1" --retour
+  [ "$status" -eq 0 ]
+}
+
+@test "deployer : --retour qui change l'image et les données dit ce que chacune ramènerait" {
   local etat_staging="${{ prefixe }}RACINE_ETAT/staging" premier
 {%- if sauvegardes %}
   horloge_qui_avance
@@ -880,36 +895,94 @@ EOF
   avec_donnees VERIFIER_CONTENU
   commit_de_donnees "$SOUS_CONTENU/page.md"
   premier="$COMMIT"
-  deployer prod "$ANCIENNE" 0.1.0 --commit-donnees "$premier"
-  [ "$status" -eq 0 ]
-  poser_donnees prod
   commit_de_donnees "$SOUS_CONTENU/page.md" "$SOUS_CONTENU/autre.md"
-  deployer prod "$NOUVELLE" 0.2.0 --commit-donnees "$COMMIT"
-  [ "$status" -eq 0 ]
-  deployer prod --retour
-  [ "$status" -eq 0 ]
+  retour_entre prod "$ANCIENNE" 0.1.0 "$premier" "$NOUVELLE" 0.2.0 "$COMMIT"
   [ "$(cat "$ETAT/echec")" = "$NOUVELLE $COMMIT" ]
   [[ "$output" == *"couple $NOUVELLE $COMMIT (0.2.0) marqué en échec : la sonde ne redéploiera pas ce couple"* ]]
 {%- if nature == 'code' %}
-  [[ "$output" == *"une nouvelle étiquette de données redéploierait 0.2.0 avec elle : poser d'abord une vX.Y.Z sur le commit de 0.1.0"* ]]
+  [[ "$output" == *"une nouvelle étiquette de données redéploierait 0.2.0 avec elle, une nouvelle vX.Y.Z les données quittées ($COMMIT) : poser d'abord celle qui remplace la moitié en cause"* ]]
 {%- else %}
   # À un dépôt, le commit de données est la révision de l'image : il n'y a pas d'étiquette de données.
   [[ "$output" != *"redéploierait"* ]]
 {%- endif %}
+  # La ligne de fin nomme le couple marqué en échec, comme le marquage.
+  [[ "$output" == *"retour effectué : 0.1.0 ($ANCIENNE, données $premier) ; le couple $NOUVELLE $COMMIT (0.2.0) reste marqué en échec"* ]]
 
   # Le staging : la sonde vise `:main` et la tête de la branche des données.
   preparer_secrets_de_test staging JETON=jeton-staging-7 HC_SONDE=https://hc.example/ping/sonde-staging
-  deployer staging "$ANCIENNE" main --commit-donnees "$premier"
-  [ "$status" -eq 0 ]
-  poser_donnees staging
-  deployer staging "$NOUVELLE" main --commit-donnees "$COMMIT"
-  [ "$status" -eq 0 ]
-  deployer staging --retour
-  [ "$status" -eq 0 ]
+  retour_entre staging "$ANCIENNE" main "$premier" "$NOUVELLE" main "$COMMIT"
   [ "$(cat "$etat_staging/echec")" = "$NOUVELLE $COMMIT" ]
   [[ "$output" == *"couple $NOUVELLE $COMMIT (main) marqué en échec : la sonde ne redéploiera pas ce couple"* ]]
 {%- if nature == 'code' %}
+  [[ "$output" == *"un nouveau commit de la branche des données redéploierait l'image quittée avec lui, une fusion dans le code les données quittées ($COMMIT) : corriger d'abord la moitié en cause"* ]]
+{%- else %}
+  [[ "$output" != *"redéploierait"* ]]
+{%- endif %}
+}
+
+# Un retour qui ne change que l'image : une étiquette de données ramènerait l'image quittée, et une
+# `vX.Y.Z` plus haute que la version quittée, sur le commit de la version gardée, passe d'abord.
+@test "deployer : --retour qui ne change que l'image dit qu'une étiquette de données la ramènerait" {
+  local etat_staging="${{ prefixe }}RACINE_ETAT/staging"
+{%- if sauvegardes %}
+  horloge_qui_avance
+{%- endif %}
+  avec_donnees VERIFIER_CONTENU
+  commit_de_donnees "$SOUS_CONTENU/page.md"
+  retour_entre prod "$ANCIENNE" 0.1.0 "$COMMIT" "$NOUVELLE" 0.2.0 "$COMMIT"
+  [ "$(cat "$ETAT/echec")" = "$NOUVELLE $COMMIT" ]
+{%- if nature == 'code' %}
+  [[ "$output" == *"une nouvelle étiquette de données redéploierait 0.2.0 avec elle : poser d'abord, sur le commit de 0.1.0, une vX.Y.Z plus haute que 0.2.0"* ]]
+  [[ "$output" != *"les données quittées"* ]]
+{%- else %}
+  [[ "$output" != *"redéploierait"* ]]
+{%- endif %}
+  [[ "$output" == *"retour effectué : 0.1.0 ($ANCIENNE, données $COMMIT) ; le couple $NOUVELLE $COMMIT (0.2.0) reste marqué en échec"* ]]
+
+  preparer_secrets_de_test staging JETON=jeton-staging-7 HC_SONDE=https://hc.example/ping/sonde-staging
+  retour_entre staging "$ANCIENNE" main "$COMMIT" "$NOUVELLE" main "$COMMIT"
+  [ "$(cat "$etat_staging/echec")" = "$NOUVELLE $COMMIT" ]
+{%- if nature == 'code' %}
   [[ "$output" == *"un nouveau commit de la branche des données redéploierait l'image quittée avec lui : fusionner d'abord le correctif du code"* ]]
+  [[ "$output" != *"les données quittées"* ]]
+{%- else %}
+  [[ "$output" != *"redéploierait"* ]]
+{%- endif %}
+}
+
+# Un retour qui ne change que le commit de données, sous la même image : une nouvelle `vX.Y.Z` (en
+# staging, une fusion dans le code) ramènerait les données quittées, et la version gardée, elle,
+# peut revenir. Les données corrigées passent d'abord.
+@test "deployer : --retour qui ne change que les données dit qu'une version du code les ramènerait" {
+  local etat_staging="${{ prefixe }}RACINE_ETAT/staging" premier
+{%- if sauvegardes %}
+  horloge_qui_avance
+{%- endif %}
+  avec_donnees VERIFIER_CONTENU
+  commit_de_donnees "$SOUS_CONTENU/page.md"
+  premier="$COMMIT"
+  commit_de_donnees "$SOUS_CONTENU/page.md" "$SOUS_CONTENU/autre.md"
+  retour_entre prod "$ANCIENNE" 0.1.0 "$premier" "$ANCIENNE" 0.1.0 "$COMMIT"
+  [ "$(cat "$ETAT/echec")" = "$ANCIENNE $COMMIT" ]
+  [[ "$output" == *"couple $ANCIENNE $COMMIT (0.1.0) marqué en échec : la sonde ne redéploiera pas ce couple"* ]]
+{%- if nature == 'code' %}
+  [[ "$output" == *"une vX.Y.Z sur un nouveau commit redéploierait les données quittées ($COMMIT) avec elle : poser d'abord une étiquette de données sur un commit corrigé"* ]]
+  [[ "$output" != *"redéploierait 0.1.0"* ]]
+  [[ "$output" != *"une vX.Y.Z plus haute"* ]]
+{%- else %}
+  [[ "$output" != *"redéploierait"* ]]
+{%- endif %}
+  # 0.1.0 est en service : c'est le couple, et non la version, qui reste marqué en échec.
+  [[ "$output" == *"retour effectué : 0.1.0 ($ANCIENNE, données $premier) ; le couple $ANCIENNE $COMMIT (0.1.0) reste marqué en échec"* ]]
+  [[ "$output" != *"0.1.0 reste marquée en échec"* ]]
+
+  preparer_secrets_de_test staging JETON=jeton-staging-7 HC_SONDE=https://hc.example/ping/sonde-staging
+  retour_entre staging "$ANCIENNE" main "$premier" "$ANCIENNE" main "$COMMIT"
+  [ "$(cat "$etat_staging/echec")" = "$ANCIENNE $COMMIT" ]
+{%- if nature == 'code' %}
+  [[ "$output" == *"une fusion dans le code redéploierait les données quittées ($COMMIT) avec elle : corriger d'abord la branche des données"* ]]
+  [[ "$output" != *"fusionner d'abord le correctif du code"* ]]
+  [[ "$output" != *"l'image quittée"* ]]
 {%- else %}
   [[ "$output" != *"redéploierait"* ]]
 {%- endif %}
