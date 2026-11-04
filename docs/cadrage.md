@@ -173,6 +173,43 @@
 > quand sa sonde va y déployer une version : la première version de prod attend les heures. La
 > réponse `sauvegardes` dit toujours si le projet a des données à sauvegarder ; qu'une prod
 > n'existe pas encore est un état de l'instance (M-0005, amendé ; LE-39).
+>
+> **Amendé le 2026-11-04, à la clôture du lot 13, de la même façon.** Le lot 13 fait la fin de
+> M-0006 (§ 6 et 7) : la naissance d'un projet en deux dépôts par le script du poste, les clones
+> des données par la sonde de `serveur`, puis le premier essai réel de la chaîne à deux dépôts, sur
+> un projet jetable, `essai-chaine`. M-0006, `methode.md` et le runbook sont amendés ; M-0003 à
+> M-0005 sont corrigés, pour dire ce que fait déjà la mécanique.
+>
+> - **§1** : le troisième livrable, `Nouveau-Projet.ps1`, vit dans `poste/` de `modele-projet`,
+>   avec son test, hors de `template/` : il n'est pas distribué aux projets. La copie de
+>   `Documents\30-ressources\35-dev\` n'en est plus la source (M-0006 § 7, amendé) ;
+> - **une décision d'Edouard, le 03/11** : en cible `serveur`, le dépôt de code est public. La
+>   chaîne à deux dépôts le suppose : la CI du dépôt de données le clone sans jeton et tire ses
+>   images en anonyme. Le script refuse `-Cible serveur -Visibilite prive` (M-0006 § 1, amendé) ;
+> - **§5.5** : le garde ne lit le mode et les contrôles d'une fusion que dans le dossier de la
+>   session, et refuse toute fusion qui suit, dans la même commande, un changement de dossier,
+>   même vers le sien (`methode.md`, amendé ; LE-45) ;
+> - **§5.6** : la porte n'a plus le repli `VISIBILITE`. En CI, un dépôt privé dont la branche par
+>   défaut ne porte pas `NATURE` prend la nature `code`, comme toute nature illisible ;
+> - **§6.2, §6.6 et §6.7** : le test de restauration tourne chaque semaine, au jour et à l'heure
+>   `TEST_RESTAURATION` que déclare `serveur`, et non le dimanche ; son contrôle Healthchecks
+>   l'attend ce jour-là (M-0003 et M-0005, corrigés) ;
+> - **§6.3** : après un retour par `deployer.sh <env> --retour`, seul le couple quitté est en
+>   échec, et la sonde déploie tout couple neuf : un geste qui ne change qu'une moitié de la cible
+>   ramène l'autre moitié du couple quitté. `--retour` dit quel geste passe d'abord (M-0004,
+>   corrigé ; M-0006, amendé ; LE-46) ;
+> - **§6.8** : la mise en service suit les six étapes du `docs/exploitation.md` du projet, et non
+>   ce tableau. À deux dépôts, la déclaration dans `serveur` porte `DONNEES=oui` ; la sonde de
+>   `serveur` crée la clé de déploiement `depot-<nom>-donnees` et attend ; 👤 Edouard la colle sur
+>   `<nom>-donnees`, en lecture seule ; puis la sonde clone les données et installe les unités. La
+>   réserve de l'amendement du lot 12, « la mise en service d'un projet à deux dépôts attend le
+>   lot 13 », est levée. La cible des 15 minutes n'a pas été chronométrée à l'essai : la session
+>   estime les gestes d'Edouard à environ 14 minutes, hors des quatre contrôles Healthchecks
+>   qu'elle a créés ;
+> - **§15** : la question GHCR est tranchée. Une image publiée par la CI d'un dépôt public est-elle
+>   publique d'emblée sur GHCR ? Établi le 03/11 : oui. Le paquet d'`essai-chaine`, premier dépôt
+>   de code public en cible `serveur`, est né public, hérité du dépôt, et `:main` se tirait sans
+>   jeton. Le geste 👤 « passer le paquet en public » devient une vérification (LE-44).
 
 Ce cadrage est la partie publique de la spec de conception du modèle, issue d'une séance de questions avec Edouard : 12 questions, puis 5 parties de design validées une à une. La partie qui nomme le serveur est privée et n'est pas reproduite ici.
 

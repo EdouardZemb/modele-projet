@@ -116,23 +116,74 @@ déclaration des heures de ses sauvegardes dans `serveur`. `pupitre` s'est scind
 son propre lot et avec l'accord d'Edouard : l'ancien dépôt est devenu `pupitre-donnees`, privé, et
 le dépôt public `pupitre` est né du modèle en `v0.7.1`, en nature `code`.
 
+Lot 13 fait le 04/11/2026 : la naissance en deux dépôts et le premier essai réel (#84), fin de
+M-0006 § 6 et 7, étiquetée `v0.8.0`.
+- **La naissance en deux dépôts.** `poste/Nouveau-Projet.ps1` entre dans le modèle, hors de
+  `template/`, avec son test (#85). En `-Cible serveur`, il crée le dépôt de code `<nom>` et le
+  dépôt de données `<nom>-donnees`, privé, qui porte les réponses de l'instance ; tout le local des
+  deux dépôts se fait avant tout geste sur GitHub (#86). Edouard seul le lance pour de vrai : sous
+  Claude Code (`CLAUDECODE` posé), un lancement sans `-ABlanc` est refusé. En cible `serveur`, le
+  code est public : le script refuse `-Visibilite prive`, et M-0006 § 1 le dit, puisque la CI du
+  dépôt de données le clone et tire ses images sans jeton (#90, #91). La naissance d'`essai-chaine`,
+  le 03/11, est la naissance réelle que demande LE-1 ; #90 a changé le script depuis, et Edouard
+  l'a relancé le 04/11 sur `essai-naissance`, jetable, en cible `serveur` : 21 étapes sur 21, les
+  deux dépôts réglés, les 18 scripts du modèle exécutables au premier commit du code, la ligne de
+  l'index, et la CI rouge des deux côtés, faute d'image, comme le dit `exploitation.md`.
+- **La mise en service à deux dépôts** (`exploitation.md`, semé ; #87). La déclaration dans
+  `serveur` porte `DONNEES=oui`. La sonde de `serveur` crée la clé de déploiement
+  `depot-<nom>-donnees`, une pour les deux clones, et attend ; 👤 Edouard la pose sur
+  `<nom>-donnees`, en lecture seule ; la sonde clone alors les données, puis installe les unités
+  (serveur#28). Le paquet GHCR d'un dépôt de code public naît public : une vérification remplace
+  le geste 👤 (LE-44).
+- **La porte n'a plus le repli `VISIBILITE`** (#88). En CI, un dépôt privé dont la branche par
+  défaut ne porte pas `NATURE` prend la nature `code`, la plus stricte, et la porte le dit : « pas
+  de NATURE sur la branche par défaut : régime code ».
+- **Le garde refuse une fusion après un changement de dossier** (#89). Il lisait le mode dans le
+  dossier suivi par les `cd`, mais les contrôles dans celui de la session : les fusions
+  d'`essai-chaine` et d'`essai-chaine-donnees` n° 2 à 7 sont passées ainsi, aucune rouge (LE-45).
+  Il ne lit plus le mode et les contrôles que du dossier de la session, et refuse toute fusion qui
+  suit, dans la même commande, un `cd`, un `Set-Location`, un `env -C`…, même vers le sien. Depuis
+  le 03/11, les fusions des autres dépôts reviennent à Edouard, ou à une session ouverte dans ces
+  dépôts.
+- **`deployer.sh --retour`** nomme le couple marqué en échec. Il dit, selon ce que le retour a
+  quitté (l'image, le commit de données, les deux), quel geste ramènerait une moitié quittée et
+  lequel passe d'abord : seul le couple quitté est en échec, et la sonde déploie tout couple neuf
+  (#91, LE-46).
+- **L'essai réel**, les 03 et 04/11, sur `essai-chaine` et `essai-chaine-donnees`, nés du script :
+  les scénarios 1 à 7 sont tenus, chacun par sa ligne de journal (l'attente de la clé, le staging,
+  un commit de données seul, la prod, une configuration refusée, le retour arrière, le ménage).
+  Les gestes d'Edouard n'ont pas été chronométrés : la session les estime à environ 14 min, hors
+  des quatre contrôles Healthchecks qu'elle a créés (environ 18 min avec eux), pour une cible de
+  15. L'essai a fait corriger la fausse application, son préfixe et le semis de `/donnees`, et les
+  textes de la chaîne (#91, LE-42, LE-43).
+  Le scénario 8 est tenu le 04/11 : la sauvegarde de 03:30 a noté le couple en service en prod et
+  envoyé au distant son archive et son couple, chiffrés ; `rclone lsl` y montre que `copy` garde la
+  date du fichier et que les `--include` répétés se combinent en OU, ce que seul le double prouvait.
+  Le test de restauration du mercredi 05:30 a réussi sur cet instantané, avec l'image du couple,
+  sans lire la configuration de la prod (une piste).
+  Le retrait d'`essai-chaine`, le 04/11, suit la notice de `serveur` (serveur#32). Sur la
+  machine, unités, conteneurs, réseaux, clones et dossiers sont retirés sans erreur, les
+  instantanés figés compris (serveur#31) ; ses 7 images aussi, dont 4 sans étiquette, sur le
+  magasin classique de la cible (LE-50). La vérification en lecture seule n'a rien trouvé du
+  projet, et le tunnel commun n'a pas été recréé. Les quatre contrôles Healthchecks sont
+  supprimés et `essai-chaine` est archivé. Restent à Edouard : les deux routes Cloudflare, la clé
+  puis l'archivage d'`essai-chaine-donnees`, le paquet GHCR et les sauvegardes distantes. À
+  l'arrêt, l'application d'essai a mis 10 s : elle ignore SIGTERM (une piste).
+
 Prochain, au choix d'Edouard :
-- le lot 13 : la naissance d'un projet en deux dépôts, par le script de création du poste (geste
-  👤) ; dans `serveur`, la déclaration des deux dépôts d'un projet et la création des clones des
-  données par sa sonde, avec la clé de déploiement du dépôt de données ; puis le premier essai réel
-  sur le serveur (spec du lot 12, § 12) ;
 - la scission de `veille-emploi`, puis celle d'`ancrage`, chacune dans son propre lot ;
 - le lot 3 (la cible `statique`) ;
-- la porte due par LE-37, au 3e constat du motif « écart à la spec mal pesé » : sa forme revient à
-  Edouard, et le registre en propose une. À peser avec la piste du workflow `publier`, qui ferait
-  publier Edouard depuis son téléphone ;
-- la porte due par LE-40, au 3e constat du motif « délai mesuré à vide » : sa forme revient à
-  Edouard, et le registre en propose une ;
+- la porte due par LE-37, au 3e constat du motif « écart à la spec mal pesé », dont LE-49 est le
+  4e : sa forme revient à Edouard, et le registre en propose une. À peser avec la piste du workflow
+  `publier`, qui ferait publier Edouard depuis son téléphone ;
+- la porte due par LE-40, au 3e constat du motif « délai mesuré à vide », dont LE-52 est le 4e : sa
+  forme revient à Edouard, et le registre en propose une ;
 - la porte due par LE-41, au 3e constat du motif « version d'outil du poste différente de la
-  cible » : sa forme revient à Edouard, et le registre en propose une ;
-- le retrait du repli `VISIBILITE = "prive"` de la porte. Il ne sert plus : depuis serveur#26, le
-  01/11, la branche par défaut de chaque projet en service porte `NATURE`. Son retrait change la
-  porte, dans un correctif à part.
+  cible », dont LE-50 est le 4e : sa forme revient à Edouard, et le registre en propose une ;
+- la porte due par LE-46, au 3e constat du motif « décision appliquée sans en chercher les
+  effets » : sa forme revient à Edouard, et le registre en propose une ;
+- la porte due par LE-53, au 3e constat du motif « mécanisme décrit sans relire son code » : sa
+  forme revient à Edouard, et le registre en propose une.
 
 Le cadrage est dans `docs/cadrage.md` ; ce que les lots ont appris, dans `docs/registre.md`.
 
@@ -142,6 +193,13 @@ Le cadrage est dans `docs/cadrage.md` ; ce que les lots ont appris, dans `docs/r
   lance les tests bats d'un projet rendu dans une image Docker : il lui faut Docker avec un serveur
   Linux, et il saute sans lui.
 - `ruff check .` : le style.
+- `poste\Tester-Nouveau-Projet.ps1 -SansPoste -SourceModele <ce clone>` : le test du script de
+  création, sans `gh`, sans la liste privée ni l'index réel. Il rend le modèle au `HEAD` du clone,
+  changements non validés et fichiers non suivis compris : Copier les ajoute, avec un
+  `DirtyLocalWarning`. Valider avant, pour éprouver la tête qui part. Sans `-SansPoste`, il lance
+  aussi le script à blanc, sur le poste d'Edouard. `tests/test_poste.py` le lance, et compare les
+  bits d'exécution du premier commit à ceux du modèle : sous Windows seulement ; ailleurs, seul le
+  contrôle du BOM tourne.
 - `copier copy --vcs-ref <étiquette> gh:EdouardZemb/modele-projet <dossier>` : créer un projet.
 - `copier update` : mettre à jour un projet né du modèle (à lancer dans ce projet, pas ici).
 - `git config core.hooksPath .githooks` : à poser dans chaque clone et chaque worktree.

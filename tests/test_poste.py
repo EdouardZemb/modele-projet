@@ -20,7 +20,8 @@ SCRIPTS = ("Nouveau-Projet.ps1", "Tester-Nouveau-Projet.ps1")
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows PowerShell 5.1 seulement")
 def test_le_script_du_poste_passe_ses_tests():
-    # copier rend le HEAD validé du dépôt : un changement non validé n'y est pas.
+    # copier rend le HEAD du dépôt local, changements non validés et fichiers non suivis compris
+    # (DirtyLocalWarning) : valider avant, pour éprouver la tête qui part.
     resultat = subprocess.run(
         [
             "powershell.exe",

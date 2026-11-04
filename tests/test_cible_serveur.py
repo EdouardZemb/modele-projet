@@ -1309,15 +1309,33 @@ def test_exploitation_dit_le_couple_et_les_deux_modes(rendre, mode, sauvegardes)
 
 
 # Le test de restauration tourne chaque semaine, au jour et à l'heure `TEST_RESTAURATION` que
-# déclare `serveur` : aucun document de la chaîne ne le situe un dimanche.
+# déclare `serveur` : aucun fichier rendu ne le situe un dimanche, ni les documents de la chaîne,
+# ni M-0005, ni le script, ni le commentaire d'une valeur d'essai de ses tests (essai-11).
 @pytest.mark.parametrize("reponses", [REPONSES_SERVEUR, REPONSES_SERVEUR_CODE], ids=["un", "deux"])
 def test_le_test_de_restauration_suit_son_jour(rendre, reponses):
     rendu = rendre(**reponses)
+    fichiers = fichiers_texte(rendu)
     for chemin in (
-        "docs/exploitation.md",
-        "docs/modele/decisions/M-0003-contrat-de-l-image.md",
+        "deploiement/tester-restauration.sh",
+        "docs/modele/decisions/M-0005-sauvegardes-et-restauration.md",
+        "tests/deploiement/unites.bats",
     ):
-        assert "dimanche" not in lire(rendu, chemin), chemin
+        assert rendu / chemin in fichiers, f"{chemin} : le test passerait à vide"
+    porteurs = [
+        chemin.relative_to(rendu).as_posix()
+        for chemin in fichiers
+        if "dimanche" in chemin.read_bytes().decode("utf-8", errors="replace").lower()
+    ]
+    assert porteurs == []
+    formule = "chaque semaine, au jour et à l'heure `TEST_RESTAURATION` que déclare `serveur`"
+    # Le commentaire de tête du script, sans ses dièses.
+    script = lire(rendu, "deploiement/tester-restauration.sh")
+    script = a_plat(re.sub(r"^#", "", script, flags=re.MULTILINE))
+    assert f"Lancé par essai-test-restauration.timer, {formule}" in script
+    m5 = lire(rendu, "docs/modele/decisions/M-0005-sauvegardes-et-restauration.md")
+    assert "\n### 5. Chaque semaine, `tester-restauration.sh prod`\n" in m5
+    paragraphe_5 = a_plat(m5.split("\n### 5. ", 1)[1].split("\n### ", 1)[0])
+    assert f"Lancé par `<nom>-test-restauration.timer`, {formule}" in paragraphe_5
     mise_en_service = a_plat(section(lire(rendu, "docs/exploitation.md"), "La mise en service"))
     assert (
         "attendrait le premier test de la semaine, au jour de `TEST_RESTAURATION`"
@@ -1325,6 +1343,21 @@ def test_le_test_de_restauration_suit_son_jour(rendre, reponses):
     )
     m3 = a_plat(lire(rendu, "docs/modele/decisions/M-0003-contrat-de-l-image.md"))
     assert "puis il tourne chaque semaine, au jour et à l'heure `TEST_RESTAURATION`" in m3
+
+
+# Les deux rendus ci-dessus ne prennent pas toutes les branches du gabarit : sans sauvegardes, la
+# cible `donnees`, un commentaire Jinja. Le gabarit lui-même ne dit « dimanche » nulle part.
+def test_le_gabarit_ne_situe_pas_le_test_de_restauration_un_dimanche():
+    gabarit = RACINE / "template"
+    fichiers = fichiers_texte(gabarit)
+    script = "{% if sauvegardes %}tester-restauration.sh{% endif %}.jinja"
+    assert any(chemin.name == script for chemin in fichiers), "le test passerait à vide"
+    porteurs = [
+        chemin.relative_to(gabarit).as_posix()
+        for chemin in fichiers
+        if "dimanche" in chemin.read_bytes().decode("utf-8", errors="replace").lower()
+    ]
+    assert porteurs == []
 
 
 # « Tout arrêter » ne décrit plus le retrait définitif : il renvoie à la procédure de la notice de

@@ -94,12 +94,13 @@ Les archives distantes sont chiffrées pour `hors-ligne.pub`. La clé privée es
 (KeePassXC, papier) : une compromission du serveur ne permet pas de les relire. En contrepartie, la
 perdre les rend inutilisables.
 
-### 5. Chaque dimanche, `tester-restauration.sh prod`
+### 5. Chaque semaine, `tester-restauration.sh prod`
 
-Le dernier `quotidiennes/<nom>-<horodatage>` (jamais un `.partiel`) est copié, contrôlé par
-`VERIFIER` dans un conteneur jetable de l'image en service, puis l'app démarre sur la copie, au port
-`bloc_ports + 9` : sa santé doit dire `ok`. Le test ne touche ni aux données de la prod ni à ses
-sauvegardes. Signal `HC_TEST_RESTAURATION`.
+Lancé par `<nom>-test-restauration.timer`, chaque semaine, au jour et à l'heure `TEST_RESTAURATION`
+que déclare `serveur` (`projets/<nom>.env`). Le dernier `quotidiennes/<nom>-<horodatage>` (jamais
+un `.partiel`) est copié, contrôlé par `VERIFIER` dans un conteneur jetable de l'image en service,
+puis l'app démarre sur la copie, au port `bloc_ports + 9` : sa santé doit dire `ok`. Le test ne
+touche ni aux données de la prod ni à ses sauvegardes. Signal `HC_TEST_RESTAURATION`.
 
 ### 6. Restaurer, à la main : `restaurer.sh prod <dossier|archive .tar.age> [--oui] [--cle <identité age>] [--sans-report]`
 
