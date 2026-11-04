@@ -28,7 +28,7 @@ setup() {
   export {{ prefixe }}DOSSIER_UNITES="$UNITES"
 {%- if sauvegardes %}
   # La déclaration du projet sur le serveur, à son emplacement par défaut, avec les heures
-  # d'origine (02:45, et le dimanche à 04:15).
+  # d'origine (02:45, et Sun 04:15 pour le test de restauration).
   declarer_projet SAUVEGARDE=02:45 "TEST_RESTAURATION=Sun 04:15"
   # Les neuf unités rendues : quatre services, quatre minuteries, un modèle d'alerte.
   ATTENDUES=(

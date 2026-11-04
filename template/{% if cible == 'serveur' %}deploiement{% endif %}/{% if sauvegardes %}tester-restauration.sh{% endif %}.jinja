@@ -6,7 +6,8 @@
 #
 #   bash deploiement/tester-restauration.sh prod
 #
-# Lancé chaque dimanche par {{ nom }}-test-restauration.timer. Réservé à la prod (code 64).
+# Lancé par {{ nom }}-test-restauration.timer, chaque semaine, au jour et à l'heure
+# `TEST_RESTAURATION` que déclare `serveur` (`projets/{{ nom }}.env`). Réservé à la prod (code 64).
 #
 # Le port de l'essai est celui de la prod plus 9, le dernier du bloc de dix du projet :
 # ${{ prefixe }}PORT, lu dans l'env de la prod par charger_env, et non un port écrit au rendu (un dépôt
