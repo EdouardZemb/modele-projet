@@ -183,22 +183,25 @@ sur la `v0.8.0`. En cible `donnees`, la porte des masqués examine aussi `config
 `contenu/README.md`, et, sauf `cible_code: aucune`, l'instance : `.sops.yaml`, `env/prod.env`,
 `env/staging.env`, `cles/*.pub` et `secrets/*.env.enc`, ses motifs au premier niveau. Un
 `.gitignore` qui masque `*.env` ou `*secret*`, comme celui de `veille-emploi`, fait donc refuser le
-commit de la mise à jour. Sous un dossier de secrets, la porte n'examine que ce que la chaîne y lit,
-à son premier niveau ; exclu, le remède en lève le masque sans celui des secrets en clair :
-`!/secrets/`, `/secrets/*` puis `!/secrets/*.env.enc`, ancrés à la racine, et de même après
-l'exception d'un dossier exclu qui le contient (M-0002, amendé). Le `.gitignore` semé d'un dépôt de
-données n'admet sous `secrets/` que les `*.env.enc`. « Changer de cible », dans `methode.md`, dit
+commit de la mise à jour. Le principe de la porte, partout : le remède n'admet que ce que la porte
+examine, toujours par des lignes ancrées. Un dossier mixte, comme `secrets/`, `cles/` ou
+`deploiement/`, se lève, en exclut le contenu, puis n'admet que ce qu'elle y examine ; sous un
+`.gitignore` imbriqué, ces lignes partent de son dossier (M-0002, amendé). Un test en matrice le
+prouve, sur 36 cas, deux cibles et 18 `.gitignore`, avec des clés privées, des secrets en clair et
+des fichiers locaux plantés à côté des fichiers examinés : appliqués à la lettre, les remèdes font
+taire la porte en deux tours au plus, et rien de planté ne paraît. Le `.gitignore` semé d'un dépôt
+de données n'admet sous `secrets/` que les `*.env.enc`. « Changer de cible », dans `methode.md`, dit
 enfin ce que fait Copier : les semés que la nouvelle cible ne rend pas partent, même retouchés ;
 ceux que les deux rendent gardent leur contenu d'avant, six pour une scission, qu'un `git rm` avant
-la mise à jour fait semer à neuf, sauf `.gitignore`, qui se refait à la main par ces trois lignes,
-que la porte ne demande pas pour un secret déjà suivi ; ce que le modèle ne connaît pas se déplace
-par `git mv` ; `--data cible_code=serveur` est obligatoire. M-0006, § 6, amendé, dit que
-`.sops.yaml` se refait à la scission. Un test fait cette scission sur un projet comme
-`veille-emploi`, seule et préparée, celle-ci sous `*.env` et `*secret*`. `ancrage` l'attend avant sa
-scission ; `veille-emploi` la prendra si elle paraît avant la PR des données de sa V2. Hors de la
-cible `donnees`, la porte corrige deux remèdes, sous `deploiement/secrets/` et pour une règle
-`<dossier>/*`, et nomme « secret chiffré » un `.enc` de la chaîne ; en cible `serveur`, elle ne
-prend plus un secret en clair de `deploiement/secrets/` pour un fichier du modèle. Les textes de
+la mise à jour fait semer à neuf, sauf `.gitignore`, qui se refait à la main par les trois lignes du
+remède de `secrets/`, que la porte ne demande pas pour un secret déjà suivi ; ce que le modèle ne
+connaît pas se déplace par `git mv` ; `--data cible_code=serveur` est obligatoire. M-0006, § 6,
+amendé, dit que `.sops.yaml` se refait à la scission. Un test fait cette scission sur un projet
+comme `veille-emploi`, seule et préparée, celle-ci sous `*.env` et `*secret*`. `ancrage` l'attend
+avant sa scission ; `veille-emploi` la prendra si elle paraît avant la PR des données de sa V2. Hors
+de la cible `donnees`, la porte corrige le remède d'une règle `<dossier>/*`, et nomme « secret
+chiffré » un `.enc` de la chaîne ; en cible `serveur`, elle n'examine sous `deploiement/` que ce que
+le modèle y écrit, et ne prend plus un fichier local pour un fichier du modèle. Les textes de
 `methode.md`, de M-0002 et de M-0006 changent.
 
 Prochain, au choix d'Edouard :

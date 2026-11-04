@@ -316,6 +316,8 @@ def test_liste_d_alignement():
         "needs:",
         "edited",
         "`.claude/settings.local.json` et `__pycache__/`",
+        # Le remède de la porte des masqués, ancré (#95, ronde 2).
+        "le remède que donne la porte, des lignes ancrées qui n'admettent que ce qu'elle examine",
         "`.githooks` et `scripts/modele`",
         "excluent les chemins",
         "extensions.worktreeConfig",
