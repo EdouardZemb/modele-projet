@@ -384,3 +384,74 @@ def test_un_autre_rendu_n_a_pas_les_dossiers_de_donnees(rendre, reponses):
         ".claude/skills/consigner/SKILL.md",
     ):
         assert (rendu / chemin).is_file(), chemin
+
+
+# Le .gitignore semé d'un dépôt de données protège ses secrets : seuls les fichiers chiffrés
+# `secrets/*.env.enc` entrent, et rien de ce que le modèle y rend n'est masqué (#94). Un dépôt de
+# code garde le .gitignore du socle.
+GITIGNORE_DU_SOCLE = [
+    ".DS_Store",
+    "Thumbs.db",
+    "__pycache__/",
+    ".venv/",
+    ".superpowers/",
+    ".claude/settings.local.json",
+]
+SECRETS_EN_CLAIR = (
+    "secrets/prod.env",
+    "secrets/staging.env",
+    "secrets/prod.env.enc.bak",
+    "secrets/age.txt",
+    "secrets/sous/prod.env.enc",
+)
+INSTANCE_SUIVIE = (
+    "secrets/prod.env.enc",
+    "secrets/staging.env.enc",
+    "env/prod.env",
+    "env/staging.env",
+    "cles/serveur.pub",
+    "cles/hors-ligne.pub",
+    ".sops.yaml",
+    "config/README.md",
+    "contenu/README.md",
+)
+
+
+def ignore(rendu, env, chemin):
+    """Vrai si le .gitignore du rendu masque `chemin`, qu'il existe ou non."""
+    r = subprocess.run(
+        ["git", "check-ignore", "-q", "--no-index", "--", chemin],
+        cwd=rendu,
+        env=env,
+        capture_output=True,
+        check=False,
+    )
+    assert r.returncode in (0, 1), r.stderr
+    return r.returncode == 0
+
+
+@pytest.mark.parametrize(
+    "reponses", [DONNEES, REPONSES_DONNEES_SERVEUR], ids=["donnees", "donnees-serveur"]
+)
+def test_gitignore_du_depot_de_donnees_protege_les_secrets(rendre, env_isole, reponses):
+    env = env_isole()
+    rendu = rendre(**reponses)
+    subprocess.run(["git", "init", "-q"], cwd=rendu, env=env, check=True)
+    assert [c for c in SECRETS_EN_CLAIR if not ignore(rendu, env, c)] == []
+    assert [c for c in INSTANCE_SUIVIE if ignore(rendu, env, c)] == []
+    masques = subprocess.run(
+        ["git", "ls-files", "--others", "--ignored", "--exclude-standard"],
+        cwd=rendu,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert masques.stdout == ""
+    lignes = lire(rendu, ".gitignore").splitlines()
+    assert lignes[: len(GITIGNORE_DU_SOCLE)] == GITIGNORE_DU_SOCLE
+
+
+@pytest.mark.parametrize("reponses", [{}, {"cible": "serveur", "nature": "code"}])
+def test_gitignore_d_un_depot_de_code_reste_celui_du_socle(rendre, reponses):
+    assert lire(rendre(**reponses), ".gitignore").splitlines() == GITIGNORE_DU_SOCLE

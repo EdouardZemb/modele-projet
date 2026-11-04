@@ -1,0 +1,13 @@
+.DS_Store
+Thumbs.db
+__pycache__/
+.venv/
+.superpowers/
+.claude/settings.local.json
+{%- if cible == 'donnees' %}
+
+# Les secrets du dépôt de données : seuls leurs fichiers chiffrés y entrent. Un secret en clair,
+# une identité age ou une copie restent dehors.
+secrets/*
+!secrets/*.env.enc
+{%- endif %}
