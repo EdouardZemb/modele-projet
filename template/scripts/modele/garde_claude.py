@@ -15,8 +15,10 @@ vers le dossier de la session.
 
 Le dossier suivi au fil des `cd` sert à lire la branche courante d'un `git push`. Un retour que le
 garde ne suit pas (`cd -`, `cd ~`, `popd`…) le rend inconnu : la branche courante est alors
-illisible, et un push qui ne nomme pas sa branche est refusé. Un sous-shell Bash `( … )`, ou un
-interprète enfant (`bash -c`), rend en sortant le dossier d'avant.
+illisible, et un push qui ne nomme pas sa branche est refusé. Un sous-shell Bash (`( … )`, un
+élément d'un pipeline, une commande lancée en fond par `&`), ou un interprète enfant (`bash -c`),
+rend en sortant le dossier d'avant. Un bloc PowerShell (`try { … }`, `% { … }`, `&{…}`) et une
+affectation (`$x = …`) se lisent comme les commandes qu'ils portent.
 
 Bibliothèque standard seule, Python 3.10 ou plus.
 
@@ -62,11 +64,22 @@ WINDOWS = os.name == "nt"
 # Le dossier suivi quand le garde ne sait plus où est le shell (`cd -`, `popd`, `cd ~`…) : un
 # octet nul ne vient jamais d'une commande. La branche courante y est illisible.
 INCONNU = chr(0) + "inconnu"
-# Ouverture et fermeture d'un sous-shell `( … )`, chacune en segment à part.
+# Les marques des opérateurs, chacune en segment à part : ouverture et fermeture d'un sous-shell
+# `( … )`, `|` d'un pipeline, `&` qui lance en fond, et ce qui enchaîne (`;`, `&&`, `||`, saut).
 OUVRE, FERME = chr(0) + "(", chr(0) + ")"
+TUBE, FOND, SUITE = chr(0) + "|", chr(0) + "&", chr(0) + ";"
+MARQUES = {OUVRE, FERME, TUBE, FOND, SUITE}
 GIT_GH = ("git", "gh")
 
 ASSIGNATION = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+# PowerShell : le membre de gauche d'une affectation (`$x = `, `$a, $b = `, `[string]$s = `,
+# `$x += `), collé ou non à la commande qui suit (`$x=gh …`).
+VARIABLE_PS = r"(?:\[[\w.\[\]]+\])*\$[\w:?{}]+"
+GAUCHE_PS = re.compile(VARIABLE_PS + ",?")
+AFFECTATION_PS = re.compile(rf"(?:{VARIABLE_PS})?(?:[-+*/%]|\?\?)?=(.*)")
+# Ce qui fait viser à gh un autre dépôt que celui du dossier : GH_REPO, et le dépôt git où il lit
+# ses remotes (GIT_DIR, GIT_WORK_TREE, GIT_COMMON_DIR).
+DEPOT_PAR_ENVIRONNEMENT = re.compile(r"gh_repo|git_dir|git_work_tree|git_common_dir", re.IGNORECASE)
 REDIRECTIONS = set("<>")
 PONCTUATION = ";|&()<>\n"
 # Marque le texte d'une here-string (`<<<`) parmi les jetons : un octet nul ne vient jamais d'une
@@ -99,7 +112,7 @@ RELEASE_LECTURE = {"view", "list", "download"}
 # Mots qui précèdent la vraie commande sans la changer.
 PREFIXES = {
     "env", "command", "exec", "sudo", "time", "nohup", "builtin", "nice", "timeout", "!", "{", "}",
-    "if", "then", "do", "else", "elif", "while", "until",
+    "if", "then", "do", "else", "elif", "while", "until", "try", "catch", "finally", "elseif",
 }  # fmt: skip
 # Options de ces enveloppes qui prennent une valeur (`env -u NOM`, `timeout -s KILL`) : les lettres
 # des options courtes, et les options longues. Une courte se groupe (`env -iC DIR`) ou se colle à sa
@@ -125,10 +138,10 @@ ENVELOPPES_A_DUREE = {"timeout"}
 # Interpréteurs dont un argument est lui-même une commande.
 INTERPRETES = {
     "bash", "sh", "zsh", "dash", "ksh", "pwsh", "powershell", "cmd", "eval", "xargs", "wsl", "start",
-    "start-process", "saps", "invoke-expression", "iex",
+    "start-process", "saps", "invoke-expression", "iex", "trap",
 }  # fmt: skip
 # Ceux qui exécutent dans le shell même : un `cd` qu'ils font y reste.
-DANS_LE_SHELL = {"eval", "invoke-expression", "iex"}
+DANS_LE_SHELL = {"eval", "invoke-expression", "iex", "trap"}
 # Ceux qui lancent un programme, dans un dossier qu'on peut leur donner.
 LANCEURS = {"start-process", "saps", "start"}
 # Les paramètres de Start-Process, et s'ils prennent une valeur. Un nom s'abrège (`-Work`) ; un
@@ -243,7 +256,7 @@ class Contexte:
         self.dossier: str | None = None
         self.hors_du_dossier = False
         self.changements = 0
-        self.depot_par_environnement = False  # la commande entière mentionne GH_REPO
+        self.depot_par_environnement = False  # la commande mentionne GH_REPO, GIT_DIR…
         self._memo: dict[tuple[str, str | None], Any] = {}
 
     def courante(self, chemin: str | None) -> str | None:
@@ -309,12 +322,44 @@ def _nom(mot: str) -> str:
     return base
 
 
-def _est_operateur(jeton: str) -> bool:
-    return bool(jeton) and all(c in PONCTUATION for c in jeton)
+def _est_operateur(jeton: str, ponctuation: str = PONCTUATION) -> bool:
+    return bool(jeton) and all(c in ponctuation for c in jeton)
 
 
-def _segments_shlex(commande: str, echappement: bool, virgules: bool) -> list[list[str]]:
-    lex = shlex.shlex(commande, posix=True, punctuation_chars=PONCTUATION)
+def _marques(operateur: str, apres: bool) -> tuple[list[list[str]], bool]:
+    """Les marques d'un opérateur (`;`, `|(`…), et si la fin de l'opérateur suit une commande.
+
+    `(` et `)` ouvrent et ferment un sous-shell ; `|` (ou `|&`) sépare les éléments d'un pipeline ;
+    `&` lance en fond ; `;`, `&&`, `||` et le saut de ligne enchaînent. `|` et `&` ne marquent que
+    s'ils suivent une commande (`apres`) : `; & cmd` est l'opérateur d'appel de PowerShell, et
+    `&>` une redirection. Une accolade, une redirection ne marquent rien."""
+    marques: list[list[str]] = []
+    i = 0
+    while i < len(operateur):
+        c, deux = operateur[i], operateur[i : i + 2]
+        if c in "()":
+            marques.append([OUVRE if c == "(" else FERME])
+        elif deux in ("&&", "||"):
+            marques.append([SUITE])
+            i += 1
+        elif c == "|" and apres:
+            marques.append([TUBE])
+            i += deux == "|&"
+        elif c == "&" and apres and deux != "&>":
+            marques.append([FOND])
+        elif c in ";\n":
+            marques.append([SUITE])
+        apres = c == ")"
+        i += 1
+    return marques, apres
+
+
+def _segments_shlex(
+    commande: str, echappement: bool, virgules: bool, accolades: bool = False
+) -> list[list[str]]:
+    # PowerShell, seconde lecture : une accolade, collée ou non, sépare comme un `;`.
+    ponctuation = PONCTUATION + ("{}" if accolades else "")
+    lex = shlex.shlex(commande, posix=True, punctuation_chars=ponctuation)
     # PowerShell : `a,b` hors guillemets est une liste, chaque élément devient un argument.
     lex.whitespace = " \t\r" + ("," if virgules else "")
     lex.whitespace_split = True
@@ -324,11 +369,13 @@ def _segments_shlex(commande: str, echappement: bool, virgules: bool) -> list[li
     segments: list[list[str]] = [[]]
     sauter = False
     chaine = False
+    apres = False  # le dernier jeton lu est un mot d'une commande, ou la fin d'un sous-shell
     for jeton in lex:
-        if _est_operateur(jeton):
-            if any(c in jeton for c in ";|()\n") or not (set(jeton) & REDIRECTIONS):
-                # chaque parenthèse devient un segment à part, pour suivre les sous-shells
-                segments += [[OUVRE if c == "(" else FERME] for c in jeton if c in "()"]
+        if _est_operateur(jeton, ponctuation):
+            if any(c in jeton for c in ";|(){}\n") or not (set(jeton) & REDIRECTIONS):
+                # chaque marque devient un segment à part, pour suivre les sous-shells
+                marques, apres = _marques(jeton, apres)
+                segments += marques
                 segments.append([])
             else:  # redirection : l'opérateur et sa cible ne sont pas des arguments
                 sauter = True
@@ -342,51 +389,61 @@ def _segments_shlex(commande: str, echappement: bool, virgules: bool) -> list[li
                 segments[-1].append(ICI + jeton)
             continue
         segments[-1].append(jeton)
+        apres = True
     return [s for s in segments if s]
 
 
-def _segments_grossiers(commande: str, virgules: bool) -> list[list[str]]:
+def _segments_grossiers(commande: str, virgules: bool, accolades: bool = False) -> list[list[str]]:
     """Repli quand `shlex` échoue (guillemets mal fermés, syntaxe PowerShell) : espaces seuls."""
-    morceaux = re.split(r"([()])|[;|&\n<>]+", commande)
-    segments = []
-    for morceau in morceaux:
-        if morceau in ("(", ")"):
-            segments.append([OUVRE if morceau == "(" else FERME])
-            continue
-        if not morceau:
+    separateurs = re.escape(";|&\n<>()" + ("{}" if accolades else ""))
+    morceaux = re.split(f"([{separateurs}]+)", commande)
+    segments: list[list[str]] = []
+    apres = False
+    for k, morceau in enumerate(morceaux):
+        if k % 2:  # un opérateur : ses marques
+            marques, apres = _marques(morceau, apres)
+            segments += marques
             continue
         jetons = morceau.replace("'", "").replace('"', "")
         if virgules:
             jetons = jetons.replace(",", " ")
         if jetons.split():
             segments.append(jetons.split())
+            apres = True
     return segments
 
 
-def _segments(commande: str, echappement: bool, virgules: bool = False) -> list[list[str]]:
+def _segments(
+    commande: str, echappement: bool, virgules: bool = False, accolades: bool = False
+) -> list[list[str]]:
     try:
-        return _segments_shlex(commande, echappement, virgules)
+        return _segments_shlex(commande, echappement, virgules, accolades)
     except ValueError:
-        return _segments_grossiers(commande, virgules)
+        return _segments_grossiers(commande, virgules, accolades)
 
 
-def _variantes(commande: str, outil: str | None = None) -> list[tuple[str, bool, bool]]:
-    """Les lectures d'une commande selon l'outil : (texte, échappement, virgules).
+def _variantes(commande: str, outil: str | None = None) -> list[tuple[str, bool, bool, bool]]:
+    """Les lectures d'une commande selon l'outil : (texte, échappement, virgules, accolades).
 
     Bash : l'antislash échappe, l'apostrophe inversée est une substitution (donc un séparateur) ;
     une troisième lecture la garde, pour que le contenu d'un jeton entre guillemets qui en porte
     une soit réanalysé. PowerShell : l'antislash est un caractère ordinaire (chemins Windows),
     l'apostrophe inversée est l'échappement, supprimé avant l'analyse, et la virgule sépare les
-    éléments d'une liste d'arguments. Outil inconnu : toutes les lectures, et on refuse si une
-    seule refuse."""
-    powershell = [(re.sub(r"`\r?\n", " ", commande).replace("`", ""), False, True)]
+    éléments d'une liste d'arguments ; une seconde lecture fait d'une accolade, collée ou non, un
+    séparateur, pour lire comme des commandes ce que porte un bloc (`try { … }`, `% { … }`,
+    `&{…}`). L'autre lecture garde les accolades : une lecture de plus ne peut qu'ajouter un
+    refus. Outil inconnu : toutes les lectures, et on refuse si une seule refuse. Celle à accolades
+    vient en tête : un bloc qui cache un changement de dossier est refusé avant qu'une autre
+    lecture ne lise les contrôles."""
+    texte_ps = re.sub(r"`\r?\n", " ", commande).replace("`", "")
+    powershell = [(texte_ps, False, True, True), (texte_ps, False, True, False)]
     if outil == "PowerShell":
         return powershell
     continue_sh = re.sub(r"\\\r?\n", "", commande)  # continuation : antislash puis saut
     textes = (continue_sh.replace("`", " "), continue_sh.replace("`", ";"), continue_sh)
     if outil == "Bash":
-        return [(t, True, False) for t in textes]
-    return [(t, e, False) for t in textes for e in (True, False)] + powershell
+        return [(t, True, False, False) for t in textes]
+    return powershell + [(t, e, False, False) for t in textes for e in (True, False)]
 
 
 def _valeur_suivante(args: list[str], i: int) -> str:
@@ -644,7 +701,7 @@ def _gh_api(args: list[str], ctx: Contexte) -> str | None:
     opaque = point is not None and "graphql" in point.lower() and _graphql_opaque(args, texte)
     fusion_rest = ecrit and bool(API_FUSION.search(point.lower()))
     if (fusion_graphql or opaque or fusion_rest) and ctx.depot_par_environnement:
-        return REFUS_AUTRE_DEPOT  # GH_REPO quelque part dans la commande : cible invérifiable
+        return REFUS_AUTRE_DEPOT  # GH_REPO, GIT_DIR… dans la commande : cible invérifiable
     if (fusion_graphql or opaque) and ctx.fusion() != "session":
         return REFUS_MODE
     if ecrit and API_FUSION.search(point.lower()) and ctx.fusion() != "session":
@@ -720,6 +777,7 @@ def _motif_segment(segment: list[str], ctx: Contexte, profondeur: int) -> str | 
                     ctx.dossier = INCONNU
     if any(CONFIG_PAR_ENVIRONNEMENT.search(jeton) for jeton in segment):
         return REFUS_CONFIG_ENVIRONNEMENT
+    segment = _sans_affectation(segment)
     i, enveloppe, dossiers, eclate = _enveloppes(segment)
     # Filet : derrière une enveloppe, un jeton qui ne peut pas nommer une commande (un nombre, un
     # dossier) est la valeur d'une option que la table ignore. Si git ou gh vient plus loin,
@@ -746,6 +804,20 @@ def _motif_segment(segment: list[str], ctx: Contexte, profondeur: int) -> str | 
         return _motif_lance(segment[debut:], ici, ctx, profondeur)
     finally:
         ctx.dossier = sauve
+
+
+def _sans_affectation(segment: list[str]) -> list[str]:
+    """Le segment sans le membre de gauche d'une affectation PowerShell : `$x = cmd …`,
+    `$x=cmd …`, `$a, $b = cmd …`, `[string]$s = cmd …`, `$x += cmd …` rendent `cmd …`. Un autre
+    segment est rendu tel quel. (En Bash, `$x = cmd` lancerait la commande nommée par `$x` : la
+    lire comme `cmd` ne fait qu'ajouter des refus.)"""
+    i = 0
+    while i < len(segment) and GAUCHE_PS.fullmatch(segment[i]):
+        i += 1
+    m = AFFECTATION_PS.fullmatch(segment[i]) if i < len(segment) else None
+    if m is None:
+        return segment
+    return [m.group(1)] * bool(m.group(1)) + segment[i + 1 :]
 
 
 def _option_d_enveloppe(enveloppe: str, jeton: str, suivant: str) -> tuple[set[str], str, bool]:
@@ -831,6 +903,10 @@ def _motif_lance(segment: list[str], ici: list[str], ctx: Contexte, profondeur: 
     if commande.startswith("git-credential-") and _affiche_identifiants(commande, reste):
         return REFUS_IDENTIFIANTS
     if commande in CHANGE_DOSSIER:
+        if commande == "pushd" and "-n" in reste:
+            # `pushd -n` ne change que la pile : le dossier reste, une fusion qui suit est refusée.
+            ctx.hors_du_dossier = True
+            return None
         ctx.aller(_cible_de_cd(reste))
         return None
     if commande in RETOURS_DE_DOSSIER:
@@ -904,9 +980,12 @@ def _motif_interprete(
     """Un interprète (`bash -c`, `cmd /c`, `eval`, Start-Process…) : ses arguments, et la commande
     qu'ils forment, sont réanalysés comme des commandes.
 
-    Chacun part du dossier où tourne l'enfant ; en sortant, le dossier d'avant revient, sauf pour
-    `eval` ou `Invoke-Expression`, qui exécutent dans le shell même : un `cd` qu'ils font le rend
-    inconnu. Le drapeau d'un changement de dossier, lui, reste levé."""
+    Chacun part du dossier où tourne l'enfant, et du drapeau d'un changement de dossier tel qu'il
+    était en y entrant : le texte de `bash -c` se lit deux fois, comme argument et dans la commande
+    formée, et un `cd` lu la première fois ne précède pas une fusion lue la seconde. En sortant, le
+    dossier d'avant revient, sauf pour `eval`, `trap` ou `Invoke-Expression`, qui exécutent dans
+    le shell même : un `cd` qu'ils font le rend inconnu. Le drapeau reste levé si un candidat l'a
+    levé."""
     utiles = list(reste)
     while utiles and (utiles[0].startswith("-") or utiles[0].startswith("/")):
         utiles.pop(0)
@@ -914,13 +993,15 @@ def _motif_interprete(
     base = utiles
     sauve = ctx.dossier
     avant = ctx.changements
+    leve = ctx.hors_du_dossier
     try:
         if commande in LANCEURS:
             base, dossiers = _lancement(commande, reste)
             for dossier in dossiers:  # `-WorkingDirectory` : un changement de dossier
                 ctx.aller(dossier)
             candidats.append(" ".join(base))
-        enfant = ctx.dossier
+        enfant, hors = ctx.dossier, ctx.hors_du_dossier
+        leve = leve or hors
         # Filet : si la commande formée ne commence pas par git ou gh, mais qu'ils viennent plus
         # loin, l'analyse repart d'eux, dans un dossier inconnu.
         filet = None
@@ -929,41 +1010,81 @@ def _motif_interprete(
         if ici:  # `bash <<< 'cmd'` exécute le texte ; `xargs git commit <<< x` l'ajoute à la fin
             candidats += [*ici, " ".join([*utiles, *ici])]
         for candidat in candidats:
-            ctx.dossier = enfant
+            ctx.dossier, ctx.hors_du_dossier = enfant, hors
             if candidat.strip():
                 motif = _motif_commande(candidat, ctx, profondeur + 1)
                 if motif:
                     return motif
+            leve = leve or ctx.hors_du_dossier
         if filet is not None:
-            ctx.dossier = enfant
+            ctx.dossier, ctx.hors_du_dossier = enfant, hors
             ctx.perdre()
+            leve = True
             motif = _motif_commande(" ".join(base[filet:]), ctx, profondeur + 1)
             if motif:
                 return motif
     finally:
         ctx.dossier = sauve
+        ctx.hors_du_dossier = leve or ctx.hors_du_dossier
         if commande in DANS_LE_SHELL and ctx.changements != avant:
             ctx.dossier = INCONNU
     return None
 
 
+def _groupes_ouverts(segment: list[str]) -> int:
+    """Le nombre de groupes Bash `{` qu'ouvre la tête du segment (`{ cd B`, `then { …`)."""
+    n = 0
+    for jeton in segment:
+        if _nom(jeton) not in PREFIXES:
+            break
+        n += jeton == "{"
+    return n
+
+
 def _motif_lecture(
-    texte: str, echappement: bool, virgules: bool, ctx: Contexte, profondeur: int
+    texte: str, echappement: bool, virgules: bool, accolades: bool, ctx: Contexte, profondeur: int
 ) -> str | None:
-    """Les segments d'une lecture, dans l'ordre. En Bash, un sous-shell `( … )` rend à sa
-    fermeture le dossier de son ouverture. En PowerShell (la lecture à virgules), des parenthèses
-    groupent sans changer de portée : le dossier reste celui du dernier `cd`."""
-    pile: list[str | None] = []
-    for segment in _segments(texte, echappement, virgules):
-        if segment == [OUVRE]:
-            pile.append(ctx.dossier)
-        elif segment == [FERME]:
-            if not virgules:
-                ctx.dossier = pile.pop() if pile else INCONNU
+    """Les segments d'une lecture, dans l'ordre.
+
+    En Bash, un sous-shell rend le dossier d'avant lui : `( … )` à sa fermeture ; un élément d'un
+    pipeline (`a | b`, groupe `{ …; }` compris) ou une commande lancée en fond (`a &`), qui partent
+    du dossier du shell. Le dernier élément d'un pipeline qui change de dossier le rend inconnu :
+    il tourne dans un sous-shell, sauf sous `shopt -s lastpipe`. En PowerShell (la lecture à
+    virgules), parenthèses, blocs et pipelines ne changent pas de portée : le dossier reste celui du
+    dernier `cd`. Dans `cmd`, `&` enchaîne dans le même shell : la lecture PowerShell d'un texte
+    imbriqué, qui garde le dossier, couvre ce cas."""
+    cadres: list[tuple[str | None, bool, str | None]] = []  # ( et { : ce qui revient à la fin
+    debut = ctx.dossier  # le dossier du shell au début du pipeline en cours
+    tube = False  # le pipeline en cours a un `|`
+    for segment in _segments(texte, echappement, virgules, accolades):
+        if virgules:
+            if segment[0] in MARQUES:
+                continue
+        elif segment in ([TUBE], [FOND]):
+            ctx.dossier = debut
+            tube = segment == [TUBE]
+            continue
+        elif segment in ([SUITE], [FERME]) or segment[0] == "}":
+            if tube and ctx.dossier != debut:  # le dernier élément d'un pipeline
+                ctx.dossier = INCONNU
+            debut, tube = ctx.dossier, False
+            if segment != [SUITE]:  # la fin d'un sous-shell ou d'un groupe
+                debut, tube, ouvert = cadres.pop() if cadres else (INCONNU, False, INCONNU)
+                if segment == [FERME]:
+                    ctx.dossier = ouvert
+            if segment[0] in MARQUES:
+                continue
+        elif segment == [OUVRE]:
+            cadres.append((debut, tube, ctx.dossier))
+            debut, tube = ctx.dossier, False
+            continue
         else:
-            motif = _motif_segment(segment, ctx, profondeur)
-            if motif:
-                return motif
+            for _ in range(_groupes_ouverts(segment)):
+                cadres.append((debut, tube, ctx.dossier))
+                debut, tube = ctx.dossier, False
+        motif = _motif_segment(segment, ctx, profondeur)
+        if motif:
+            return motif
     return None
 
 
@@ -977,11 +1098,11 @@ def _motif_commande(commande: str, ctx: Contexte, profondeur: int = 0) -> str | 
     dossier, hors = ctx.dossier, ctx.hors_du_dossier
     leve = hors
     try:
-        for texte, echappement, virgules in _variantes(commande, lecture):
+        for texte, echappement, virgules, accolades in _variantes(commande, lecture):
             if CONFIG_PAR_ENVIRONNEMENT.search(texte):
                 return REFUS_CONFIG_ENVIRONNEMENT
             ctx.dossier, ctx.hors_du_dossier = dossier, hors
-            motif = _motif_lecture(texte, echappement, virgules, ctx, profondeur)
+            motif = _motif_lecture(texte, echappement, virgules, accolades, ctx, profondeur)
             if motif:
                 return motif
             leve = leve or ctx.hors_du_dossier
@@ -1016,15 +1137,15 @@ def motif_de_refus(
         if CONFIG_PAR_ENVIRONNEMENT.search(commande):
             return REFUS_CONFIG_ENVIRONNEMENT
         ctx = Contexte(branche, branche_courante, checks_verts, outil, fusion)
-        ctx.depot_par_environnement = "gh_repo" in commande.lower()
-        for texte, echappement, virgules in _variantes(commande, outil):
+        ctx.depot_par_environnement = bool(DEPOT_PAR_ENVIRONNEMENT.search(commande))
+        for texte, echappement, virgules, accolades in _variantes(commande, outil):
             if CONFIG_PAR_ENVIRONNEMENT.search(texte):
                 return REFUS_CONFIG_ENVIRONNEMENT
             # Chaque lecture part du dossier de la session, drapeau baissé : le dossier suivi et
             # le changement de dossier ne passent pas d'une lecture à l'autre.
             ctx.dossier = None
             ctx.hors_du_dossier = False
-            motif = _motif_lecture(texte, echappement, virgules, ctx, 0)
+            motif = _motif_lecture(texte, echappement, virgules, accolades, ctx, 0)
             if motif:
                 return motif
     except Exception:  # noqa: BLE001 - fail-closed : jamais d'exception vers l'appelant

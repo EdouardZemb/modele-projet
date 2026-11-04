@@ -1409,3 +1409,213 @@ def test_branche_courante_illisible_a_son_message():
         assert "branche courante illisible" in resultat, commande
         assert "push vers main" not in resultat, commande
     assert "push vers main" in refus("git push", courante="main")
+
+
+# --- revue de la PR (tour 1) : blocs PowerShell, GIT_DIR, pipelines, interprètes ---------------
+
+# Un bloc PowerShell `{ … }`, collé ou non, et une affectation `$x = …` ne cachent ni la commande ni
+# un changement de dossier.
+BLOCS_EDOUARD = [
+    "try { gh pr merge 12 --squash } catch {}",
+    "try {gh pr merge 12 --squash} catch {}",
+    "$out = gh pr merge 12 --squash",
+    "$out=gh pr merge 12 --squash",
+    "if ($LASTEXITCODE -eq 0) {gh pr merge 12 --squash}",
+    "{gh pr merge 12 --squash}",
+    "1 | % { gh pr merge 12 --squash }",
+    "trap { gh pr merge 12 --squash }",
+]
+
+
+@pytest.mark.parametrize("outil", ["PowerShell", None])
+@pytest.mark.parametrize("commande", BLOCS_EDOUARD)
+def test_bloc_powershell_ne_cache_pas_la_fusion(commande, outil):
+    resultat = motif(commande, outil=outil, mode="edouard")
+    assert resultat is not None, (commande, outil)
+    assert "mode fusion : edouard" in resultat, (commande, outil, resultat)
+
+
+BLOCS_REFUSES = [
+    ("$out = gh pr merge 12 --admin", "--admin"),
+    ("$a, $b = gh pr merge 12 --admin", "--admin"),
+    ("[string]$s = gh pr merge 12 --admin", "--admin"),
+    ("$out += gh pr merge 12 --admin", "--admin"),
+    ("$null = git push origin main", "push vers main"),
+    ("&{git push origin main}", "push vers main"),
+    ("& { git push origin main }", "push vers main"),
+    ("1 | % { git push origin main }", "push vers main"),
+    ("1 | ForEach-Object -Process {git push origin main}", "push vers main"),
+    ("Invoke-Command -ComputerName x -ScriptBlock {git push origin main}", "push vers main"),
+    (". {git push origin main}", "push vers main"),
+    ("try { $null = git push origin main } finally {}", "push vers main"),
+    ("trap [Exception] {git push origin main}", "push vers main"),
+    ("try {Remove-Item -Recurse .githooks} catch {}", "garde-fous"),
+]
+
+
+@pytest.mark.parametrize("outil", ["PowerShell", None])
+@pytest.mark.parametrize(("commande", "fragment"), BLOCS_REFUSES)
+def test_bloc_powershell_refuse(commande, fragment, outil):
+    resultat = motif(commande, outil=outil)
+    assert resultat is not None, (commande, outil)
+    assert fragment in resultat, (commande, outil, resultat)
+
+
+@pytest.mark.parametrize("outil", ["PowerShell", None])
+@pytest.mark.parametrize(
+    "commande",
+    [
+        r"try { Set-Location ..\B; gh pr merge 12 } finally { Pop-Location }",
+        r"try {Set-Location ..\B; gh pr merge 12} finally {Pop-Location}",
+        r"& { Set-Location ..\B }; gh pr merge 12",
+        r"$x = Set-Location ..\B; gh pr merge 12",
+        r"if ($true) {Push-Location ..\B}; gh pr merge 12",
+    ],
+)
+def test_bloc_powershell_ne_cache_pas_le_changement_de_dossier(commande, outil):
+    verts, vus = _espion(True)
+    resultat = garde_claude.motif_de_refus(
+        commande, BRANCHE, lambda c: "lot-1/x", verts, outil, fusion=lambda d: "session"
+    )
+    assert resultat is not None, (commande, outil)
+    assert "fusion après un changement de dossier" in resultat, (commande, outil, resultat)
+    assert vus == [], (commande, outil)
+
+
+@pytest.mark.parametrize("outil", ["PowerShell", None])
+@pytest.mark.parametrize(
+    ("commande", "controles"),
+    [
+        ("try { python -m pytest -q } catch {}", []),
+        ("$out = gh pr view 12", []),
+        ("$out = gh pr merge 12 --squash", ["12"]),
+        ("try { gh pr merge 12 --squash } catch {}", ["12"]),
+        ("if ($LASTEXITCODE -eq 0) {gh pr merge 12 --squash}", ["12"]),
+        ("Get-ChildItem | ForEach-Object { $_.Name }", []),
+        ("$h = @{a=1}; git push origin lot-1/x", []),
+        ("git stash list; $n = 0", []),
+        ("trap { Write-Host erreur; continue }", []),
+    ],
+)
+def test_bloc_powershell_admis(commande, controles, outil):
+    verts, vus = _espion(True)
+    resultat = garde_claude.motif_de_refus(
+        commande, BRANCHE, lambda c: "lot-1/x", verts, outil, fusion=lambda d: "session"
+    )
+    assert resultat is None, (commande, outil, resultat)
+    assert vus == controles, (commande, outil, vus)
+
+
+@pytest.mark.parametrize(
+    "commande",
+    ["trap 'git push origin main' EXIT", "trap 'rm -rf .githooks' EXIT"],
+)
+def test_trap_bash_lit_sa_commande(commande):
+    assert refus(commande) is not None, commande
+
+
+def test_trap_bash_sans_commande_dangereuse_admis():
+    assert refus("trap 'rm -f \"$tmp\"' EXIT") is None
+    assert refus("trap - EXIT") is None
+
+
+# GIT_DIR, GIT_WORK_TREE, GIT_COMMON_DIR : gh y trouve son dépôt, comme dans GH_REPO.
+GIT_DIR_FUSIONS = [
+    "GIT_DIR=../B/.git gh pr merge 12",
+    "env GIT_DIR=../B/.git gh pr merge 12",
+    "export GIT_DIR=../B/.git; gh pr merge 12",
+    r"$env:GIT_DIR='..\B\.git'; gh pr merge 12",
+    "GIT_WORK_TREE=../B gh pr merge 12",
+    "GIT_COMMON_DIR=../B/.git gh pr merge 12",
+    "GIT_DIR=../B/.git gh api -X PUT repos/{owner}/{repo}/pulls/12/merge",
+]
+
+
+@pytest.mark.parametrize("mode", ["session", "edouard"])
+@pytest.mark.parametrize("commande", GIT_DIR_FUSIONS)
+def test_git_dir_dans_la_commande_refuse_la_fusion(commande, mode):
+    verts, vus = _espion(True)
+    resultat = garde_claude.motif_de_refus(
+        commande, BRANCHE, lambda c: "lot-1/x", verts, fusion=lambda d: mode
+    )
+    assert resultat is not None, (commande, mode)
+    assert "autre dépôt" in resultat, (commande, mode, resultat)
+    assert vus == [], (commande, mode)
+
+
+@pytest.mark.parametrize("commande", ["GIT_DIR=x gh pr view 12", "export GIT_DIR=x; git status"])
+def test_git_dir_sans_fusion_admis(commande):
+    assert refus(commande) is None, commande
+
+
+# Un `cd` dans un pipeline Bash, ou lancé en fond, tourne dans un sous-shell ; `pushd -n` ne change
+# que la pile. La branche courante est alors celle de la session (main ici, lot-13/x dans B).
+@pytest.mark.parametrize("outil", ["Bash", None])
+@pytest.mark.parametrize(
+    ("commande", "fragment"),
+    [
+        ("cd B | true; git push", "push vers main"),
+        ("cd B|true; git push", "push vers main"),
+        ("cd B |& tee log; git push", "push vers main"),
+        ("cd B & git push", "push vers main"),
+        ("cd B & wait; git push origin HEAD", "push vers main"),
+        ("(cd B &); git push", "push vers main"),
+        ("pushd -n B; git push", "push vers main"),
+        ("pushd -n B >/dev/null; git push origin HEAD", "push vers main"),
+        ("{ cd B; } | cat; git push", "push vers main"),
+        ("{ cd B && echo x; } 2>&1 | tail -20; git push", "push vers main"),
+        # le dernier élément d'un pipeline : sous-shell, sauf `shopt -s lastpipe`
+        ("true | cd B; git push", "illisible"),
+    ],
+)
+def test_cd_dans_un_pipeline_ou_en_fond_ne_reste_pas(commande, fragment, outil):
+    resultat = motif(commande, _courante_main_dans_la_session(), outil)
+    assert resultat is not None, (commande, outil)
+    assert fragment in resultat, (commande, outil, resultat)
+
+
+@pytest.mark.parametrize(
+    ("commande", "outil"),
+    [
+        ("cd B && git log | head; git push origin HEAD", "Bash"),
+        ("cd B; git status | cat; git push", "Bash"),
+        ("cd B && { echo x; echo y; }; git push", "Bash"),
+        ("cd B && echo x && git push", "Bash"),
+        ("Set-Location B | Out-Null; git push", "PowerShell"),
+    ],
+)
+def test_cd_hors_pipeline_suivi(commande, outil):
+    assert motif(commande, _courante_main_dans_la_session(), outil) is None, (commande, outil)
+
+
+def test_pushd_n_leve_le_drapeau_de_la_fusion():
+    assert "fusion après un changement de dossier" in refus("pushd -n ../B; gh pr merge 12")
+
+
+def test_esperluette_de_cmd_garde_le_dossier():
+    # Dans cmd, `&` enchaîne dans le même shell : le cd vaut pour git push, qui vise main dans B.
+    def lire(chemin):
+        return "main" if chemin == "B" else "lot-13/x"
+
+    for outil in ("Bash", "PowerShell", None):
+        resultat = motif('cmd /c "cd B & git push"', lire, outil)
+        assert resultat is not None, outil
+        assert "push vers main" in resultat, (outil, resultat)
+
+
+# Le drapeau d'un candidat d'interprète ne passe pas au suivant : chacun lit la même commande.
+@pytest.mark.parametrize("outil", ["Bash", "PowerShell", None])
+@pytest.mark.parametrize(
+    "commande",
+    [
+        'bash -c "gh pr merge 12 --squash && cd .."',
+        'pwsh -Command "gh pr merge 12 --squash; Set-Location .."',
+    ],
+)
+def test_fusion_avant_le_cd_d_un_interprete_admise(commande, outil):
+    verts, vus = _espion(True)
+    resultat = garde_claude.motif_de_refus(
+        commande, BRANCHE, lambda c: "lot-1/x", verts, outil, fusion=lambda d: "session"
+    )
+    assert resultat is None, (commande, outil, resultat)
+    assert vus and set(vus) == {"12"}, (commande, outil, vus)

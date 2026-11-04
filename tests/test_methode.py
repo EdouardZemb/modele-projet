@@ -69,8 +69,12 @@ def test_fusion_dans_un_autre_depot():
     assert "Le garde ne fusionne que dans le dépôt de la session." in texte
     assert "fusion dans un autre dépôt : contrôles invérifiables ici" in texte
     assert "Un plan qui touche plusieurs dépôts dit, pour chaque PR, qui la fusionne" in texte
-    # Tout dépôt nommé est refusé, même celui de la session : on fusionne depuis le clone.
-    assert "toute fusion qui nomme un dépôt (`-R`, `--repo`, `GH_REPO`, une adresse de PR)" in texte
+    # Tout dépôt nommé est refusé, même celui de la session : on fusionne depuis le clone. GIT_DIR
+    # aussi, où gh lit ses remotes (revue de la PR du lot 13, tour 1).
+    assert (
+        "toute fusion qui nomme un dépôt (`-R`, `--repo`, `GH_REPO`, `GIT_DIR`, une adresse de PR)"
+        in texte
+    )
     assert "`gh pr merge <n>`, depuis le clone" in texte
     assert "en mode `edouard`, toute fusion est refusée de toute façon" in texte
     # Revue finale du lot 13 (garde-5) : le mode et les contrôles se lisent dans le dossier de la
@@ -241,6 +245,8 @@ def test_garde_fous_a_jour():
         "`env -C`",
         "`Start-Process -WorkingDirectory`",
         "la branche courante est illisible",
+        # revue de la PR du lot 13 (tour 1) : les blocs et les affectations de PowerShell
+        "les blocs PowerShell (`try { … }`, `& { … }`, `% { … }`) et ses affectations (`$x = …`)",
     ):
         assert fragment in section, fragment
     assert "gitleaks sur tout l'historique ;" not in section
