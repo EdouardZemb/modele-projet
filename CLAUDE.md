@@ -166,13 +166,14 @@ M-0006 § 6 et 7, étiquetée `v0.8.0`.
   Le retrait d'`essai-chaine`, le 04/11, suit la notice de `serveur` (serveur#32). Sur la
   machine, unités, conteneurs, réseaux, clones et dossiers sont retirés sans erreur, les
   instantanés figés compris (serveur#31) ; ses 7 images aussi, dont 4 sans étiquette, sur le
-  magasin classique de la cible (LE-50). La vérification en lecture seule n'a rien trouvé du
-  projet, et le tunnel commun n'a pas été recréé. Les quatre contrôles Healthchecks sont
-  supprimés ; `essai-chaine` est archivé, et `essai-chaine-donnees` aussi, sans sa clé de
-  déploiement. Restent à Edouard : les deux routes Cloudflare et leurs CNAME s'ils restent, le
-  paquet GHCR `essai-chaine`, l'effacement des sauvegardes distantes, et l'archivage
-  d'`essai-naissance` et d'`essai-naissance-donnees`. À l'arrêt, l'application d'essai a mis 10 s :
-  elle ignore SIGTERM (une piste).
+  magasin classique de la cible (LE-50). La vérification en lecture seule n'a rien trouvé du projet,
+  et le tunnel commun n'a pas été recréé ; elle ne cherchait pas les horodatages des deux minuteries
+  persistantes, qui restent (serveur#34, une piste). Les quatre contrôles Healthchecks sont
+  supprimés, et les deux routes Cloudflare aussi, leurs CNAME avec elles ; `essai-chaine` est
+  archivé, et `essai-chaine-donnees` aussi, sans sa clé de déploiement. Restent à Edouard : les deux
+  horodatages (geste 👤 de serveur#34), le paquet GHCR `essai-chaine`, l'effacement des sauvegardes
+  distantes, et l'archivage d'`essai-naissance` et d'`essai-naissance-donnees`. À l'arrêt,
+  l'application d'essai a mis 10 s : elle ignore SIGTERM (une piste).
   Le complément de la revue finale, sur les tâches 10 et 11, n'a tourné qu'après la fusion de #92 ;
   ses constats ont fait corriger ces textes (LE-54, LE-55).
 
