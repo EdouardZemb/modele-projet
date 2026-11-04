@@ -290,7 +290,7 @@ def test_secret_chiffre_sous_un_dossier_de_secrets_exclu(depot_masque, env, caps
     assert "secrets/prod.env " not in err
     assert "secrets/age.txt" not in err
     for clair in SECRETS_IMBRIQUES:
-        assert clair not in err, clair
+        assert f" : {clair} (règle " not in err, clair
     appliquer(depot_masque, "*secret*\n", REMEDE_SECRETS)
     assert masques.main(["--racine", str(depot_masque)]) == 0
     # Le remède appliqué à la lettre : aucun secret en clair ne paraît, imbriqué ou non.
@@ -298,15 +298,33 @@ def test_secret_chiffre_sous_un_dossier_de_secrets_exclu(depot_masque, env, caps
     assert not ignore(depot_masque, env, "secrets/prod.env.enc")
 
 
+# Ce qu'un projet à un dépôt garde en local sous `deploiement/secrets/`, hors de ce que la chaîne y
+# lit au premier niveau (`*.cles`, `*.env.enc`) : un secret en clair, une identité, une copie.
+CLAIRS_A_UN_DEPOT = (
+    "deploiement/secrets/prod.env",
+    "deploiement/secrets/age.txt",
+    "deploiement/secrets/ancien/staging.env.enc",
+)
+
+
 def test_secret_chiffre_d_un_projet_a_un_depot(depot_masque, env, capsys):
-    """En cible `serveur`, `deploiement/secrets/` porte aussi les `.cles` du modèle."""
+    """En cible `serveur`, `deploiement/secrets/` porte aussi les `.cles` du modèle. La porte examine
+    tout `deploiement/`, mais n'y voit, sous `deploiement/secrets/`, que ce que la chaîne y lit au
+    premier niveau : un secret en clair y reste masqué, sans refus ni remède qui le nomme."""
     (depot_masque / GERE).unlink()
     ecrire(depot_masque, ".gitignore", "*secret*\n")
-    for chemin in ("deploiement/secrets/prod.cles", "deploiement/secrets/prod.env.enc"):
+    for chemin in (
+        "deploiement/secrets/prod.cles",
+        "deploiement/secrets/prod.env.enc",
+        *CLAIRS_A_UN_DEPOT,
+    ):
         ecrire(depot_masque, chemin)
     modifier_reponses(depot_masque, env, cible="serveur")
     assert masques.main(["--racine", str(depot_masque)]) == 1
-    lignes = capsys.readouterr().err.splitlines()
+    err = capsys.readouterr().err
+    for clair in CLAIRS_A_UN_DEPOT:
+        assert f" : {clair} (règle " not in err, clair
+    lignes = err.splitlines()
     assert (
         "modele-projet : refusé — fichier du modèle masqué par le .gitignore : "
         "deploiement/secrets/prod.cles (règle .gitignore:1:*secret*). "
@@ -319,8 +337,48 @@ def test_secret_chiffre_d_un_projet_a_un_depot(depot_masque, env, capsys):
     ) in lignes
     appliquer(depot_masque, "*secret*\n", REMEDE_SECRETS_A_UN_DEPOT)
     assert masques.main(["--racine", str(depot_masque)]) == 0
-    assert ignore(depot_masque, env, "deploiement/secrets/prod.env")
+    assert [clair for clair in CLAIRS_A_UN_DEPOT if not ignore(depot_masque, env, clair)] == []
     assert not ignore(depot_masque, env, "deploiement/secrets/prod.cles")
+    assert not ignore(depot_masque, env, "deploiement/secrets/prod.env.enc")
+
+
+# Un dossier exclu qui contient un dossier de secrets : `!/deploiement/` seul ferait entrer tout
+# `deploiement/secrets/`. Le remède lève aussi le dossier de secrets, au cas où une autre règle
+# l'exclut, en exclut le contenu, puis n'admet que ce que la chaîne y lit.
+REMEDE_DEPLOIEMENT = (
+    "Ajouter à la fin de ce fichier `!/deploiement/`, `!/deploiement/secrets/`, "
+    "`/deploiement/secrets/*`, `!/deploiement/secrets/*.cles` et "
+    "`!/deploiement/secrets/*.env.enc`, dans cet ordre, puis indexer le fichier : jamais "
+    "`!/deploiement/` seul, qui laisserait entrer les secrets en clair."
+)
+
+
+@pytest.mark.parametrize(
+    "gitignore", ["deploiement/\n", "*secret*\ndeploiement/\n"], ids=["deploiement", "et-secret"]
+)
+def test_dossier_exclu_qui_contient_un_dossier_de_secrets(depot_masque, env, capsys, gitignore):
+    (depot_masque / GERE).unlink()
+    ecrire(depot_masque, ".gitignore", gitignore)
+    du_modele = (
+        "deploiement/deployer.sh",
+        "deploiement/secrets/prod.cles",
+        "deploiement/secrets/prod.env.enc",
+    )
+    for chemin in (*du_modele, *CLAIRS_A_UN_DEPOT):
+        ecrire(depot_masque, chemin)
+    modifier_reponses(depot_masque, env, cible="serveur")
+    assert masques.main(["--racine", str(depot_masque)]) == 1
+    err = capsys.readouterr().err
+    for chemin in du_modele:
+        (ligne,) = [ligne for ligne in err.splitlines() if f" : {chemin} (règle " in ligne]
+        assert ligne.endswith(f"). {REMEDE_DEPLOIEMENT}"), ligne
+    for clair in CLAIRS_A_UN_DEPOT:
+        assert f" : {clair} (règle " not in err, clair
+    # Appliqué à la lettre, le remède converge en un tour, et les secrets en clair restent dehors.
+    appliquer(depot_masque, gitignore, REMEDE_DEPLOIEMENT)
+    assert masques.main(["--racine", str(depot_masque)]) == 0
+    assert [clair for clair in CLAIRS_A_UN_DEPOT if not ignore(depot_masque, env, clair)] == []
+    assert [chemin for chemin in du_modele if ignore(depot_masque, env, chemin)] == []
 
 
 def test_depot_de_donnees_garde_ce_qu_il_peut_ignorer(depot_masque, env):
@@ -461,6 +519,9 @@ def test_chemins_couvrent_le_rendu(rendre, reponses):
     geres = [g for g in fichiers(rendu) if g not in semes]
     assert geres
     assert [g for g in geres if not couvert(g, chemins)] == []
+    # Sous un dossier de secrets, la porte n'examine que ce que la chaîne y lit : aucun fichier du
+    # rendu, semé ou géré, n'y échappe.
+    assert [f for f in fichiers(rendu) if masques.hors_de_la_chaine(f)] == []
 
 
 @pytest.mark.parametrize(

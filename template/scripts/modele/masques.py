@@ -9,15 +9,19 @@ illisible vaut `serveur`. En cible `donnees`, elle examine aussi `config/README.
 `contenu/README.md`, semés, puis, sauf si `cible_code` vaut `aucune`, l'instance du dépôt de
 données : `.sops.yaml`, `env/prod.env`, `env/staging.env`, `cles/*.pub` et les secrets chiffrés
 `secrets/*.env.enc`. Ce qu'un dépôt de données peut ignorer (un secret en clair, une clé privée,
-un fichier local de `config/` ou de `contenu/`) n'est pas examiné. Un cache Python
-(`__pycache__`, `.pyc`) est ignoré.
+un fichier local de `config/` ou de `contenu/`) n'est pas examiné. Sous un dossier de secrets
+(`secrets/`, `deploiement/secrets/`), seul ce que la chaîne y lit, à son premier niveau, l'est :
+en cible `serveur`, un secret en clair de `deploiement/secrets/` reste masqué sans refus. Un cache
+Python (`__pycache__`, `.pyc`) est ignoré.
 
 Le remède est une exception nommée au .gitignore : `!<fichier>`, ou `!<dossier>/` quand un dossier
 parent est exclu, car git ne regarde pas ce que contient un dossier exclu. Un dossier de secrets
-exclu (`secrets/`, `deploiement/secrets/`) ne se lève jamais seul, ce qui laisserait entrer les
-secrets en clair : le remède le lève, en exclut le contenu, puis n'admet que ce que la chaîne y
-lit, `!/secrets/`, `/secrets/*` et `!/secrets/*.env.enc`. Ces lignes sont ancrées à la racine :
-`!secrets/` vaudrait à toute profondeur, et ferait paraître les dossiers `secrets/` imbriqués.
+exclu ne se lève jamais seul, ce qui laisserait entrer les secrets en clair : le remède le lève,
+en exclut le contenu, puis n'admet que ce que la chaîne y lit, `!/secrets/`, `/secrets/*` et
+`!/secrets/*.env.enc`. Ces lignes sont ancrées à la racine : `!secrets/` vaudrait à toute
+profondeur, et ferait paraître les dossiers `secrets/` imbriqués. Un dossier exclu qui contient
+un dossier de secrets (`deploiement/`) se lève de même : son exception, ancrée, est suivie des
+lignes de ce dossier, `!/deploiement/secrets/` en tête.
 
 Bibliothèque standard seule, Python 3.10 ou plus.
 
@@ -62,8 +66,8 @@ CHEMINS_DONNEES: tuple[str, ...] = (
     "config/README.md",
     "contenu/README.md",
 )
-# L'instance d'un projet `serveur` dans son dépôt de données (`cible_code: serveur`) : ce que le
-# modèle y sème, et les secrets chiffrés que la chaîne y lit. Rien d'autre : un secret en clair
+# L'instance d'un projet `serveur` dans son dépôt de données (sauf `cible_code: aucune`) : ce que
+# le modèle y sème, et les secrets chiffrés que la chaîne y lit. Rien d'autre : un secret en clair
 # sous `secrets/`, ou une clé privée sous `cles/`, reste masqué sans refus.
 CHEMINS_INSTANCE: tuple[str, ...] = (
     ".sops.yaml",
@@ -75,7 +79,8 @@ CHEMINS_INSTANCE: tuple[str, ...] = (
 # Les secrets chiffrés que la chaîne lit : ils ne sont pas du modèle, mais doivent entrer. Un motif
 # ne vaut qu'au premier niveau de son dossier, comme dans `.sops.yaml`.
 SECRETS_CHIFFRES: tuple[str, ...] = ("secrets/*.env.enc", "deploiement/secrets/*.env.enc")
-# Les dossiers de secrets, et ce que la chaîne y lit : le seul contenu à y admettre.
+# Les dossiers de secrets, et ce que la chaîne y lit à leur premier niveau : le seul contenu à y
+# examiner, et à y admettre.
 DOSSIERS_DE_SECRETS: dict[str, tuple[str, ...]] = {
     "secrets/": ("*.env.enc",),
     "deploiement/secrets/": ("*.cles", "*.env.enc"),
@@ -173,7 +178,22 @@ def fichiers_masques(racine: Path, chemins: tuple[str, ...]) -> list[str]:
         *chemins,
     )
     noms = [n for n in sortie.split("\0") if n]
-    return sorted(n for n in noms if "__pycache__" not in n.split("/") and not n.endswith(".pyc"))
+    return sorted(
+        n
+        for n in noms
+        if "__pycache__" not in n.split("/") and not n.endswith(".pyc") and not hors_de_la_chaine(n)
+    )
+
+
+def hors_de_la_chaine(chemin: str) -> bool:
+    """Vrai si `chemin` est sous un dossier de secrets sans être, à son premier niveau, ce que la
+    chaîne y lit (`DOSSIERS_DE_SECRETS`) : un secret en clair, une identité, une copie. Il n'est
+    pas examiné, et reste masqué sans refus."""
+    for dossier, admis in DOSSIERS_DE_SECRETS.items():
+        if chemin.startswith(dossier):
+            reste = chemin[len(dossier) :]
+            return "/" in reste or not any(fnmatch.fnmatchcase(reste, motif) for motif in admis)
+    return False
 
 
 def regle(racine: Path, chemin: str) -> str:
@@ -219,24 +239,36 @@ def dossiers_exclus(racine: Path, chemins: list[str]) -> dict[str, str]:
     return resultat
 
 
+def exceptions(dossier: str) -> list[str]:
+    """Les lignes qui lèvent le dossier exclu `dossier`, dans leur ordre.
+
+    Un dossier de secrets, ou un dossier qui en contient un (`deploiement/`), se lève sans laisser
+    entrer ce que la chaîne n'y lit pas : après l'exception du dossier, chaque dossier de secrets
+    qu'il contient se lève (une autre règle peut l'exclure), son contenu s'exclut, puis ce que la
+    chaîne y lit s'admet. Ces lignes sont ancrées à la racine : `!secrets/`, sans `/` en tête,
+    vaudrait à toute profondeur."""
+    contenus = [(d, admis) for d, admis in DOSSIERS_DE_SECRETS.items() if d.startswith(dossier)]
+    if not contenus:
+        return [f"!{dossier}"]
+    lignes = [f"!/{dossier}"]
+    for d, admis in contenus:
+        if d != dossier:
+            lignes.append(f"!/{d}")
+        lignes += [f"/{d}*", *(f"!/{d}{motif}" for motif in admis)]
+    return lignes
+
+
 def remede(chemin: str, dossier: str | None) -> str:
-    """L'exception à poser : sur le dossier exclu s'il y en a un, sinon sur le fichier. Un dossier
-    de secrets se lève sans laisser entrer ce que la chaîne n'y lit pas."""
+    """L'exception à poser : sur le dossier exclu s'il y en a un, sinon sur le fichier."""
     if dossier is None:
         return f"Ajouter `!{chemin}` à ce fichier, puis l'indexer."
-    admis = DOSSIERS_DE_SECRETS.get(dossier)
-    if admis is None:
-        return f"Ajouter `!{dossier}` à ce fichier, puis indexer le fichier."
-    # Ancrées à la racine : `!secrets/`, sans `/` en tête, vaudrait à toute profondeur.
-    exceptions = [
-        f"`!/{dossier}`",
-        f"`/{dossier}*`",
-        *(f"`!/{dossier}{motif}`" for motif in admis),
-    ]
+    lignes = [f"`{ligne}`" for ligne in exceptions(dossier)]
+    if len(lignes) == 1:
+        return f"Ajouter {lignes[0]} à ce fichier, puis indexer le fichier."
     return (
-        f"Ajouter à la fin de ce fichier {', '.join(exceptions[:-1])} et {exceptions[-1]}, dans cet "
-        f"ordre, puis indexer le fichier : jamais `!/{dossier}` seul, qui laisserait entrer les "
-        "secrets en clair."
+        f"Ajouter à la fin de ce fichier {', '.join(lignes[:-1])} et {lignes[-1]}, dans cet ordre, "
+        f"puis indexer le fichier : jamais {lignes[0]} seul, qui laisserait entrer les secrets en "
+        "clair."
     )
 
 
