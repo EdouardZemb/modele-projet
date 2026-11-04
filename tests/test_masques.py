@@ -7,7 +7,7 @@ from pathlib import Path
 import masques
 import pytest
 import yaml
-from conftest import RACINE, REPONSES_SERVEUR, git
+from conftest import RACINE, REPONSES_DONNEES_SERVEUR, REPONSES_SERVEUR, git
 
 METHODE = RACINE / "template/docs/modele/methode.md"
 GERE = "scripts/modele/verifier_secrets.py"
@@ -128,13 +128,99 @@ def test_chemins_serveur_selon_la_cible(depot_masque, env):
     assert masques.main(["--racine", str(depot_masque)]) == 1
 
 
+SERVEUR = masques.CHEMINS_COMMUNS + masques.CHEMINS_SERVEUR
+DONNEES = masques.CHEMINS_COMMUNS + masques.CHEMINS_DONNEES
+DONNEES_SERVEUR = DONNEES + masques.CHEMINS_INSTANCE
+
+
 def test_cible_illisible_vaut_serveur(depot_masque):
     ecrire(depot_masque, ".copier-answers.yml", "_commit: v0.2.3\n")
-    assert masques.cible_serveur(depot_masque) is True
+    assert masques.chemins_examines(depot_masque) == SERVEUR
     ecrire(depot_masque, ".copier-answers.yml", "cible: aucune\n")
-    assert masques.cible_serveur(depot_masque) is False
+    assert masques.chemins_examines(depot_masque) == masques.CHEMINS_COMMUNS
+    ecrire(depot_masque, ".copier-answers.yml", "cible: 'serveur'\n")
+    assert masques.chemins_examines(depot_masque) == SERVEUR
     (depot_masque / ".copier-answers.yml").unlink()
-    assert masques.cible_serveur(depot_masque) is True
+    assert masques.chemins_examines(depot_masque) == SERVEUR
+
+
+def test_cible_code_illisible_vaut_serveur(depot_masque):
+    """Un dépôt de données examine son instance, sauf si sa `cible_code` dit `aucune`."""
+    ecrire(depot_masque, ".copier-answers.yml", "cible: donnees\ncible_code: aucune\n")
+    assert masques.chemins_examines(depot_masque) == DONNEES
+    ecrire(depot_masque, ".copier-answers.yml", "cible: donnees\ncible_code: serveur\n")
+    assert masques.chemins_examines(depot_masque) == DONNEES_SERVEUR
+    ecrire(depot_masque, ".copier-answers.yml", "cible: donnees\n")
+    assert masques.chemins_examines(depot_masque) == DONNEES_SERVEUR
+
+
+# Le .gitignore de `veille-emploi` avant sa scission : il masque tout dotenv et tout ce qui nomme
+# un secret, et la porte ne voyait rien de l'instance d'un dépôt de données.
+GITIGNORE_A_UN_DEPOT = "*secret*\n*.env\n"
+INSTANCE_DES_DONNEES = (
+    "env/prod.env",
+    "env/staging.env",
+    "cles/serveur.pub",
+    "cles/hors-ligne.pub",
+    ".sops.yaml",
+    "secrets/prod.env.enc",
+    "secrets/staging.env.enc",
+)
+
+
+def test_instance_des_donnees_masquee_refuse(depot_masque, env, capsys):
+    (depot_masque / GERE).unlink()
+    ecrire(depot_masque, ".gitignore", GITIGNORE_A_UN_DEPOT + "cles/\n.sops.yaml\n")
+    for chemin in INSTANCE_DES_DONNEES:
+        ecrire(depot_masque, chemin)
+    ecrire(depot_masque, ".copier-answers.yml", "cible: donnees\ncible_code: serveur\n")
+    git(depot_masque, env, "add", ".copier-answers.yml")
+    assert masques.main(["--racine", str(depot_masque)]) == 1
+    err = capsys.readouterr().err
+    for chemin in INSTANCE_DES_DONNEES:
+        assert f"{chemin} (règle" in err, chemin
+    assert "env/prod.env (règle .gitignore:2:*.env)" in err
+    assert "secrets/prod.env.enc (règle .gitignore:1:*secret*)" in err
+    assert "Ajouter `!secrets/` à ce fichier, puis indexer le fichier." in err
+    # Le .gitignore d'un dépôt de données : l'instance passe, les secrets en clair restent dehors.
+    ecrire(
+        depot_masque,
+        ".gitignore",
+        GITIGNORE_A_UN_DEPOT
+        + "!env/prod.env\n!env/staging.env\n!secrets/\nsecrets/*\n!secrets/*.env.enc\n",
+    )
+    assert masques.main(["--racine", str(depot_masque)]) == 0
+
+
+def test_depot_de_donnees_garde_ce_qu_il_peut_ignorer(depot_masque, env):
+    """Un secret en clair, une clé privée, un fichier local de config/ ou de contenu/ : un dépôt
+    de données a le droit de les ignorer, et la porte ne lui demande pas de lever leur masque."""
+    (depot_masque / GERE).unlink()
+    ecrire(depot_masque, ".gitignore", "*secret*\n*.env\n*.txt\nconfig/.env\ncontenu/local/\n")
+    for chemin in (
+        "secrets/prod.env",
+        "cles/hors-ligne.txt",
+        "config/.env",
+        "contenu/local/brouillon.md",
+    ):
+        ecrire(depot_masque, chemin)
+    ecrire(depot_masque, ".copier-answers.yml", "cible: donnees\ncible_code: serveur\n")
+    git(depot_masque, env, "add", ".copier-answers.yml")
+    assert masques.main(["--racine", str(depot_masque)]) == 0
+
+
+def test_depot_de_donnees_sans_serveur(depot_masque, env):
+    """Sans `cible_code: serveur`, le dépôt de données n'a pas d'instance à examiner, mais ses deux
+    README.md restent du modèle."""
+    (depot_masque / GERE).unlink()
+    ecrire(depot_masque, ".gitignore", "*.env\n")
+    ecrire(depot_masque, "env/prod.env")
+    ecrire(depot_masque, ".copier-answers.yml", "cible: donnees\ncible_code: aucune\n")
+    git(depot_masque, env, "add", ".copier-answers.yml")
+    assert masques.main(["--racine", str(depot_masque)]) == 0
+    ecrire(depot_masque, ".gitignore", "*.env\nREADME.md\n")
+    ecrire(depot_masque, "config/README.md")
+    assert masques.main(["--racine", str(depot_masque)]) == 1
 
 
 def test_reponses_non_suivies_declenchent(tmp_path, env, capsys):
@@ -208,13 +294,43 @@ def couvert(fichier: str, chemins) -> bool:
     return False
 
 
-@pytest.mark.parametrize("reponses", [{}, REPONSES_SERVEUR], ids=["aucune", "serveur"])
+REPONSES_DONNEES = {"nom": "essai-donnees", "cible": "donnees"}
+
+
+def fichiers(rendu: Path) -> list[str]:
+    return [p.relative_to(rendu).as_posix() for p in sorted(rendu.rglob("*")) if p.is_file()]
+
+
+@pytest.mark.parametrize(
+    "reponses",
+    [{}, REPONSES_SERVEUR, REPONSES_DONNEES, REPONSES_DONNEES_SERVEUR],
+    ids=["aucune", "serveur", "donnees", "donnees-serveur"],
+)
 def test_chemins_couvrent_le_rendu(rendre, reponses):
-    """Chaque fichier géré du rendu (tout ce que `_skip_if_exists` ne sème pas) est examiné."""
+    """Chaque fichier géré du rendu (tout ce que `_skip_if_exists` ne sème pas) est examiné, sous
+    les chemins que la porte tire des réponses du rendu."""
     semes = set(yaml.safe_load(lire(RACINE / "copier.yml"))["_skip_if_exists"])
-    chemins = masques.CHEMINS_COMMUNS + (masques.CHEMINS_SERVEUR if reponses else ())
     rendu = rendre(**reponses)
-    geres = [p.relative_to(rendu).as_posix() for p in sorted(rendu.rglob("*")) if p.is_file()]
-    geres = [g for g in geres if g not in semes]
+    chemins = masques.chemins_examines(rendu)
+    geres = [g for g in fichiers(rendu) if g not in semes]
     assert geres
     assert [g for g in geres if not couvert(g, chemins)] == []
+
+
+@pytest.mark.parametrize(
+    "reponses", [REPONSES_DONNEES, REPONSES_DONNEES_SERVEUR], ids=["donnees", "donnees-serveur"]
+)
+def test_chemins_couvrent_les_donnees(rendre, reponses):
+    """Ce qu'un dépôt de données a de plus qu'un dépôt de code est examiné, semés compris (son
+    instance, ses deux README.md), et les secrets chiffrés que la chaîne y lit aussi."""
+    code = set(fichiers(rendre()))
+    rendu = rendre(**reponses)
+    chemins = masques.chemins_examines(rendu)
+    propres = [f for f in fichiers(rendu) if f not in code]
+    assert {"config/README.md", "contenu/README.md"} <= set(propres)
+    if reponses.get("cible_code") == "serveur":
+        assert {"env/prod.env", "env/staging.env", "cles/serveur.pub", ".sops.yaml"} <= set(
+            propres
+        )
+        propres += ["secrets/prod.env.enc", "secrets/staging.env.enc"]
+    assert [f for f in propres if not couvert(f, chemins)] == []

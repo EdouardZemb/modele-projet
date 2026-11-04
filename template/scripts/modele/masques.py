@@ -5,7 +5,12 @@ Un fichier géré masqué par le .gitignore n'est pas indexé : la mise à jour 
 le disque, mais il n'entre jamais dans un commit (LE-23). La porte ne s'applique qu'à un commit qui
 touche `.copier-answers.yml` (indexé, ou présent sans être suivi). Elle examine les chemins gérés
 communs, et ceux de la cible `serveur` sauf si la cible déclarée est une autre ; une cible
-illisible vaut `serveur`. Un cache Python (`__pycache__`, `.pyc`) est ignoré.
+illisible vaut `serveur`. En cible `donnees`, elle examine aussi `config/README.md` et
+`contenu/README.md`, semés, puis, sauf si `cible_code` vaut `aucune`, l'instance du dépôt de
+données : `.sops.yaml`, `env/prod.env`, `env/staging.env`, `cles/*.pub` et les secrets chiffrés
+`secrets/*.env.enc`. Ce qu'un dépôt de données peut ignorer (un secret en clair, une clé privée,
+un fichier local de `config/` ou de `contenu/`) n'est pas examiné. Un cache Python
+(`__pycache__`, `.pyc`) est ignoré.
 
 Le remède est une exception nommée au .gitignore : `!<fichier>`, ou `!<dossier>/` quand un dossier
 parent est exclu, car git ne regarde pas ce que contient un dossier exclu.
@@ -46,7 +51,24 @@ CHEMINS_SERVEUR: tuple[str, ...] = (
     ".github/actions/modele-image-construire/",
     ".github/actions/modele-image-publier/",
 )
+# Un dépôt de données (cible `donnees`) : ses deux README.md, semés. Le reste de `config/` et de
+# `contenu/` est au projet, qui peut en ignorer une partie.
+CHEMINS_DONNEES: tuple[str, ...] = (
+    "config/README.md",
+    "contenu/README.md",
+)
+# L'instance d'un projet `serveur` dans son dépôt de données (`cible_code: serveur`) : ce que le
+# modèle y sème, et les secrets chiffrés que la chaîne y lit. Rien d'autre : un secret en clair
+# sous `secrets/`, ou une clé privée sous `cles/`, reste masqué sans refus.
+CHEMINS_INSTANCE: tuple[str, ...] = (
+    ".sops.yaml",
+    "env/prod.env",
+    "env/staging.env",
+    "cles/*.pub",
+    "secrets/*.env.enc",
+)
 LIGNE_CIBLE = re.compile(r"^cible:[ \t]*(\S+)[ \t]*$", re.MULTILINE)
+LIGNE_CIBLE_CODE = re.compile(r"^cible_code:[ \t]*(\S+)[ \t]*$", re.MULTILINE)
 AUTRE_REMEDE = (
     "Si ce fichier n'est pas du modèle (un fichier local), le sortir de ce dossier ; "
     "ne jamais lever le masque d'un fichier de secrets."
@@ -95,19 +117,33 @@ def declenche(racine: Path) -> bool:
     return _git(racine, "ls-files", "--error-unmatch", "--", REPONSES).returncode != 0
 
 
-def cible_serveur(racine: Path) -> bool:
-    """Faux seulement si les réponses déclarent une cible autre que `serveur`."""
+def _reponse(texte: str, ligne: re.Pattern[str]) -> str | None:
+    """La valeur d'une réponse de premier niveau, sans ses guillemets ; None si elle est absente."""
+    m = ligne.search(texte)
+    return None if m is None else m.group(1).strip("'\"")
+
+
+def chemins_examines(racine: Path) -> tuple[str, ...]:
+    """Les chemins à examiner, selon la cible que déclarent les réponses.
+
+    Toujours les chemins communs. En cible `serveur`, ou si la cible est illisible, ceux de la
+    cible `serveur`. En cible `donnees`, les deux README.md, et l'instance sauf si `cible_code`
+    vaut `aucune` : une `cible_code` illisible vaut `serveur`."""
     try:
         texte = (racine / REPONSES).read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
-        return True
-    m = LIGNE_CIBLE.search(texte)
-    return m is None or m.group(1).strip("'\"") == "serveur"
+        return CHEMINS_COMMUNS + CHEMINS_SERVEUR
+    cible = _reponse(texte, LIGNE_CIBLE)
+    if cible is None or cible == "serveur":
+        return CHEMINS_COMMUNS + CHEMINS_SERVEUR
+    if cible == "donnees":
+        instance = () if _reponse(texte, LIGNE_CIBLE_CODE) == "aucune" else CHEMINS_INSTANCE
+        return CHEMINS_COMMUNS + CHEMINS_DONNEES + instance
+    return CHEMINS_COMMUNS
 
 
-def fichiers_masques(racine: Path, serveur: bool) -> list[str]:
-    """Les fichiers gérés présents sur le disque que le .gitignore masque, triés."""
-    chemins = CHEMINS_COMMUNS + (CHEMINS_SERVEUR if serveur else ())
+def fichiers_masques(racine: Path, chemins: tuple[str, ...]) -> list[str]:
+    """Les fichiers du modèle présents sur le disque que le .gitignore masque, triés."""
     sortie = _git_ok(
         racine, "ls-files", "--others", "--ignored", "--exclude-standard", "-z", "--", *chemins
     )
@@ -184,7 +220,7 @@ def main(argv: list[str] | None = None) -> int:
         racine = args.racine if args.racine is not None else racine_du_depot(Path.cwd())
         if not declenche(racine):
             return 0
-        masques = fichiers_masques(racine, cible_serveur(racine))
+        masques = fichiers_masques(racine, chemins_examines(racine))
         dossiers = dossiers_exclus(racine, masques)
         lignes = [
             f"modele-projet : refusé — fichier du modèle masqué par le .gitignore : {chemin} "
