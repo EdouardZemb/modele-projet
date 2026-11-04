@@ -2,6 +2,7 @@
 
 import fnmatch
 import re
+import subprocess
 from pathlib import Path
 
 import masques
@@ -12,8 +13,8 @@ from conftest import RACINE, REPONSES_DONNEES_SERVEUR, REPONSES_SERVEUR, git
 METHODE = RACINE / "template/docs/modele/methode.md"
 GERE = "scripts/modele/verifier_secrets.py"
 AUTRE_REMEDE = (
-    "Si ce fichier n'est pas du modèle (un fichier local), le sortir de ce dossier ; "
-    "ne jamais lever le masque d'un fichier de secrets."
+    "Si ce fichier n'est ni du modèle ni un secret chiffré que la chaîne lit (un fichier local), "
+    "le sortir de ce dossier ; ne jamais lever le masque d'un secret en clair."
 )
 
 
@@ -25,6 +26,19 @@ def ecrire(racine: Path, chemin: str, texte: str = "x\n") -> None:
     cible = racine / chemin
     cible.parent.mkdir(parents=True, exist_ok=True)
     cible.write_text(texte, encoding="utf-8", newline="\n")
+
+
+def ignore(racine: Path, env, chemin: str) -> bool:
+    """Vrai si le .gitignore de `racine` masque `chemin`."""
+    r = subprocess.run(
+        ["git", "check-ignore", "-q", "--no-index", "--", chemin],
+        cwd=racine,
+        env=env,
+        capture_output=True,
+        check=False,
+    )
+    assert r.returncode in (0, 1), r.stderr
+    return r.returncode == 0
 
 
 def modifier_reponses(racine, env, cible="aucune"):
@@ -181,7 +195,12 @@ def test_instance_des_donnees_masquee_refuse(depot_masque, env, capsys):
         assert f"{chemin} (règle" in err, chemin
     assert "env/prod.env (règle .gitignore:2:*.env)" in err
     assert "secrets/prod.env.enc (règle .gitignore:1:*secret*)" in err
-    assert "Ajouter `!secrets/` à ce fichier, puis indexer le fichier." in err
+    assert (
+        "secret chiffré que la chaîne lit, masqué par le .gitignore : secrets/prod.env.enc "
+        "(règle .gitignore:1:*secret*)"
+    ) in err
+    assert "`!secrets/`, `secrets/*` et `!secrets/*.env.enc`, dans cet ordre" in err
+    assert "Ajouter `!secrets/` à ce fichier" not in err
     # Le .gitignore d'un dépôt de données : l'instance passe, les secrets en clair restent dehors.
     ecrire(
         depot_masque,
@@ -190,6 +209,78 @@ def test_instance_des_donnees_masquee_refuse(depot_masque, env, capsys):
         + "!env/prod.env\n!env/staging.env\n!secrets/\nsecrets/*\n!secrets/*.env.enc\n",
     )
     assert masques.main(["--racine", str(depot_masque)]) == 0
+
+
+# Sous un dossier de secrets exclu (`*secret*` exclut `secrets/` comme `deploiement/secrets/`),
+# `!<dossier>` seul laisserait entrer les secrets en clair : le remède lève le dossier, en exclut le
+# contenu, puis n'admet que ce que la chaîne y lit (M-0002, amendement du 2026-11-04).
+REMEDE_SECRETS = (
+    "Ajouter à la fin de ce fichier `!secrets/`, `secrets/*` et `!secrets/*.env.enc`, dans cet "
+    "ordre, puis indexer le fichier : jamais `!secrets/` seul, qui laisserait entrer les secrets "
+    "en clair."
+)
+REMEDE_SECRETS_A_UN_DEPOT = (
+    "Ajouter à la fin de ce fichier `!deploiement/secrets/`, `deploiement/secrets/*`, "
+    "`!deploiement/secrets/*.cles` et `!deploiement/secrets/*.env.enc`, dans cet ordre, puis "
+    "indexer le fichier : jamais `!deploiement/secrets/` seul, qui laisserait entrer les secrets "
+    "en clair."
+)
+
+
+def test_secret_chiffre_sous_un_dossier_de_secrets_exclu(depot_masque, env, capsys):
+    (depot_masque / GERE).unlink()
+    ecrire(depot_masque, ".gitignore", "*secret*\n")
+    for chemin in ("secrets/prod.env.enc", "secrets/prod.env", "secrets/age.txt"):
+        ecrire(depot_masque, chemin)
+    ecrire(depot_masque, ".copier-answers.yml", "cible: donnees\ncible_code: serveur\n")
+    git(depot_masque, env, "add", ".copier-answers.yml")
+    assert masques.main(["--racine", str(depot_masque)]) == 1
+    err = capsys.readouterr().err
+    assert (
+        "modele-projet : refusé — secret chiffré que la chaîne lit, masqué par le .gitignore : "
+        f"secrets/prod.env.enc (règle .gitignore:1:*secret*). {REMEDE_SECRETS}"
+    ) in err.splitlines()
+    # Ni « fichier du modèle », ni un remède qui sortirait le secret chiffré : il doit entrer.
+    assert "fichier du modèle" not in err
+    assert err.splitlines()[-2:] == [AUTRE_REMEDE, masques.RENVOI]
+    # Les secrets en clair ne sont pas examinés : rien n'en est dit.
+    assert "secrets/prod.env " not in err
+    assert "secrets/age.txt" not in err
+    ecrire(depot_masque, ".gitignore", "*secret*\n!secrets/\nsecrets/*\n!secrets/*.env.enc\n")
+    assert masques.main(["--racine", str(depot_masque)]) == 0
+    assert ignore(depot_masque, env, "secrets/prod.env")
+    assert ignore(depot_masque, env, "secrets/age.txt")
+    assert not ignore(depot_masque, env, "secrets/prod.env.enc")
+
+
+def test_secret_chiffre_d_un_projet_a_un_depot(depot_masque, env, capsys):
+    """En cible `serveur`, `deploiement/secrets/` porte aussi les `.cles` du modèle."""
+    (depot_masque / GERE).unlink()
+    ecrire(depot_masque, ".gitignore", "*secret*\n")
+    for chemin in ("deploiement/secrets/prod.cles", "deploiement/secrets/prod.env.enc"):
+        ecrire(depot_masque, chemin)
+    modifier_reponses(depot_masque, env, cible="serveur")
+    assert masques.main(["--racine", str(depot_masque)]) == 1
+    lignes = capsys.readouterr().err.splitlines()
+    assert (
+        "modele-projet : refusé — fichier du modèle masqué par le .gitignore : "
+        "deploiement/secrets/prod.cles (règle .gitignore:1:*secret*). "
+        f"{REMEDE_SECRETS_A_UN_DEPOT}"
+    ) in lignes
+    assert (
+        "modele-projet : refusé — secret chiffré que la chaîne lit, masqué par le .gitignore : "
+        "deploiement/secrets/prod.env.enc (règle .gitignore:1:*secret*). "
+        f"{REMEDE_SECRETS_A_UN_DEPOT}"
+    ) in lignes
+    ecrire(
+        depot_masque,
+        ".gitignore",
+        "*secret*\n!deploiement/secrets/\ndeploiement/secrets/*\n"
+        "!deploiement/secrets/*.cles\n!deploiement/secrets/*.env.enc\n",
+    )
+    assert masques.main(["--racine", str(depot_masque)]) == 0
+    assert ignore(depot_masque, env, "deploiement/secrets/prod.env")
+    assert not ignore(depot_masque, env, "deploiement/secrets/prod.cles")
 
 
 def test_depot_de_donnees_garde_ce_qu_il_peut_ignorer(depot_masque, env):

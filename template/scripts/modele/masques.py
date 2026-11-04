@@ -1,5 +1,5 @@
 """Porte « fichiers masqués » : refuse un commit qui aligne ou met à jour le projet quand son
-.gitignore masque un fichier que le modèle écrit.
+.gitignore masque un fichier que le modèle écrit, ou un secret chiffré que la chaîne lit.
 
 Un fichier géré masqué par le .gitignore n'est pas indexé : la mise à jour du modèle l'écrit sur
 le disque, mais il n'entre jamais dans un commit (LE-23). La porte ne s'applique qu'à un commit qui
@@ -13,7 +13,10 @@ un fichier local de `config/` ou de `contenu/`) n'est pas examiné. Un cache Pyt
 (`__pycache__`, `.pyc`) est ignoré.
 
 Le remède est une exception nommée au .gitignore : `!<fichier>`, ou `!<dossier>/` quand un dossier
-parent est exclu, car git ne regarde pas ce que contient un dossier exclu.
+parent est exclu, car git ne regarde pas ce que contient un dossier exclu. Un dossier de secrets
+exclu (`secrets/`, `deploiement/secrets/`) ne se lève jamais seul, ce qui laisserait entrer les
+secrets en clair : le remède le lève, en exclut le contenu, puis n'admet que ce que la chaîne y
+lit, `!secrets/`, `secrets/*` et `!secrets/*.env.enc`.
 
 Bibliothèque standard seule, Python 3.10 ou plus.
 
@@ -25,6 +28,7 @@ Retour : 0 rien à signaler, 1 refus (fichier masqué, ou git en échec), 64 err
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import re
 import subprocess
 import sys
@@ -67,11 +71,19 @@ CHEMINS_INSTANCE: tuple[str, ...] = (
     "cles/*.pub",
     "secrets/*.env.enc",
 )
+# Les secrets chiffrés que la chaîne lit : ils ne sont pas du modèle, mais doivent entrer. Un motif
+# ne vaut qu'au premier niveau de son dossier, comme dans `.sops.yaml`.
+SECRETS_CHIFFRES: tuple[str, ...] = ("secrets/*.env.enc", "deploiement/secrets/*.env.enc")
+# Les dossiers de secrets, et ce que la chaîne y lit : le seul contenu à y admettre.
+DOSSIERS_DE_SECRETS: dict[str, tuple[str, ...]] = {
+    "secrets/": ("*.env.enc",),
+    "deploiement/secrets/": ("*.cles", "*.env.enc"),
+}
 LIGNE_CIBLE = re.compile(r"^cible:[ \t]*(\S+)[ \t]*$", re.MULTILINE)
 LIGNE_CIBLE_CODE = re.compile(r"^cible_code:[ \t]*(\S+)[ \t]*$", re.MULTILINE)
 AUTRE_REMEDE = (
-    "Si ce fichier n'est pas du modèle (un fichier local), le sortir de ce dossier ; "
-    "ne jamais lever le masque d'un fichier de secrets."
+    "Si ce fichier n'est ni du modèle ni un secret chiffré que la chaîne lit (un fichier local), "
+    "le sortir de ce dossier ; ne jamais lever le masque d'un secret en clair."
 )
 RENVOI = "Voir docs/modele/methode.md, « Les garde-fous »."
 
@@ -191,10 +203,34 @@ def dossiers_exclus(racine: Path, chemins: list[str]) -> dict[str, str]:
 
 
 def remede(chemin: str, dossier: str | None) -> str:
-    """L'exception à poser : sur le dossier exclu s'il y en a un, sinon sur le fichier."""
+    """L'exception à poser : sur le dossier exclu s'il y en a un, sinon sur le fichier. Un dossier
+    de secrets se lève sans laisser entrer ce que la chaîne n'y lit pas."""
     if dossier is None:
         return f"Ajouter `!{chemin}` à ce fichier, puis l'indexer."
-    return f"Ajouter `!{dossier}` à ce fichier, puis indexer le fichier."
+    admis = DOSSIERS_DE_SECRETS.get(dossier)
+    if admis is None:
+        return f"Ajouter `!{dossier}` à ce fichier, puis indexer le fichier."
+    exceptions = [f"`!{dossier}`", f"`{dossier}*`", *(f"`!{dossier}{motif}`" for motif in admis)]
+    return (
+        f"Ajouter à la fin de ce fichier {', '.join(exceptions[:-1])} et {exceptions[-1]}, dans cet "
+        f"ordre, puis indexer le fichier : jamais `!{dossier}` seul, qui laisserait entrer les "
+        "secrets en clair."
+    )
+
+
+def secret_chiffre(chemin: str) -> bool:
+    """Vrai si `chemin` est un secret chiffré que la chaîne lit (`SECRETS_CHIFFRES`)."""
+    return any(
+        chemin.count("/") == motif.count("/") and fnmatch.fnmatchcase(chemin, motif)
+        for motif in SECRETS_CHIFFRES
+    )
+
+
+def constat(chemin: str) -> str:
+    """Ce qu'est le fichier masqué, pour le message de refus."""
+    if secret_chiffre(chemin):
+        return "secret chiffré que la chaîne lit, masqué par le .gitignore"
+    return "fichier du modèle masqué par le .gitignore"
 
 
 class _Analyseur(argparse.ArgumentParser):
@@ -209,7 +245,8 @@ def main(argv: list[str] | None = None) -> int:
         except (AttributeError, ValueError):
             pass
     p = _Analyseur(
-        prog="masques.py", description="Refuse un fichier du modèle masqué par le .gitignore."
+        prog="masques.py",
+        description="Refuse un fichier du modèle, ou un secret chiffré, masqué par le .gitignore.",
     )
     p.add_argument("--racine", type=Path, default=None, help="racine du dépôt (pour les tests)")
     try:
@@ -223,7 +260,7 @@ def main(argv: list[str] | None = None) -> int:
         masques = fichiers_masques(racine, chemins_examines(racine))
         dossiers = dossiers_exclus(racine, masques)
         lignes = [
-            f"modele-projet : refusé — fichier du modèle masqué par le .gitignore : {chemin} "
+            f"modele-projet : refusé — {constat(chemin)} : {chemin} "
             f"(règle {regle(racine, chemin)}). {remede(chemin, dossiers.get(chemin))}"
             for chemin in masques
         ]
