@@ -159,7 +159,14 @@ M-0006 § 6 et 7, étiquetée `v0.8.0`.
   date du fichier et que les `--include` répétés se combinent en OU, ce que seul le double prouvait.
   Le test de restauration du mercredi 05:30 a réussi sur cet instantané, avec l'image du couple,
   sans lire la configuration de la prod (une piste).
-  <!-- T11 : à compléter -->
+  Le retrait d'`essai-chaine`, le 04/11, suit la notice de `serveur` (serveur#32). Sur la
+  machine, unités, conteneurs, réseaux, clones et dossiers sont retirés sans erreur, les
+  instantanés figés compris (serveur#31) ; ses 7 images aussi, dont 4 sans étiquette, sur le
+  magasin classique de la cible (LE-50). La vérification en lecture seule n'a rien trouvé du
+  projet, et le tunnel commun n'a pas été recréé. Les quatre contrôles Healthchecks sont
+  supprimés et `essai-chaine` est archivé. Restent à Edouard : les deux routes Cloudflare, la clé
+  puis l'archivage d'`essai-chaine-donnees`, le paquet GHCR et les sauvegardes distantes. À
+  l'arrêt, l'application d'essai a mis 10 s : elle ignore SIGTERM (une piste).
 
 Prochain, au choix d'Edouard :
 - la scission de `veille-emploi`, puis celle d'`ancrage`, chacune dans son propre lot ;
