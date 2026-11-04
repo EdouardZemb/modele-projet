@@ -221,38 +221,59 @@ def test_instance_des_donnees_masquee_refuse(depot_masque, env, capsys):
         "secret chiffré que la chaîne lit, masqué par le .gitignore : secrets/prod.env.enc "
         "(règle .gitignore:1:*secret*)"
     ) in err
-    assert "`!secrets/`, `secrets/*` et `!secrets/*.env.enc`, dans cet ordre" in err
+    assert "`!/secrets/`, `/secrets/*` et `!/secrets/*.env.enc`, dans cet ordre" in err
     assert "Ajouter `!secrets/` à ce fichier" not in err
+    assert "Ajouter `!/secrets/` à ce fichier" not in err
     # Le .gitignore d'un dépôt de données : l'instance passe, les secrets en clair restent dehors.
     ecrire(
         depot_masque,
         ".gitignore",
         GITIGNORE_A_UN_DEPOT
-        + "!env/prod.env\n!env/staging.env\n!secrets/\nsecrets/*\n!secrets/*.env.enc\n",
+        + "!env/prod.env\n!env/staging.env\n!/secrets/\n/secrets/*\n!/secrets/*.env.enc\n",
     )
     assert masques.main(["--racine", str(depot_masque)]) == 0
 
 
 # Sous un dossier de secrets exclu (`*secret*` exclut `secrets/` comme `deploiement/secrets/`),
 # `!<dossier>` seul laisserait entrer les secrets en clair : le remède lève le dossier, en exclut le
-# contenu, puis n'admet que ce que la chaîne y lit (M-0002, amendement du 2026-11-04).
+# contenu, puis n'admet que ce que la chaîne y lit (M-0002, amendement du 2026-11-04). Ses lignes
+# sont ancrées à la racine : `!secrets/`, sans `/` en tête, vaudrait à toute profondeur, et lèverait
+# le masque de tout dossier `secrets/` imbriqué que `*secret*` exclut.
 REMEDE_SECRETS = (
-    "Ajouter à la fin de ce fichier `!secrets/`, `secrets/*` et `!secrets/*.env.enc`, dans cet "
-    "ordre, puis indexer le fichier : jamais `!secrets/` seul, qui laisserait entrer les secrets "
+    "Ajouter à la fin de ce fichier `!/secrets/`, `/secrets/*` et `!/secrets/*.env.enc`, dans cet "
+    "ordre, puis indexer le fichier : jamais `!/secrets/` seul, qui laisserait entrer les secrets "
     "en clair."
 )
 REMEDE_SECRETS_A_UN_DEPOT = (
-    "Ajouter à la fin de ce fichier `!deploiement/secrets/`, `deploiement/secrets/*`, "
-    "`!deploiement/secrets/*.cles` et `!deploiement/secrets/*.env.enc`, dans cet ordre, puis "
-    "indexer le fichier : jamais `!deploiement/secrets/` seul, qui laisserait entrer les secrets "
+    "Ajouter à la fin de ce fichier `!/deploiement/secrets/`, `/deploiement/secrets/*`, "
+    "`!/deploiement/secrets/*.cles` et `!/deploiement/secrets/*.env.enc`, dans cet ordre, puis "
+    "indexer le fichier : jamais `!/deploiement/secrets/` seul, qui laisserait entrer les secrets "
     "en clair."
 )
+# Des dossiers `secrets/` imbriqués, que `*secret*` masque, et que le remède doit laisser masqués.
+SECRETS_IMBRIQUES = (
+    "deploiement/secrets/identite.txt",
+    "config/secrets/jeton.txt",
+    "contenu/brouillons/secrets/cle.pem",
+)
+
+
+def lignes_du_remede(remede: str) -> list[str]:
+    """Les lignes qu'un remède demande d'ajouter, dans son ordre."""
+    return re.findall(r"`([^`]+)`", remede.split(", dans cet ordre", 1)[0])
+
+
+def appliquer(racine: Path, gitignore: str, remede: str) -> None:
+    """Écrit le .gitignore, suivi des lignes du remède, à la lettre."""
+    lignes = "".join(f"{ligne}\n" for ligne in lignes_du_remede(remede))
+    ecrire(racine, ".gitignore", gitignore + lignes)
 
 
 def test_secret_chiffre_sous_un_dossier_de_secrets_exclu(depot_masque, env, capsys):
     (depot_masque / GERE).unlink()
     ecrire(depot_masque, ".gitignore", "*secret*\n")
-    for chemin in ("secrets/prod.env.enc", "secrets/prod.env", "secrets/age.txt"):
+    clairs = ("secrets/prod.env", "secrets/age.txt", *SECRETS_IMBRIQUES)
+    for chemin in ("secrets/prod.env.enc", *clairs):
         ecrire(depot_masque, chemin)
     ecrire(depot_masque, ".copier-answers.yml", "cible: donnees\ncible_code: serveur\n")
     git(depot_masque, env, "add", ".copier-answers.yml")
@@ -268,10 +289,12 @@ def test_secret_chiffre_sous_un_dossier_de_secrets_exclu(depot_masque, env, caps
     # Les secrets en clair ne sont pas examinés : rien n'en est dit.
     assert "secrets/prod.env " not in err
     assert "secrets/age.txt" not in err
-    ecrire(depot_masque, ".gitignore", "*secret*\n!secrets/\nsecrets/*\n!secrets/*.env.enc\n")
+    for clair in SECRETS_IMBRIQUES:
+        assert clair not in err, clair
+    appliquer(depot_masque, "*secret*\n", REMEDE_SECRETS)
     assert masques.main(["--racine", str(depot_masque)]) == 0
-    assert ignore(depot_masque, env, "secrets/prod.env")
-    assert ignore(depot_masque, env, "secrets/age.txt")
+    # Le remède appliqué à la lettre : aucun secret en clair ne paraît, imbriqué ou non.
+    assert [clair for clair in clairs if not ignore(depot_masque, env, clair)] == []
     assert not ignore(depot_masque, env, "secrets/prod.env.enc")
 
 
@@ -294,12 +317,7 @@ def test_secret_chiffre_d_un_projet_a_un_depot(depot_masque, env, capsys):
         "deploiement/secrets/prod.env.enc (règle .gitignore:1:*secret*). "
         f"{REMEDE_SECRETS_A_UN_DEPOT}"
     ) in lignes
-    ecrire(
-        depot_masque,
-        ".gitignore",
-        "*secret*\n!deploiement/secrets/\ndeploiement/secrets/*\n"
-        "!deploiement/secrets/*.cles\n!deploiement/secrets/*.env.enc\n",
-    )
+    appliquer(depot_masque, "*secret*\n", REMEDE_SECRETS_A_UN_DEPOT)
     assert masques.main(["--racine", str(depot_masque)]) == 0
     assert ignore(depot_masque, env, "deploiement/secrets/prod.env")
     assert not ignore(depot_masque, env, "deploiement/secrets/prod.cles")

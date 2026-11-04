@@ -16,7 +16,8 @@ Le remède est une exception nommée au .gitignore : `!<fichier>`, ou `!<dossier
 parent est exclu, car git ne regarde pas ce que contient un dossier exclu. Un dossier de secrets
 exclu (`secrets/`, `deploiement/secrets/`) ne se lève jamais seul, ce qui laisserait entrer les
 secrets en clair : le remède le lève, en exclut le contenu, puis n'admet que ce que la chaîne y
-lit, `!secrets/`, `secrets/*` et `!secrets/*.env.enc`.
+lit, `!/secrets/`, `/secrets/*` et `!/secrets/*.env.enc`. Ces lignes sont ancrées à la racine :
+`!secrets/` vaudrait à toute profondeur, et ferait paraître les dossiers `secrets/` imbriqués.
 
 Bibliothèque standard seule, Python 3.10 ou plus.
 
@@ -226,10 +227,15 @@ def remede(chemin: str, dossier: str | None) -> str:
     admis = DOSSIERS_DE_SECRETS.get(dossier)
     if admis is None:
         return f"Ajouter `!{dossier}` à ce fichier, puis indexer le fichier."
-    exceptions = [f"`!{dossier}`", f"`{dossier}*`", *(f"`!{dossier}{motif}`" for motif in admis)]
+    # Ancrées à la racine : `!secrets/`, sans `/` en tête, vaudrait à toute profondeur.
+    exceptions = [
+        f"`!/{dossier}`",
+        f"`/{dossier}*`",
+        *(f"`!/{dossier}{motif}`" for motif in admis),
+    ]
     return (
         f"Ajouter à la fin de ce fichier {', '.join(exceptions[:-1])} et {exceptions[-1]}, dans cet "
-        f"ordre, puis indexer le fichier : jamais `!{dossier}` seul, qui laisserait entrer les "
+        f"ordre, puis indexer le fichier : jamais `!/{dossier}` seul, qui laisserait entrer les "
         "secrets en clair."
     )
 
