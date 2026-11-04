@@ -8,8 +8,8 @@
   code suit le premier segment du chemin (§ 3), et la chaîne garde les deux modes, à deux dépôts et
   à un dépôt (§ 6).
 - **Amendé** le 2026-11-03, avec le lot 13 : le script de création du poste vit dans
-  `modele-projet`, sous `poste/` (§ 7) ; après un retour arrière par `--retour`, une étiquette de
-  données remettrait en service la version quittée (§ 6).
+  `modele-projet`, sous `poste/` (§ 7) ; après un retour arrière par `--retour`, un geste qui ne
+  change qu'une moitié de la cible ramène l'autre moitié du couple quitté (§ 6).
 - **S'applique en deux temps.** D'abord la porte par nature et le gabarit de données (§ 1 à 4).
   Ensuite la chaîne à deux dépôts et les règles de chemins (§ 3, dernier point, § 5 à 7). Entre les
   deux, la chaîne lit encore tout dans le clone du code, comme avant.
@@ -234,10 +234,15 @@ décrivent l'instance et le parc, pas l'auteur.
   aussi une étiquette sur l'ancien commit de données.
 - **Ce qui déclenche un déploiement** : une nouvelle image, un nouveau commit de données, ou les
   deux à la fois. Un nouveau commit de données forme un couple avec l'image visée, la plus haute
-  `vX.Y.Z` en prod : c'est l'image en service, sauf après un retour arrière par `--retour`, qui l'a
+  `vX.Y.Z` en prod : c'est l'image en service, sauf après un retour arrière par `--retour` qui l'a
   quittée. Le couple se déploie après ses vérifications, avec le même retour arrière qu'une image.
-  Après un tel retour, une étiquette de données remettrait donc en service la version quittée : il
-  faut d'abord une `vX.Y.Z` plus haute sur le commit de la version gardée.
+  Après un tel retour, seul le couple quitté est en échec, et un geste qui ne change qu'une moitié
+  de la cible ramène l'autre moitié de ce couple. Quand le retour a quitté l'image, une étiquette
+  de données remettrait donc en service la version quittée : il faut d'abord une `vX.Y.Z` plus
+  haute sur le commit de la version gardée. Quand il a quitté le commit de données, une `vX.Y.Z`
+  sur un nouveau commit remettrait en service les données quittées : il faut d'abord une étiquette
+  de données sur un commit corrigé. Quand il a quitté les deux, le premier geste remplace la moitié
+  en cause.
 - **Les deux clones propres et à jour, ou rien.** Un clone modifié, ou dont la mise à jour échoue,
   arrête la sonde avant tout déploiement, avec une alerte, comme aujourd'hui un clone modifié.
 - **L'échec se note sur le couple.** Une vérification qui refuse, ou un déploiement qui échoue,

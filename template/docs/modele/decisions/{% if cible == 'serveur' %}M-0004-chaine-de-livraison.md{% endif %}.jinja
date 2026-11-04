@@ -56,7 +56,9 @@ données en service, que les vérifications jugent comme tout couple (§ 8).
 `deployer.sh <env> --retour` reste l'outil de secours, lancé à la main sur le serveur quand le
 chemin par étiquette ne passe pas. Il revient au couple précédent, son image et son commit de
 données (§ 8), marque le couple quitté en échec pour que la sonde ne le redéploie pas, refuse un
-second retour, et laisse le clone sur l'étiquette quittée.
+second retour, et laisse le clone sur l'étiquette quittée. À deux dépôts, seul ce couple attend :
+un geste qui ne change qu'une moitié de la cible, une étiquette de données ou une `vX.Y.Z`, peut
+ramener l'autre moitié du couple quitté (M-0006, § 6).
 
 ### 3. Les environnements et les images
 
@@ -191,10 +193,11 @@ lisent que les premiers champs de ces fichiers (`read -r image version _`) : un 
 `v0.7.0`, sans le commit, se lit comme un couple en `-`.
 
 **Ce qui déclenche un déploiement** : un couple visé différent du couple déployé, donc une nouvelle
-image, un nouveau commit de données, ou les deux. Un commit de données seul redéploie la même
-image, avec les mêmes vérifications et le même retour arrière. **L'échec se note sur le couple** :
-un couple en échec ne se rejoue jamais ; tout autre couple se tente, et un même commit de données
-peut échouer avec une image et passer avec la suivante.
+image, un nouveau commit de données, ou les deux. Un commit de données seul redéploie l'image
+visée, la même hors d'un `--retour` qui l'a quittée (§ 2), avec les mêmes vérifications et le même
+retour arrière. **L'échec se note sur le couple** : un couple en échec ne se rejoue jamais ; tout
+autre couple se tente, et un même commit de données peut échouer avec une image et passer avec la
+suivante.
 
 **L'instantané des données.** Pour un couple qui a un commit, la chaîne extrait du commit, par
 `git archive`, jamais de la copie de travail du clone, les dossiers déclarés, sous

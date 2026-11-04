@@ -1174,7 +1174,17 @@ def test_exploitation_dit_le_couple_et_les_deux_modes(rendre, mode, sauvegardes)
     assert "redéploie l'image en service avec lui" not in texte
     plus_haute = "la sonde de prod le déploie avec la plus haute `vX.Y.Z`, après ses vérifications"
     assert (plus_haute in en_ligne) is deux
-    assert ("C'est l'image en service, sauf après un `--retour`" in en_ligne) is deux
+    assert ("C'est l'image en service, sauf après un `--retour` qui l'a quittée" in en_ligne) is deux
+    # un --retour ne quitte pas toujours l'image : il peut ne quitter que le commit de données
+    assert "sauf après un `--retour`, qui l'a quittée" not in texte
+    # en staging de même : un commit de données se déploie avec `:main`, l'image quittée après un
+    # --retour qui l'a quittée
+    assert "redéploie la même image avec lui" not in texte
+    staging = (
+        "la sonde le déploie avec l'image `:main`, après ses vérifications. C'est l'image en "
+        "service, sauf après un `--retour` qui l'a quittée"
+    )
+    assert (staging in en_ligne) is deux
 
     # Revenir en arrière : le couple entier, et les deux cas de transition.
     retour = a_plat(section(texte, "Revenir en arrière"))
@@ -1194,18 +1204,28 @@ def test_exploitation_dit_le_couple_et_les_deux_modes(rendre, mode, sauvegardes)
     assert ("l'ancienne image et le commit de données en service" in retour) is deux
     assert ("**Revenir à une configuration antérieure**" in retour) is deux
     assert ("ramène ensemble l'image et l'instance de ce commit" in retour) is not deux
-    # Après un `--retour`, une étiquette de données remettrait en service la version quittée : la
-    # sonde vise la plus haute `vX.Y.Z`, et seul le couple quitté est en échec. D'abord une `vX.Y.Z`
-    # sur le commit de la version gardée.
+    # Après un `--retour`, seul le couple quitté est en échec, et la sonde déploie tout couple neuf :
+    # un geste qui ne change qu'une moitié de la cible ramène l'autre moitié du couple quitté. Ce
+    # qui passe d'abord dépend de ce que le retour a quitté : l'image, le commit de données, ou les
+    # deux.
     assert "ou un nouveau commit de données" not in retour
-    avant_tout = (
-        "**Après un `--retour`, une `vX.Y.Z` d'abord, puis seulement une étiquette de données.**"
-    )
-    assert (avant_tout in retour) is deux
-    gardee = "Poser d'abord une `vX.Y.Z` plus haute sur le commit de la version gardée"
-    assert (gardee in retour) is deux
-    assert ("une fusion dans le dépôt de données redéploie la `:main` quittée" in retour) is deux
-    assert ("la plus haute `vX.Y.Z`, l'image en service hors d'un `--retour`" in retour) is deux
+    assert "une `vX.Y.Z` d'abord, puis seulement une étiquette de données" not in retour
+    for fragment in (
+        ("**Après un `--retour`, changer une moitié de la cible peut ramener l'autre moitié du "
+        "couple quitté.**"),
+        ("**l'image**, pour une autre version : une étiquette de données fait un couple neuf avec la "
+        "version quittée"),
+        "Poser d'abord une `vX.Y.Z` plus haute sur le commit de la version gardée",
+        ("**le commit de données**, sous la même image : une `vX.Y.Z` sur un nouveau commit fait un "
+        "couple neuf avec les données quittées"),
+        "Poser d'abord une étiquette de données sur un commit corrigé",
+        ("**les deux** : chacun des deux gestes ramène une moitié du couple quitté. Le premier "
+        "remplace la moitié en cause"),
+        "une fusion dans le dépôt de données redéploie la `:main` quittée",
+        "une fusion dans le code redéploie les données quittées",
+        "la plus haute `vX.Y.Z`, l'image en service hors d'un `--retour` qui l'a quittée",
+    ):
+        assert (fragment in retour) is deux, fragment
 
     # Les images, et à côté le ménage des instantanés des données.
     images = a_plat(section(texte, "Les images"))
@@ -1274,6 +1294,11 @@ def test_exploitation_dit_le_couple_et_les_deux_modes(rendre, mode, sauvegardes)
     assert (deux_gestes in secrets) is deux
     correctif = "Une rotation urgente se publie par une étiquette de correctif"
     assert (correctif in secrets) is not deux
+    apres_retour = (
+        "Après un `--retour` qui a quitté l'image, l'un et l'autre remettraient en service l'image "
+        "quittée"
+    )
+    assert (apres_retour in secrets) is deux
 
     # Unités : la sonde suit un couple.
     unites = a_plat(section(texte, "Unités"))
@@ -1346,6 +1371,22 @@ def test_m0004_la_branche_des_donnees_ne_se_change_pas(rendre):
         assert fragment in m4, fragment
 
 
+# Un commit de données seul se déploie avec l'image visée, qui n'est l'image en service que hors
+# d'un `--retour` qui l'a quittée ; après un `--retour`, seul le couple quitté attend (M-0006, § 6).
+@pytest.mark.parametrize("reponses", [REPONSES_SERVEUR, REPONSES_SERVEUR_CODE], ids=["un", "deux"])
+def test_m0004_dit_ce_qu_un_geste_ramene_apres_un_retour(rendre, reponses):
+    m4 = a_plat(lire(rendre(**reponses), "docs/modele/decisions/M-0004-chaine-de-livraison.md"))
+    assert "Un commit de données seul redéploie la même image" not in m4
+    for fragment in (
+        ("Un commit de données seul redéploie l'image visée, la même hors d'un `--retour` qui l'a "
+        "quittée (§ 2)"),
+        ("À deux dépôts, seul ce couple attend : un geste qui ne change qu'une moitié de la cible, une "
+        "étiquette de données ou une `vX.Y.Z`, peut ramener l'autre moitié du couple quitté "
+        "(M-0006, § 6)"),
+    ):
+        assert fragment in m4, fragment
+
+
 M0006 = RACINE / "template/docs/modele/decisions/M-0006-code-et-donnees.md"
 
 
@@ -1366,9 +1407,21 @@ def test_m0006_dit_l_amendement_du_lot_13():
 def test_m0006_dit_l_etiquette_de_donnees_apres_un_retour():
     plat = a_plat(M0006.read_text(encoding="utf-8"))
     assert "Une modification du dépôt de données redéploie la même image" not in plat
+    # un --retour ne quitte pas toujours l'image : il peut ne quitter que le commit de données
+    assert "sauf après un retour arrière par `--retour`, qui l'a quittée" not in plat
     for fragment in (
         "Un nouveau commit de données forme un couple avec l'image visée, la plus haute `vX.Y.Z` en prod",
-        "une étiquette de données remettrait donc en service la version quittée",
+        "c'est l'image en service, sauf après un retour arrière par `--retour` qui l'a quittée",
+        "un geste qui ne change qu'une moitié de la cible ramène l'autre moitié de ce couple",
+        ("Quand le retour a quitté l'image, une étiquette de données remettrait donc en service la "
+        "version quittée"),
         "il faut d'abord une `vX.Y.Z` plus haute sur le commit de la version gardée",
+        ("Quand il a quitté le commit de données, une `vX.Y.Z` sur un nouveau commit remettrait en "
+        "service les données quittées : il faut d'abord une étiquette de données sur un commit "
+        "corrigé"),
+        "Quand il a quitté les deux, le premier geste remplace la moitié en cause",
+        # l'en-tête du lot 13 le résume
+        ("après un retour arrière par `--retour`, un geste qui ne change qu'une moitié de la cible "
+        "ramène l'autre moitié du couple quitté (§ 6)"),
     ):
         assert fragment in plat, fragment
