@@ -1,6 +1,7 @@
 """La mise à jour par Copier propage le géré et préserve le semé (spec §8, critère 3)."""
 
 import hashlib
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -8,7 +9,14 @@ from pathlib import Path
 import copier
 import pytest
 import yaml
-from conftest import RACINE, REPONSES_PAR_DEFAUT, REPONSES_SERVEUR, git
+from conftest import (
+    CLE_HORS_LIGNE_DE_TEST,
+    CLE_SERVEUR_DE_TEST,
+    RACINE,
+    REPONSES_PAR_DEFAUT,
+    REPONSES_SERVEUR,
+    git,
+)
 
 SH = shutil.which("sh") or (
     r"C:\Program Files\Git\bin\sh.exe" if Path(r"C:\Program Files\Git\bin\sh.exe").exists() else None
@@ -394,3 +402,181 @@ def test_mise_a_jour_d_un_projet_a_un_depot_garde_ses_cles(tmp_path, env_isole):
     lib = (projet / "deploiement/lib.sh").read_text(encoding="utf-8")
     assert 'MODE_DONNEES="un"' in lib.splitlines()
     _sans_conflit(projet)
+
+
+# La scission d'un projet à un dépôt (#94) : un projet comme `veille-emploi`, en cible `serveur` et
+# de nature `donnees`, devient son dépôt de données par `copier update`, comme le fera `ancrage`.
+# Valeurs inventées, sur `exemple.test`, et clés `age` de test.
+METHODE = RACINE / "template/docs/modele/methode.md"
+REPONSES_A_UN_DEPOT = {
+    **REPONSES_SERVEUR,
+    "branche_principale": "principal",
+    "domaine": "exemple.test",
+    "bloc_ports": 4320,
+    "port_app": 8000,
+    "chemin_sante": "/sante",
+}
+SCISSION = {
+    "cible": "donnees",
+    "cible_code": "serveur",
+    "nom": "essai-donnees",
+    "sous_domaine": "essai",
+    "cle_serveur": CLE_SERVEUR_DE_TEST,
+    "cle_hors_ligne": CLE_HORS_LIGNE_DE_TEST,
+}
+# Ce que le modèle ne connaît pas : l'instance et les secrets chiffrés d'un projet à un dépôt.
+HORS_DU_MODELE = ("deploiement/secrets/prod.env.enc", "instance/config/projet.toml")
+
+
+def _tous(racine):
+    return {
+        p.relative_to(racine).as_posix()
+        for p in racine.rglob("*")
+        if p.is_file() and ".git" not in p.relative_to(racine).parts
+    }
+
+
+PHRASE_DES_RESTES = "à un dépôt devient un dépôt de données, ce sont "
+
+
+def semes_restes_selon_la_methode():
+    """Les semés que `methode.md` dit restés à leur contenu de cible `serveur` après la scission."""
+    puce = METHODE.read_text(encoding="utf-8").split("- Changer de cible,", 1)[1]
+    puce = " ".join(puce.split("\n\n", 1)[0].split())
+    if PHRASE_DES_RESTES not in puce:
+        return set()
+    liste = puce.split(PHRASE_DES_RESTES, 1)[1].split(". ", 1)[0]
+    return set(re.findall(r"`([^`]+)`", liste))
+
+
+def _projet_a_un_depot(tmp_path, env):
+    """Le projet à un dépôt, retouché par lui et avec ce que le modèle ne connaît pas, commité."""
+    modele = _modele_v1(tmp_path, env)
+    projet = _projet_v1(tmp_path, env, modele, REPONSES_A_UN_DEPOT)
+    _retoucher(projet / "deploiement/projet.env", projet / "docs/registre.md", projet / "CLAUDE.md")
+    for chemin in HORS_DU_MODELE:
+        (projet / chemin).parent.mkdir(parents=True, exist_ok=True)
+        (projet / chemin).write_text("hors du modèle\n", encoding="utf-8", newline="\n")
+    git(projet, env, "add", "-A")
+    git(projet, env, "commit", "-q", "-m", "retouches du projet")
+    return modele, projet
+
+
+def _rendu_neuf(tmp_path, modele, projet):
+    """Un rendu neuf du modèle, avec les réponses du projet mis à jour."""
+    reponses = yaml.safe_load((projet / ".copier-answers.yml").read_text(encoding="utf-8"))
+    neuf = tmp_path / "neuf"
+    copier.run_copy(
+        str(modele),
+        str(neuf),
+        data={cle: valeur for cle, valeur in reponses.items() if not cle.startswith("_")},
+        defaults=True,
+        vcs_ref="v0.0.1",
+        quiet=True,
+    )
+    return neuf
+
+
+@pytest.mark.parametrize("preparee", [False, True], ids=["seule", "preparee"])
+def test_scission_d_un_projet_a_un_depot(tmp_path, env_isole, preparee):
+    env = env_isole()
+    modele, projet = _projet_a_un_depot(tmp_path, env)
+    restes = semes_restes_selon_la_methode()
+    if preparee:
+        # La voie préparée de methode.md : les semés retirés avant la mise à jour sont semés à neuf.
+        assert restes, "methode.md ne nomme pas les semés restés"
+        git(projet, env, "rm", "-q", "--", *sorted(restes))
+        git(projet, env, "commit", "-q", "-m", "semés à refaire")
+    avant = {chemin: (projet / chemin).read_bytes() for chemin in _tous(projet)}
+
+    copier.run_update(
+        str(projet), data=SCISSION, defaults=True, overwrite=True, vcs_ref="v0.0.1", quiet=True
+    )
+
+    _sans_conflit(projet)
+    reponses = yaml.safe_load((projet / ".copier-answers.yml").read_text(encoding="utf-8"))
+    assert (reponses["cible"], reponses["cible_code"], reponses["nom"]) == (
+        "donnees",
+        "serveur",
+        "essai-donnees",
+    )
+    assert (reponses["domaine"], reponses["bloc_ports"], reponses["sous_domaine"]) == (
+        "exemple.test",
+        4320,
+        "essai",
+    )
+    for question in ("nature", "port_app", "chemin_sante", "sauvegardes"):
+        assert question not in reponses, question
+    apres = _tous(projet)
+    # Le géré de la cible `serveur` part, et ses semés que la cible `donnees` ne rend pas, même
+    # retouchés : rien de `deploiement/` ne reste, que ce que le modèle ne connaît pas.
+    assert sorted(c for c in apres if c.startswith("deploiement/")) == [HORS_DU_MODELE[0]]
+    for parti in (
+        "deploiement/projet.env",
+        "deploiement/compose.projet.yml",
+        "deploiement/secrets/prod.cles",
+        "deploiement/cles/serveur.pub",
+        "deploiement/env/prod.env",
+        "tests/deploiement",
+        ".github/actions",
+        ".github/workflows/modele-version.yml",
+        ".github/ISSUE_TEMPLATE/lot.yml",
+        ".claude/skills/consigner",
+        "docs/registre.md",
+        "docs/exploitation.md",
+        "docs/cadrage.md",
+        "docs/decisions/README.md",
+        "docs/modele/decisions/M-0003-contrat-de-l-image.md",
+    ):
+        assert not (projet / parti).exists(), parti
+    assert (projet / HORS_DU_MODELE[1]).is_file()
+    # L'instance du dépôt de données arrive.
+    for arrive in (
+        "env/prod.env",
+        "env/staging.env",
+        "cles/serveur.pub",
+        "cles/hors-ligne.pub",
+        "config/README.md",
+        "contenu/README.md",
+        ".github/workflows/modele-donnees.yml",
+    ):
+        assert arrive in apres, arrive
+    staging = (projet / "env/staging.env").read_text(encoding="utf-8").splitlines()
+    assert staging[-1] == "ESSAI_BRANCHE_DONNEES=principal"
+    assert (projet / "cles/serveur.pub").read_text(encoding="utf-8") == CLE_SERVEUR_DE_TEST + "\n"
+    # Face à un rendu neuf : seuls diffèrent les semés que methode.md nomme, à leur ancien contenu.
+    neuf = _rendu_neuf(tmp_path, modele, projet)
+    attendus = _tous(neuf)
+    assert sorted(attendus - apres) == []
+    assert sorted(apres - attendus) == sorted(HORS_DU_MODELE)
+    differents = {c for c in attendus if (projet / c).read_bytes() != (neuf / c).read_bytes()}
+    if preparee:
+        assert sorted(differents) == []
+    else:
+        assert differents == restes
+        assert restes
+        assert {c: (projet / c).read_bytes() for c in restes} == {c: avant[c] for c in restes}
+
+
+def test_scission_sans_cible_code_prend_aucune(tmp_path, env_isole):
+    """`cible_code` est une question nouvelle : sous `--defaults`, elle prend `aucune` sans un mot,
+    et le dépôt de données perd l'instance (methode.md, « Changer de cible »)."""
+    env = env_isole()
+    _, projet = _projet_a_un_depot(tmp_path, env)
+    sans = {cle: valeur for cle, valeur in SCISSION.items() if cle != "cible_code"}
+
+    copier.run_update(
+        str(projet), data=sans, defaults=True, overwrite=True, vcs_ref="v0.0.1", quiet=True
+    )
+
+    _sans_conflit(projet)
+    reponses = yaml.safe_load((projet / ".copier-answers.yml").read_text(encoding="utf-8"))
+    assert (reponses["cible"], reponses["cible_code"]) == ("donnees", "aucune")
+    for question in ("domaine", "bloc_ports", "sous_domaine", "cle_serveur", "cle_hors_ligne"):
+        assert question not in reponses, question
+    for absent in (".sops.yaml", "env", "cles", ".github/workflows/modele-donnees.yml"):
+        assert not (projet / absent).exists(), absent
+    assert (projet / "config/README.md").is_file()
+    assert (projet / "contenu/README.md").is_file()
+    texte = " ".join(METHODE.read_text(encoding="utf-8").split())
+    assert "`--data cible_code=serveur` est obligatoire" in texte
