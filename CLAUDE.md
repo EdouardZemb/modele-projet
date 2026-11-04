@@ -125,8 +125,10 @@ M-0006 § 6 et 7, étiquetée `v0.8.0`.
   Claude Code (`CLAUDECODE` posé), un lancement sans `-ABlanc` est refusé. En cible `serveur`, le
   code est public : le script refuse `-Visibilite prive`, et M-0006 § 1 le dit, puisque la CI du
   dépôt de données le clone et tire ses images sans jeton (#90, #91). La naissance d'`essai-chaine`,
-  le 03/11, est la naissance réelle que demande LE-1 ; #90 a changé le script depuis, et LE-1 en
-  demande une autre, sur le script corrigé (geste 👤, à proposer à Edouard).
+  le 03/11, est la naissance réelle que demande LE-1 ; #90 a changé le script depuis, et Edouard
+  l'a relancé le 04/11 sur `essai-naissance`, jetable, en cible `serveur` : 21 étapes sur 21, les
+  deux dépôts réglés, les 18 scripts du modèle exécutables au premier commit du code, la ligne de
+  l'index, et la CI rouge des deux côtés, faute d'image, comme le dit `exploitation.md`.
 - **La mise en service à deux dépôts** (`exploitation.md`, semé ; #87). La déclaration dans
   `serveur` porte `DONNEES=oui`. La sonde de `serveur` crée la clé de déploiement
   `depot-<nom>-donnees`, une pour les deux clones, et attend ; 👤 Edouard la pose sur
