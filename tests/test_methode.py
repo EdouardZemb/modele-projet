@@ -724,3 +724,25 @@ def test_les_phrases_recoupees_tiennent_en_100_caracteres():
         (bloc,) = trouves
         assert max(len(ligne) for ligne in bloc) <= 100, phrase
         assert min(len(ligne) for ligne in bloc[:-1]) >= 70, phrase
+
+
+def test_changer_de_cible_dit_ce_que_fait_copier():
+    """« Changer de cible » disait que les semés de l'ancienne cible restaient : Copier en retire
+    une partie, même retouchés, et garde l'ancien contenu des autres (#94). Le passage d'un projet
+    à un dépôt en dépôt de données, qu'éprouve `tests/test_mise_a_jour.py`, y est nommé."""
+    (bloc,) = [b for b in blocs(lire(METHODE)) if b[0].startswith("- Changer de cible,")]
+    texte = " ".join(" ".join(bloc).split())
+    assert "Les fichiers semés de l'ancienne cible restent" not in texte
+    for fragment in (
+        (
+            "Les fichiers semés de l'ancienne cible que la nouvelle ne rend pas disparaissent "
+            "aussi, même retouchés, sans conflit ni `.rej`"
+        ),
+        "Les semés que les deux cibles rendent gardent leur contenu d'avant",
+        "Copier sème à neuf un semé absent du projet",
+        "Une question nouvelle prend son défaut sous `--defaults`",
+        "`--data cible_code=serveur` est obligatoire",
+    ):
+        assert fragment in texte, fragment
+    assert max(len(ligne) for ligne in bloc) <= 100
+    assert min(len(ligne) for ligne in bloc[:-1]) >= 70
