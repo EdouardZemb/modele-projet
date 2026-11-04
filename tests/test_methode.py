@@ -309,7 +309,16 @@ def test_garde_fous_dit_la_porte_des_masques():
     section = " ".join(lire(METHODE).split("## Les garde-fous", 1)[1].split("\n## ", 1)[0].split())
     ligne = section.split("| hook git `pre-commit` |", 1)[1].split("| hook git `commit-msg`", 1)[0]
     assert "`.copier-answers.yml`" in ligne
-    assert "refus d'un fichier du modèle que le `.gitignore` du projet masque" in ligne
+    # Correctif #94 : dans un dépôt de données, la porte examine aussi les secrets chiffrés, et leur
+    # remède ne lève pas le masque des secrets en clair (M-0002, amendement du 2026-11-04).
+    assert (
+        "refus d'un fichier du modèle, ou, dans un dépôt de données, d'un secret chiffré "
+        "`secrets/*.env.enc`, que le `.gitignore` du projet masque" in ligne
+    )
+    assert (
+        "un secret chiffré se libère par `!secrets/`, `secrets/*` puis `!secrets/*.env.enc`, "
+        "jamais par `!secrets/` seul" in ligne
+    )
     # La phrase des masqués vient après celle de la confidentialité : placée avant, elle se lirait
     # comme si la porte des masqués n'avertissait que dans un dépôt privé et tournait en CI.
     assert ligne.index("au hook comme en CI") < ligne.index("Au commit d'un alignement")
@@ -408,7 +417,14 @@ def test_m0002_amende():
     assert "étiquette" in texte
     # les amendements, dans l'ordre chronologique
     dates = re.findall(r"^- \*\*Amendé\*\* le (\S+),", texte, flags=re.MULTILINE)
-    assert dates == ["2026-10-17", "2026-10-18", "2026-10-27", "2026-10-29", "2026-10-29"]
+    assert dates == [
+        "2026-10-17",
+        "2026-10-18",
+        "2026-10-27",
+        "2026-10-29",
+        "2026-10-29",
+        "2026-11-04",
+    ]
     assert (
         "- **Amendé** le 2026-10-29, avec le lot 11 : la porte suit la nature du dépôt, de code ou "
         "de données (M-0006)"
@@ -416,7 +432,54 @@ def test_m0002_amende():
     # le remède des masqués, tel que masques.py le prescrit
     texte = " ".join(texte.split())
     assert "ou `!<dossier>/` quand un dossier parent est exclu" in texte
-    assert "le masque d'un fichier de secrets ne se lève jamais" in texte
+    # Correctif #94 : un secret chiffré entre ; seul le masque d'un secret en clair ne se lève pas.
+    assert "le masque d'un fichier de secrets ne se lève jamais" not in texte
+    assert "le masque d'un secret en clair ne se lève jamais" in texte
+
+
+def test_m0002_amende_par_le_correctif_94():
+    """La porte des masqués examine l'instance d'un dépôt de données, secrets chiffrés compris, et
+    leur remède ne laisse pas entrer un secret en clair (masques.py, `remede`)."""
+    brut = lire(DECISIONS / "M-0002-garde-fous-et-confidentialite.md")
+    assert (
+        "- **Amendé** le 2026-11-04, avec le correctif #94 : dans un dépôt de données, la porte des"
+        "\n  fichiers masqués examine aussi l'instance"
+    ) in brut
+    texte = " ".join(brut.split())
+    for fragment in (
+        "Dans un dépôt de données, elle examine aussi `config/README.md` et `contenu/README.md`",
+        (
+            "sauf `cible_code: aucune`, l'instance : `.sops.yaml`, `env/prod.env`, "
+            "`env/staging.env`, `cles/*.pub` et les secrets chiffrés `secrets/*.env.enc`, que la "
+            "chaîne lit (amendement du 2026-11-04)"
+        ),
+        (
+            "Sous un dossier de secrets exclu, leur masque se lève par `!secrets/`, `secrets/*` "
+            "puis `!secrets/*.env.enc`, jamais par `!secrets/` seul, qui laisserait entrer les "
+            "secrets en clair"
+        ),
+    ):
+        assert fragment in texte, fragment
+
+
+def test_m0006_dit_ce_que_la_scission_refait():
+    """La scission ne fait pas que déplacer : `env/` et `cles/` sont rendus à neuf, et
+    `.sops.yaml`, resté à la racine, se refait pour le nouveau chemin des secrets (#94)."""
+    brut = lire(DECISIONS / "M-0006-code-et-donnees.md")
+    assert "- **Amendé** le 2026-11-04, avec le correctif #94 : à la scission," in brut
+    texte = " ".join(brut.split())
+    assert "ne fait ensuite que déplacer ces dossiers, avec `deploiement/env/`" not in texte
+    for fragment in (
+        "La scission déplace ensuite ces dossiers et les secrets chiffrés vers le dépôt de données",
+        "Le modèle y rend `env/` et `cles/` à la place de `deploiement/env/` et de `deploiement/cles/`",
+        "`.sops.yaml` s'y refait pour le nouveau chemin des secrets (amendement du 2026-11-04)",
+        "Le contrat de l'application ne change pas (M-0004, § 8)",
+    ):
+        assert fragment in texte, fragment
+    puce = brut.split("- **Un projet né avant M-0006 garde la chaîne à un dépôt", 1)[1]
+    puce = puce.split("\n\n", 1)[0]
+    longues = [ligne for ligne in puce.splitlines() if len(ligne) > 100]
+    assert not longues, longues
 
 
 # m3 : ce qui est garanti, exactement. Le mode lui-même se lit par l'API de GitHub ; la branche de
