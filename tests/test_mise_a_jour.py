@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 
 import copier
+import masques
 import pytest
 import yaml
 from conftest import (
@@ -457,6 +458,20 @@ def semes_restes_selon_la_methode():
     return set(re.findall(r"`([^`]+)`", liste))
 
 
+# Les règles du .gitignore de `veille-emploi` : tout dotenv, et tout ce qui nomme un secret. Sous
+# elles, la correction à la main de `.gitignore` doit lever `secrets/` sans les secrets en clair.
+REGLES_DU_PROJET = ("*.env", "*secret*")
+PHRASE_DE_LA_CORRECTION = "Il se corrige à la main : pour un dépôt de données, "
+
+
+def correction_selon_la_methode():
+    """Les lignes que `methode.md` fait ajouter à la main au `.gitignore`, dans leur ordre."""
+    puce = METHODE.read_text(encoding="utf-8").split("- Changer de cible,", 1)[1]
+    puce = " ".join(puce.split("\n\n", 1)[0].split())
+    m = re.search(re.escape(PHRASE_DE_LA_CORRECTION) + r"((?:`[^`]+`(?:, | puis ))*`[^`]+`)", puce)
+    return [] if m is None else re.findall(r"`([^`]+)`", m.group(1))
+
+
 def _projet_a_un_depot(tmp_path, env):
     """Le projet à un dépôt, retouché par lui et avec ce que le modèle ne connaît pas, commité ;
     son .gitignore a ses règles propres, et les fichiers locaux qu'elles masquent sont là."""
@@ -503,7 +518,7 @@ def _rendu_neuf(tmp_path, modele, projet):
 
 
 @pytest.mark.parametrize("preparee", [False, True], ids=["seule", "preparee"])
-def test_scission_d_un_projet_a_un_depot(tmp_path, env_isole, preparee):
+def test_scission_d_un_projet_a_un_depot(tmp_path, env_isole, capsys, preparee):
     env = env_isole()
     modele, projet = _projet_a_un_depot(tmp_path, env)
     restes = semes_restes_selon_la_methode()
@@ -511,9 +526,11 @@ def test_scission_d_un_projet_a_un_depot(tmp_path, env_isole, preparee):
         # La voie préparée de methode.md : les semés retirés avant la mise à jour sont semés à neuf,
         # sauf `.gitignore`, corrigé à la main ; ce que le modèle ne connaît pas se déplace.
         assert ".gitignore" in restes, "methode.md ne nomme pas les semés restés"
+        correction = correction_selon_la_methode()
+        assert correction, "methode.md ne dit pas comment corriger `.gitignore`"
         git(projet, env, "rm", "-q", "--", *sorted(restes - {".gitignore"}))
         with (projet / ".gitignore").open("a", encoding="utf-8", newline="\n") as f:
-            f.write("secrets/*\n!secrets/*.env.enc\n")
+            f.write("".join(f"{ligne}\n" for ligne in (*REGLES_DU_PROJET, *correction)))
         for ancien, nouveau in DEPLACES.items():
             (projet / nouveau).parent.mkdir(parents=True, exist_ok=True)
             git(projet, env, "mv", "--", ancien, nouveau)
@@ -592,9 +609,21 @@ def test_scission_d_un_projet_a_un_depot(tmp_path, env_isole, preparee):
         assert differents == {".gitignore"}
         lignes = (projet / ".gitignore").read_text(encoding="utf-8").splitlines()
         assert set(LOCAUX) <= set(lignes)
-        for masque in (*LOCAUX, "secrets/prod.env", "secrets/age.txt"):
+        # Les secrets en clair restent masqués, à la racine comme dans un dossier `secrets/`
+        # imbriqué ; un secret chiffré neuf, que `secrets.ps1 refaire` écrira, ne l'est pas.
+        for masque in (*LOCAUX, "secrets/prod.env", "secrets/age.txt", "config/secrets/jeton.txt"):
             assert _masque(projet, env, masque), masque
         assert not _masque(projet, env, "secrets/prod.env.enc")
+        assert not _masque(projet, env, "secrets/staging.env.enc")
+        # Au commit de la mise à jour, la porte des masqués ne voit pas le secret chiffré, déjà
+        # suivi : elle ne demande que les dotenv de l'instance, que `*.env` masque.
+        git(projet, env, "add", "--", ".copier-answers.yml")
+        assert masques.main(["--racine", str(projet)]) == 1
+        refuses = re.findall(r" : (\S+) \(règle ", capsys.readouterr().err)
+        assert sorted(refuses) == ["env/prod.env", "env/staging.env"]
+        with (projet / ".gitignore").open("a", encoding="utf-8", newline="\n") as f:
+            f.write("!env/prod.env\n!env/staging.env\n")
+        assert masques.main(["--racine", str(projet)]) == 0
     else:
         assert differents == restes
         assert restes

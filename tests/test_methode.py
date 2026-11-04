@@ -309,16 +309,26 @@ def test_garde_fous_dit_la_porte_des_masques():
     section = " ".join(lire(METHODE).split("## Les garde-fous", 1)[1].split("\n## ", 1)[0].split())
     ligne = section.split("| hook git `pre-commit` |", 1)[1].split("| hook git `commit-msg`", 1)[0]
     assert "`.copier-answers.yml`" in ligne
-    # Correctif #94 : dans un dépôt de données, la porte examine aussi les secrets chiffrés, et leur
-    # remède ne lève pas le masque des secrets en clair (M-0002, amendement du 2026-11-04).
-    assert (
-        "refus d'un fichier du modèle, ou, dans un dépôt de données, d'un secret chiffré "
-        "`secrets/*.env.enc`, que le `.gitignore` du projet masque" in ligne
-    )
-    assert (
-        "un secret chiffré se libère par `!secrets/`, `secrets/*` puis `!secrets/*.env.enc`, "
-        "jamais par `!secrets/` seul" in ligne
-    )
+    # Correctif #94 : la porte examine aussi les secrets chiffrés, selon la cible et non la nature,
+    # et leur remède ne lève pas le masque des secrets en clair (M-0002, amendement du 2026-11-04).
+    for fragment in (
+        (
+            "refus d'un fichier du modèle, ou d'un secret chiffré que la chaîne lit (en cible "
+            "`donnees`, sauf `cible_code: aucune`, `secrets/*.env.enc` ; en cible `serveur`, "
+            "`deploiement/secrets/*.env.enc`), que le `.gitignore` du projet masque"
+        ),
+        "Sous un dossier de secrets, la porte n'examine que ce que la chaîne y lit, à son premier",
+        # Ancrées : `!secrets/` vaudrait à toute profondeur, et ferait paraître les dossiers
+        # `secrets/` imbriqués.
+        "Exclu, ce dossier se lève par `!/secrets/`, `/secrets/*` puis `!/secrets/*.env.enc`",
+        "lignes ancrées à la racine",
+        "sous `deploiement/secrets/`, de même, avec aussi `!/deploiement/secrets/*.cles`",
+        "jamais par `!/secrets/` seul, qui laisserait entrer un secret en clair",
+        "un dossier exclu qui en contient un (`deploiement/`) se lève suivi de ces lignes",
+    ):
+        assert fragment in ligne, fragment
+    assert "dans un dépôt de données, d'un secret chiffré" not in ligne
+    assert "`!secrets/`" not in ligne
     # La phrase des masqués vient après celle de la confidentialité : placée avant, elle se lirait
     # comme si la porte des masqués n'avertissait que dans un dépôt privé et tournait en CI.
     assert ligne.index("au hook comme en CI") < ligne.index("Au commit d'un alignement")
@@ -808,7 +818,12 @@ def test_changer_de_cible_dit_ce_que_fait_copier():
         # Revue de #95 : `.gitignore` porte les règles du projet, et son retrait salit l'arbre.
         "Sauf `.gitignore`, qui ne se retire jamais",
         "ce que Copier refuse comme un arbre sale",
-        "pour un dépôt de données, `secrets/*` puis `!secrets/*.env.enc`",
+        # Relecture de la reprise : sous `*secret*`, `secrets/` reste exclu sans `!/secrets/`, et la
+        # porte des masqués ne le voit pas, puisque le secret chiffré déplacé est suivi.
+        (
+            "pour un dépôt de données, `!/secrets/`, `/secrets/*` puis `!/secrets/*.env.enc`, à la "
+            "fin du fichier, puisque la porte des masqués ne voit pas un secret chiffré déjà suivi"
+        ),
         # Copier ne déplace rien de ce qu'il ne connaît pas.
         "Ce que le modèle ne connaît pas reste où il est",
         "se déplacent par `git mv`",
