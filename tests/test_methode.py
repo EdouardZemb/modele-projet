@@ -451,25 +451,42 @@ def test_m0002_amende_par_le_correctif_94():
     """La porte des masqués examine l'instance d'un dépôt de données, secrets chiffrés compris, et
     leur remède ne laisse pas entrer un secret en clair (masques.py, `remede`)."""
     brut = lire(DECISIONS / "M-0002-garde-fous-et-confidentialite.md")
-    assert (
-        "- **Amendé** le 2026-11-04, avec le correctif #94 : dans un dépôt de données, la porte des"
-        "\n  fichiers masqués examine aussi l'instance"
-    ) in brut
     texte = " ".join(brut.split())
+    # La porte suit la cible, comme `chemins_examines`, et non la nature du dépôt.
+    assert (
+        "- **Amendé** le 2026-11-04, avec le correctif #94 : en cible `donnees`, la porte des "
+        "fichiers masqués examine aussi l'instance"
+    ) in texte
     for fragment in (
-        "Dans un dépôt de données, elle examine aussi `config/README.md` et `contenu/README.md`",
+        "En cible `donnees`, elle examine aussi `config/README.md` et `contenu/README.md`",
         (
             "sauf `cible_code: aucune`, l'instance : `.sops.yaml`, `env/prod.env`, "
             "`env/staging.env`, `cles/*.pub` et les secrets chiffrés `secrets/*.env.enc`, que la "
             "chaîne lit (amendement du 2026-11-04)"
         ),
         (
-            "Sous un dossier de secrets exclu, leur masque se lève par `!secrets/`, `secrets/*` "
-            "puis `!secrets/*.env.enc`, jamais par `!secrets/` seul, qui laisserait entrer les "
+            "Sous un dossier de secrets (`secrets/`, ou `deploiement/secrets/` en cible `serveur`), "
+            "elle n'examine que ce que la chaîne y lit, à son premier niveau"
+        ),
+        (
+            "Exclu, ce dossier se lève par `!/secrets/`, `/secrets/*` puis `!/secrets/*.env.enc`, "
+            "lignes ancrées à la racine, jamais par `!/secrets/` seul, qui laisserait entrer les "
             "secrets en clair"
         ),
+        "un dossier exclu qui en contient un (`deploiement/`) se lève suivi de ces lignes",
     ):
         assert fragment in texte, fragment
+    assert "Dans un dépôt de données, elle examine aussi" not in texte
+    assert "`!secrets/`" not in texte
+    # Relecture de la reprise : une ligne de la puce dépassait 100 caractères.
+    (puce,) = [
+        b for b in blocs(brut) if b[0].startswith("- **Un fichier du modèle que le `.gitignore`")
+    ]
+    (amendement,) = [
+        b for b in blocs(brut) if b[0].startswith("- **Amendé** le 2026-11-04, avec le correctif")
+    ]
+    longues = [ligne for ligne in (*puce, *amendement) if len(ligne) > 100]
+    assert not longues, longues
 
 
 def test_m0006_dit_ce_que_la_scission_refait():
