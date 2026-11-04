@@ -3,6 +3,7 @@
 # `fausse-app` en cible `serveur`, nature code, y copie ce dossier, et lui fait passer l'action
 # modele-image-construire du rendu : construction, santé, révision, sauvegarde, vérification, et
 # l'exemple de l'instance ; puis tests/modele/epreuve-donnees.sh la déploie avec ses données.
+# À copier dans un projet <nom> : remplacer FAUSSE_APP_ par son préfixe (<NOM>_, tirets en _).
 
 # python:3.13-slim (Python 3.13.16, Debian trixie), résolue le 2026-10-18 par
 # `docker buildx imagetools inspect` ; empreinte de l'index multi-architecture.
@@ -10,7 +11,8 @@ FROM python:3.13-slim@sha256:70729b46c69b4f1e97c4822c1af3df53a1476cf5ddc6c087c0c
 
 # /donnees : les données de l'app, semées à la construction pour qu'un instantané ne soit jamais
 # vide. MARQUE est ce que `verifier` contrôle. Elles appartiennent à l'uid 1000, comme sur le
-# serveur.
+# serveur. Là, le dossier de l'hôte, vide au premier déploiement, cache celui-ci : app.py y sème
+# alors les mêmes fichiers (SEMIS).
 RUN mkdir -p /donnees/notes \
     && printf 'fausse-app\n' >/donnees/MARQUE \
     && printf 'une note\n' >/donnees/notes/premiere.txt \

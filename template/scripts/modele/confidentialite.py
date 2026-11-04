@@ -546,8 +546,9 @@ def nature() -> str:
     En CI, DEPOT_PRIVE porte la visibilité réelle du dépôt : toute autre valeur que `true` donne
     `code`. Un dépôt privé en CI lit sa nature sur la branche par défaut que GitHub déclare
     (`origin/<BRANCHE_DEFAUT>`), jamais dans la copie de la PR, qui pourrait la réécrire ; si cette
-    lecture échoue, c'est `code`. Sans DEPOT_PRIVE (le poste, les hooks), c'est le reglages.py
-    voisin du script ; sans lui (le dépôt modèle lui-même), `code`."""
+    lecture échoue, ou si le texte lu n'a pas de ligne `NATURE`, c'est `code`, et la porte le dit.
+    Sans DEPOT_PRIVE (le poste, les hooks), c'est le reglages.py voisin du script ; sans lui (le
+    dépôt modèle lui-même), `code`."""
     depot_prive = os.environ.get("DEPOT_PRIVE")
     if depot_prive is not None and not depot_prive.strip():
         print("confidentialité : visibilité inconnue : régime code", file=sys.stderr)
@@ -575,6 +576,12 @@ def nature() -> str:
     if texte is None:
         print(
             "confidentialité : nature illisible sur la branche par défaut : régime code",
+            file=sys.stderr,
+        )
+        return "code"
+    if not _LIGNE_NATURE.search(texte):
+        print(
+            "confidentialité : pas de NATURE sur la branche par défaut : régime code",
             file=sys.stderr,
         )
         return "code"

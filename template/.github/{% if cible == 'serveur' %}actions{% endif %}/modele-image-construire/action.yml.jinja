@@ -24,9 +24,11 @@ runs:
       run: docker build --build-arg REVISION="$GITHUB_SHA" -t {{ nom }}:ci .
 
     # Comme en production (deploiement/compose.yml) : utilisateur 1000, système de fichiers en
-    # lecture seule, /tmp en mémoire et le port publié sur la boucle locale seulement. /donnees,
-    # monté en production, est ici un volume anonyme, que Docker remplit de ce que l'image y a mis :
-    # l'app y écrit comme sur le serveur.
+    # lecture seule, /tmp en mémoire et le port publié sur la boucle locale seulement. /donnees est
+    # ici un volume anonyme, que Docker remplit de ce que l'image y a mis : il prouve que l'app y
+    # écrit à l'uid 1000. Au contraire, le dossier de l'hôte que la production monte est vide au
+    # premier déploiement, et cache le /donnees de l'image : l'app y crée au démarrage ce qu'il lui
+    # faut (M-0003), ce que cette étape ne prouve pas.
     - name: Lancer l'image
       shell: bash
       working-directory: {% raw %}${{ inputs.dossier }}{% endraw %}

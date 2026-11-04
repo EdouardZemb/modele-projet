@@ -1095,7 +1095,18 @@ def test_exploitation_dit_le_couple_et_les_deux_modes(rendre, mode, sauvegardes)
     assert "`~/.local/state/essai/prod/instantanes/`" in tourne
     assert "donne l'image, la version et le commit de données du couple en service" in tourne
     assert "`echec` nomme un couple, son image et son commit" in tourne
-    assert ("sont ceux de l'exemple" in tourne) is deux
+    # Un dépôt de code n'a ni domaine, ni sous-domaine, ni bloc de ports : le rendu ne donne pas les
+    # valeurs d'exemple de copier.yml pour celles du projet (4310 est un bloc pris), il les nomme.
+    assert "sont ceux de l'exemple" not in tourne
+    noms = "ce fichier les écrit `<domaine>`, `<sous_domaine>` et `<bloc>`"
+    assert (noms in tourne) is deux
+    assert ("`bloc_ports` de son `.copier-answers.yml`" in tourne) is deux
+    assert ("4310" in texte) is not deux
+    assert ("exemple.org" in texte) is not deux
+    sante = "| Santé locale | `127.0.0.1:<bloc>` | `127.0.0.1:<bloc>+1` |"
+    assert (sante in tourne) is deux
+    adresse = "| Adresse | `https://<sous_domaine>.<domaine>` | `https://<sous_domaine>-staging.<domaine>` |"
+    assert (adresse in tourne) is deux
     assert ("`instance/config/` et `instance/contenu/`" in tourne) is not deux
 
     # La mise en service : à deux dépôts, la CI des données tire l'image publique du code.
@@ -1112,14 +1123,37 @@ def test_exploitation_dit_le_couple_et_les_deux_modes(rendre, mode, sauvegardes)
     assert ("une première étiquette de données, dans tous les cas" in mise_en_service) is deux
     sans_elle = "la prod ne prend aucun env ni secret du dépôt de données après son clonage"
     assert (sans_elle in mise_en_service) is deux
-    # à deux dépôts, la déclaration dit `DONNEES=oui` et l'étape 4 dit la clé des données
+    # à deux dépôts, la déclaration dit `DONNEES=oui` et l'étape 4 dit la clé des données ; les
+    # messages de la sonde de `serveur` sont cités tels qu'elle les écrit, sans apostrophes inverses
+    # autour des noms, pour se chercher tels quels dans le journal
     for fragment in (
         "`DONNEES=oui`",
         "`~/.ssh/depot-essai-donnees`",
-        "en attente de la clé du dépôt de données `essai-donnees`",
+        "`en attente de la clé du dépôt de données essai-donnees : <clé publique>`",
+        "`en attente des clones des données de essai`",
         "ne s'installent qu'une fois ces clones faits",
     ):
         assert (fragment in mise_en_service) is deux, fragment
+    assert "données `essai-donnees` »" not in mise_en_service
+    assert ("en attente des clones des données" in texte) is deux
+    # l'étape 1 donne le bloc des réponses du dépôt de données, pas celui de l'exemple
+    (etape_1,) = re.findall(r"^\| 1 \|.*$", section(texte, "La mise en service"), re.MULTILINE)
+    bloc = "le bloc de ports des réponses de `essai-donnees` (`bloc_ports` de son `.copier-answers.yml`)"
+    assert (bloc in etape_1) is deux
+    assert ("bloc de ports `4310`" in etape_1) is not deux
+    # l'étape 3 : le paquet GHCR naît public, hérité du dépôt de code public ; une vérification
+    assert ("privé par défaut" in mise_en_service) is not deux
+    herite = "Publié depuis un dépôt public, le paquet en prend la visibilité : il naît public"
+    assert (herite in mise_en_service) is deux
+    verification = (
+        "`gh api users/EdouardZemb/packages/container/essai --jq .visibility` rend `public`"
+    )
+    assert (verification in mise_en_service) is deux
+    # à la naissance, la CI de la branche principale est rouge dans les deux dépôts : c'est attendu
+    rouge = "**À la naissance, la CI de la branche principale est rouge dans les deux dépôts**"
+    assert (rouge in mise_en_service) is deux
+    assert ("gh run rerun <id> --failed" in mise_en_service) is deux
+    assert ("`Dockerfile`, jusqu'à la première PR de l'application" in mise_en_service) is deux
 
     # Mettre en ligne : l'étiquette de données (👤), ou son absence à un dépôt.
     en_ligne = a_plat(section(texte, "Mettre en ligne"))
@@ -1135,6 +1169,22 @@ def test_exploitation_dit_le_couple_et_les_deux_modes(rendre, mode, sauvegardes)
     ci_instance = "La CI du code les vérifie comme le fera le déploiement, qui les revérifie"
     assert (ci_instance in en_ligne) is not deux
     assert "**Un couple dont la santé échoue**" in en_ligne
+    # une étiquette de données forme un couple avec la plus haute `vX.Y.Z`, qui n'est l'image en
+    # service que hors d'un retour arrière par `--retour`
+    assert "redéploie l'image en service avec lui" not in texte
+    plus_haute = "la sonde de prod le déploie avec la plus haute `vX.Y.Z`, après ses vérifications"
+    assert (plus_haute in en_ligne) is deux
+    assert ("C'est l'image en service, sauf après un `--retour` qui l'a quittée" in en_ligne) is deux
+    # un --retour ne quitte pas toujours l'image : il peut ne quitter que le commit de données
+    assert "sauf après un `--retour`, qui l'a quittée" not in texte
+    # en staging de même : un commit de données se déploie avec `:main`, l'image quittée après un
+    # --retour qui l'a quittée
+    assert "redéploie la même image avec lui" not in texte
+    staging = (
+        "la sonde le déploie avec l'image `:main`, après ses vérifications. C'est l'image en "
+        "service, sauf après un `--retour` qui l'a quittée"
+    )
+    assert (staging in en_ligne) is deux
 
     # Revenir en arrière : le couple entier, et les deux cas de transition.
     retour = a_plat(section(texte, "Revenir en arrière"))
@@ -1154,6 +1204,28 @@ def test_exploitation_dit_le_couple_et_les_deux_modes(rendre, mode, sauvegardes)
     assert ("l'ancienne image et le commit de données en service" in retour) is deux
     assert ("**Revenir à une configuration antérieure**" in retour) is deux
     assert ("ramène ensemble l'image et l'instance de ce commit" in retour) is not deux
+    # Après un `--retour`, seul le couple quitté est en échec, et la sonde déploie tout couple neuf :
+    # un geste qui ne change qu'une moitié de la cible ramène l'autre moitié du couple quitté. Ce
+    # qui passe d'abord dépend de ce que le retour a quitté : l'image, le commit de données, ou les
+    # deux.
+    assert "ou un nouveau commit de données" not in retour
+    assert "une `vX.Y.Z` d'abord, puis seulement une étiquette de données" not in retour
+    for fragment in (
+        ("**Après un `--retour`, changer une moitié de la cible peut ramener l'autre moitié du "
+        "couple quitté.**"),
+        ("**l'image**, pour une autre version : une étiquette de données fait un couple neuf avec la "
+        "version quittée"),
+        "Poser d'abord une `vX.Y.Z` plus haute sur le commit de la version gardée",
+        ("**le commit de données**, sous la même image : une `vX.Y.Z` sur un nouveau commit fait un "
+        "couple neuf avec les données quittées"),
+        "Poser d'abord une étiquette de données sur un commit corrigé",
+        ("**les deux** : chacun des deux gestes ramène une moitié du couple quitté. Le premier "
+        "remplace la moitié en cause"),
+        "une fusion dans le dépôt de données redéploie la `:main` quittée",
+        "une fusion dans le code redéploie les données quittées",
+        "la plus haute `vX.Y.Z`, l'image en service hors d'un `--retour` qui l'a quittée",
+    ):
+        assert (fragment in retour) is deux, fragment
 
     # Les images, et à côté le ménage des instantanés des données.
     images = a_plat(section(texte, "Les images"))
@@ -1193,8 +1265,14 @@ def test_exploitation_dit_le_couple_et_les_deux_modes(rendre, mode, sauvegardes)
         "**« clone des données modifié »**",
         "**« mise à jour du clone des données impossible »**",
         "`ESSAI_BRANCHE_DONNEES`",
+        # la sonde n'avance le clone que par `merge --ff-only`, sur la branche du clonage : une
+        # autre branche des données n'est pas un réglage
+        "**Changer de branche n'est pas pris en charge à ce jour**",
+        "Une autre branche ne se suit que si elle descend de la tête du clone",
+        "fusionnée par squash",
     ):
         assert (fragment in debloquer) is deux, fragment
+    assert ("la principale, écrite à la création, et qui ne se change pas" in tourne) is deux
     if sauvegardes:
         geste = "Le couple du geste est marqué en échec : la sonde attend un nouveau couple"
         assert geste in debloquer
@@ -1216,7 +1294,151 @@ def test_exploitation_dit_le_couple_et_les_deux_modes(rendre, mode, sauvegardes)
     assert (deux_gestes in secrets) is deux
     correctif = "Une rotation urgente se publie par une étiquette de correctif"
     assert (correctif in secrets) is not deux
+    apres_retour = (
+        "Après un `--retour` qui a quitté l'image, l'un et l'autre remettraient en service l'image "
+        "quittée"
+    )
+    assert (apres_retour in secrets) is deux
 
     # Unités : la sonde suit un couple.
     unites = a_plat(section(texte, "Unités"))
     assert "déploie tout nouveau couple" in unites
+    # le port du test de restauration : le bloc + 9, nommé à deux dépôts
+    assert ("sur le port local `<bloc>+9`" in unites) is (deux and sauvegardes)
+    assert ("sur le port local 4319" in unites) is (not deux and sauvegardes)
+
+
+# Le test de restauration tourne chaque semaine, au jour et à l'heure `TEST_RESTAURATION` que
+# déclare `serveur` : aucun document de la chaîne ne le situe un dimanche.
+@pytest.mark.parametrize("reponses", [REPONSES_SERVEUR, REPONSES_SERVEUR_CODE], ids=["un", "deux"])
+def test_le_test_de_restauration_suit_son_jour(rendre, reponses):
+    rendu = rendre(**reponses)
+    for chemin in (
+        "docs/exploitation.md",
+        "docs/modele/decisions/M-0003-contrat-de-l-image.md",
+    ):
+        assert "dimanche" not in lire(rendu, chemin), chemin
+    mise_en_service = a_plat(section(lire(rendu, "docs/exploitation.md"), "La mise en service"))
+    assert (
+        "attendrait le premier test de la semaine, au jour de `TEST_RESTAURATION`"
+        in mise_en_service
+    )
+    m3 = a_plat(lire(rendu, "docs/modele/decisions/M-0003-contrat-de-l-image.md"))
+    assert "puis il tourne chaque semaine, au jour et à l'heure `TEST_RESTAURATION`" in m3
+
+
+# « Tout arrêter » ne décrit plus le retrait définitif : il renvoie à la procédure de la notice de
+# `serveur`, qui nomme chaque chose en entier. Un motif comme `<nom>-*` prendrait aussi les fichiers
+# d'un projet `<nom>-…`.
+@pytest.mark.parametrize("reponses", [REPONSES_SERVEUR, REPONSES_SERVEUR_CODE], ids=["un", "deux"])
+def test_tout_arreter_renvoie_au_retrait_d_un_projet(rendre, reponses):
+    arreter = a_plat(section(lire(rendre(**reponses), "docs/exploitation.md"), "Tout arrêter"))
+    assert "systemd/user/essai-*" not in arreter
+    assert "essai-*" not in arreter
+    renvoi = (
+        "**Le retrait définitif suit la notice du dépôt `serveur`** (« Gestes d'exploitation »,"
+        " « Retirer un projet »)"
+    )
+    assert renvoi in arreter
+    deux = reponses["nature"] == "code"
+    assert ("les clones du code et des données" in arreter) is deux
+
+
+# Sur le serveur, /donnees est le dossier de l'hôte, vide au premier déploiement : il cache celui de
+# l'image, que seuls la CI et son volume anonyme voient. Le contrat le dit.
+def test_m0003_le_dossier_de_l_hote_cache_celui_de_l_image(rendre):
+    m3 = a_plat(
+        lire(rendre(**REPONSES_SERVEUR_CODE), "docs/modele/decisions/M-0003-contrat-de-l-image.md")
+    )
+    cache = (
+        "vide au premier déploiement, il cache le `/donnees` de l'image : l'app crée au démarrage"
+        " ce qu'il lui faut"
+    )
+    assert cache in m3
+
+
+# La branche des données du staging n'est pas un réglage : la sonde avance le clone par
+# `merge --ff-only`, sur la branche du clonage.
+def test_m0004_la_branche_des_donnees_ne_se_change_pas(rendre):
+    m4 = a_plat(
+        lire(rendre(**REPONSES_SERVEUR_CODE), "docs/modele/decisions/M-0004-chaine-de-livraison.md")
+    )
+    for fragment in (
+        "La sonde ne change jamais la branche du clone",
+        "Une autre branche ne se suit donc que si elle descend de la tête du clone",
+        "changer de branche n'est pas pris en charge à ce jour",
+    ):
+        assert fragment in m4, fragment
+
+
+# Un commit de données seul se déploie avec l'image visée, qui n'est l'image en service que hors
+# d'un `--retour` qui l'a quittée ; après un `--retour`, seul le couple quitté attend (M-0006, § 6).
+@pytest.mark.parametrize("reponses", [REPONSES_SERVEUR, REPONSES_SERVEUR_CODE], ids=["un", "deux"])
+def test_m0004_dit_ce_qu_un_geste_ramene_apres_un_retour(rendre, reponses):
+    m4 = a_plat(lire(rendre(**reponses), "docs/modele/decisions/M-0004-chaine-de-livraison.md"))
+    assert "Un commit de données seul redéploie la même image" not in m4
+    for fragment in (
+        ("Un commit de données seul redéploie l'image visée, la même hors d'un `--retour` qui l'a "
+        "quittée (§ 2)"),
+        ("À deux dépôts, seul ce couple attend : un geste qui ne change qu'une moitié de la cible, une "
+        "étiquette de données ou une `vX.Y.Z`, peut ramener l'autre moitié du couple quitté "
+        "(M-0006, § 6)"),
+    ):
+        assert fragment in m4, fragment
+
+
+M0006 = RACINE / "template/docs/modele/decisions/M-0006-code-et-donnees.md"
+
+
+# Le lot 13 amende M-0006 (§ 6 et § 7) : son en-tête le dit, comme pour les lots 11 et 12, et le
+# § 7 garde la prose coupée à 100 caractères.
+def test_m0006_dit_l_amendement_du_lot_13():
+    texte = M0006.read_text(encoding="utf-8")
+    plat = a_plat(texte)
+    assert "- **Amendé** le 2026-11-03, avec le lot 13 :" in texte
+    assert "le script de création du poste vit dans `modele-projet`, sous `poste/` (§ 7)" in plat
+    paragraphe_7 = texte.split("### 7. La naissance et la scission\n", 1)[1].split("\n## ", 1)[0]
+    longues = [ligne for ligne in paragraphe_7.splitlines() if len(ligne) > 100]
+    assert not longues, longues
+
+
+# Après un retour arrière par `--retour`, à deux dépôts, une étiquette de données forme un couple avec
+# la plus haute `vX.Y.Z`, celle que le retour a quittée : M-0006 le dit, et ce qui le prévient.
+def test_m0006_dit_l_etiquette_de_donnees_apres_un_retour():
+    plat = a_plat(M0006.read_text(encoding="utf-8"))
+    assert "Une modification du dépôt de données redéploie la même image" not in plat
+    # un --retour ne quitte pas toujours l'image : il peut ne quitter que le commit de données
+    assert "sauf après un retour arrière par `--retour`, qui l'a quittée" not in plat
+    for fragment in (
+        "Un nouveau commit de données forme un couple avec l'image visée, la plus haute `vX.Y.Z` en prod",
+        "c'est l'image en service, sauf après un retour arrière par `--retour` qui l'a quittée",
+        "un geste qui ne change qu'une moitié de la cible ramène l'autre moitié de ce couple",
+        ("Quand le retour a quitté l'image, une étiquette de données remettrait donc en service la "
+        "version quittée"),
+        "il faut d'abord une `vX.Y.Z` plus haute sur le commit de la version gardée",
+        ("Quand il a quitté le commit de données, une `vX.Y.Z` sur un nouveau commit remettrait en "
+        "service les données quittées : il faut d'abord une étiquette de données sur un commit "
+        "corrigé"),
+        "Quand il a quitté les deux, le premier geste remplace la moitié en cause",
+        # l'en-tête du lot 13 le résume
+        ("après un retour arrière par `--retour`, un geste qui ne change qu'une moitié de la cible "
+        "ramène l'autre moitié du couple quitté (§ 6)"),
+    ):
+        assert fragment in plat, fragment
+
+
+# Décision du lot 13, acceptée par Edouard : en cible `serveur`, le dépôt de code est
+# public, puisque la chaîne à deux dépôts le suppose. La CI du dépôt de données le clone sans jeton
+# et tire ses images en anonyme.
+def test_m0006_en_cible_serveur_le_depot_de_code_est_public():
+    texte = M0006.read_text(encoding="utf-8")
+    paragraphe_1 = a_plat(texte.split("### 1. Deux natures de dépôt\n", 1)[1].split("\n### ", 1)[0])
+    for fragment in (
+        (
+            "En cible `serveur`, ce choix est fait : il est public, puisque la chaîne à deux dépôts le"
+            " suppose"
+        ),
+        "La CI du dépôt de données le clone sans jeton et tire ses images en anonyme (§ 6)",
+    ):
+        assert fragment in paragraphe_1, fragment
+    assert "en cible `serveur`, le dépôt de code est public (§ 1)" in a_plat(texte)

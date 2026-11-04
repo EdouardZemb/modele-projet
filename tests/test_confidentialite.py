@@ -603,6 +603,36 @@ def test_nature_illisible_vaut_code(tmp_path, env_isole, variables):
     assert "constat(s), refus." in r.stderr
 
 
+@pytest.mark.parametrize("texte", ['BRANCHE_PRINCIPALE = "main"\n', "", "NATURE = 'donnees'\n"])
+def test_sans_nature_sur_la_branche_par_defaut_la_porte_le_dit(tmp_path, env_isole, texte):
+    """Un reglages.py lisible sur la branche par défaut, mais sans ligne `NATURE` : le régime code,
+    la plus stricte, et la porte le dit, comme pour une nature illisible."""
+    env = env_isole()
+    clone, f = depot_de_nature(tmp_path, env, "donnees", "donnees")
+    reglages = clone / "scripts/modele/reglages.py"
+    reglages.write_text(texte, encoding="utf-8")
+    git(clone, env, "add", "scripts/modele/reglages.py")
+    git(clone, env, "commit", "-q", "--allow-empty", "-m", "chore: sans nature")
+    git(clone, env, "push", "-q", "origin", "main")
+    reglages.write_text('NATURE = "donnees"\n', encoding="utf-8")
+    r = porte_en_ci(clone, f, env, BRANCHE_DEFAUT="main")
+    assert r.returncode == 1
+    assert "confidentialité : pas de NATURE sur la branche par défaut : régime code" in r.stderr
+    assert NATURES_ILLISIBLES not in r.stderr
+    assert "constat(s), refus." in r.stderr
+    assert "avertissement" not in r.stderr
+
+
+def test_une_nature_lue_ne_dit_rien_de_plus(tmp_path, env_isole):
+    """Une ligne `NATURE` lue sur la branche par défaut : ni l'un ni l'autre message."""
+    env = env_isole()
+    clone, f = depot_de_nature(tmp_path, env, "code", "code")
+    r = porte_en_ci(clone, f, env, BRANCHE_DEFAUT="main")
+    assert r.returncode == 1
+    assert "pas de NATURE" not in r.stderr
+    assert NATURES_ILLISIBLES not in r.stderr
+
+
 def test_depot_public_toujours_code(tmp_path, env_isole):
     env = env_isole()
     clone, f = depot_de_nature(tmp_path, env, "donnees", "donnees")

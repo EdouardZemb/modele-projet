@@ -32,7 +32,9 @@ Un `Dockerfile` à la racine du dépôt. L'image :
 - **crée `/donnees`, à l'uid 1000.** En CI, `modele-image-construire` lance l'image avec
   `--read-only --tmpfs /tmp --user 1000:1000 -v /donnees` : ce volume anonyme hérite du contenu et
   du propriétaire du `/donnees` de l'image, et sans lui l'app n'y écrit pas. En production,
-  `/donnees` est un montage du dossier de l'hôte, `~/.local/share/{{ nom }}/<env>/donnees` ;
+  `/donnees` est un montage du dossier de l'hôte, `~/.local/share/{{ nom }}/<env>/donnees` ; vide
+  au premier déploiement, il cache le `/donnees` de l'image : l'app crée au démarrage ce qu'il lui
+  faut ;
 - lit dans son environnement `{{ prefixe }}ENV`, `{{ prefixe }}VERSION` et `{{ prefixe }}URL_PUBLIQUE`, que `compose.yml`
   lui passe. En CI, la mécanique ne pose que `{{ prefixe }}ENV=ci` et `{{ prefixe }}URL_PUBLIQUE` ; le projet
   peut y ajouter les siennes, par l'entrée `variables` de `modele-image-construire` ;
@@ -223,13 +225,13 @@ et `instance/contenu/` du dépôt lui-même, à un dépôt.
 - **La CI ne prouve pas la clause de l'`ENTRYPOINT`** : `docker exec` le contourne, alors que le
   serveur lance `VERIFIER` par `docker run`. C'est le test de restauration qui la prouve : la mise
   en service le lance une fois après le premier déploiement en prod (`docs/exploitation.md`), puis
-  il tourne chaque dimanche. Une image qui la viole passe la CI, puis fait échouer ce test et toute
-  restauration. Faire passer la vérification de la CI par `verifier_copie` est une piste de
-  `modele-projet`.
+  il tourne chaque semaine, au jour et à l'heure `TEST_RESTAURATION` que déclare `serveur`. Une
+  image qui la viole passe la CI, puis fait échouer ce test et toute restauration. Faire passer la
+  vérification de la CI par `verifier_copie` est une piste de `modele-projet`.
 - Les deux commandes sont du code de l'app, que le projet teste. Leur compatibilité d'une version à
   l'autre s'ajoute à l'invariant 4.
 - **Rien ne lance `REPORTER` avant une vraie restauration** : ni la CI, ni le test de restauration
-  du dimanche, qui n'a pas de données en service à reporter. Le projet la teste dans ses propres
+  de la semaine, qui n'a pas de données en service à reporter. Le projet la teste dans ses propres
   tests, contre son image.
 - **Difficile à changer** : la forme de l'instantané. Les archives gardées 90 jours la portent.
 {%- else %}

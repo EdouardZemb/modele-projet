@@ -7,6 +7,10 @@
 - **Amendé** le 2026-10-29, avec le lot 12 : la seconde étape est faite. La porte d'un dépôt de
   code suit le premier segment du chemin (§ 3), et la chaîne garde les deux modes, à deux dépôts et
   à un dépôt (§ 6).
+- **Amendé** le 2026-11-03, avec le lot 13 : le script de création du poste vit dans
+  `modele-projet`, sous `poste/` (§ 7) ; après un retour arrière par `--retour`, un geste qui ne
+  change qu'une moitié de la cible ramène l'autre moitié du couple quitté (§ 6) ; en cible
+  `serveur`, le dépôt de code est public (§ 1).
 - **S'applique en deux temps.** D'abord la porte par nature et le gabarit de données (§ 1 à 4).
   Ensuite la chaîne à deux dépôts et les règles de chemins (§ 3, dernier point, § 5 à 7). Entre les
   deux, la chaîne lit encore tout dans le clone du code, comme avant.
@@ -69,7 +73,9 @@ Comment la chaîne combine le code et les données :
 - Un **dépôt de code** porte l'application, ses tests, son jeu factice, sa configuration
   d'exemple (`exemple/`), son contenu d'exemple et sa documentation générique. Il est public par
   défaut. S'il reste privé, la porte le traite comme public : sa visibilité n'est plus qu'un choix,
-  sans travail préalable.
+  sans travail préalable. En cible `serveur`, ce choix est fait : il est public, puisque la chaîne à
+  deux dépôts le suppose. La CI du dépôt de données le clone sans jeton et tire ses images en
+  anonyme (§ 6).
 - Un **dépôt de données** porte ce qui fait d'une instance celle d'Edouard :
   - la configuration personnelle de l'application (`config/`) ;
   - le contenu de l'instance (`contenu/`, § 2) ;
@@ -230,8 +236,16 @@ décrivent l'instance et le parc, pas l'auteur.
   refuse si cette image ne connaît pas la version de schéma en service ; le retour demande alors
   aussi une étiquette sur l'ancien commit de données.
 - **Ce qui déclenche un déploiement** : une nouvelle image, un nouveau commit de données, ou les
-  deux à la fois. Une modification du dépôt de données redéploie la même image, après ses
-  vérifications, avec le même retour arrière qu'une image.
+  deux à la fois. Un nouveau commit de données forme un couple avec l'image visée, la plus haute
+  `vX.Y.Z` en prod : c'est l'image en service, sauf après un retour arrière par `--retour` qui l'a
+  quittée. Le couple se déploie après ses vérifications, avec le même retour arrière qu'une image.
+  Après un tel retour, seul le couple quitté est en échec, et un geste qui ne change qu'une moitié
+  de la cible ramène l'autre moitié de ce couple. Quand le retour a quitté l'image, une étiquette
+  de données remettrait donc en service la version quittée : il faut d'abord une `vX.Y.Z` plus
+  haute sur le commit de la version gardée. Quand il a quitté le commit de données, une `vX.Y.Z`
+  sur un nouveau commit remettrait en service les données quittées : il faut d'abord une étiquette
+  de données sur un commit corrigé. Quand il a quitté les deux, le premier geste remplace la moitié
+  en cause.
 - **Les deux clones propres et à jour, ou rien.** Un clone modifié, ou dont la mise à jour échoue,
   arrête la sonde avant tout déploiement, avec une alerte, comme aujourd'hui un clone modifié.
 - **L'échec se note sur le couple.** Une vérification qui refuse, ou un déploiement qui échoue,
@@ -255,7 +269,8 @@ décrivent l'instance et le parc, pas l'auteur.
 ### 7. La naissance et la scission
 
 - **Un projet naît en deux dépôts** : le modèle produit le dépôt de code (`nature` à `code`), puis
-  le dépôt de données (`nature` à `donnees`). Le script de création du poste, `poste/Nouveau-Projet.ps1` dans `modele-projet`, crée les deux.
+  le dépôt de données (`nature` à `donnees`). Le script de création du poste,
+  `poste/Nouveau-Projet.ps1` dans `modele-projet`, crée les deux.
 - **Un dépôt né avant M-0006 ne se réécrit pas.** Il est renommé `<nom>-donnees` et devient le
   dépôt de données : son historique, ses PR, ses issues, ses étiquettes et ses publications restent
   privés. Jusque-là, il a la nature `donnees`. Une PR y retire ensuite le code, qui ne vit plus
