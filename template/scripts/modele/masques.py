@@ -184,16 +184,20 @@ def dossiers_exclus(racine: Path, chemins: list[str]) -> dict[str, str]:
 
     Une exception `!<chemin>` ne lève pas un tel masque : git ne regarde pas dans un dossier exclu.
     Un seul appel à `git check-ignore`, pour tous les dossiers. Il passe `--no-index` : sans lui,
-    un dossier qui contient déjà un fichier suivi compte comme suivi, et git ne le dit pas exclu."""
+    un dossier qui contient déjà un fichier suivi compte comme suivi, et git ne le dit pas exclu.
+    Les dossiers lui passent sans leur `/` final : git compare `env/*` à `env/` et l'y trouve, alors
+    que ce motif n'exclut que le contenu. Ils existent, puisqu'ils contiennent un fichier listé, et
+    git y reconnaît encore un motif de dossier (`env/`)."""
     dossiers = list(dict.fromkeys(d for chemin in chemins for d in _parents(chemin)))
     if not dossiers:
         return {}
-    entree = b"".join(d.encode("utf-8") + b"\0" for d in dossiers)
+    entree = b"".join(d.rstrip("/").encode("utf-8") + b"\0" for d in dossiers)
     r = _git(racine, "check-ignore", "--no-index", "-z", "--stdin", entree=entree)
     if r.returncode not in (0, 1):  # 1 : aucun dossier exclu
         erreur = r.stderr.decode("utf-8", errors="replace").strip()
         raise ErreurGit(f"git check-ignore --no-index -z --stdin : {erreur}")
-    exclus = set(r.stdout.decode("utf-8", errors="replace").split("\0"))
+    sortie = r.stdout.decode("utf-8", errors="replace").split("\0")
+    exclus = {d + "/" for d in sortie if d}
     resultat = {}
     for chemin in chemins:
         haut = next((d for d in _parents(chemin) if d in exclus), None)

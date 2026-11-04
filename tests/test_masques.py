@@ -120,6 +120,28 @@ def test_dossier_parent_exclu_avec_un_fichier_suivi(depot_masque, env, capsys):
     assert masques.main(["--racine", str(depot_masque)]) == 0
 
 
+@pytest.mark.parametrize(
+    ("motif", "fichier"),
+    [("env/*", "env/prod.env"), ("secrets/*", "secrets/prod.env.enc")],
+    ids=["env", "secrets"],
+)
+def test_contenu_d_un_dossier_exclu(depot_masque, env, capsys, motif, fichier):
+    """`<dossier>/*` exclut ce que contient le dossier, pas le dossier : `!<dossier>/` n'y vaut
+    rien, et le remède nomme le fichier. Git compare ce motif à `<dossier>/` et le dit exclu :
+    un remède sur le dossier reviendrait en boucle."""
+    (depot_masque / GERE).unlink()
+    ecrire(depot_masque, ".gitignore", f"{motif}\n")
+    ecrire(depot_masque, fichier)
+    ecrire(depot_masque, ".copier-answers.yml", "cible: donnees\ncible_code: serveur\n")
+    git(depot_masque, env, "add", ".copier-answers.yml")
+    assert masques.main(["--racine", str(depot_masque)]) == 1
+    err = capsys.readouterr().err
+    assert f"{fichier} (règle .gitignore:1:{motif}). Ajouter `!{fichier}` à ce fichier" in err
+    assert f"`!{fichier.split('/')[0]}/`" not in err
+    ecrire(depot_masque, ".gitignore", f"{motif}\n!{fichier}\n")
+    assert masques.main(["--racine", str(depot_masque)]) == 0
+
+
 def test_exception_nommee_acceptee(depot_masque, env):
     ecrire(depot_masque, ".gitignore", f"*secret*\n*.env\n!{GERE}\n")
     modifier_reponses(depot_masque, env)
