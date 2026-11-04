@@ -5,7 +5,9 @@
 
     -SansPoste : pour la CI et les machines sans le poste d'Edouard. Saute ce qui lit gh, la liste
     privée ou l'index réel (les lancements à blanc dans un enfant), prend un index factice et rend
-    le modèle depuis -SourceModele (un dépôt local) à -Version (HEAD par défaut) au lieu de v0.2.0.
+    le modèle depuis -SourceModele (un dépôt local) à -Version (HEAD par défaut) au lieu de v0.7.0.
+    Sans -SansPoste, un -SourceModele local sans -Version rend aussi sa tête (HEAD) : v0.7.0 n'est
+    la version par défaut que du modèle sur GitHub.
 #>
 [CmdletBinding()]
 param(
@@ -26,6 +28,7 @@ if ($SansPoste) {
     Write-Host 'Mode -SansPoste : pas de lancement à blanc, index factice' -ForegroundColor Yellow
     if (-not $versionTest) { $versionTest = 'HEAD' }
 }
+if (-not $versionTest -and $sourceTest -notlike 'gh:*') { $versionTest = 'HEAD' }
 $reussis = 0
 
 function Verifier([string] $Nom, [bool] $Condition, [string] $Detail = '') {
@@ -73,17 +76,47 @@ function Lire-HorsContexte([object[]] $Liste) {
 
 function Lire-Commande([string] $Commande) {
     # Ce que PowerShell ferait de la commande collée, sans l'exécuter : ses erreurs d'analyse, ses
-    # chaînes entre guillemets doubles (qui interpoleraient $ et `) et la valeur de chaque élément.
+    # chaînes entre guillemets doubles (qui interpoleraient $ et `), ses parenthèses (qu'il
+    # exécuterait : un commentaire entre parenthèses devient une commande) et la valeur de chaque
+    # élément.
     $jetons = $null; $erreurs = $null
     $ast = [System.Management.Automation.Language.Parser]::ParseInput($Commande, [ref] $jetons, [ref] $erreurs)
     $doubles = @($ast.FindAll({
         $args[0] -is [System.Management.Automation.Language.ExpandableStringExpressionAst] -or
         ($args[0] -is [System.Management.Automation.Language.StringConstantExpressionAst] -and
          $args[0].StringConstantType -ne 'SingleQuoted' -and $args[0].StringConstantType -ne 'BareWord') }, $true))
+    $parentheses = @($ast.FindAll({
+        $args[0] -is [System.Management.Automation.Language.ParenExpressionAst] -or
+        $args[0] -is [System.Management.Automation.Language.SubExpressionAst] }, $true))
     $valeurs = @($ast.FindAll({ $args[0] -is [System.Management.Automation.Language.CommandAst] }, $true) |
         ForEach-Object { $_.CommandElements } |
         ForEach-Object { if ($_ -is [System.Management.Automation.Language.StringConstantExpressionAst]) { $_.Value } else { $_.Extent.Text } })
-    return [pscustomobject]@{ Erreurs = @($erreurs).Count; Doubles = $doubles.Count; Valeurs = $valeurs }
+    return [pscustomobject]@{ Erreurs = @($erreurs).Count; Doubles = $doubles.Count; Parentheses = $parentheses.Count; Valeurs = $valeurs }
+}
+
+function Git-Essai([string[]] $Arguments) {
+    # git pour les faux clones de serveur, avec une identité d'essai. Un échec arrête le test.
+    $ea = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    $sortie = & git -c user.name=Essai -c user.email=essai@example.com @Arguments 2>&1 | Out-String
+    $code = $LASTEXITCODE
+    $ErrorActionPreference = $ea
+    if ($code -ne 0) { throw "git $($Arguments -join ' ') a échoué : $sortie" }
+}
+
+function New-FauxServeur([string] $Racine, [string] $Nom, [object[]] $Projets) {
+    # Un faux serveur dans $Racine : une origine nue (<nom>.git), née d'une graine dont main porte
+    # projets/<nom>.env pour chaque projet (Nom, Bloc), et son clone (<nom>), à jour. Rend le clone.
+    $graine  = Join-Path $Racine "$Nom-graine"
+    $origine = Join-Path $Racine "$Nom.git"
+    $clone   = Join-Path $Racine $Nom
+    New-Item -ItemType Directory -Path (Join-Path $graine 'projets') -Force | Out-Null
+    foreach ($p in $Projets) { [IO.File]::WriteAllText((Join-Path $graine "projets\$($p.Nom).env"), "NOM=$($p.Nom)`nBLOC_PORTS=$($p.Bloc)`n") }
+    Git-Essai @('init', '--quiet', '-b', 'main', $graine)
+    Git-Essai @('-C', $graine, 'add', '-A')
+    Git-Essai @('-C', $graine, 'commit', '--quiet', '-m', 'projets')
+    Git-Essai @('clone', '--quiet', '--bare', $graine, $origine)
+    Git-Essai @('clone', '--quiet', $origine, $clone)
+    return $clone
 }
 
 function Indice([object[]] $Liste, [string] $Motif, [switch] $Dernier) {
@@ -109,12 +142,12 @@ $sortie = Lancer-Enfant @('-Nom', 'Mauvais_Nom', '-Description', 'x', '-ABlanc')
 Verifier 'le message contient « minuscules »' ($sortie -match 'minuscules') $sortie
 Verifier 'aucune étape n''a commencé' ($sortie -notmatch 'préalables') $sortie
 # Le nom d'un dépôt de données est celui que le script donne lui-même au second dépôt.
-$sortie = Lancer-Enfant @('-Nom', 'essai-donnees', '-Description', 'x', '-Version', 'v0.1.0', '-ABlanc')
+$sortie = Lancer-Enfant @('-Nom', 'essai-donnees', '-Description', 'x', '-Version', 'v0.7.0', '-ABlanc')
 # Le message d'erreur est coupé à la largeur de la console : on compare sur des blancs réduits.
 Verifier 'nom en -donnees : refus' (($sortie -replace '\s+', ' ') -match 'r.serv. au d.p.t de donn.es') $sortie
 Verifier 'nom en -donnees : aucune étape n''a commencé' ($sortie -notmatch '\[1/\d+\]') $sortie
 # Le sous-domaine des données reprend le nom : copier refuse qu'il finisse par un tiret.
-$sortie = Lancer-Enfant @('-Nom', 'essai-', '-Description', 'x', '-Version', 'v0.1.0', '-ABlanc')
+$sortie = Lancer-Enfant @('-Nom', 'essai-', '-Description', 'x', '-Version', 'v0.7.0', '-ABlanc')
 Verifier 'nom qui finit par - : refus' (($sortie -replace '\s+', ' ') -match 'finir par un tiret') $sortie
 Verifier 'nom qui finit par - : aucune étape n''a commencé' ($sortie -notmatch '\[1/\d+\]') $sortie
 
@@ -123,7 +156,7 @@ Verifier 'nom qui finit par - : aucune étape n''a commencé' ($sortie -notmatch
 if (-not $sansPoste) {
 Write-Host 'A blanc'
 $cible = 'C:\src\github.com\EdouardZemb\essai-a-blanc'
-$sortie = Lancer-Enfant @('-Nom', 'essai-a-blanc', '-Description', 'Essai à blanc', '-Version', 'v0.1.0', '-ABlanc')
+$sortie = Lancer-Enfant @('-Nom', 'essai-a-blanc', '-Description', 'Essai à blanc', '-Version', 'v0.7.0', '-ABlanc')
 $attendu = @('préalables', 'copier copy', 'git init', 'premier commit',
              'gh repo create EdouardZemb/essai-a-blanc --public', 'réglages de fusion',
              'secret MOTIFS_INTERDITS', 'premier envoi', 'règle de protection', 'dossier .worktrees', "ligne d'index")
@@ -140,17 +173,17 @@ Verifier 'la commande copier porte --data fusion=session' ($sortie -match '--dat
 
 # ------------------------------------------------------------ fusion
 Write-Host 'Fusion'
-$sortieEdouard = Lancer-Enfant @('-Nom', 'essai-a-blanc', '-Description', 'Essai à blanc', '-Version', 'v0.1.0', '-Fusion', 'edouard', '-ABlanc')
+$sortieEdouard = Lancer-Enfant @('-Nom', 'essai-a-blanc', '-Description', 'Essai à blanc', '-Version', 'v0.7.0', '-Fusion', 'edouard', '-ABlanc')
 Verifier 'à blanc -Fusion edouard : le récapitulatif nomme la fusion' ($sortieEdouard -match 'fusion edouard') $sortieEdouard
 Verifier 'à blanc -Fusion edouard : la commande copier porte --data fusion=edouard' ($sortieEdouard -match '--data fusion=edouard') $sortieEdouard
-$sortieAutre = Lancer-Enfant @('-Nom', 'essai-a-blanc', '-Description', 'Essai à blanc', '-Version', 'v0.1.0', '-Fusion', 'autre', '-ABlanc')
+$sortieAutre = Lancer-Enfant @('-Nom', 'essai-a-blanc', '-Description', 'Essai à blanc', '-Version', 'v0.7.0', '-Fusion', 'autre', '-ABlanc')
 Verifier '-Fusion autre est refusé (ValidateSet)' ($sortieAutre -match 'Fusion' -and $sortieAutre -match 'session' -and $sortieAutre -match 'edouard') $sortieAutre
 Verifier '-Fusion autre : aucune étape n''a commencé' ($sortieAutre -notmatch 'préalables' -and $sortieAutre -notmatch 'copier copy') $sortieAutre
 }
 
 # ------------------------------------------------------------ fonctions, par point-source
 Write-Host 'Fonctions'
-. $script -Nom 'essai-fonctions' -Description 'Essai' -Version 'v0.1.0'
+. $script -Nom 'essai-fonctions' -Description 'Essai' -Version 'v0.7.0'
 Verifier 'Get-LigneIndex est chargée' ($null -ne (Get-Command Get-LigneIndex -ErrorAction SilentlyContinue))
 Verifier 'Add-LigneIndex est chargée' ($null -ne (Get-Command Add-LigneIndex -ErrorAction SilentlyContinue))
 Verifier 'Get-Etapes est chargée'     ($null -ne (Get-Command Get-Etapes -ErrorAction SilentlyContinue))
@@ -255,25 +288,23 @@ if ((Get-Command Get-LigneIndex -ErrorAction SilentlyContinue) -and (Get-Command
 }
 
 # ------------------------------------------------------------ les étapes, en trois formes
-# Un faux clone de serveur, dans un dossier temporaire : deux projets y prennent 4310 et 4320 ; un
-# second prend tous les blocs. Le vrai clone n'est jamais lu ici.
+# Un faux clone de serveur, dans un dossier temporaire : un vrai clone git, à jour de son origine
+# nue, où deux projets prennent 4310 et 4320 ; un second, un simple dossier, prend tous les blocs.
+# Le vrai clone n'est jamais lu ici.
 $racineFaux  = Join-Path ([IO.Path]::GetTempPath()) ("faux-serveur-{0}" -f [guid]::NewGuid())
-$fauxServeur = Join-Path $racineFaux 'serveur'
 $fauxPlein   = Join-Path $racineFaux 'plein'
 $cleTest1 = Fabriquer-Cle
 $cleTest2 = Fabriquer-Cle
 try {
-    New-Item -ItemType Directory -Path (Join-Path $fauxServeur 'projets') -Force | Out-Null
+    $fauxServeur = New-FauxServeur -Racine $racineFaux -Nom 'serveur' -Projets @(@{ Nom = 'a'; Bloc = 4310 }, @{ Nom = 'b'; Bloc = 4320 })
     New-Item -ItemType Directory -Path (Join-Path $fauxPlein 'projets') -Force | Out-Null
-    [IO.File]::WriteAllText((Join-Path $fauxServeur 'projets\a.env'), "NOM=a`nBLOC_PORTS=4310`n")
-    [IO.File]::WriteAllText((Join-Path $fauxServeur 'projets\b.env'), "NOM=b`nBLOC_PORTS=4320`n")
     [IO.File]::WriteAllText((Join-Path $fauxPlein 'projets\tous.env'), ((0..68 | ForEach-Object { "BLOC_PORTS=$(4310 + 10 * $_)" }) -join "`n"))
     $argsServeur = @{ Cible = 'serveur'; Domaine = 'exemple.org'; CleServeur = $cleTest1; CleHorsLigne = $cleTest2; RacineServeur = $fauxServeur }
     $etapesA = @(); $etapesB = @(); $etapesS = @()
 
     # -- aucune : le dépôt de code seul, les onze étapes d'aujourd'hui
     Write-Host 'Etapes : aucune'
-    try { . $script -Nom 'essai-fonctions' -Description 'Essai' -Version 'v0.1.0' } catch { Write-Host "  point-source : $_" -ForegroundColor Red }
+    try { . $script -Nom 'essai-fonctions' -Description 'Essai' -Version 'v0.7.0' } catch { Write-Host "  point-source : $_" -ForegroundColor Red }
     try { $etapesA = @(Get-Etapes) } catch { Write-Host "  Get-Etapes : $_" -ForegroundColor Red }
     $refusA = $null
     try { Assert-Parametres } catch { $refusA = $_.Exception.Message }
@@ -292,7 +323,7 @@ try {
 
     # -- aucune -Donnees : deux dépôts, les données en cible donnees
     Write-Host 'Etapes : aucune -Donnees'
-    try { . $script -Nom 'essai' -Description 'Essai' -Version 'v0.1.0' -Donnees -Fusion edouard } catch { Write-Host "  point-source : $_" -ForegroundColor Red }
+    try { . $script -Nom 'essai' -Description 'Essai' -Version 'v0.7.0' -Donnees -Fusion edouard } catch { Write-Host "  point-source : $_" -ForegroundColor Red }
     try { $etapesB = @(Get-Etapes) } catch { Write-Host "  Get-Etapes : $_" -ForegroundColor Red }
     Verifier 'aucune -Donnees : 21 étapes' ($etapesB.Count -eq 21) "$($etapesB.Count)"
     $creationsB = @($etapesB | Where-Object { $_.Description -like 'gh repo create*' })
@@ -306,7 +337,7 @@ try {
 
     # -- serveur : toujours les deux dépôts ; les données portent l'instance
     Write-Host 'Etapes : serveur'
-    try { . $script -Nom 'essai' -Description 'Essai' -Version 'v0.1.0' @argsServeur } catch { Write-Host "  point-source : $_" -ForegroundColor Red }
+    try { . $script -Nom 'essai' -Description 'Essai' -Version 'v0.7.0' @argsServeur } catch { Write-Host "  point-source : $_" -ForegroundColor Red }
     $refusS = $null
     try { Assert-Parametres } catch { $refusS = $_.Exception.Message }
     Verifier 'serveur : les paramètres passent, le bloc est le premier libre (4330)' ($null -eq $refusS -and $BlocPorts -eq 4330) "$refusS / bloc $BlocPorts"
@@ -336,7 +367,7 @@ try {
     Verifier 'serveur : chaque description nomme son dépôt (dix pour les données)' ($etapesS.Count -gt 0 -and $sansNom.Count -eq 0 -and $deDonnees.Count -eq 10) (($sansNom | ForEach-Object { $_.Description }) -join "`n")
     $sansSauv = ''
     try {
-        . $script -Nom 'essai' -Description 'Essai' -Version 'v0.1.0' -SansSauvegardes -BlocPorts 4330 @argsServeur
+        . $script -Nom 'essai' -Description 'Essai' -Version 'v0.7.0' -SansSauvegardes -BlocPorts 4330 @argsServeur
         $sansSauv = @(Get-Etapes | Where-Object { $_.Description -like 'copier copy*' })[0].Commande
     } catch { $sansSauv = "$_" }
     Verifier 'serveur -SansSauvegardes : sauvegardes=false' ($sansSauv -match '--data sauvegardes=false ') $sansSauv
@@ -351,16 +382,23 @@ try {
 
     # -- les commandes affichées se collent telles quelles dans PowerShell (« Reste à faire »)
     Write-Host 'Commandes à coller'
-    $descSpeciale = 'Un $HOME, une apostrophe inverse ` , l''apostrophe et des "guillemets"'
+    # PowerShell lit aussi ’ ‘ ‚ ‛ comme des apostrophes : écrites par leur code, pour que ce fichier
+    # n'ait pas à les doubler lui-même.
+    $typographiques = [string] [char] 0x2019 + [char] 0x2018 + [char] 0x201A + [char] 0x201B
+    $descSpeciale = 'Un $HOME, une apostrophe inverse ` , l''apostrophe, l' + [char] 0x2019 + 'outil, ' + $typographiques + ' et des "guillemets"'
     $etapesC = @()
-    try { . $script -Nom 'essai' -Description $descSpeciale -Version 'v0.1.0' -BlocPorts 4330 @argsServeur } catch { Write-Host "  point-source : $_" -ForegroundColor Red }
+    try { . $script -Nom 'essai' -Description $descSpeciale -Version 'v0.7.0' -BlocPorts 4330 @argsServeur } catch { Write-Host "  point-source : $_" -ForegroundColor Red }
     try { $etapesC = @(Get-Etapes) } catch { Write-Host "  Get-Etapes : $_" -ForegroundColor Red }
+    # Les préalables compris : leur commande se colle aussi, sans commentaire entre parenthèses.
     $malCollees = @()
-    foreach ($e in @($etapesC | Select-Object -Skip 1 | Where-Object { $_.Commande -ne '(aucune)' -and -not $_.Description.StartsWith("ligne d'index") })) {
+    foreach ($e in @($etapesC | Where-Object { $_.Commande -ne '(aucune)' -and -not $_.Description.StartsWith("ligne d'index") })) {
         $lu = Lire-Commande $e.Commande
-        if ($lu.Erreurs -or $lu.Doubles) { $malCollees += "$($e.Description) > $($e.Commande)" }
+        if ($lu.Erreurs -or $lu.Doubles -or $lu.Parentheses) { $malCollees += "$($e.Description) > $($e.Commande)" }
     }
-    Verifier 'chaque commande affichée se colle telle quelle (apostrophes simples, rien d''interpolé)' ($etapesC.Count -eq 21 -and $malCollees.Count -eq 0) ($malCollees -join "`n")
+    Verifier 'chaque commande affichée se colle telle quelle (apostrophes simples, rien d''interpolé, aucune parenthèse)' ($etapesC.Count -eq 21 -and $malCollees.Count -eq 0) ($malCollees -join "`n")
+    $erreurTypo = $null
+    try { $erreurTypo = (Lire-Commande ('Write-Output ' + (Format-Argument ('l' + $typographiques + 'outil')))).Valeurs } catch { $erreurTypo = "$_" }
+    Verifier 'Format-Argument : chaque apostrophe typographique est doublée, la valeur collée est entière' (@($erreurTypo).Count -eq 2 -and @($erreurTypo)[1] -ceq ('l' + $typographiques + 'outil')) (@($erreurTypo) -join ' | ')
     $descPassee = $descSpeciale -replace '"', '\"'
     $creationC = @($etapesC | Where-Object { $_.Description -like 'gh repo create*' }) | Select-Object -First 1
     $valeursGh = if ($creationC) { @((Lire-Commande $creationC.Commande).Valeurs) } else { @() }
@@ -380,7 +418,7 @@ try {
                      @{ PortApp = 8080 }, @{ CheminSante = '/sante' }, @{ SansSauvegardes = $true })) {
         $nomP = @($p.Keys)[0]
         $refusP = $null
-        try { . $script -Nom 'essai' -Description 'Essai' -Version 'v0.1.0' -Donnees @p; Assert-Parametres } catch { $refusP = $_.Exception.Message }
+        try { . $script -Nom 'essai' -Description 'Essai' -Version 'v0.7.0' -Donnees @p; Assert-Parametres } catch { $refusP = $_.Exception.Message }
         if (-not ($refusP -and $refusP.Contains("-$nomP") -and $refusP.Contains('Ajouter -Cible serveur'))) { $acceptes += "-$nomP : $refusP" }
     }
     Verifier 'aucune : chaque paramètre de serveur est refusé (Ajouter -Cible serveur)' ($acceptes.Count -eq 0) ($acceptes -join "`n")
@@ -403,7 +441,7 @@ try {
 
     # -- les refus, avant toute étape : dans un enfant, à blanc, sur le faux clone
     Write-Host 'Refus avant toute étape'
-    $baseEnfant = @('-Nom', 'essai', '-Description', 'Essai', '-Version', 'v0.1.0', '-Cible', 'serveur',
+    $baseEnfant = @('-Nom', 'essai', '-Description', 'Essai', '-Version', 'v0.7.0', '-Cible', 'serveur',
                     '-RacineCode', (Join-Path $racineFaux 'code'), '-RacineServeur', $fauxServeur, '-ABlanc')
     foreach ($cas in @(
             @{ Nom = 'serveur sans -Domaine';      Args = @('-CleServeur', $cleTest1, '-CleHorsLigne', $cleTest2);                          Attendu = '-Domaine est obligatoire' },
@@ -415,9 +453,52 @@ try {
         $sortie = Lancer-Enfant ($baseEnfant + $cas.Args)
         Verifier "$($cas.Nom) : refus avant toute étape" (($sortie -replace '\s+', ' ') -match [regex]::Escape($cas.Attendu) -and $sortie -notmatch '\[1/\d+\]') $sortie
     }
-    $sortie = Lancer-Enfant @('-Nom', 'essai', '-Description', 'Essai', '-Version', 'v0.1.0', '-Domaine', 'exemple.org',
+    # Un code privé en cible serveur : la chaîne à deux dépôts suppose un dépôt de code public.
+    $sortie = Lancer-Enfant ($baseEnfant + @('-Domaine', 'exemple.org', '-CleServeur', $cleTest1, '-CleHorsLigne', $cleTest2, '-Visibilite', 'prive'))
+    Verifier 'serveur -Visibilite prive : refus avant toute étape (la chaîne suppose un code public)' (($sortie -replace '\s+', ' ') -match 'code public' -and $sortie -notmatch '\[1/\d+\]') $sortie
+    $sortie = Lancer-Enfant @('-Nom', 'essai', '-Description', 'Essai', '-Version', 'v0.7.0', '-Domaine', 'exemple.org',
                               '-RacineCode', (Join-Path $racineFaux 'code'), '-ABlanc')
     Verifier 'aucune avec -Domaine : refus avant toute étape' (($sortie -replace '\s+', ' ') -match 'Ajouter -Cible serveur' -and $sortie -notmatch '\[1/\d+\]') $sortie
+    # Le script passe nature, cible_code et les réponses de l'instance : v0.7.0 au moins.
+    $sortie = Lancer-Enfant @('-Nom', 'essai', '-Description', 'Essai', '-Version', 'v0.6.0', '-RacineCode', (Join-Path $racineFaux 'code'), '-ABlanc')
+    Verifier '-Version v0.6.0 : refus avant toute étape' (($sortie -replace '\s+', ' ') -match 'v0\.7\.0 ou plus' -and $sortie -notmatch '\[1/\d+\]') $sortie
+    # Un nom que la déclaration de serveur refuserait, une fois les deux dépôts nés.
+    $sortie = Lancer-Enfant @('-Nom', 'serveur-essai', '-Description', 'Essai', '-Version', 'v0.7.0', '-Cible', 'serveur', '-Domaine', 'exemple.org',
+                              '-CleServeur', $cleTest1, '-CleHorsLigne', $cleTest2, '-RacineCode', (Join-Path $racineFaux 'code'), '-RacineServeur', $fauxServeur, '-ABlanc')
+    Verifier 'serveur-essai en cible serveur : refus avant toute étape' (($sortie -replace '\s+', ' ') -match 'serveur-essai.{1,6}refus' -and $sortie -notmatch '\[1/\d+\]') $sortie
+
+    # -- Assert-Version
+    Write-Host 'Assert-Version'
+    $versionsRefusees = @()
+    foreach ($v in @('v0.7.0', 'v0.7.2', 'v0.10.0', 'v1.0.0', 'HEAD', '3b6a71a')) {
+        try { Assert-Version $v } catch { $versionsRefusees += "$v : $($_.Exception.Message)" }
+    }
+    Verifier 'Assert-Version : v0.7.0 et après passent, une autre forme aussi (HEAD, un SHA)' ($versionsRefusees.Count -eq 0) ($versionsRefusees -join "`n")
+    $versionsAcceptees = @()
+    foreach ($v in @('v0.6.9', 'v0.2.0', 'v0.1.0')) {
+        $refusV = $null
+        try { Assert-Version $v } catch { $refusV = $_.Exception.Message }
+        if (-not ($refusV -and $refusV.Contains('v0.7.0'))) { $versionsAcceptees += $v }
+    }
+    Verifier 'Assert-Version : avant v0.7.0, un refus qui dit v0.7.0' ($versionsAcceptees.Count -eq 0) ($versionsAcceptees -join ', ')
+
+    # -- une session de Claude Code (CLAUDECODE posé) ne lance le script qu'à blanc
+    # Le testeur ne lance jamais d'enfant sans -ABlanc, sauf ici : -Domaine hors cible serveur, un
+    # index et une liste absents feraient refuser l'enfant avant toute étape, même sans ce garde.
+    Write-Host 'Session de Claude Code'
+    $claudeAvant = [Environment]::GetEnvironmentVariable('CLAUDECODE', 'Process')
+    $argsSession = @('-Nom', 'essai', '-Description', 'Essai', '-Version', 'v0.7.0', '-Domaine', 'exemple.org',
+                     '-RacineCode', (Join-Path $racineFaux 'code'), '-Index', (Join-Path $racineFaux 'index-absent.md'),
+                     '-Motifs', (Join-Path $racineFaux 'motifs-absents.txt'))
+    try {
+        [Environment]::SetEnvironmentVariable('CLAUDECODE', '1', 'Process')
+        $sortieReelle = Lancer-Enfant $argsSession
+        $sortieABlanc = Lancer-Enfant ($argsSession + '-ABlanc')
+    } finally {
+        [Environment]::SetEnvironmentVariable('CLAUDECODE', $claudeAvant, 'Process')
+    }
+    Verifier 'CLAUDECODE sans -ABlanc : refus avant toute étape, le lancement réel est à Edouard' (($sortieReelle -replace '\s+', ' ') -match 'lancement r.el est . Edouard' -and $sortieReelle -notmatch 'Ajouter -Cible serveur' -and $sortieReelle -notmatch '\[1/\d+\]') $sortieReelle
+    Verifier 'CLAUDECODE avec -ABlanc : le garde laisse passer (refus plus loin, par les paramètres)' (($sortieABlanc -replace '\s+', ' ') -match 'Ajouter -Cible serveur' -and $sortieABlanc -notmatch 'lancement r.el') $sortieABlanc
 
     # -- Get-BlocLibre, sur le faux clone
     Write-Host 'Get-BlocLibre'
@@ -430,6 +511,56 @@ try {
     $erreurAbsent = $null
     try { $null = Get-BlocLibre (Join-Path $racineFaux 'absent') } catch { $erreurAbsent = $_ }
     Verifier 'Get-BlocLibre : un clone illisible, une erreur' ($null -ne $erreurAbsent -and "$erreurAbsent" -match 'serveur') "$erreurAbsent"
+
+    # -- les blocs et les noms pris : origin/main après un fetch, l'arbre de travail, les voisins
+    # Un clone en retard d'une déclaration fusionnée (c-long, 4330), une déclaration en cours dans
+    # son arbre de travail (d, 4350), un dépôt de données voisin né mais pas encore déclaré (4340).
+    Write-Host 'Blocs et noms pris'
+    $racineVoisins = Join-Path $racineFaux 'voisins'
+    $fauxRetard = New-FauxServeur -Racine $racineVoisins -Nom 'serveur' -Projets @(@{ Nom = 'a'; Bloc = 4310 }, @{ Nom = 'b'; Bloc = 4320 })
+    $fauxHorsLigne = Join-Path $racineVoisins 'hors-ligne'
+    Git-Essai @('clone', '--quiet', (Join-Path $racineVoisins 'serveur.git'), $fauxHorsLigne)
+    $poussoir = Join-Path $racineVoisins 'poussoir'
+    Git-Essai @('clone', '--quiet', (Join-Path $racineVoisins 'serveur.git'), $poussoir)
+    [IO.File]::WriteAllText((Join-Path $poussoir 'projets\c-long.env'), "NOM=c-long`nBLOC_PORTS=4330`n")
+    Git-Essai @('-C', $poussoir, 'add', '-A')
+    Git-Essai @('-C', $poussoir, 'commit', '--quiet', '-m', 'c-long')
+    Git-Essai @('-C', $poussoir, 'push', '--quiet', 'origin', 'main')
+    [IO.File]::WriteAllText((Join-Path $fauxRetard 'projets\d.env'), "NOM=d`nBLOC_PORTS=4350`n")
+    New-Item -ItemType Directory -Path (Join-Path $racineVoisins 'e-donnees') -Force | Out-Null
+    [IO.File]::WriteAllText((Join-Path $racineVoisins 'e-donnees\.copier-answers.yml'), "cible: donnees`ncible_code: serveur`nbloc_ports: 4340`nnom: e-donnees`n")
+    # Sans réseau : l'origine du clone est introuvable, son origin/main est celle de son clonage.
+    Git-Essai @('-C', $fauxHorsLigne, 'remote', 'set-url', 'origin', (Join-Path $racineVoisins 'absente.git'))
+
+    $flux = @()
+    try { $flux = @(Get-BlocLibre $fauxRetard 6>&1) } catch { $flux = @("$_") }
+    $blocRetard = @($flux | Where-Object { $_ -is [int] })
+    Verifier 'Get-BlocLibre : les blocs de origin/main (après un fetch), de l''arbre de travail et des données voisines sont pris (4360)' ($blocRetard.Count -eq 1 -and $blocRetard[0] -eq 4360) (@($flux | ForEach-Object { "$_" }) -join "`n")
+    Verifier 'le fetch ne touche pas l''arbre de travail du clone (témoin)' (-not (Test-Path -LiteralPath (Join-Path $fauxRetard 'projets\c-long.env')))
+    foreach ($cas in @(@{ Bloc = 4330; Quoi = 'déclaré sur GitHub seulement' }, @{ Bloc = 4340; Quoi = 'd''un dépôt de données voisin' }, @{ Bloc = 4350; Quoi = 'déclaré dans l''arbre de travail seulement' })) {
+        $refusB = $null
+        try { Assert-BlocLibre -RacineServeur $fauxRetard -Bloc $cas.Bloc } catch { $refusB = $_.Exception.Message }
+        Verifier "Assert-BlocLibre : un bloc $($cas.Quoi) est refusé ($($cas.Bloc))" ($refusB -and $refusB.Contains("$($cas.Bloc)")) "$refusB"
+    }
+    $flux = @()
+    try { $flux = @(Get-BlocLibre $fauxHorsLigne 6>&1) } catch { $flux = @("$_") }
+    $blocHorsLigne = @($flux | Where-Object { $_ -is [int] })
+    $texteHorsLigne = (@($flux | Where-Object { $_ -isnot [int] } | ForEach-Object { "$_" }) -join "`n")
+    Verifier 'fetch impossible : un avertissement, et l''origin/main du dernier fetch est lue (4330)' ($blocHorsLigne.Count -eq 1 -and $blocHorsLigne[0] -eq 4330 -and $texteHorsLigne -match 'Avertissement' -and $texteHorsLigne -match 'fetch') (@($flux | ForEach-Object { "$_" }) -join "`n")
+
+    # Les noms que la déclaration de serveur refuserait (sonde/projets.py) : serveur et serveur-…,
+    # un projet déjà déclaré, un préfixe ou un prolongement d'un projet déclaré, suivi d'un tiret.
+    $nomsAcceptes = @()
+    foreach ($cas in @(@{ Nom = 'serveur'; Quoi = 'serveur' }, @{ Nom = 'serveur-x'; Quoi = 'serveur-' }, @{ Nom = 'b'; Quoi = 'b' },
+                       @{ Nom = 'a-mobile'; Quoi = 'a' }, @{ Nom = 'c'; Quoi = 'c-long' }, @{ Nom = 'd-x'; Quoi = 'd' })) {
+        $refusN = $null
+        try { Assert-NomServeur -Nom $cas.Nom -RacineServeur $fauxRetard } catch { $refusN = $_.Exception.Message }
+        if (-not ($refusN -and $refusN.Contains($cas.Nom) -and $refusN.Contains($cas.Quoi))) { $nomsAcceptes += "$($cas.Nom) : $refusN" }
+    }
+    Verifier 'Assert-NomServeur : serveur, serveur-x, un projet déclaré, un préfixe (sur GitHub seulement) ou un prolongement sont refusés' ($nomsAcceptes.Count -eq 0) ($nomsAcceptes -join "`n")
+    $refusCc = $null
+    try { Assert-NomServeur -Nom 'cc' -RacineServeur $fauxRetard } catch { $refusCc = $_.Exception.Message }
+    Verifier 'Assert-NomServeur : un nom sans chevauchement passe (cc)' ($null -eq $refusCc) "$refusCc"
 
     # -- Invoke-Etapes, sur de fausses étapes
     Write-Host 'Invoke-Etapes'
@@ -451,24 +582,93 @@ try {
     try { $flux = @(Invoke-Etapes -Etapes $locales 6>&1) } catch { $flux = @("$_") }
     $texteInv = (@($flux | Where-Object { $_ -isnot [int] } | ForEach-Object { "$_" }) -join "`n")
     Verifier 'Invoke-Etapes : un échec avant toute étape GitHub n''affiche pas de reste' ($texteInv.Contains('ECHEC') -and -not $texteInv.Contains('Reste à faire')) $texteInv
+    # Un échec local après un rendu : les dossiers rendus restent, et une relance les refuserait aux
+    # préalables. La sortie les nomme, avec la commande qui les supprime.
+    $renduA = Join-Path $racineFaux 'rendu-a'
+    $renduB = Join-Path $racineFaux 'rendu-b'
+    $apresRendu = @(
+        [pscustomobject]@{ Description = 'préalables'; Commande = 'commande-pre'; Action = { }; Ctx = @{ chemins = @($renduA, $renduB) }; GitHub = $false },
+        [pscustomobject]@{ Description = 'rendu a'; Commande = 'commande-a'; Action = { New-Item -ItemType Directory -Path $script:Ctx.chemin -Force | Out-Null }; Ctx = @{ chemin = $renduA }; GitHub = $false },
+        [pscustomobject]@{ Description = 'rendu b'; Commande = 'commande-b'; Action = { New-Item -ItemType Directory -Path $script:Ctx.chemin -Force | Out-Null; throw 'boum' }; Ctx = @{ chemin = $renduB }; GitHub = $false },
+        [pscustomobject]@{ Description = 'distante'; Commande = 'commande-distante'; Action = { }; Ctx = @{ chemin = $renduA }; GitHub = $true })
+    $flux = @()
+    try { $flux = @(Invoke-Etapes -Etapes $apresRendu 6>&1) } catch { $flux = @("$_") }
+    $texteInv = (@($flux | Where-Object { $_ -isnot [int] } | ForEach-Object { "$_" }) -join "`n")
+    $suppressions = @($renduA, $renduB | ForEach-Object { "Remove-Item -LiteralPath $(Format-Argument $_) -Recurse -Force" })
+    Verifier 'Invoke-Etapes : un échec local nomme les dossiers rendus, et la commande qui supprime chacun' ($texteInv.Contains($suppressions[0]) -and $texteInv.Contains($suppressions[1]) -and $texteInv.Contains("Rien n'est sur GitHub") -and $texteInv.Contains('relancer') -and -not $texteInv.Contains('Reste à faire')) $texteInv
+    # Un refus des préalables : le dossier qui existait avant le lancement n'est pas à supprimer.
+    $refusPrealables = @(
+        [pscustomobject]@{ Description = 'préalables'; Commande = 'commande-pre'; Action = { throw 'Le dossier cible existe déjà' }; Ctx = @{ chemins = @($renduA) }; GitHub = $false })
+    $flux = @()
+    try { $flux = @(Invoke-Etapes -Etapes $refusPrealables 6>&1) } catch { $flux = @("$_") }
+    $texteInv = (@($flux | Where-Object { $_ -isnot [int] } | ForEach-Object { "$_" }) -join "`n")
+    Verifier 'Invoke-Etapes : un refus des préalables ne fait supprimer aucun dossier' ($texteInv.Contains('ECHEC') -and (Test-Path -LiteralPath $renduA) -and -not $texteInv.Contains('Remove-Item')) $texteInv
 
-    # -- rendu réel, cible serveur : copier seul, les deux dépôts, dans un dossier temporaire
+    # -- rendu réel, cible serveur : le local des deux dépôts (rendu, git init, premier commit, avec
+    # les hooks du projet rendu), dans un dossier temporaire ; aucune étape GitHub n'est jouée.
     # Le script passe nature (v0.6.0) et les réponses du dépôt de données d'un projet serveur
-    # (v0.7.0) : sans -SansPoste, on rend v0.7.0, la première version qui les a.
-    Write-Host 'Rendu serveur (copier copy seul, dossier temporaire)'
+    # (v0.7.0) : sans -SansPoste, on rend v0.7.0, la première version qui les a, du modèle sur
+    # GitHub ; un -SourceModele local rend sa tête.
     $versionRenduServeur = if ($versionTest) { $versionTest } else { 'v0.7.0' }
+    Write-Host "Rendu serveur (le local seulement, modèle $versionRenduServeur, dossier temporaire)"
     $racineRenduServeur = Join-Path $racineFaux 'rendu'
-    $erreurRendu = $null
+    # Une liste privée d'essai, hors du chemin par défaut : elle refuse la description du code. Une
+    # autre liste dans MOTIFS_INTERDITS : la porte du premier commit doit lire celle de -Motifs.
+    $motifsEssai = Join-Path $racineFaux 'motifs-essai.txt'
+    [IO.File]::WriteAllText($motifsEssai, "# liste d'essai`ntémoinprivé`n", [Text.UTF8Encoding]::new($false))
+    $envRendu = [ordered]@{ GIT_AUTHOR_NAME = 'Essai'; GIT_AUTHOR_EMAIL = 'essai@example.com'; GIT_COMMITTER_NAME = 'Essai'; GIT_COMMITTER_EMAIL = 'essai@example.com'; MOTIFS_INTERDITS = 'sentinelle-du-testeur' }
+    $envAvant = @{}
+    foreach ($k in $envRendu.Keys) { $envAvant[$k] = [Environment]::GetEnvironmentVariable($k, 'Process') }
+    $erreurRendu = $null; $texteRefus = ''; $codeRefus = @(); $sentinelleApresRefus = $null; $erreurCommits = $null
+    $etapesLocales = @()
     try {
-        . $script -Nom 'essai' -Description 'Essai' -Version $versionRenduServeur -SourceModele $sourceTest -RacineCode $racineRenduServeur @argsServeur
+        foreach ($k in $envRendu.Keys) { [Environment]::SetEnvironmentVariable($k, $envRendu[$k], 'Process') }
+        . $script -Nom 'essai' -Description 'Essai du Témoinprivé' -Version $versionRenduServeur -SourceModele $sourceTest -RacineCode $racineRenduServeur -Motifs $motifsEssai @argsServeur
         Assert-Parametres
-        foreach ($e in @(Get-Etapes | Where-Object { $_.Description -like 'copier copy*' })) {
-            $script:Ctx = $e.Ctx
-            $null = & $e.Action
-        }
+        $etapesR = @(Get-Etapes)
+        $dernierLocal = Indice $etapesR 'premier commit' -Dernier
+        if ($dernierLocal -gt 0) { $etapesLocales = @($etapesR[1..$dernierLocal]) }
+        # Garde-fou du test : six étapes locales, aucune sur GitHub.
+        if ($etapesLocales.Count -ne 6 -or @($etapesLocales | Where-Object { $_.GitHub }).Count) { throw "étapes locales inattendues : $(@($etapesLocales | ForEach-Object { $_.Description }) -join ' / ')" }
+        $flux = @(Invoke-Etapes -Etapes $etapesLocales 6>&1)
+        $codeRefus  = @($flux | Where-Object { $_ -is [int] })
+        $texteRefus = (@($flux | Where-Object { $_ -isnot [int] } | ForEach-Object { "$_" }) -join "`n")
+        $sentinelleApresRefus = [Environment]::GetEnvironmentVariable('MOTIFS_INTERDITS', 'Process')
     } catch { $erreurRendu = $_.Exception.Message }
     $dossierCode    = "$script:Chemin"
     $dossierDonnees = "$script:CheminDonnees"
+    Verifier 'rendu serveur : la porte du premier commit lit la liste de -Motifs, hors du chemin par défaut (refus)' ($codeRefus.Count -eq 1 -and $codeRefus[0] -eq 1 -and $texteRefus.Contains('ECHEC') -and $texteRefus.Contains('premier commit (essai)')) "$erreurRendu`n$texteRefus"
+    Verifier 'rendu serveur : MOTIFS_INTERDITS est rendue telle quelle après le premier commit' ($sentinelleApresRefus -ceq 'sentinelle-du-testeur') "$sentinelleApresRefus"
+    $suppressionsR = @($dossierCode, $dossierDonnees | ForEach-Object { "Remove-Item -LiteralPath $(Format-Argument $_) -Recurse -Force" })
+    Verifier 'rendu serveur : l''échec local nomme les deux dossiers rendus, à supprimer avant de relancer' ($texteRefus.Contains($suppressionsR[0]) -and $texteRefus.Contains($suppressionsR[1]) -and $texteRefus.Contains("Rien n'est sur GitHub")) $texteRefus
+    # La liste corrigée, le premier commit des deux dépôts passe : les modes y sont ceux du modèle.
+    try {
+        [IO.File]::WriteAllText($motifsEssai, "# liste d'essai`nmotif-temoin-absent`n", [Text.UTF8Encoding]::new($false))
+        $premier = Indice $etapesLocales 'premier commit'
+        if ($premier -lt 0) { throw 'premier commit introuvable' }
+        foreach ($e in @($etapesLocales[$premier..($etapesLocales.Count - 1)])) {
+            $script:Ctx = $e.Ctx
+            $null = & $e.Action
+        }
+    } catch { $erreurCommits = $_.Exception.Message }
+    Verifier 'rendu serveur : avec une liste qui ne refuse rien, le premier commit des deux dépôts passe' ($null -eq $erreurCommits) "$erreurCommits"
+    $modes = @{}
+    foreach ($d in @($dossierCode, $dossierDonnees)) {
+        $modes[$d] = @()
+        if ($d -and (Test-Path -LiteralPath (Join-Path $d '.git'))) {
+            $modes[$d] = @(& git -C $d ls-files -s | Where-Object { $_ -match '^100755 ' } | ForEach-Object { ($_ -split "`t", 2)[1] } | Sort-Object)
+        }
+    }
+    $attendusCode = @(); $attendusDonnees = @()
+    try { $attendusCode = @(Get-Executables -Cible serveur -Sauvegardes $true | Sort-Object); $attendusDonnees = @(Get-Executables -Cible donnees -Sauvegardes $false | Sort-Object) } catch { }
+    Verifier 'rendu serveur : le code enregistre en 100755 les chemins que le modèle y porte' ($attendusCode.Count -gt 3 -and (($modes[$dossierCode] -join "`n") -ceq ($attendusCode -join "`n"))) "obtenus : $($modes[$dossierCode] -join ', ')`nattendus : $($attendusCode -join ', ')"
+    Verifier 'rendu serveur : les données n''enregistrent en 100755 que les hooks' (($modes[$dossierDonnees] -join "`n") -ceq ($attendusDonnees -join "`n") -and $attendusDonnees.Count -eq 3) "obtenus : $($modes[$dossierDonnees] -join ', ')"
+    foreach ($k in $envAvant.Keys) { [Environment]::SetEnvironmentVariable($k, $envAvant[$k], 'Process') }
+    $erreurVide = $null
+    $motifsVide = Join-Path $racineFaux 'motifs-vide.txt'
+    [IO.File]::WriteAllText($motifsVide, " `n", [Text.UTF8Encoding]::new($false))
+    try { $null = Invoke-PremierCommit -Chemin $dossierCode -Message 'chore: essai' -Motifs $motifsVide } catch { $erreurVide = $_.Exception.Message }
+    Verifier 'Invoke-PremierCommit : une liste vide est refusée (la porte en lirait une autre)' ($erreurVide -match 'vide') "$erreurVide"
     $reponsesCode    = if ($dossierCode)    { Join-Path $dossierCode '.copier-answers.yml' } else { '' }
     $reponsesDonnees = if ($dossierDonnees) { Join-Path $dossierDonnees '.copier-answers.yml' } else { '' }
     $texteCode    = if ($reponsesCode -and (Test-Path -LiteralPath $reponsesCode)) { [IO.File]::ReadAllText($reponsesCode) } else { '' }
@@ -482,9 +682,9 @@ try {
 
 # ------------------------------------------------------------ rendu réel de la fusion
 # Seule l'étape « copier copy » est exécutée, dans un dossier temporaire ; rien ne part sur GitHub.
-# v0.1.0 n'a pas la question « fusion » : on rend v0.2.0, la première version qui l'a.
-Write-Host 'Rendu de la fusion (copier copy seul, dossier temporaire)'
-$versionRendu = if ($versionTest) { $versionTest } else { 'v0.2.0' }
+# Le script refuse une version antérieure à v0.7.0 : on rend v0.7.0, comme pour la cible serveur.
+$versionRendu = if ($versionTest) { $versionTest } else { 'v0.7.0' }
+Write-Host "Rendu de la fusion (copier copy seul, modèle $versionRendu, dossier temporaire)"
 $racineRendu = Join-Path ([IO.Path]::GetTempPath()) ("rendu-fusion-{0}" -f [guid]::NewGuid())
 try {
     foreach ($cas in @(@{ Nom = 'essai-fusion-edouard'; Args = @{ Fusion = 'edouard' }; Attendu = 'edouard' },
