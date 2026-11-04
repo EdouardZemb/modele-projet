@@ -155,9 +155,21 @@ def chemins_examines(racine: Path) -> tuple[str, ...]:
 
 
 def fichiers_masques(racine: Path, chemins: tuple[str, ...]) -> list[str]:
-    """Les fichiers du modèle présents sur le disque que le .gitignore masque, triés."""
+    """Les fichiers du modèle présents sur le disque que le .gitignore masque, triés.
+
+    `--glob-pathspecs` : un `*` ne franchit pas un `/`, comme dans un .gitignore. Sans lui,
+    `secrets/*.env.enc` prendrait aussi `secrets/sous/x.env.enc`. Un chemin sans motif vaut
+    toujours pour ce qu'il contient."""
     sortie = _git_ok(
-        racine, "ls-files", "--others", "--ignored", "--exclude-standard", "-z", "--", *chemins
+        racine,
+        "--glob-pathspecs",
+        "ls-files",
+        "--others",
+        "--ignored",
+        "--exclude-standard",
+        "-z",
+        "--",
+        *chemins,
     )
     noms = [n for n in sortie.split("\0") if n]
     return sorted(n for n in noms if "__pycache__" not in n.split("/") and not n.endswith(".pyc"))

@@ -322,6 +322,20 @@ def test_depot_de_donnees_garde_ce_qu_il_peut_ignorer(depot_masque, env):
     assert masques.main(["--racine", str(depot_masque)]) == 0
 
 
+def test_motifs_de_l_instance_au_premier_niveau(depot_masque, env):
+    """`secrets/*.env.enc` et `cles/*.pub` ne valent qu'au premier niveau de leur dossier, comme le
+    .gitignore semé et `.sops.yaml` : ce que le .gitignore semé masque exprès sous `secrets/sous/`,
+    ou un ancien dossier de clés, n'est pas examiné."""
+    (depot_masque / GERE).unlink()
+    ecrire(depot_masque, ".gitignore", "secrets/*\n!secrets/*.env.enc\ncles/ancien/\n")
+    for chemin in ("secrets/sous/prod.env.enc", "cles/ancien/vieux.pub", "secrets/prod.env.enc"):
+        ecrire(depot_masque, chemin)
+    ecrire(depot_masque, ".copier-answers.yml", "cible: donnees\ncible_code: serveur\n")
+    git(depot_masque, env, "add", ".copier-answers.yml")
+    assert masques.main(["--racine", str(depot_masque)]) == 0
+    assert masques.fichiers_masques(depot_masque, masques.chemins_examines(depot_masque)) == []
+
+
 def test_depot_de_donnees_sans_serveur(depot_masque, env):
     """Sans `cible_code: serveur`, le dépôt de données n'a pas d'instance à examiner, mais ses deux
     README.md restent du modèle."""
@@ -394,13 +408,14 @@ def test_chemins_couvrent_methode():
 
 def couvert(fichier: str, chemins) -> bool:
     """Vrai si un chemin de la liste couvre `fichier` : un dossier (`…/`) couvre ce qu'il contient,
-    un motif `*` se compare par fnmatch, tout autre chemin se compare tel quel."""
+    un motif `*` se compare par fnmatch sans franchir un `/`, comme la porte le lit
+    (`--glob-pathspecs`), tout autre chemin se compare tel quel."""
     for chemin in chemins:
         if chemin.endswith("/"):
             if fichier.startswith(chemin):
                 return True
         elif "*" in chemin:
-            if fnmatch.fnmatchcase(fichier, chemin):
+            if fichier.count("/") == chemin.count("/") and fnmatch.fnmatchcase(fichier, chemin):
                 return True
         elif fichier == chemin:
             return True
