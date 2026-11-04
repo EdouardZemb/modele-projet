@@ -11,9 +11,11 @@
     commit) se fait avant tout geste sur GitHub.
 
     C'est Edouard qui le lance pour de vrai (création de dépôt, secret, règle : ses décisions).
-    Une session ne le lance qu'avec -ABlanc : seules des lectures sont faites, chaque étape est
-    décrite et sa commande affichée sans être exécutée. Sous Claude Code (CLAUDECODE posé), un
-    lancement sans -ABlanc est refusé avant toute étape.
+    Une session ne le lance qu'avec -ABlanc : chaque étape est décrite et sa commande affichée
+    sans être exécutée. À blanc, le script ne fait que des lectures, et, en cible serveur, un
+    git fetch dans le clone local de serveur, qui met à jour ses références origin/* et jamais son
+    arbre de travail. Sous Claude Code (CLAUDECODE posé), un lancement sans -ABlanc est refusé
+    avant toute étape.
 
     Usage :
       .\Nouveau-Projet.ps1 -Nom mon-outil -Description "Ce que fait l'outil"
@@ -110,7 +112,8 @@ param(
 
     [string] $RacineCode = 'C:\src',
 
-    # Le clone local de serveur, lu seulement. Absent : <RacineCode>\github.com\EdouardZemb\serveur.
+    # Le clone local de serveur : lu, après un git fetch qui ne touche que ses références origin/*.
+    # Absent : <RacineCode>\github.com\EdouardZemb\serveur.
     [string] $RacineServeur,
 
     [string] $Index = (Join-Path $HOME 'Documents\INDEX-PROJETS.md'),
@@ -566,7 +569,8 @@ function Get-Etapes {
 
     $etapes = @()
 
-    # 1. préalables : des lectures seulement, les seules faites à blanc
+    # 1. préalables, les seuls faits à blanc : des lectures, et, en cible serveur, le git fetch du
+    #    clone de serveur (ses références origin/* seulement)
     $chemins  = @($depots | ForEach-Object { $_.chemin })
     $distants = @($depots | ForEach-Object { $_.depot })
     $ctxPre = $commun.Clone()
