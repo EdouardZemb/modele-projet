@@ -1427,7 +1427,7 @@ def test_m0006_dit_l_etiquette_de_donnees_apres_un_retour():
         assert fragment in plat, fragment
 
 
-# Décision par défaut du lot 13, en attente d'Edouard : en cible `serveur`, le dépôt de code est
+# Décision du lot 13, acceptée par Edouard : en cible `serveur`, le dépôt de code est
 # public, puisque la chaîne à deux dépôts le suppose. La CI du dépôt de données le clone sans jeton
 # et tire ses images en anonyme.
 def test_m0006_en_cible_serveur_le_depot_de_code_est_public():
