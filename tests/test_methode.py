@@ -1,5 +1,6 @@
 """Les fichiers gérés de la méthode : méthode, ADR hérités, /consigner, modèles."""
 
+import ast
 import re
 
 import pytest
@@ -309,7 +310,41 @@ def test_garde_fous_dit_la_porte_des_masques():
     section = " ".join(lire(METHODE).split("## Les garde-fous", 1)[1].split("\n## ", 1)[0].split())
     ligne = section.split("| hook git `pre-commit` |", 1)[1].split("| hook git `commit-msg`", 1)[0]
     assert "`.copier-answers.yml`" in ligne
-    assert "refus d'un fichier du modèle que le `.gitignore` du projet masque" in ligne
+    # Correctif #94 : la porte examine aussi les secrets chiffrés, selon la cible, et en cible
+    # `serveur`, à un dépôt seulement (M-0002, amendement du 2026-11-04 ; #95, ronde 3).
+    assert (
+        "refus d'un fichier du modèle, ou d'un secret chiffré que la chaîne lit (en cible "
+        "`donnees`, sauf `cible_code: aucune`, `secrets/*.env.enc` ; en cible `serveur` à un "
+        "dépôt, de nature `donnees`, `deploiement/secrets/*.env.enc`), que le `.gitignore` du "
+        "projet masque"
+    ) in ligne
+    assert "dans un dépôt de données, d'un secret chiffré" not in ligne
+    # Le principe du remède, et ses trois formes, sans la liste des cas d'avant (#95, ronde 2).
+    for fragment in (
+        "un dossier du modèle exclu se lève par `!/<dossier>/`",
+        (
+            "un dossier mixte, où un fichier local peut vivre à côté d'un fichier examiné, se lève, "
+            "en exclut le contenu, puis n'admet que ce qu'elle y examine (`!/cles/`, `/cles/*` puis "
+            "`!/cles/*.pub`), et un ancêtre exclu, de même, suivi des lignes de ses dossiers"
+        ),
+        "sous un `.gitignore` imbriqué, ces lignes partent de son dossier",
+        # Ce qui reste masqué, sans promettre plus que le code (#95, ronde 3).
+        (
+            "Ce que la porte n'examine pas reste masqué, sans refus : dans un dossier mixte, un "
+            "secret en clair, une clé privée ou un fichier local ; sous un ancêtre levé, un semé du "
+            "projet (`docs/cadrage.md` sous `docs/`). Sous un dossier du modèle, tout fichier est "
+            "du modèle, sauf un dossier de secrets ou de clés imbriqué, ou un cache Python : un "
+            "autre fichier local posé là, même un `.env`, est refusé comme fichier du modèle"
+        ),
+    ):
+        assert fragment in ligne, fragment
+    for ancien in (
+        "Exclu, ce dossier se lève par",
+        "un dossier exclu qui en contient un",
+        "`!secrets/`",
+        "Un secret en clair, une clé privée ou un fichier local restent ainsi masqués",
+    ):
+        assert ancien not in ligne, ancien
     # La phrase des masqués vient après celle de la confidentialité : placée avant, elle se lirait
     # comme si la porte des masqués n'avertissait que dans un dépôt privé et tournait en CI.
     assert ligne.index("au hook comme en CI") < ligne.index("Au commit d'un alignement")
@@ -408,15 +443,111 @@ def test_m0002_amende():
     assert "étiquette" in texte
     # les amendements, dans l'ordre chronologique
     dates = re.findall(r"^- \*\*Amendé\*\* le (\S+),", texte, flags=re.MULTILINE)
-    assert dates == ["2026-10-17", "2026-10-18", "2026-10-27", "2026-10-29", "2026-10-29"]
+    assert dates == [
+        "2026-10-17",
+        "2026-10-18",
+        "2026-10-27",
+        "2026-10-29",
+        "2026-10-29",
+        "2026-11-04",
+    ]
     assert (
         "- **Amendé** le 2026-10-29, avec le lot 11 : la porte suit la nature du dépôt, de code ou "
         "de données (M-0006)"
     ) in texte
-    # le remède des masqués, tel que masques.py le prescrit
+    # le remède des masqués, tel que masques.py le prescrit : des lignes ancrées (#95, ronde 2)
     texte = " ".join(texte.split())
-    assert "ou `!<dossier>/` quand un dossier parent est exclu" in texte
-    assert "le masque d'un fichier de secrets ne se lève jamais" in texte
+    assert "ou `!<dossier>/` quand un dossier parent est exclu" not in texte
+    assert (
+        "`!/<chemin>`, ou les lignes du plus haut dossier exclu, car git ne regarde pas dans un "
+        "dossier exclu"
+    ) in texte
+    # Correctif #94 : un secret chiffré entre ; seul le masque d'un secret en clair ne se lève pas.
+    assert "le masque d'un fichier de secrets ne se lève jamais" not in texte
+    assert "le masque d'un secret en clair ne se lève jamais" in texte
+    # Sous un dossier du modèle, seul un cache Python s'en sort (#95, ronde 4).
+    assert "un fichier local s'en sort" not in texte
+    assert (
+        "ou un cache Python : un autre fichier local posé là, même un `.env`, est refusé comme "
+        "fichier du modèle. Ailleurs, le masque d'un secret en clair ne se lève jamais"
+    ) in texte
+
+
+def test_m0002_amende_par_le_correctif_94():
+    """La porte des masqués examine l'instance d'un dépôt de données, secrets chiffrés compris, et
+    leur remède ne laisse pas entrer un secret en clair (masques.py, `remede`)."""
+    brut = lire(DECISIONS / "M-0002-garde-fous-et-confidentialite.md")
+    texte = " ".join(brut.split())
+    # La porte suit la cible, comme `chemins_examines`, et, en cible `serveur`, la nature.
+    assert (
+        "- **Amendé** le 2026-11-04, avec le correctif #94 : en cible `donnees`, la porte des "
+        "fichiers masqués examine aussi l'instance"
+    ) in texte
+    for fragment in (
+        "En cible `donnees`, elle examine aussi `config/README.md` et `contenu/README.md`",
+        (
+            "sauf `cible_code: aucune`, l'instance : `.sops.yaml`, `env/prod.env`, "
+            "`env/staging.env`, `cles/*.pub` et les secrets chiffrés `secrets/*.env.enc`, que la "
+            "chaîne lit (amendement du 2026-11-04)"
+        ),
+        # Le principe du remède, une fois, sans la liste des cas d'avant (#95, ronde 2).
+        "un dossier du modèle se lève par `!/<dossier>/`",
+        (
+            "un dossier mixte, où un fichier local peut vivre à côté d'un fichier examiné, se lève, "
+            "en exclut le contenu, puis n'admet que ce qu'elle y examine, et un ancêtre exclu, de "
+            "même, suivi des lignes de ses dossiers"
+        ),
+        "Sous un `.gitignore` imbriqué, ces lignes partent de son dossier",
+        # En cible `serveur`, ce que le modèle écrit, et l'instance à un dépôt (#95, ronde 3).
+        (
+            "En cible `serveur`, elle n'examine sous `deploiement/` que ce que le modèle y écrit, "
+            "ses fichiers de premier niveau par leur nom, et l'instance et ses secrets chiffrés "
+            "qu'à un dépôt, en nature `donnees` : un dépôt de code a les siens dans "
+            "`<nom>-donnees`"
+        ),
+        (
+            "Ce que la porte n'examine pas reste masqué, sans refus, un semé du projet sous un "
+            "ancêtre levé compris, que la vérification de `docs/aligner.md` voit"
+        ),
+    ):
+        assert fragment in texte, fragment
+    assert "Dans un dépôt de données, elle examine aussi" not in texte
+    for ancien in (
+        "Exclu, ce dossier se lève par",
+        "un dossier exclu qui en contient un",
+        "`!secrets/`",
+        "lève leur masque sans celui des secrets en clair",
+    ):
+        assert ancien not in texte, ancien
+    # Relecture de la reprise : une ligne de la puce dépassait 100 caractères.
+    (puce,) = [
+        b for b in blocs(brut) if b[0].startswith("- **Un fichier du modèle que le `.gitignore`")
+    ]
+    (amendement,) = [
+        b for b in blocs(brut) if b[0].startswith("- **Amendé** le 2026-11-04, avec le correctif")
+    ]
+    longues = [ligne for ligne in (*puce, *amendement) if len(ligne) > 100]
+    assert not longues, longues
+
+
+def test_m0006_dit_ce_que_la_scission_refait():
+    """La scission ne fait pas que déplacer : `env/` et `cles/` sont rendus à neuf, et
+    `.sops.yaml`, resté à la racine, se refait pour le nouveau chemin des secrets (#94)."""
+    brut = lire(DECISIONS / "M-0006-code-et-donnees.md")
+    assert "- **Amendé** le 2026-11-04, avec le correctif #94 : à la scission," in brut
+    texte = " ".join(brut.split())
+    assert "ne fait ensuite que déplacer ces dossiers, avec `deploiement/env/`" not in texte
+    for fragment in (
+        "La scission déplace ensuite ces dossiers et les secrets chiffrés vers le dépôt de données",
+        "Le modèle y rend `env/` et `cles/` à la place de `deploiement/env/` et de `deploiement/cles/`",
+        "`.sops.yaml` s'y refait pour le nouveau chemin des secrets (amendement du 2026-11-04)",
+        "Le contrat de l'application ne change pas (M-0004, § 8)",
+    ):
+        assert fragment in texte, fragment
+    puce = brut.split("- **Un projet né avant M-0006 garde la chaîne à un dépôt", 1)[1]
+    puce = puce.split("\n\n", 1)[0]
+    longues = [ligne for ligne in puce.splitlines() if len(ligne) > 100]
+    assert not longues, longues
 
 
 # m3 : ce qui est garanti, exactement. Le mode lui-même se lit par l'API de GitHub ; la branche de
@@ -724,3 +855,109 @@ def test_les_phrases_recoupees_tiennent_en_100_caracteres():
         (bloc,) = trouves
         assert max(len(ligne) for ligne in bloc) <= 100, phrase
         assert min(len(ligne) for ligne in bloc[:-1]) >= 70, phrase
+
+
+def test_changer_de_cible_dit_ce_que_fait_copier():
+    """« Changer de cible » disait que les semés de l'ancienne cible restaient : Copier en retire
+    une partie, même retouchés, et garde l'ancien contenu des autres (#94). Le passage d'un projet
+    à un dépôt en dépôt de données, qu'éprouve `tests/test_mise_a_jour.py`, y est nommé."""
+    (bloc,) = [b for b in blocs(lire(METHODE)) if b[0].startswith("- Changer de cible,")]
+    texte = " ".join(" ".join(bloc).split())
+    assert "Les fichiers semés de l'ancienne cible restent" not in texte
+    for fragment in (
+        (
+            "Les fichiers semés de l'ancienne cible que la nouvelle ne rend pas disparaissent "
+            "aussi, même retouchés, sans conflit ni `.rej`"
+        ),
+        "Les semés que les deux cibles rendent gardent leur contenu d'avant",
+        "Copier sème à neuf un semé absent du projet",
+        "Une question nouvelle prend son défaut sous `--defaults`",
+        "`--data cible_code=serveur` est obligatoire",
+        # Revue de #95 : `.gitignore` porte les règles du projet, et son retrait salit l'arbre.
+        "Sauf `.gitignore`, qui ne se retire jamais",
+        "ce que Copier refuse comme un arbre sale",
+        # Relecture de la reprise : sous `*secret*`, `secrets/` reste exclu sans `!/secrets/`, et la
+        # porte des masqués ne le voit pas, puisque le secret chiffré déplacé est suivi. Ces lignes
+        # sont celles de son remède pour ce dossier mixte (#95, ronde 2).
+        (
+            "pour un dépôt de données, `!/secrets/`, `/secrets/*` puis `!/secrets/*.env.enc`, à la "
+            "fin du fichier : les lignes que la porte des masqués donne pour ce dossier mixte, et "
+            "qu'elle ne demande pas, puisqu'elle ne voit pas un secret chiffré déjà suivi"
+        ),
+        # Copier ne déplace rien de ce qu'il ne connaît pas.
+        "Ce que le modèle ne connaît pas reste où il est",
+        "se déplacent par `git mv`",
+    ):
+        assert fragment in texte, fragment
+    assert max(len(ligne) for ligne in bloc) <= 100
+    assert min(len(ligne) for ligne in bloc[:-1]) >= 70
+
+
+# Le principe du remède de la porte des masqués (#95, ronde 2 après relecture) : chaque texte le dit
+# une fois, au lieu d'énumérer des cas, et `tests/test_masques.py` le prouve par une matrice.
+PRINCIPE_DU_REMEDE = "n'admet que ce que la porte examine, toujours par des lignes ancrées"
+
+
+def _aplati(texte):
+    return " ".join(texte.split())
+
+
+def _docstring_des_masques():
+    return _aplati(ast.get_docstring(ast.parse(lire(TEMPLATE / "scripts/modele/masques.py"))))
+
+
+def _ligne_pre_commit():
+    section = _aplati(lire(METHODE).split("## Les garde-fous", 1)[1].split("\n## ", 1)[0])
+    return section.split("| hook git `pre-commit` |", 1)[1].split("| hook git `commit-msg`", 1)[0]
+
+
+def _changer_de_cible():
+    (bloc,) = [b for b in blocs(lire(METHODE)) if b[0].startswith("- Changer de cible,")]
+    return _aplati(" ".join(bloc))
+
+
+def _puce_des_masques_de_m0002():
+    brut = lire(DECISIONS / "M-0002-garde-fous-et-confidentialite.md")
+    (puce,) = [
+        b for b in blocs(brut) if b[0].startswith("- **Un fichier du modèle que le `.gitignore`")
+    ]
+    return _aplati(" ".join(puce))
+
+
+def _correctif_dans_claude_md():
+    brut = lire(RACINE / "CLAUDE.md")
+    return _aplati(brut.split("Correctif du 04/11 : la scission", 1)[1].split("\n\n", 1)[0])
+
+
+@pytest.mark.parametrize(
+    ("texte", "fragment", "anciens"),
+    [
+        (
+            _docstring_des_masques,
+            f"Le principe du remède : il {PRINCIPE_DU_REMEDE}.",
+            ("Un dossier de secrets exclu ne se lève jamais seul",),
+        ),
+        (_ligne_pre_commit, f"Le remède {PRINCIPE_DU_REMEDE}", ("Exclu, ce dossier se lève",)),
+        (
+            _changer_de_cible,
+            "les lignes que la porte des masqués donne pour ce dossier mixte",
+            ("puisque la porte des masqués ne voit pas un secret chiffré déjà suivi, et",),
+        ),
+        (
+            _puce_des_masques_de_m0002,
+            f"Le remède {PRINCIPE_DU_REMEDE}",
+            ("Exclu, ce dossier se lève", "un dossier exclu qui en contient un"),
+        ),
+        (
+            _correctif_dans_claude_md,
+            f"le remède {PRINCIPE_DU_REMEDE}",
+            ("et de même après l'exception d'un dossier exclu qui le contient",),
+        ),
+    ],
+    ids=["docstring", "pre-commit", "changer-de-cible", "m0002", "claude-md"],
+)
+def test_le_principe_du_remede_dit_une_fois(texte, fragment, anciens):
+    lu = texte()
+    assert lu.count(fragment) == 1, fragment
+    for ancien in anciens:
+        assert ancien not in lu, ancien

@@ -50,9 +50,16 @@ Chaque case se coche dans la PR d'alignement. Une case qui ne s'applique pas au 
       (`__pycache__/`). Copier écrit un fichier
       que le `.gitignore` du projet ignore sans rien en dire : la règle `*secret*` de
       `veille-emploi` masquait `scripts/modele/verifier_secrets.py` (LE-23). `git check-ignore -v
-      <chemin>` nomme la règle ; ajouter au `.gitignore` une exception nommée (`!<chemin>`). Cette
-      vérification reste à faire à la main : si on l'oublie, le `pre-commit` refuse le commit qui
-      modifie `.copier-answers.yml` et nomme le fichier masqué.
+      <chemin>` nomme la règle ; ajouter au `.gitignore`, à la fin, dans leur ordre,
+      le remède que donne la porte, des lignes ancrées qui n'admettent que ce qu'elle examine
+      (`!/<chemin>`, ou les lignes du dossier exclu). Cette vérification reste à faire à la main :
+      si on l'oublie, le `pre-commit` refuse le commit qui modifie `.copier-answers.yml` et nomme
+      le fichier masqué, avec ce remède.
+      Un semé (`docs/cadrage.md`, `.github/workflows/ci.yml`…) sous un dossier exclu reste masqué
+      après le remède, sans refus : la porte ne l'examine pas. `git status --short --ignored` le
+      montre en `!!` ; s'il doit entrer, ajouter `!/<chemin>` après le remède, avec le chemin tel
+      que `git status --short --ignored` le montre : un dossier (`docs/decisions/`) se lève ainsi
+      tout entier, et un fichier qu'il contient ne se lève pas seul.
 
 ## 3. Les reports à la main
 
