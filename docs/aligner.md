@@ -55,6 +55,9 @@ Chaque case se coche dans la PR d'alignement. Une case qui ne s'applique pas au 
       (`!/<chemin>`, ou les lignes du dossier exclu). Cette vérification reste à faire à la main :
       si on l'oublie, le `pre-commit` refuse le commit qui modifie `.copier-answers.yml` et nomme
       le fichier masqué, avec ce remède.
+      Un semé (`docs/cadrage.md`, `.github/workflows/ci.yml`…) sous un dossier exclu reste masqué
+      après le remède, sans refus : la porte ne l'examine pas. `git status --short --ignored` le
+      montre en `!!` ; s'il doit entrer, ajouter `!/<chemin>` après le remède.
 
 ## 3. Les reports à la main
 

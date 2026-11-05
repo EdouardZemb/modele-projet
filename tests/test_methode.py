@@ -310,12 +310,13 @@ def test_garde_fous_dit_la_porte_des_masques():
     section = " ".join(lire(METHODE).split("## Les garde-fous", 1)[1].split("\n## ", 1)[0].split())
     ligne = section.split("| hook git `pre-commit` |", 1)[1].split("| hook git `commit-msg`", 1)[0]
     assert "`.copier-answers.yml`" in ligne
-    # Correctif #94 : la porte examine aussi les secrets chiffrés, selon la cible et non la nature
-    # (M-0002, amendement du 2026-11-04).
+    # Correctif #94 : la porte examine aussi les secrets chiffrés, selon la cible, et en cible
+    # `serveur`, à un dépôt seulement (M-0002, amendement du 2026-11-04 ; #95, ronde 3).
     assert (
         "refus d'un fichier du modèle, ou d'un secret chiffré que la chaîne lit (en cible "
-        "`donnees`, sauf `cible_code: aucune`, `secrets/*.env.enc` ; en cible `serveur`, "
-        "`deploiement/secrets/*.env.enc`), que le `.gitignore` du projet masque"
+        "`donnees`, sauf `cible_code: aucune`, `secrets/*.env.enc` ; en cible `serveur` à un "
+        "dépôt, de nature `donnees`, `deploiement/secrets/*.env.enc`), que le `.gitignore` du "
+        "projet masque"
     ) in ligne
     assert "dans un dépôt de données, d'un secret chiffré" not in ligne
     # Le principe du remède, et ses trois formes, sans la liste des cas d'avant (#95, ronde 2).
@@ -327,10 +328,21 @@ def test_garde_fous_dit_la_porte_des_masques():
             "`!/cles/*.pub`), et un ancêtre exclu, de même, suivi des lignes de ses dossiers"
         ),
         "sous un `.gitignore` imbriqué, ces lignes partent de son dossier",
-        "Un secret en clair, une clé privée ou un fichier local restent ainsi masqués, sans refus",
+        # Ce qui reste masqué, sans promettre plus que le code (#95, ronde 3).
+        (
+            "Ce que la porte n'examine pas reste masqué, sans refus : dans un dossier mixte, un "
+            "secret en clair, une clé privée ou un fichier local ; sous un ancêtre levé, un semé du "
+            "projet (`docs/cadrage.md` sous `docs/`). Sous un dossier du modèle, tout fichier est "
+            "du modèle, sauf un dossier de secrets ou de clés imbriqué, ou un cache"
+        ),
     ):
         assert fragment in ligne, fragment
-    for ancien in ("Exclu, ce dossier se lève par", "un dossier exclu qui en contient un", "`!secrets/`"):
+    for ancien in (
+        "Exclu, ce dossier se lève par",
+        "un dossier exclu qui en contient un",
+        "`!secrets/`",
+        "Un secret en clair, une clé privée ou un fichier local restent ainsi masqués",
+    ):
         assert ancien not in ligne, ancien
     # La phrase des masqués vient après celle de la confidentialité : placée avant, elle se lirait
     # comme si la porte des masqués n'avertissait que dans un dépôt privé et tournait en CI.
@@ -459,7 +471,7 @@ def test_m0002_amende_par_le_correctif_94():
     leur remède ne laisse pas entrer un secret en clair (masques.py, `remede`)."""
     brut = lire(DECISIONS / "M-0002-garde-fous-et-confidentialite.md")
     texte = " ".join(brut.split())
-    # La porte suit la cible, comme `chemins_examines`, et non la nature du dépôt.
+    # La porte suit la cible, comme `chemins_examines`, et, en cible `serveur`, la nature.
     assert (
         "- **Amendé** le 2026-11-04, avec le correctif #94 : en cible `donnees`, la porte des "
         "fichiers masqués examine aussi l'instance"
@@ -479,6 +491,17 @@ def test_m0002_amende_par_le_correctif_94():
             "même, suivi des lignes de ses dossiers"
         ),
         "Sous un `.gitignore` imbriqué, ces lignes partent de son dossier",
+        # En cible `serveur`, ce que le modèle écrit, et l'instance à un dépôt (#95, ronde 3).
+        (
+            "En cible `serveur`, elle n'examine sous `deploiement/` que ce que le modèle y écrit, "
+            "ses fichiers de premier niveau par leur nom, et l'instance et ses secrets chiffrés "
+            "qu'à un dépôt, en nature `donnees` : un dépôt de code a les siens dans "
+            "`<nom>-donnees`"
+        ),
+        (
+            "Ce que la porte n'examine pas reste masqué, sans refus, un semé du projet sous un "
+            "ancêtre levé compris, que la vérification de `docs/aligner.md` voit"
+        ),
     ):
         assert fragment in texte, fragment
     assert "Dans un dépôt de données, elle examine aussi" not in texte
