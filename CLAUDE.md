@@ -209,6 +209,15 @@ y écrit, ses fichiers de premier niveau par leur nom, et l'instance et ses secr
 dépôt, en nature `donnees` : un fichier local, ou le `.sops.yaml` d'un dépôt de code, restent
 masqués sans refus. Les textes de `methode.md`, de M-0002 et de M-0006 changent.
 
+Versions des projets au 05/11 : `ancrage`, `serveur`, `pupitre` et `pupitre-donnees` en `v0.8.1`
+(ancrage#195, serveur#40, pupitre#19, pupitre-donnees#18), sans refus de la porte des masqués ; le
+staging d'`ancrage` sert le commit de sa fusion. `veille-emploi` reste en `v0.8.0` : la `v0.8.1`
+est arrivée pendant la scission de sa V2 (veille-emploi#39), qui la prendra, comme Edouard l'a
+décidé le 04/11. `pupitre` portait ses trois hooks en 100644 depuis sa naissance par scission, faite
+sous Windows : un clone sous Linux ou macOS les aurait ignorés. pupitre#19 les a rendus
+exécutables ; un relevé par l'API, le 05/11, trouve les 18 exécutables du modèle en 100755 dans les
+autres dépôts nés de lui.
+
 Prochain, au choix d'Edouard :
 - la scission de `veille-emploi`, puis celle d'`ancrage`, chacune dans son propre lot ;
 - le lot 3 (la cible `statique`) ;
