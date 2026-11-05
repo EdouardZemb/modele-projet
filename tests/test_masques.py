@@ -278,6 +278,8 @@ def test_fichier_local_de_premier_niveau_sous_deploiement(depot_masque, env, cap
         ("tests/deploiement/SECRETS/cle.pem", "tests/deploiement/SECRETS/"),
         ("tests/deploiement/Cles/identite.txt", "tests/deploiement/Cles/"),
         ("tests/deploiement/cles/identite.txt", "tests/deploiement/cles/"),
+        # Chaque niveau sous le dossier du modèle compte, pas seulement le premier (#95, ronde 4).
+        ("tests/deploiement/doubles/secrets/x.pem", "tests/deploiement/doubles/secrets/"),
         ("scripts/modele/vieux.pyc", "scripts/modele/vieux.pyc"),
         ("scripts/modele/__pycache__/x.pyc", "scripts/modele/__pycache__/"),
         ("scripts/modele/cles.py", None),
@@ -303,6 +305,12 @@ def test_remede_echappe_les_caracteres_de_motif():
     ]
     assert masques.exceptions("tests/deploiement/[x]/", SERVEUR) == ["!/tests/deploiement/\\[x]/"]
     assert masques.relative("!/a\\[b]/x.sh", "a[b]/") == "!/x.sh"
+    assert masques.echapper("a*b\\c") == "a\\*b\\\\c"
+    # Un remède ne ré-exclut que ce qui est sous le dossier qu'il lève (#95, ronde 4).
+    lignes = masques.a_poser(
+        "tests/deploiement/x.bats", "tests/", SERVEUR, ["scripts/modele/secrets/"]
+    )
+    assert "/scripts/modele/secrets/" not in lignes
 
 
 def test_cible_code_illisible_vaut_serveur(depot_masque):
