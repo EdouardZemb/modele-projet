@@ -120,11 +120,12 @@ pas de la discipline de celui qui travaille ?
   exclu, de même, suivi des lignes de ses dossiers. Sous un `.gitignore` imbriqué, ces lignes
   partent de son dossier. Ce que la porte n'examine pas reste masqué, sans refus, un semé du projet
   sous un ancêtre levé compris, que la vérification de `docs/aligner.md` voit. Sous un dossier du
-  modèle, tout fichier est du modèle, sauf un dossier de secrets ou de clés imbriqué, ou un cache :
-  un fichier local s'en sort, et le masque d'un secret en clair ne se lève jamais. Le hook est le
-  bon endroit : c'est le seul moment où le fichier manquant se voit encore, avant le commit, et il
-  vaut pour une session comme pour Edouard. La vérification à la main de `docs/aligner.md` reste, la
-  porte refuse si on l'oublie.
+  modèle, tout fichier est du modèle, sauf un dossier de secrets ou de clés imbriqué, ou un cache
+  Python : un autre fichier local posé là, même un `.env`, est refusé comme fichier du modèle.
+  Ailleurs, le masque d'un secret en clair ne se lève jamais. Le hook est le bon endroit : c'est le
+  seul moment où le fichier manquant se voit encore, avant le commit, et il vaut pour une session
+  comme pour Edouard. La vérification à la main de `docs/aligner.md` reste, la porte refuse si on
+  l'oublie.
 - **Un hook `SessionStart` affiche ce qui est rouge sur GitHub** (amendement du 2026-10-27). Au
   démarrage et à la reprise, `signaux.py` lit les exécutions de la branche principale, les PR
   ouvertes et les workflows désactivés, et les montre à la session. Il ne bloque jamais : il sort

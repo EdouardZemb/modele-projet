@@ -188,11 +188,11 @@ examine, toujours par des lignes ancrées. Un dossier mixte, comme `secrets/`, `
 `deploiement/`, se lève, en exclut le contenu, puis n'admet que ce qu'elle y examine ; sous un
 `.gitignore` imbriqué, ces lignes partent de son dossier (M-0002, amendé). Ce qu'elle n'examine pas
 reste masqué, sans refus, un semé sous un ancêtre levé compris ; sous un dossier du modèle, tout est
-du modèle, sauf un dossier de secrets ou de clés imbriqué, quelle que soit sa casse, ou un cache. Un
-test en matrice le prouve, sur 75 cas, trois cibles (`donnees`, et `serveur` en nature `donnees`
-comme en nature `code`) et 25 `.gitignore`, avec des clés privées, des secrets en clair, des
-fichiers locaux et des noms piégés plantés à côté des fichiers examinés : appliqués à la lettre, les
-remèdes font taire la porte en un tour, deux quand deux règles masquent le même fichier ou sous
+du modèle, sauf un dossier de secrets ou de clés imbriqué, quelle que soit sa casse, ou un cache
+Python. Un test en matrice le prouve, sur 75 cas, trois cibles (`donnees`, et `serveur` en nature
+`donnees` comme en nature `code`) et 25 `.gitignore`, avec des clés privées, des secrets en clair,
+des fichiers locaux et des noms piégés plantés à côté des fichiers examinés : appliqués à la lettre,
+les remèdes font taire la porte en un tour, deux quand deux règles masquent le même fichier ou sous
 `**`, trois sous `*`, et rien de planté ne paraît. Le `.gitignore` semé d'un dépôt de données
 n'admet sous `secrets/` que les `*.env.enc`. « Changer de cible », dans `methode.md`, dit enfin ce
 que fait Copier : les semés que la nouvelle cible ne rend pas partent, même retouchés ; ceux que les

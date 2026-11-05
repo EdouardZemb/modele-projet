@@ -57,7 +57,9 @@ Chaque case se coche dans la PR d'alignement. Une case qui ne s'applique pas au 
       le fichier masqué, avec ce remède.
       Un semé (`docs/cadrage.md`, `.github/workflows/ci.yml`…) sous un dossier exclu reste masqué
       après le remède, sans refus : la porte ne l'examine pas. `git status --short --ignored` le
-      montre en `!!` ; s'il doit entrer, ajouter `!/<chemin>` après le remède.
+      montre en `!!` ; s'il doit entrer, ajouter `!/<chemin>` après le remède, avec le chemin tel
+      que `git status --short --ignored` le montre : un dossier (`docs/decisions/`) se lève ainsi
+      tout entier, et un fichier qu'il contient ne se lève pas seul.
 
 ## 3. Les reports à la main
 

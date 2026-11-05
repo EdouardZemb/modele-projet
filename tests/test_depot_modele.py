@@ -320,6 +320,8 @@ def test_liste_d_alignement():
         "le remède que donne la porte, des lignes ancrées qui n'admettent que ce qu'elle examine",
         # Un semé sous un ancêtre levé reste masqué : la porte ne l'examine pas (#95, ronde 3).
         "Un semé (`docs/cadrage.md`, `.github/workflows/ci.yml`…) sous un dossier exclu",
+        # Le chemin tel que git le montre : un dossier se lève tout entier (#95, ronde 4).
+        "que `git status --short --ignored` le montre : un dossier (`docs/decisions/`) se lève ainsi",
         "`.githooks` et `scripts/modele`",
         "excluent les chemins",
         "extensions.worktreeConfig",

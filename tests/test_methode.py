@@ -333,7 +333,8 @@ def test_garde_fous_dit_la_porte_des_masques():
             "Ce que la porte n'examine pas reste masqué, sans refus : dans un dossier mixte, un "
             "secret en clair, une clé privée ou un fichier local ; sous un ancêtre levé, un semé du "
             "projet (`docs/cadrage.md` sous `docs/`). Sous un dossier du modèle, tout fichier est "
-            "du modèle, sauf un dossier de secrets ou de clés imbriqué, ou un cache"
+            "du modèle, sauf un dossier de secrets ou de clés imbriqué, ou un cache Python : un "
+            "autre fichier local posé là, même un `.env`, est refusé comme fichier du modèle"
         ),
     ):
         assert fragment in ligne, fragment
@@ -464,6 +465,12 @@ def test_m0002_amende():
     # Correctif #94 : un secret chiffré entre ; seul le masque d'un secret en clair ne se lève pas.
     assert "le masque d'un fichier de secrets ne se lève jamais" not in texte
     assert "le masque d'un secret en clair ne se lève jamais" in texte
+    # Sous un dossier du modèle, seul un cache Python s'en sort (#95, ronde 4).
+    assert "un fichier local s'en sort" not in texte
+    assert (
+        "ou un cache Python : un autre fichier local posé là, même un `.env`, est refusé comme "
+        "fichier du modèle. Ailleurs, le masque d'un secret en clair ne se lève jamais"
+    ) in texte
 
 
 def test_m0002_amende_par_le_correctif_94():
