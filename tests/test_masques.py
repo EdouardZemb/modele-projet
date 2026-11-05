@@ -8,7 +8,13 @@ from pathlib import Path
 import masques
 import pytest
 import yaml
-from conftest import RACINE, REPONSES_DONNEES_SERVEUR, REPONSES_SERVEUR, git
+from conftest import (
+    RACINE,
+    REPONSES_DONNEES_SERVEUR,
+    REPONSES_SERVEUR,
+    REPONSES_SERVEUR_CODE,
+    git,
+)
 
 METHODE = RACINE / "template/docs/modele/methode.md"
 GERE = "scripts/modele/verifier_secrets.py"
@@ -183,7 +189,8 @@ def test_chemins_serveur_selon_la_cible(depot_masque, env):
     assert masques.main(["--racine", str(depot_masque)]) == 1
 
 
-SERVEUR = masques.CHEMINS_COMMUNS + masques.CHEMINS_SERVEUR
+SERVEUR_CODE = masques.CHEMINS_COMMUNS + masques.CHEMINS_SERVEUR
+SERVEUR = SERVEUR_CODE + masques.CHEMINS_SERVEUR_A_UN_DEPOT
 DONNEES = masques.CHEMINS_COMMUNS + masques.CHEMINS_DONNEES
 DONNEES_SERVEUR = DONNEES + masques.CHEMINS_INSTANCE
 
@@ -197,6 +204,105 @@ def test_cible_illisible_vaut_serveur(depot_masque):
     assert masques.chemins_examines(depot_masque) == SERVEUR
     (depot_masque / ".copier-answers.yml").unlink()
     assert masques.chemins_examines(depot_masque) == SERVEUR
+
+
+def test_nature_illisible_vaut_donnees(depot_masque):
+    """En cible `serveur`, l'instance et ses secrets chiffrés ne sont examinés qu'à un dépôt, en
+    nature `donnees` : un dépôt de code a les siens dans `<nom>-donnees` (#95, ronde 3). Une nature
+    illisible vaut `donnees`, comme une cible illisible vaut `serveur`."""
+    ecrire(depot_masque, ".copier-answers.yml", "cible: serveur\nnature: code\n")
+    assert masques.chemins_examines(depot_masque) == SERVEUR_CODE
+    ecrire(depot_masque, ".copier-answers.yml", "cible: serveur\nnature: 'donnees'\n")
+    assert masques.chemins_examines(depot_masque) == SERVEUR
+    ecrire(depot_masque, ".copier-answers.yml", "cible: serveur\n")
+    assert masques.chemins_examines(depot_masque) == SERVEUR
+    ecrire(depot_masque, ".copier-answers.yml", "_commit: v0.8.1\nnature: code\n")
+    assert masques.chemins_examines(depot_masque) == SERVEUR_CODE
+
+
+# L'instance d'un projet `serveur` à un dépôt : un dépôt de code n'en a rien (M-0006, § 3).
+INSTANCE_A_UN_DEPOT = (
+    ".sops.yaml",
+    "deploiement/env/prod.env",
+    "deploiement/env/staging.env",
+    "deploiement/cles/serveur.pub",
+    "deploiement/secrets/prod.env.enc",
+)
+
+
+def test_depot_de_code_n_examine_pas_l_instance(depot_masque, env, capsys):
+    """Dans un dépôt de code `serveur`, un `.sops.yaml`, un `.enc` ou un fichier d'env locaux ne
+    sont ni du modèle ni lus par la chaîne : ils restent masqués, sans refus. La confidentialité
+    refuserait de toute façon les deux premiers, et le troisième entrerait dans un dépôt public."""
+    (depot_masque / GERE).unlink()
+    ecrire(depot_masque, ".gitignore", "*.env\n*.enc\n*.pub\n.sops.yaml\n")
+    for chemin in INSTANCE_A_UN_DEPOT:
+        ecrire(depot_masque, chemin)
+    ecrire(depot_masque, ".copier-answers.yml", "_commit: v0.8.1\ncible: serveur\nnature: code\n")
+    git(depot_masque, env, "add", ".copier-answers.yml")
+    assert masques.main(["--racine", str(depot_masque)]) == 0
+    assert capsys.readouterr().err == ""
+    ecrire(
+        depot_masque, ".copier-answers.yml", "_commit: v0.8.1\ncible: serveur\nnature: donnees\n"
+    )
+    git(depot_masque, env, "add", ".copier-answers.yml")
+    assert masques.main(["--racine", str(depot_masque)]) == 1
+    err = capsys.readouterr().err
+    for chemin in INSTANCE_A_UN_DEPOT:
+        assert f" : {chemin} (règle " in err, chemin
+
+
+def test_fichier_local_de_premier_niveau_sous_deploiement(depot_masque, env, capsys):
+    """La porte nomme les fichiers que le modèle écrit au premier niveau de `deploiement/` : un
+    `compose.override.yml` ou un script local y restent masqués, sans refus (#95, ronde 3)."""
+    (depot_masque / GERE).unlink()
+    ecrire(depot_masque, ".gitignore", "compose.override.yml\n*-locale.sh\nlib.sh\n")
+    for chemin in ("deploiement/compose.override.yml", "deploiement/sauvegarde-locale.sh"):
+        ecrire(depot_masque, chemin)
+    modifier_reponses(depot_masque, env, cible="serveur")
+    assert masques.main(["--racine", str(depot_masque)]) == 0
+    ecrire(depot_masque, "deploiement/lib.sh")
+    assert masques.main(["--racine", str(depot_masque)]) == 1
+    err = capsys.readouterr().err
+    assert "Ajouter `!/deploiement/lib.sh` à ce fichier, puis l'indexer." in err
+    assert "compose.override.yml (" not in err
+    assert "sauvegarde-locale.sh (" not in err
+
+
+@pytest.mark.parametrize(
+    ("chemin", "attendu"),
+    [
+        ("scripts/modele/secrets/jeton.txt", "scripts/modele/secrets/"),
+        # Sous Windows, `git init` pose `core.ignorecase` : `*secret*` y masque `Secrets/`.
+        ("scripts/modele/Secrets/jeton.txt", "scripts/modele/Secrets/"),
+        ("tests/deploiement/SECRETS/cle.pem", "tests/deploiement/SECRETS/"),
+        ("tests/deploiement/Cles/identite.txt", "tests/deploiement/Cles/"),
+        ("tests/deploiement/cles/identite.txt", "tests/deploiement/cles/"),
+        ("scripts/modele/vieux.pyc", "scripts/modele/vieux.pyc"),
+        ("scripts/modele/__pycache__/x.pyc", "scripts/modele/__pycache__/"),
+        ("scripts/modele/cles.py", None),
+        ("deploiement/cles/identite.txt", None),
+    ],
+)
+def test_hors_de_la_porte_sans_la_casse(chemin, attendu):
+    """Un dossier de secrets ou de clés imbriqué sous un dossier du modèle n'est pas examiné, quelle
+    que soit sa casse."""
+    assert masques.hors_de_la_porte(chemin, SERVEUR) == attendu
+
+
+def test_remede_echappe_les_caracteres_de_motif():
+    """Un chemin cité par un remède se lit comme un motif du .gitignore : ses `[`, `*`, `?` et ses
+    barres obliques inverses s'échappent, sinon `/tests/deploiement/[secrets]/` viserait
+    `tests/deploiement/s/`."""
+    lignes = masques.a_poser(
+        "tests/deploiement/x.bats", "tests/", SERVEUR, ["tests/deploiement/[secrets]/"]
+    )
+    assert lignes[-1] == "/tests/deploiement/\\[secrets]/"
+    assert masques.a_poser("scripts/modele/a[1]?.py", None, SERVEUR, []) == [
+        "!/scripts/modele/a\\[1]\\?.py"
+    ]
+    assert masques.exceptions("tests/deploiement/[x]/", SERVEUR) == ["!/tests/deploiement/\\[x]/"]
+    assert masques.relative("!/a\\[b]/x.sh", "a[b]/") == "!/x.sh"
 
 
 def test_cible_code_illisible_vaut_serveur(depot_masque):
@@ -367,11 +473,27 @@ def test_secret_chiffre_d_un_projet_a_un_depot(depot_masque, env, capsys):
 REMEDE_DEPLOIEMENT = remede_attendu(
     "!/deploiement/",
     "/deploiement/*",
-    "!/deploiement/*.sh",
-    "!/deploiement/*.yml",
+    # Ses fichiers de premier niveau, par leur nom : un fichier local y reste masqué (#95, ronde 3).
+    "!/deploiement/alerter.sh",
+    "!/deploiement/deployer.sh",
+    "!/deploiement/installer-unites.sh",
+    "!/deploiement/lib.sh",
+    "!/deploiement/nettoyer-images.sh",
+    "!/deploiement/sonder.sh",
+    "!/deploiement/restaurer.sh",
+    "!/deploiement/sauvegarder.sh",
+    "!/deploiement/tester-restauration.sh",
+    "!/deploiement/compose.yml",
+    "!/deploiement/compose.config.yml",
+    "!/deploiement/compose.contenu.yml",
+    "!/deploiement/compose.projet.yml",
     "!/deploiement/projet.env",
     "!/deploiement/ci/",
     "!/deploiement/systemd/",
+    "!/deploiement/secrets/",
+    "/deploiement/secrets/*",
+    "!/deploiement/secrets/*.cles",
+    "!/deploiement/secrets/*.env.enc",
     "!/deploiement/env/",
     "/deploiement/env/*",
     "!/deploiement/env/prod.env",
@@ -379,10 +501,6 @@ REMEDE_DEPLOIEMENT = remede_attendu(
     "!/deploiement/cles/",
     "/deploiement/cles/*",
     "!/deploiement/cles/*.pub",
-    "!/deploiement/secrets/",
-    "/deploiement/secrets/*",
-    "!/deploiement/secrets/*.cles",
-    "!/deploiement/secrets/*.env.enc",
 )
 
 
@@ -538,23 +656,46 @@ def fichiers(rendu: Path) -> list[str]:
     return [p.relative_to(rendu).as_posix() for p in sorted(rendu.rglob("*")) if p.is_file()]
 
 
+# Les semés que la porte laisse au projet : ils vivent hors des dossiers du modèle et de l'instance.
+# Tout autre semé est examiné : un semé neuf sous `deploiement/` doit l'être, ou s'ajouter ici.
+SEMES_DU_PROJET = {
+    "CLAUDE.md",
+    "README.md",
+    ".gitattributes",
+    ".gitignore",
+    ".editorconfig",
+    "docs/00-brief-initial.md",
+    "docs/cadrage.md",
+    "docs/decisions/README.md",
+    "docs/pistes.md",
+    "docs/registre.md",
+    "docs/exploitation.md",
+    ".github/workflows/ci.yml",
+    ".github/dependabot.yml",
+}
+
+
 @pytest.mark.parametrize(
     "reponses",
-    [{}, REPONSES_SERVEUR, REPONSES_DONNEES, REPONSES_DONNEES_SERVEUR],
-    ids=["aucune", "serveur", "donnees", "donnees-serveur"],
+    [{}, REPONSES_SERVEUR, REPONSES_SERVEUR_CODE, REPONSES_DONNEES, REPONSES_DONNEES_SERVEUR],
+    ids=["aucune", "serveur", "serveur-code", "donnees", "donnees-serveur"],
 )
 def test_chemins_couvrent_le_rendu(rendre, reponses):
-    """Chaque fichier géré du rendu (tout ce que `_skip_if_exists` ne sème pas) est examiné, sous
-    les chemins que la porte tire des réponses du rendu."""
+    """Chaque fichier du rendu est examiné, sous les chemins que la porte tire des réponses du
+    rendu, semés compris, sauf les semés que la porte laisse au projet (`SEMES_DU_PROJET`). Et,
+    hors des chemins communs, la porte n'examine que ce que le modèle écrit : chaque chemin de la
+    cible couvre un fichier du rendu, sauf les secrets chiffrés, que la chaîne lit (#95, ronde 3)."""
     semes = set(yaml.safe_load(lire(RACINE / "copier.yml"))["_skip_if_exists"])
+    assert SEMES_DU_PROJET <= semes
     rendu = rendre(**reponses)
     chemins = masques.chemins_examines(rendu)
-    geres = [g for g in fichiers(rendu) if g not in semes]
-    assert geres
-    assert [g for g in geres if not couvert(g, chemins)] == []
+    tous = fichiers(rendu)
+    assert [f for f in tous if f not in SEMES_DU_PROJET and not couvert(f, chemins)] == []
+    propres = [c for c in chemins if c not in masques.CHEMINS_COMMUNS + masques.SECRETS_CHIFFRES]
+    assert [c for c in propres if not any(couvert(f, (c,)) for f in tous)] == []
     # Ce que la porte n'examine pas sous ses chemins (un dossier de secrets ou de clés imbriqué, un
     # cache) : aucun fichier du rendu, semé ou géré, n'y échappe.
-    assert [f for f in fichiers(rendu) if masques.hors_de_la_porte(f, chemins) is not None] == []
+    assert [f for f in tous if masques.hors_de_la_porte(f, chemins) is not None] == []
 
 
 @pytest.mark.parametrize(
@@ -576,11 +717,11 @@ def test_chemins_couvrent_les_donnees(rendre, reponses):
     assert [f for f in propres if not couvert(f, chemins)] == []
 
 
-# La matrice des remèdes (#95, ronde 2 après relecture). Le principe : un remède n'admet que ce que
-# la porte examine, toujours par des lignes ancrées. Pour chaque cible et chaque .gitignore, les
-# remèdes appliqués à la lettre, jusqu'au silence, ne font paraître aucun des fichiers plantés à côté
-# des fichiers examinés, et rendent suivable tout ce que la porte examine. Un seul dépôt git par
-# case, sans Copier.
+# La matrice des remèdes (#95, rondes 2 et 3 après relecture). Le principe : un remède n'admet que
+# ce que la porte examine, toujours par des lignes ancrées. Pour chaque cible et chaque .gitignore,
+# les remèdes appliqués à la lettre, jusqu'au silence, ne font paraître aucun des fichiers plantés à
+# côté des fichiers examinés, et rendent suivable tout ce que la porte examine, en autant de tours
+# au plus que `TOURS` le dit. Un seul dépôt git par case, sans Copier.
 EXAMINES_COMMUNS = (
     ".copier-answers.yml",
     ".githooks/pre-commit",
@@ -595,6 +736,21 @@ EXAMINES_COMMUNS = (
     ".claude/skills/consigner/SKILL.md",
     ".claude/settings.json",
 )
+EXAMINES_SERVEUR_CODE = (
+    *EXAMINES_COMMUNS,
+    "deploiement/alerter.sh",
+    "deploiement/deployer.sh",
+    "deploiement/lib.sh",
+    "deploiement/compose.yml",
+    "deploiement/compose.projet.yml",
+    "deploiement/projet.env",
+    "deploiement/ci/verifier-image.sh",
+    "deploiement/systemd/essai-sonde.timer.in",
+    "deploiement/secrets/prod.cles",
+    "tests/deploiement/secrets.bats",
+    "tests/deploiement/doubles/git",
+    ".github/actions/modele-image-construire/action.yml",
+)
 EXAMINES_PAR_CIBLE = {
     "donnees": (
         *EXAMINES_COMMUNS,
@@ -608,30 +764,18 @@ EXAMINES_PAR_CIBLE = {
         "secrets/prod.env.enc",
         "secrets/staging.env.enc",
     ),
-    "serveur": (
-        *EXAMINES_COMMUNS,
-        "deploiement/deployer.sh",
-        "deploiement/compose.yml",
-        "deploiement/projet.env",
-        "deploiement/ci/verifier-image.sh",
-        "deploiement/systemd/essai-sonde.timer.in",
-        "deploiement/env/prod.env",
-        "deploiement/env/staging.env",
-        "deploiement/cles/serveur.pub",
-        "deploiement/secrets/prod.cles",
-        "deploiement/secrets/prod.env.enc",
-        "tests/deploiement/secrets.bats",
-        "tests/deploiement/doubles/git",
-        ".sops.yaml",
-        ".github/actions/modele-image-construire/action.yml",
-    ),
+    # Un projet `serveur` à un dépôt (nature `donnees`) porte son instance.
+    "serveur": (*EXAMINES_SERVEUR_CODE, *INSTANCE_A_UN_DEPOT),
+    "serveur-code": EXAMINES_SERVEUR_CODE,
 }
 REPONSES_PAR_CIBLE = {
     "donnees": "cible: donnees\ncible_code: serveur\n",
-    "serveur": "cible: serveur\n",
+    "serveur": "cible: serveur\nnature: donnees\n",
+    "serveur-code": "cible: serveur\nnature: code\n",
 }
 # Ce que la porte n'examine pas, à côté de ce qu'elle examine : des clés privées, des secrets en
-# clair, des fichiers locaux, des dossiers de secrets ou d'env imbriqués, un cache.
+# clair, des fichiers locaux, des dossiers de secrets, de clés ou d'env imbriqués, quelle que soit
+# leur casse, un cache, un nom qui porte un caractère de motif.
 PLANTES = (
     "cles/identite-age.txt",
     "deploiement/cles/identite-age.txt",
@@ -641,17 +785,30 @@ PLANTES = (
     "deploiement/secrets/ancien/vieux.env.enc",
     "env/local.env",
     "deploiement/env/local.env",
+    "deploiement/compose.override.yml",
+    "deploiement/sauvegarde-locale.sh",
     "config/local.env",
     "config/secrets/jeton.txt",
     "contenu/brouillons/notes.md",
     "contenu/brouillons/env/prod.env",
     "deploiement/outils/secrets/cle.pem",
     "tests/deploiement/secrets/cle.pem",
+    "tests/deploiement/cles/identite.txt",
+    "tests/deploiement/[secrets]/cle.pem",
+    "scripts/modele/Secrets/jeton.txt",
+    "scripts/modele/Cles/id.txt",
+    "scripts/modele/vieux.pyc",
     ".claude/settings.local.json",
     "scripts/modele/__pycache__/lancer.cpython-312.pyc",
 )
-# Le dossier du .gitignore, et ses règles : celles de `veille-emploi`, des dossiers, des motifs, une
-# liste blanche, et des .gitignore imbriqués.
+# Un dépôt de code n'a rien de l'instance : un `.sops.yaml`, un env ou un `.enc` y sont locaux.
+PLANTES_PAR_CIBLE = {
+    "donnees": PLANTES,
+    "serveur": PLANTES,
+    "serveur-code": (*PLANTES, *INSTANCE_A_UN_DEPOT),
+}
+# Le dossier du .gitignore, et ses règles : celles de `veille-emploi`, des dossiers, des motifs, des
+# fichiers locaux, une liste blanche, `*` seul, et des .gitignore imbriqués.
 REGLES = {
     "veille-emploi": (".", "*.env\n*secret*\n"),
     "secrets": (".", "secrets/\n"),
@@ -664,14 +821,25 @@ REGLES = {
     "deploiement-contenu": (".", "deploiement/*\n"),
     "deploiement-tout": (".", "deploiement/**\n"),
     "secret-et-deploiement": (".", "*secret*\ndeploiement/\n"),
+    "tests": (".", "tests/\n"),
+    "scripts": (".", "scripts/\n"),
+    "sous-dossiers-du-modele": (".", "decisions/\ndoubles/\n"),
+    "fichiers-locaux": (".", "compose.override.yml\n*-locale.sh\n"),
     "pub": (".", "*.pub\n"),
     "enc": (".", "*.enc\n"),
+    "sops": (".", ".sops.yaml\n"),
     "claude": (".", ".claude/\n"),
     "liste-blanche": (".", "*\n!*/\n!.gitignore\n"),
+    "etoile": (".", "*\n!.gitignore\n"),
     "imbrique-secrets": ("secrets", "*\n!.gitignore\n"),
     "imbrique-cles": ("cles", "*\n"),
     "imbrique-deploiement": ("deploiement", "secrets/\n"),
+    "imbrique-tests": ("tests", "*\n"),
 }
+# Les tours de remède qu'un .gitignore demande au plus, dans toute cible : un seul, sauf quand deux
+# règles masquent le même fichier (git ne nomme que celle du dossier exclu, l'autre se voit au tour
+# suivant), et sous `*` ou `**`, qui excluent aussi ce que contient un dossier levé, niveau par niveau.
+TOURS = {"secret-et-deploiement": 2, "deploiement-tout": 2, "etoile": 3, "imbrique-tests": 3}
 REFUS = re.compile(r"\(règle (.+?):\d+:.*?\)\. Ajouter (.+)$")
 
 
@@ -717,33 +885,34 @@ def remedes_a_la_lettre(err: str) -> list[tuple[str, tuple[str, ...]]]:
     return remedes
 
 
-def depot_de_la_matrice(racine: Path, cible: str) -> tuple[str, ...]:
+def depot_de_la_matrice(racine: Path, cible: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """Un dépôt neuf, ses fichiers examinés et plantés, ses réponses non suivies (le déclencheur)."""
     racine.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=racine, check=True, capture_output=True)
-    examines = EXAMINES_PAR_CIBLE[cible]
-    for chemin in (*examines, *PLANTES):
+    examines, plantes = EXAMINES_PAR_CIBLE[cible], PLANTES_PAR_CIBLE[cible]
+    for chemin in (*examines, *plantes):
         ecrire(racine, chemin)
     ecrire(racine, ".copier-answers.yml", REPONSES_PAR_CIBLE[cible])
-    return examines
+    return examines, plantes
 
 
 @pytest.mark.parametrize("regle", list(REGLES))
 @pytest.mark.parametrize("cible", list(EXAMINES_PAR_CIBLE))
 def test_matrice_des_remedes(tmp_path, git_isole, capsys, cible, regle):
     d = tmp_path / "depot"
-    examines = depot_de_la_matrice(d, cible)
+    examines, plantes = depot_de_la_matrice(d, cible)
     dossier, regles = REGLES[regle]
     ecrire(d, ".gitignore" if dossier == "." else f"{dossier}/.gitignore", regles)
-    plantes_masques = masques_parmi(d, PLANTES)
-    for _ in range(3):
-        if masques.main(["--racine", str(d)]) == 0:
-            break
+    plantes_masques = masques_parmi(d, plantes)
+    tours = 0
+    while masques.main(["--racine", str(d)]) != 0 and tours <= TOURS.get(regle, 1):
+        tours += 1
         for source, lignes in remedes_a_la_lettre(capsys.readouterr().err):
             with (d / source).open("a", encoding="utf-8", newline="\n") as f:
                 f.write("".join(f"{ligne}\n" for ligne in lignes))
     assert masques.main(["--racine", str(d)]) == 0, capsys.readouterr().err
-    apres = masques_parmi(d, (*examines, *PLANTES))
+    assert tours <= TOURS.get(regle, 1), f"{tours} tours"
+    apres = masques_parmi(d, (*examines, *plantes))
     leves = sorted(plantes_masques - apres)
     assert not leves, f"plantés levés par un remède : {leves}"
     encore = sorted(apres & set(examines))
@@ -755,7 +924,7 @@ def test_la_matrice_plante_hors_de_ce_que_la_porte_examine(tmp_path, git_isole, 
     """Sous une liste blanche qui masque tout fichier, la porte voit exactement les fichiers
     examinés de la matrice : aucun fichier planté n'est examiné."""
     d = tmp_path / "depot"
-    examines = depot_de_la_matrice(d, cible)
+    examines, _ = depot_de_la_matrice(d, cible)
     ecrire(d, ".gitignore", "*\n!*/\n")
     assert masques.fichiers_masques(d, masques.chemins_examines(d)) == sorted(examines)
 

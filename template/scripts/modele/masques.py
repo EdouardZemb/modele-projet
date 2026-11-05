@@ -4,10 +4,11 @@
 Un fichier géré masqué par le .gitignore n'est pas indexé : la mise à jour du modèle l'écrit sur
 le disque, mais il n'entre jamais dans un commit (LE-23). La porte ne s'applique qu'à un commit qui
 touche `.copier-answers.yml` (indexé, ou présent sans être suivi). Elle examine ce que le modèle
-écrit pour la cible déclarée (`chemins_examines`) : les chemins communs, ceux de la cible `serveur`
-(une cible illisible vaut `serveur`), ou, en cible `donnees`, ses deux README.md et, sauf
-`cible_code: aucune`, l'instance et ses secrets chiffrés. Un motif (`cles/*.pub`) ne vaut qu'au
-premier niveau de son dossier.
+écrit pour la cible déclarée (`chemins_examines`) : les chemins communs ; en cible `serveur` (une
+cible illisible vaut `serveur`), ceux de `deploiement/`, ses fichiers de premier niveau par leur
+nom, et, à un dépôt (nature `donnees`, ou illisible), l'instance et ses secrets chiffrés ; en cible
+`donnees`, ses deux README.md et, sauf `cible_code: aucune`, l'instance et ses secrets chiffrés. Un
+motif (`cles/*.pub`) ne vaut qu'au premier niveau de son dossier.
 
 Le principe du remède : il n'admet que ce que la porte examine, toujours par des lignes ancrées.
 Un dossier exclu qu'elle examine en entier, un dossier du modèle comme `scripts/modele/`, se lève
@@ -15,10 +16,14 @@ par `!/<dossier>/`. Un dossier mixte, où un fichier local peut vivre à côté 
 (`cles/`, `env/`, `secrets/`, `deploiement/`…), se lève, en exclut le contenu, puis n'admet que ce
 qu'elle y examine : `!/cles/`, `/cles/*`, `!/cles/*.pub`. Un ancêtre exclu se lève de même, suivi
 des lignes de ses dossiers. Un fichier masqué hors d'un dossier exclu se lève par `!/<fichier>`.
-Ce que la porte n'examine pas reste donc masqué : un secret en clair, une clé privée, un fichier
-local, et, sous un dossier du modèle, un dossier de secrets ou de clés imbriqué ou un cache Python,
-que le remède ré-exclut par son chemin. Sous un .gitignore imbriqué, les lignes partent de son
-dossier, comme git les y lit.
+Sous un .gitignore imbriqué, les lignes partent de son dossier, comme git les y lit. Un chemin cité
+s'échappe : ses `[`, `*`, `?` et barres obliques inverses ne se lisent pas comme un motif.
+
+Ce que la porte n'examine pas reste donc masqué, sans refus : dans un dossier mixte, un secret en
+clair, une clé privée ou un fichier local ; sous un ancêtre levé, un semé du projet
+(`docs/cadrage.md` sous `docs/`), que `docs/aligner.md` fait vérifier à la main. Sous un dossier du
+modèle, tout fichier est du modèle, sauf un dossier de secrets ou de clés imbriqué, quelle que soit
+sa casse, ou un cache Python, que le remède ré-exclut par son chemin.
 
 Bibliothèque standard seule, Python 3.10 ou plus.
 
@@ -53,23 +58,38 @@ CHEMINS_COMMUNS: tuple[str, ...] = (
     ".copier-answers.yml",
 )
 # La cible `serveur`. `deploiement/` est mixte : un projet y garde ses fichiers à côté de ceux du
-# modèle. La porte n'y examine que ce que le modèle y écrit, et, sous `env/`, `cles/` et
-# `secrets/`, que ce que la chaîne y lit.
+# modèle. La porte n'y examine que ce que le modèle y écrit, ses fichiers de premier niveau par
+# leur nom, et, sous `secrets/`, que ce que la chaîne y lit.
 CHEMINS_SERVEUR: tuple[str, ...] = (
-    "deploiement/*.sh",
-    "deploiement/*.yml",
+    "deploiement/alerter.sh",
+    "deploiement/deployer.sh",
+    "deploiement/installer-unites.sh",
+    "deploiement/lib.sh",
+    "deploiement/nettoyer-images.sh",
+    "deploiement/sonder.sh",
+    "deploiement/restaurer.sh",
+    "deploiement/sauvegarder.sh",
+    "deploiement/tester-restauration.sh",
+    "deploiement/compose.yml",
+    "deploiement/compose.config.yml",
+    "deploiement/compose.contenu.yml",
+    "deploiement/compose.projet.yml",
     "deploiement/projet.env",
     "deploiement/ci/",
     "deploiement/systemd/",
+    "deploiement/secrets/*.cles",
+    "tests/deploiement/",
+    ".github/actions/modele-image-construire/",
+    ".github/actions/modele-image-publier/",
+)
+# L'instance d'un projet `serveur` à un dépôt (nature `donnees`), et les secrets chiffrés que sa
+# chaîne lit. Un dépôt de code n'en a rien : son instance vit dans `<nom>-donnees` (M-0006, § 3).
+CHEMINS_SERVEUR_A_UN_DEPOT: tuple[str, ...] = (
     "deploiement/env/prod.env",
     "deploiement/env/staging.env",
     "deploiement/cles/*.pub",
-    "deploiement/secrets/*.cles",
     "deploiement/secrets/*.env.enc",
-    "tests/deploiement/",
     ".sops.yaml",
-    ".github/actions/modele-image-construire/",
-    ".github/actions/modele-image-publier/",
 )
 # Un dépôt de données (cible `donnees`) : ses deux README.md, semés. Le reste de `config/` et de
 # `contenu/` est au projet.
@@ -92,6 +112,9 @@ SECRETS_CHIFFRES: tuple[str, ...] = ("secrets/*.env.enc", "deploiement/secrets/*
 DOSSIERS_HORS_DE_LA_PORTE: tuple[str, ...] = ("*secret*", "cles")
 LIGNE_CIBLE = re.compile(r"^cible:[ \t]*(\S+)[ \t]*$", re.MULTILINE)
 LIGNE_CIBLE_CODE = re.compile(r"^cible_code:[ \t]*(\S+)[ \t]*$", re.MULTILINE)
+LIGNE_NATURE = re.compile(r"^nature:[ \t]*(\S+)[ \t]*$", re.MULTILINE)
+# Ce qu'un motif du .gitignore lit autrement que tel quel, dans un chemin cité par un remède.
+CARACTERES_DE_MOTIF = re.compile(r"([\\\[*?])")
 SOURCE_HORS_DU_DEPOT = re.compile(r"^([A-Za-z]:|~|\.\./)")
 AUTRE_REMEDE = (
     "Si ce fichier n'est ni du modèle ni un secret chiffré que la chaîne lit (un fichier local), "
@@ -153,15 +176,17 @@ def chemins_examines(racine: Path) -> tuple[str, ...]:
     """Les chemins à examiner, selon la cible que déclarent les réponses.
 
     Toujours les chemins communs. En cible `serveur`, ou si la cible est illisible, ceux de la
-    cible `serveur`. En cible `donnees`, les deux README.md, et l'instance sauf si `cible_code`
+    cible `serveur`, et l'instance à un dépôt sauf si `nature` vaut `code` : une nature illisible
+    vaut `donnees`. En cible `donnees`, les deux README.md, et l'instance sauf si `cible_code`
     vaut `aucune` : une `cible_code` illisible vaut `serveur`."""
     try:
         texte = (racine / REPONSES).read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
-        return CHEMINS_COMMUNS + CHEMINS_SERVEUR
+        return CHEMINS_COMMUNS + CHEMINS_SERVEUR + CHEMINS_SERVEUR_A_UN_DEPOT
     cible = _reponse(texte, LIGNE_CIBLE)
     if cible is None or cible == "serveur":
-        return CHEMINS_COMMUNS + CHEMINS_SERVEUR
+        instance = () if _reponse(texte, LIGNE_NATURE) == "code" else CHEMINS_SERVEUR_A_UN_DEPOT
+        return CHEMINS_COMMUNS + CHEMINS_SERVEUR + instance
     if cible == "donnees":
         instance = () if _reponse(texte, LIGNE_CIBLE_CODE) == "aucune" else CHEMINS_INSTANCE
         return CHEMINS_COMMUNS + CHEMINS_DONNEES + instance
@@ -190,7 +215,8 @@ def _masques_sous(racine: Path, chemins: tuple[str, ...]) -> list[str]:
 
 def hors_de_la_porte(chemin: str, chemins: tuple[str, ...]) -> str | None:
     """Ce que la porte n'examine pas sous ses `chemins` : un cache Python, ou, sous un dossier du
-    modèle, un dossier de secrets ou de clés imbriqué (`DOSSIERS_HORS_DE_LA_PORTE`). Rend ce qu'un
+    modèle, un dossier de secrets ou de clés imbriqué (`DOSSIERS_HORS_DE_LA_PORTE`), quelle que soit
+    sa casse : sous Windows, `core.ignorecase` fait masquer `Secrets/` par `*secret*`. Rend ce qu'un
     remède en ré-exclut (le dossier, comme `…/secrets/`, ou le fichier `.pyc`), sinon None."""
     parties = chemin.split("/")
     if "__pycache__" in parties[:-1]:
@@ -202,7 +228,7 @@ def hors_de_la_porte(chemin: str, chemins: tuple[str, ...]) -> str | None:
         return None
     sous = chemin[len(dossier) :].split("/")[:-1]
     for i, nom in enumerate(sous):
-        if any(fnmatch.fnmatchcase(nom, motif) for motif in DOSSIERS_HORS_DE_LA_PORTE):
+        if any(fnmatch.fnmatchcase(nom.lower(), motif) for motif in DOSSIERS_HORS_DE_LA_PORTE):
             return dossier + "/".join(sous[: i + 1]) + "/"
     return None
 
@@ -257,16 +283,23 @@ def dossiers_exclus(racine: Path, chemins: list[str]) -> dict[str, str]:
     return resultat
 
 
+def echapper(chemin: str) -> str:
+    """Un chemin cité tel quel dans un .gitignore : ses caractères de motif s'échappent."""
+    return CARACTERES_DE_MOTIF.sub(r"\\\1", chemin)
+
+
 def exceptions(dossier: str, chemins: tuple[str, ...]) -> list[str]:
     """Les lignes qui lèvent le dossier exclu `dossier`, ancrées à la racine, dans leur ordre :
     elles n'admettent que ce que la porte y examine.
 
     Un dossier du modèle, ou un dossier qu'il contient, se lève par `!/<dossier>/`. Tout autre
     dossier est mixte, ou l'ancêtre d'un chemin examiné : il se lève, son contenu s'exclut, puis
-    chaque chemin examiné qu'il contient s'admet, un sous-dossier par ses propres lignes."""
+    chaque chemin examiné qu'il contient s'admet, un sous-dossier par ses propres lignes. Le
+    chemin du dossier s'échappe ; ce qui vient des chemins examinés garde ses motifs."""
+    cite = echapper(dossier)
     if any(c.endswith("/") and dossier.startswith(c) for c in chemins):
-        return [f"!/{dossier}"]
-    lignes = [f"!/{dossier}", f"/{dossier}*"]
+        return [f"!/{cite}"]
+    lignes = [f"!/{cite}", f"/{cite}*"]
     enfants: list[str] = []
     for chemin in chemins:
         if chemin.startswith(dossier) and chemin != dossier:
@@ -278,7 +311,7 @@ def exceptions(dossier: str, chemins: tuple[str, ...]) -> list[str]:
         if enfant.endswith("/"):
             lignes += exceptions(dossier + enfant, chemins)
         else:
-            lignes.append(f"!/{dossier}{enfant}")
+            lignes.append(f"!/{cite}{enfant}")
     return lignes
 
 
@@ -288,8 +321,11 @@ def a_poser(
     """Les lignes du remède, ancrées à la racine : l'exception du fichier, ou celles du dossier
     exclu, suivies de ce qu'elles lèveraient sans que la porte l'examine, ré-exclu par son chemin."""
     if dossier is None:
-        return [f"!/{chemin}"]
-    return [*exceptions(dossier, chemins), *(f"/{h}" for h in hors if h.startswith(dossier))]
+        return [f"!/{echapper(chemin)}"]
+    return [
+        *exceptions(dossier, chemins),
+        *(f"/{echapper(h)}" for h in hors if h.startswith(dossier)),
+    ]
 
 
 def dossier_de_la_regle(source: str) -> str:
@@ -304,10 +340,11 @@ def dossier_de_la_regle(source: str) -> str:
 
 def relative(ligne: str, base: str) -> str:
     """Une ligne ancrée à la racine, récrite pour le .gitignore du dossier `base` : sans ce
-    préfixe, avec le `/` de tête."""
+    préfixe, échappé comme la ligne, avec le `/` de tête."""
     signe = "!" if ligne.startswith("!") else ""
     chemin = ligne[len(signe) + 1 :]
-    return f"{signe}/{chemin[len(base) :]}" if base and chemin.startswith(base) else ligne
+    prefixe = echapper(base)
+    return f"{signe}/{chemin[len(prefixe) :]}" if base and chemin.startswith(prefixe) else ligne
 
 
 def remede(lignes: list[str], fichier: bool, base: str = "") -> str:
