@@ -357,6 +357,33 @@ def test_mise_a_jour_d_un_projet_public_passe_en_code(tmp_path, env_isole):
     _sans_conflit(projet)
 
 
+# Lot 14 : le LICENSE est semé. Un projet de code rendu par la v0.8.1, sans lui, le reçoit à sa
+# mise à jour ; un dépôt de données, de nature ou de cible, ne le reçoit jamais.
+@pytest.mark.parametrize(
+    ("reponses", "cree"),
+    [
+        (REPONSES_PAR_DEFAUT, True),
+        ({**REPONSES_PAR_DEFAUT, "nature": "donnees"}, False),
+        ({**REPONSES_PAR_DEFAUT, "nom": "essai-donnees", "cible": "donnees"}, False),
+    ],
+    ids=["code", "nature-donnees", "cible-donnees"],
+)
+def test_mise_a_jour_cree_la_licence(tmp_path, env_isole, reponses, cree):
+    env = env_isole()
+    projet = _projet_depuis(tmp_path, env, "v0.8.1", reponses)
+    assert not (projet / "LICENSE").exists()
+    _mettre_a_jour(projet)
+    assert (projet / "LICENSE").is_file() == cree
+    if cree:
+        # Un semé retiré exprès revient à la mise à jour suivante.
+        git(projet, env, "add", "-A")
+        git(projet, env, "commit", "-q", "-m", "mise à jour")
+        git(projet, env, "rm", "-q", "--", "LICENSE")
+        git(projet, env, "commit", "-q", "-m", "sans licence")
+        _mettre_a_jour(projet)
+        assert (projet / "LICENSE").is_file()
+
+
 # Lot 12 (M-0006, § 9) : les clés du parc sortent du modèle, et les fichiers de l'instance d'un
 # projet à un dépôt sont semés. Rendu en v0.6.0, un tel projet monte de version sans --data : ses
 # clés, son .sops.yaml et ses env/ restent tels quels, au caractère près. On compare des
