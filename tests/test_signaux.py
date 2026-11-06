@@ -6,12 +6,23 @@ import sys
 import time
 import types
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
+import documentation
 import pytest
 import signaux
 from conftest import RACINE, appels_de, faux_gh, faux_gh_lent
 
 MAINTENANT = datetime(2026, 10, 27, 12, 0, tzinfo=timezone.utc)
+RIEN_DE_ROUGE = "signaux de la CI : rien de rouge (0 workflow exécuté en 7 jours, 0 PR ouverte)"
+VRAIE_DOCUMENTATION = getattr(signaux, "_documentation", None)
+
+
+@pytest.fixture(autouse=True)
+def sans_constat_de_documentation(monkeypatch):
+    """Les tests de `main` lisent le vrai clone, que le gabarit resté vide lirait aussi : ils
+    reçoivent un contrôle sans constat. Ceux du contrôle remettent la vraie fonction."""
+    monkeypatch.setattr(signaux, "_documentation", lambda racine: [], raising=False)
 
 
 def iso(dt):
@@ -316,6 +327,50 @@ def test_titre_long_borne():
     assert len(signaux.prs_rouges([p])[0]) < 500
 
 
+RIEN = (([], ""), ([], ""), ([], ""))  # les trois lectures faites, vides
+
+
+def test_composer_sans_documentation_inchange():
+    rouge = ([run("ci", "failure", "2026-10-26T10:00:00Z")], "")
+    for runs in (([], ""), rouge):
+        sans = signaux.composer("main", runs, ([], ""), ([], ""), MAINTENANT)
+        avec = signaux.composer("main", runs, ([], ""), ([], ""), MAINTENANT, documentation=())
+        assert avec == sans
+    assert signaux.composer("main", *RIEN, MAINTENANT) == RIEN_DE_ROUGE
+
+
+def test_composer_un_constat():
+    texte = signaux.composer("main", *RIEN, MAINTENANT, documentation=["a : b"])
+    assert texte == RIEN_DE_ROUGE + "\ndocumentation : a : b"
+
+
+def test_composer_plusieurs_constats():
+    runs = [run("ci", "failure", "2026-10-26T10:00:00Z")]
+    texte = signaux.composer(
+        "main", (runs, ""), ([], ""), ([], ""), MAINTENANT, documentation=["a", "b"]
+    )
+    lignes = texte.split("\n")
+    assert lignes[0] == "signaux de la CI (branche main) :"
+    assert lignes[1].startswith("- rouge : ci")
+    assert lignes[2:] == ["documentation :", "- a", "- b"]
+
+
+def test_composer_documentation_bornee():
+    constats = [f"c{i:02}" for i in range(25)]
+    lignes = signaux.composer("main", *RIEN, MAINTENANT, documentation=constats).split("\n")
+    assert lignes[:2] == [RIEN_DE_ROUGE, "documentation :"]
+    assert lignes[2:-1] == [f"- c{i:02}" for i in range(20)]
+    assert lignes[-1] == "… et 5 de plus"
+    # Un constat de 5 000 caractères est borné, seul comme dans une liste.
+    long = "x" * 5000
+    lignes = signaux.composer("main", *RIEN, MAINTENANT, documentation=[long]).split("\n")
+    assert lignes == [RIEN_DE_ROUGE, signaux._borner(f"documentation : {long}")]
+    assert len(lignes[1]) == signaux.MAX_LIGNE
+    lignes = signaux.composer("main", *RIEN, MAINTENANT, documentation=[long, "y"]).split("\n")
+    assert lignes == [RIEN_DE_ROUGE, "documentation :", signaux._borner(f"- {long}"), "- y"]
+    assert len(lignes[2]) == signaux.MAX_LIGNE
+
+
 def test_sortie_hook():
     objet = json.loads(signaux.sortie_hook("é"))
     assert objet["systemMessage"] == "é"
@@ -414,13 +469,53 @@ def test_budget_epuise(tmp_path, monkeypatch, capsys):
 
 
 def test_exception_interne_rend_zero(monkeypatch, capsys):
-    def explose(*_):
+    appels = []
+
+    def explose(*_, **__):
+        appels.append(1)
         raise RuntimeError("boum")
 
     monkeypatch.setattr(signaux, "composer", explose)
     code, texte = lancer(capsys)
     assert code == 0
     assert texte == "signaux de la CI : non lus (erreur interne)"
+    assert appels == [1]  # l'erreur vient bien du faux, et non d'un appel qu'il refuserait
+
+
+def test_main_passe_la_racine_au_controle(tmp_path, monkeypatch, capsys):
+    """Le gabarit resté vide se lit dans la racine du dépôt où tourne le script : ici, le clone."""
+    racines = []
+
+    def faux(racine):
+        racines.append(racine)
+        return ["x : y"]
+
+    monkeypatch.setattr(signaux, "_documentation", VRAIE_DOCUMENTATION)
+    monkeypatch.setattr(documentation, "gabarits_vides", faux, raising=False)
+    faux_gh(tmp_path, sorties())
+    gh_en_tete(monkeypatch, tmp_path)
+    code, texte = lancer(capsys)
+    assert code == 0
+    assert texte == RIEN_DE_ROUGE + "\ndocumentation : x : y"
+    assert len(racines) == 1
+    assert Path(racines[0]).resolve() == RACINE
+
+
+def test_erreur_du_controle_laisse_les_signaux(tmp_path, monkeypatch, capsys):
+    appels = []
+
+    def explose(racine):
+        appels.append(racine)
+        raise RuntimeError("boum")
+
+    monkeypatch.setattr(signaux, "_documentation", VRAIE_DOCUMENTATION)
+    monkeypatch.setattr(documentation, "gabarits_vides", explose, raising=False)
+    faux_gh(tmp_path, sorties())
+    gh_en_tete(monkeypatch, tmp_path)
+    code, texte = lancer(capsys)
+    assert code == 0
+    assert texte == RIEN_DE_ROUGE + "\ndocumentation : non lue (erreur)"
+    assert len(appels) == 1  # le faux a tourné : l'erreur est la sienne
 
 
 def test_sortie_ascii_et_json(tmp_path, monkeypatch, capsys):

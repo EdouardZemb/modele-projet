@@ -1,5 +1,7 @@
-"""La documentation de la racine : la licence et la carte, qui refusent en CI."""
+"""La documentation de la racine : la licence et la carte, qui refusent en CI, et le gabarit resté
+vide, qui avertit au `SessionStart`."""
 
+import os
 import shutil
 import subprocess
 import sys
@@ -139,7 +141,7 @@ def test_carte_suffixe_sans_casse_et_fichiers_seuls(tmp_path):
     )
 
 
-def test_carte_ne_voit_pas_ce_que_git_ignore(tmp_path, env_isole):
+def test_carte_ne_voit_pas_ce_que_git_ignore(tmp_path, env_isole, monkeypatch):
     """À la racine d'un dépôt git, la carte lit ce que git suit ou suivrait, comme la CI : un
     `CLAUDE.local.md` ignoré n'est pas compté, un fichier non suivi et non ignoré l'est."""
     env = env_isole()
@@ -153,6 +155,8 @@ def test_carte_ne_voit_pas_ce_que_git_ignore(tmp_path, env_isole):
         CLAUDE_local_md="# Local\n",
         _gitignore="/CLAUDE.local.md\n",
     )
+    # Une variable `GIT_` de la session (un hook en pose) ne détourne pas git vers un autre dépôt.
+    monkeypatch.setenv("GIT_DIR", str(tmp_path / "absent"))
     assert d.carte(racine) == (["carte : 1 fichier .md à la racine, lié"], False)
     ecrire(racine, NOTICE_md="# Notice\n")
     assert d.carte(racine) == (
@@ -164,6 +168,47 @@ def test_carte_ne_voit_pas_ce_que_git_ignore(tmp_path, env_isole):
     lignes, refus = d.carte(racine)
     assert refus
     assert lignes[-1] == f"carte : CLAUDE.local.md {NON_LIE}"
+
+
+def test_carte_quand_git_echoue(tmp_path):
+    """Un `.git` que git ne sait pas lire : la carte et la licence lisent tout le dossier, au lieu
+    de ne rien voir."""
+    racine = tmp_path / "depot"
+    racine.mkdir()
+    (racine / ".git").write_text("gitdir: ../absent\n", encoding="utf-8")
+    ecrire(racine, README_md=README, CLAUDE_md=CLAUDE, LICENSE="MIT License\n")
+    assert d.carte(racine) == (["carte : 1 fichier .md à la racine, lié"], False)
+    assert d.licence(racine, "code") == (["licence : LICENSE présent (nature code)"], False)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows ne nomme un fichier qu'en Unicode")
+def test_carte_nom_non_utf8_suivi_par_git(tmp_path, env_isole):
+    """Sous Linux, un nom qui n'est pas de l'UTF-8, que git liste tel quel, est vu et affiché."""
+    env = env_isole()
+    racine = tmp_path / "depot"
+    racine.mkdir()
+    git(racine, env, "init", "-q", "-b", "main")
+    ecrire(racine, README_md=README, CLAUDE_md=CLAUDE)
+    nom = os.fsdecode(b"\xff.md")
+    (racine / nom).write_text("# N\n", encoding="utf-8")
+    git(racine, env, "add", "--", nom)
+    lignes, refus = d.carte(racine)
+    assert refus
+    assert lignes[-1] == f"carte : ?.md {NON_LIE}"
+
+
+def test_carte_deux_sections_ce_qui_fait_foi(tmp_path):
+    """Deux sections « Ce qui fait foi » ne se collent pas : une définition seule qui ouvre la
+    seconde, juste après la première, ne coupe pas un paragraphe, et ne lie rien."""
+    ecrire(
+        tmp_path,
+        README_md=README,
+        CLAUDE_md="# E\n\n## Ce qui fait foi\n\n- Texte\n## Ce qui fait foi\n[n]: NOTICE.md\n",
+        NOTICE_md="# N\n",
+    )
+    lignes, refus = d.carte(tmp_path)
+    assert refus
+    assert lignes[-1] == f"carte : NOTICE.md {NON_LIE}"
 
 
 def test_carte_reference_comme_sur_github(tmp_path):
@@ -304,6 +349,7 @@ def test_affichable_remplace_les_caracteres_de_controle():
     # Sous Linux, un nom qui n'est pas de l'UTF-8 arrive avec un « surrogate », que stdout, en
     # UTF-8 strict, refuserait d'écrire.
     assert d._affichable("\udcff.md") == "?.md"
+    assert d._affichable("a\x01b\nc\x7fd") == "a?b?c?d"
 
 
 def test_carte_affiche_un_nom_a_caractere_de_controle(tmp_path, monkeypatch):
@@ -412,6 +458,8 @@ def test_liens_de_reference():
     # Une définition peut suivre un titre ; son titre peut tenir sur la ligne suivante, et une
     # autre définition la suivre ; un reste sur sa ligne en fait du texte (CommonMark).
     assert d.liens("# Titre\n[t]: titre.md\n\n[voir][t]\n") == ["titre.md"]
+    # Une ligne de blancs sépare comme une ligne vide : la définition qui la suit en est une.
+    assert d.liens("texte\n   \n[r]: r.md\n\n[voir][r]\n") == ["r.md"]
     assert d.liens('[a][a] [b][b]\n\n[a]: a.md\n  "titre"\n[b]: b.md\n') == ["a.md", "b.md"]
     assert d.liens("[voir][r]\n\n[r]: r.md suite\n") == []
     assert d.liens('[voir][r]\n\n[r]: r.md "titre" suite\n') == []
@@ -451,6 +499,229 @@ def test_cible_locale_refuse_une_sortie_par_un_lien(tmp_path):
     lien_de_dossier(racine / "lien", dehors)
     assert d.cible_locale("lien/x.md", racine) is None
     assert d.cible_locale("docs/x.md", racine) == "docs/x.md"
+
+
+# --- le gabarit resté vide -------------------------------------------------------------------
+
+MARQUEUR = "garde le marqueur *AAAA-MM-JJ* du gabarit"
+VIDE = "corps vide (titres et consignes seulement)"
+DOSSIER = "dossier sans autre fichier que README.md"
+AUCUN = "le README ne lie aucun document du dépôt"
+
+
+def arbre(racine, fichiers):
+    """Écrit les fichiers, nommés par leur chemin relatif en `/`, leurs dossiers créés ; un texte
+    tel quel (en CRLF s'il l'est), des octets bruts."""
+    for chemin, contenu in fichiers.items():
+        f = racine / chemin
+        f.parent.mkdir(parents=True, exist_ok=True)
+        if isinstance(contenu, bytes):
+            f.write_bytes(contenu)
+        else:
+            f.write_text(contenu, encoding="utf-8", newline="")
+    return racine
+
+
+def test_marqueur(tmp_path):
+    arbre(
+        tmp_path,
+        {
+            "README.md": "# E\n\nLe [cadrage](docs/cadrage.md).\n",
+            "docs/cadrage.md": "# Cadrage\n\n- **Date** : *AAAA-MM-JJ*\n\nUn texte.\n",
+        },
+    )
+    assert d.gabarits_vides(tmp_path) == [f"docs/cadrage.md : {MARQUEUR}"]
+    # Un constat par chemin, la première règle qui touche : le marqueur avant le corps vide.
+    arbre(tmp_path, {"docs/cadrage.md": "# Cadrage\n\n*AAAA-MM-JJ*\n"})
+    assert d.gabarits_vides(tmp_path) == [f"docs/cadrage.md : {MARQUEUR}"]
+    # Cité dans un bloc de code ou entre accents graves, le marqueur ne compte pas.
+    for cite in (
+        "```\n- **Date** : *AAAA-MM-JJ*\n```\n",
+        "Le marqueur `*AAAA-MM-JJ*` se remplace par la date.\n",
+    ):
+        arbre(tmp_path, {"docs/cadrage.md": f"# Cadrage\n\n{cite}"})
+        assert d.gabarits_vides(tmp_path) == [], cite
+
+
+def test_corps_vide(tmp_path):
+    vide = (
+        "# Un\n## Deux\n### Trois\n#### Quatre\n##### Cinq\n###### Six\n\n"
+        "<!-- Une consigne\n     sur trois\n     lignes. -->\n"
+        "*Une consigne en italique.*\n"
+        "_Une autre consigne._\n"
+        "\n"
+    )
+    arbre(tmp_path, {"README.md": "# E\n\nLe [brief](docs/brief.md).\n", "docs/brief.md": vide})
+    assert d.gabarits_vides(tmp_path) == [f"docs/brief.md : {VIDE}"]
+    arbre(tmp_path, {"docs/brief.md": ""})
+    assert d.gabarits_vides(tmp_path) == [f"docs/brief.md : {VIDE}"]
+    # Un document se reconnaît à son suffixe, sans égard à la casse.
+    arbre(tmp_path, {"README.md": "# E\n\nLa [note](docs/NOTE.MD).\n", "docs/NOTE.MD": vide})
+    assert d.gabarits_vides(tmp_path) == [f"docs/NOTE.MD : {VIDE}"]
+    arbre(tmp_path, {"README.md": "# E\n\nLe [brief](docs/brief.md).\n"})
+    for corps in (
+        "Une ligne ordinaire.\n",
+        "```\n# Une ligne dans un bloc de code\n```\n",
+        "*Une consigne* et *une autre*\n",
+        "####### Sept dièses ne font pas un titre.\n",
+    ):
+        arbre(tmp_path, {"docs/brief.md": vide + corps})
+        assert d.gabarits_vides(tmp_path) == [], corps
+
+
+def test_dossier(tmp_path):
+    arbre(
+        tmp_path,
+        {
+            "README.md": "# E\n\nLes [décisions](docs/decisions/), [ici aussi](docs/decisions).\n",
+            "docs/decisions/README.md": "# Décisions\n\nUne par fichier.\n",
+        },
+    )
+    assert d.gabarits_vides(tmp_path) == [f"docs/decisions/ : {DOSSIER}"]
+    arbre(tmp_path, {"docs/decisions/.gitkeep": ""})
+    assert d.gabarits_vides(tmp_path) == [f"docs/decisions/ : {DOSSIER}"]
+    arbre(tmp_path, {"docs/decisions/0001-un-choix.md": ""})
+    assert d.gabarits_vides(tmp_path) == []
+    (tmp_path / "docs/decisions/0001-un-choix.md").unlink()
+    (tmp_path / "docs/decisions/anciennes").mkdir()
+    assert d.gabarits_vides(tmp_path) == []
+
+
+def test_mis_de_cote(tmp_path):
+    """Le registre, les plans et les fichiers d'ADR ne sont pas lus ; le `README.md` du dossier des
+    ADR, si."""
+    arbre(
+        tmp_path,
+        {
+            "README.md": (
+                "# E\n\n[r](docs/registre.md) [R](REGISTRE.md) [p](.claude/plans/2026-11-06-x.md)\n"
+                "[a](docs/decisions/0001-x.md) [b](docs/adr/0002-y.md)\n"
+            ),
+            "docs/registre.md": "",
+            "REGISTRE.md": "",
+            ".claude/plans/2026-11-06-x.md": "",
+            "docs/decisions/0001-x.md": "# Un choix\n\n- **Date** : *AAAA-MM-JJ*\n",
+            "docs/adr/0002-y.md": "",
+        },
+    )
+    assert d.gabarits_vides(tmp_path) == []
+    arbre(tmp_path, {"README.md": "# E\n\n[Les décisions](docs/decisions/README.md)\n"})
+    arbre(tmp_path, {"docs/decisions/README.md": "# Décisions\n"})
+    assert d.gabarits_vides(tmp_path) == [f"docs/decisions/README.md : {VIDE}"]
+
+
+def test_readme_ne_lie_rien(tmp_path):
+    arbre(tmp_path, {"README.md": "# E\n\nLe [site](https://exemple.org/a.md), [ici](#e).\n"})
+    assert d.gabarits_vides(tmp_path) == [AUCUN]
+    arbre(
+        tmp_path,
+        {
+            "README.md": "# E\n\n[CLAUDE.md](CLAUDE.md), [la doc](docs/).\n",
+            "CLAUDE.md": "# C\n\nDu texte.\n",
+            "docs/a.md": "Du texte.\n",
+        },
+    )
+    assert d.gabarits_vides(tmp_path) == []
+    (tmp_path / "README.md").unlink()
+    assert d.gabarits_vides(tmp_path) == ["pas de README.md"]
+    arbre(tmp_path, {"readme.md": "# E\n\n[CLAUDE.md](CLAUDE.md)\n"})  # la casse compte
+    assert d.gabarits_vides(tmp_path) == ["pas de README.md"]
+
+
+def test_ignores(tmp_path):
+    arbre(
+        tmp_path,
+        {
+            "README.md": (
+                "# E\n\n![capture](docs/capture.png) [script](scripts/vide.py)\n"
+                "[site](https://exemple.org/vide.md) [absent](docs/absent.md) [mal](docs/mal.md)\n"
+            ),
+            "docs/capture.png": b"\x89PNG\r\n",
+            "scripts/vide.py": "",
+            "docs/mal.md": b"\xff\xfe\x00",
+        },
+    )
+    assert d.gabarits_vides(tmp_path) == []
+    arbre(tmp_path, {"README.md": "# E\n\n![capture](docs/capture.png)\n"})
+    assert d.gabarits_vides(tmp_path) == [AUCUN]
+
+
+def test_gabarits_vides_ordre_et_doublons(tmp_path):
+    """Les constats suivent l'ordre des liens du README, un par chemin."""
+    arbre(
+        tmp_path,
+        {
+            "README.md": "# E\n\n[b](docs/b.md) [a](docs/a.md) [b encore](./docs/b.md#titre)\n",
+            "docs/a.md": "",
+            "docs/b.md": "# B\n\n*AAAA-MM-JJ*\n",
+        },
+    )
+    assert d.gabarits_vides(tmp_path) == [f"docs/b.md : {MARQUEUR}", f"docs/a.md : {VIDE}"]
+
+
+def test_gabarits_vides_lit_un_texte_en_crlf(tmp_path):
+    arbre(
+        tmp_path,
+        {
+            "README.md": (
+                "# E\r\n\r\nLe [brief](docs/brief.md), le\r\n[cadrage](docs/cadrage.md).\r\n"
+            ),
+            "docs/brief.md": "# Brief\r\n\r\n<!-- Une\r\nconsigne. -->\r\n*En italique.*\r\n",
+            "docs/cadrage.md": (
+                "# Cadrage\r\n\r\n```\r\nUn bloc.\r\n```\r\n- **Date** : *AAAA-MM-JJ*\r\n"
+            ),
+        },
+    )
+    assert d.gabarits_vides(tmp_path) == [
+        f"docs/brief.md : {VIDE}",
+        f"docs/cadrage.md : {MARQUEUR}",
+    ]
+
+
+def test_gabarits_vides_chemins_pieges(tmp_path):
+    racine = tmp_path / "racine"
+    arbre(tmp_path, {"hors.md": ""})
+    arbre(
+        racine,
+        {
+            "README.md": "# E\n\n[Dehors](../hors.md), les [décisions](docs/d%C3%A9cisions/).\n",
+            "docs/décisions/README.md": "# Décisions\n\nUne par fichier.\n",
+        },
+    )
+    assert d.gabarits_vides(racine) == [f"docs/décisions/ : {DOSSIER}"]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows refuse un saut de ligne dans un nom")
+def test_gabarits_vides_nom_a_caractere_de_controle(tmp_path):
+    arbre(tmp_path, {"README.md": "# E\n\n[Vide](docs/a%0Ab.md)\n", "docs/a\nb.md": ""})
+    assert d.gabarits_vides(tmp_path) == [f"docs/a?b.md : {VIDE}"]
+
+
+def test_gabarits_vides_en_ligne_de_commande(tmp_path, capsys, monkeypatch):
+    """`--gabarits-vides` imprime un constat par ligne et rend toujours 0, une erreur comprise."""
+    arbre(
+        tmp_path,
+        {
+            "README.md": "# E\n\n[a](docs/a.md) [b](docs/b.md)\n",
+            "docs/a.md": "",
+            "docs/b.md": "# B\n\n*AAAA-MM-JJ*\n",
+        },
+    )
+    assert d.main(["--racine", str(tmp_path), "--gabarits-vides"]) == 0
+    assert capsys.readouterr().out.splitlines() == [
+        f"documentation : docs/a.md : {VIDE}",
+        f"documentation : docs/b.md : {MARQUEUR}",
+    ]
+    arbre(tmp_path, {"docs/a.md": "Du texte.\n", "docs/b.md": "Du texte.\n"})
+    assert d.main(["--racine", str(tmp_path), "--gabarits-vides"]) == 0
+    assert capsys.readouterr().out == ""
+
+    def explose(racine):
+        raise RuntimeError("boum")
+
+    monkeypatch.setattr(d, "gabarits_vides", explose, raising=False)
+    assert d.main(["--racine", str(tmp_path), "--gabarits-vides"]) == 0
+    assert capsys.readouterr().out.splitlines() == ["documentation : non lue (erreur)"]
 
 
 # --- la ligne de commande --------------------------------------------------------------------

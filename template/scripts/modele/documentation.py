@@ -1,4 +1,5 @@
-"""La documentation de la racine : la licence et la carte, deux contrôles qui refusent en CI.
+"""La documentation de la racine : la licence et la carte, deux contrôles qui refusent en CI, et le
+gabarit resté vide, qui avertit au démarrage d'une session.
 
 La licence. En nature `code`, `LICENSE` doit être présent à la racine, sous ce nom exact, et non
 vide ; en nature `donnees`, il n'est pas exigé. La nature se lit comme la lit la porte de
@@ -14,13 +15,28 @@ La sortie dit le nombre de fichiers vus, puis nomme chaque fichier non lié. À 
 git, les fichiers vus sont ceux que git suit ou suivrait, comme en CI : un fichier qu'il ignore,
 comme `CLAUDE.local.md`, n'est pas compté. Ailleurs, c'est tout le dossier.
 
+Le gabarit resté vide. Chaque fichier `.md` et chaque dossier que `README.md` lie, et qui existent
+sous la racine, sont lus ; le reste est ignoré : une image, un script, un lien externe, une cible
+absente ou hors de la racine. Trois règles, dont la première qui touche donne le constat d'un
+chemin : un fichier qui garde le marqueur du gabarit, `*AAAA-MM-JJ*`, hors du code ; un fichier
+dont le corps est vide, une fois retirés les titres (de `#` à `######`), les lignes vides, les
+commentaires HTML et les lignes tout en italique (`*…*` ou `_…_`), une ligne d'un bloc de code
+faisant un corps ; un dossier sans autre enfant que `README.md` et `.gitkeep`. Le registre (tout
+`registre.md`, sans égard à la casse) et les plans (sous `.claude/plans/`) échappent aux trois
+règles ; les fichiers d'ADR (sous `docs/decisions/` ou `docs/adr/`, sauf leur `README.md`), aux
+deux premières, et leur dossier relève de la troisième. Les constats suivent l'ordre des liens, un
+par chemin. Rien à signaler ne donne rien, sauf un README qui ne lie aucun document du dépôt, ou
+pas de README. Ce contrôle ne refuse jamais et ne lance aucun sous-processus : `signaux.py` le
+lance au `SessionStart`, jamais la CI.
+
 Ce qui est un lien : un lien en ligne, `[…](cible)` ou `![…](cible)`, avec un titre ou des
 chevrons, son texte sur plusieurs lignes ou entre crochets au besoin, une image cliquable donnant
 ses deux cibles ; un lien de référence, `[texte][x]`, `[x][]` ou `[x]`, quand une définition
-`[x]: cible` de son étiquette (sans égard à la casse ni aux blancs) est dans le même fichier, où
-qu'elle soit, sa cible au besoin sur la ligne suivante. Comme sur GitHub, une définition ne se rend
-pas : seule, elle ne lie rien, et une définition qui coupe un paragraphe n'en est pas une. Pour
-« Ce qui fait foi », les emplois se lisent dans la section, les définitions dans tout `CLAUDE.md`.
+`[x]: cible` de son étiquette (sans égard à la casse ni aux blancs) est dans le même fichier, hors
+d'une liste ou d'une citation, sa cible au besoin sur la ligne suivante. Comme sur GitHub, une
+définition ne se rend pas : seule, elle ne lie rien, et une définition qui coupe un paragraphe n'en
+est pas une. Pour « Ce qui fait foi », les emplois se lisent dans la section, les définitions dans
+tout `CLAUDE.md`.
 Les blocs de code clôturés, le code en ligne et les commentaires HTML sont retirés avant : GitHub
 n'y rend aucun lien. La cible perd son ancre et sa requête, ses échappements (`\\.`), puis elle est
 décodée (`%20`) ; un `/` en tête part de la racine ; une cible avec un schéma (`https:`, `mailto:`)
@@ -30,20 +46,27 @@ document est un fichier dont le suffixe est `.md`, sans égard à la casse. Un t
 comme en LF, un BOM en tête est ignoré, et un octet qui n'est pas de l'UTF-8 est remplacé, sans
 erreur.
 
-Des écarts connus au rendu de GitHub, rares, font refuser à tort ; aucun ne laisse passer. Un titre
+Des écarts connus au rendu de GitHub, rares. Deux laissent passer à tort : un lien dans un bloc de
+code indenté, que GitHub rend en code, et un lien dans un bloc HTML sans ligne vide (`<details>`
+collé à son contenu), où GitHub ne lit pas le Markdown. Les autres font refuser à tort. Un titre
 souligné (`Ce qui fait foi` sur une ligne de `---`) n'est pas lu ; un accent grave échappé
 (`` \\` ``) ouvre quand même un code en ligne ; une entité dans la cible (`&#46;`) n'est pas
 décodée ; un commentaire HTML ouvert dans un paragraphe court jusqu'à sa fermeture, plus loin.
+Une définition n'est pas lue quand elle suit une ligne de commentaire (`<!-- liens -->`, puis les
+définitions), quand elle est dans un élément de liste ou dans une citation, quand elle suit une
+ligne de séparation (`***`), ou quand son titre tient sur deux lignes.
 
 La sortie ne cite jamais le contenu d'un fichier, seulement des chemins, chaque caractère de
 contrôle ou non décodable (un nom qui n'est pas de l'UTF-8) remplacé par `?`.
 
 Bibliothèque standard seule, Python 3.10 ou plus.
 
-Usage : documentation.py [--racine DOSSIER]  (défaut : le dossier courant ; la CI le lance depuis
-        la racine du dépôt)
+Usage : documentation.py [--racine DOSSIER] [--gabarits-vides]  (racine par défaut : le dossier
+        courant ; la CI lance la licence et la carte depuis la racine du dépôt.
+        --gabarits-vides lance le seul gabarit resté vide, et imprime un constat par ligne)
 
-Retour : 0 rien à signaler, 1 refus, 64 erreur d'usage.
+Retour : 0 rien à signaler, 1 refus, 64 erreur d'usage ; avec --gabarits-vides, toujours 0, hors
+         d'une erreur d'usage.
 """
 
 from __future__ import annotations
@@ -290,21 +313,28 @@ def _noms(racine: Path) -> list[str]:
     return os.listdir(racine)
 
 
-def _lire(racine: Path, nom: str, noms: list[str]) -> str | None:
-    """Le texte d'un fichier de la racine, nommé à la casse près, sans BOM ; `None` s'il n'y est
-    pas."""
-    chemin = racine / nom
-    if nom not in noms or not chemin.is_file():
-        return None
+def _texte(chemin: Path) -> str | None:
+    """Le texte d'un fichier, en LF, sans BOM, chaque octet qui n'est pas de l'UTF-8 remplacé ;
+    `None` s'il ne se lit pas."""
     try:
         return _en_lf(chemin.read_text("utf-8", errors="replace").removeprefix("\ufeff"))
     except OSError:
         return None
 
 
+def _lire(racine: Path, nom: str, noms: list[str]) -> str | None:
+    """Le texte d'un fichier de la racine, nommé à la casse près, sans BOM ; `None` s'il n'y est
+    pas."""
+    chemin = racine / nom
+    if nom not in noms or not chemin.is_file():
+        return None
+    return _texte(chemin)
+
+
 def _section(texte: str, titre: str) -> str:
     """Les lignes des sections d'un titre donné (sans égard à la casse), jusqu'au titre suivant de
-    même niveau ou d'un niveau supérieur ; hors des blocs de code clôturés."""
+    même niveau ou d'un niveau supérieur ; hors des blocs de code clôturés. Deux sections sont
+    séparées par une ligne vide : la seconde ne prolonge pas un paragraphe de la première."""
     lignes = texte.split("\n")
     niveaux: list[tuple[int, int, str]] = []
     for i, ligne in enumerate(_hors_des_blocs(texte).split("\n")):
@@ -318,7 +348,7 @@ def _section(texte: str, titre: str) -> str:
             continue
         fin = next((j for j, n, _ in niveaux[k + 1 :] if n <= niveau), len(lignes))
         morceaux.append("\n".join(lignes[i + 1 : fin]))
-    return "\n".join(morceaux)
+    return "\n\n".join(morceaux)
 
 
 def _cibles(texte: str, racine: Path, document: str | None = None) -> set[str]:
@@ -370,6 +400,91 @@ def carte(racine: Path) -> tuple[list[str], bool]:
     return [tete, *absents, *non_lies], bool(absents or non_lies)
 
 
+MARQUEUR = "*AAAA-MM-JJ*"
+# Une ligne tout en italique : une seule emphase, de son premier à son dernier caractère.
+_ITALIQUE = re.compile(r"\*[^*\s](?:[^*]*[^*\s])?\*|_[^_\s](?:[^_]*[^_\s])?_")
+_PLANS = ".claude/plans"
+_ADR = ("docs/decisions/", "docs/adr/")
+_SANS_CONTENU = {"README.md", ".gitkeep"}
+
+
+def _sous_les_plans(chemin: str) -> bool:
+    return chemin == _PLANS or chemin.startswith(_PLANS + "/")
+
+
+def _fichier_mis_de_cote(chemin: str) -> bool:
+    """Le registre (tout `registre.md`, sans égard à la casse), un plan, ou un fichier d'ADR (sous
+    `docs/decisions/` ou `docs/adr/`, sauf leur `README.md`) : ni le marqueur ni le corps ne s'y
+    lisent."""
+    if chemin.rsplit("/", 1)[-1].lower() == "registre.md" or _sous_les_plans(chemin):
+        return True
+    return chemin.startswith(_ADR) and chemin not in {d + "README.md" for d in _ADR}
+
+
+def _corps_vide(texte: str) -> bool:
+    """Vrai si le texte n'a que des titres (de `#` à `######`), des lignes vides, des commentaires
+    HTML et des lignes tout en italique. Une ligne d'un bloc de code clôturé, ses clôtures
+    comprises, fait un corps ; un code en ligne aussi."""
+    hors = _hors_des_blocs(texte)
+    for ligne, dehors in zip(texte.split("\n"), hors.split("\n")):
+        if ligne.strip() and not dehors:  # une ligne vidée par `_hors_des_blocs` : du code
+            return False
+    # Les commentaires retirés, leurs fins de ligne gardées ; un code en ligne reste, et protège
+    # le `<!--` qu'il contiendrait.
+    sans_commentaire = _CODE_OU_COMMENTAIRE.sub(
+        lambda m: m.group(0) if m.group(1) else "\n" * m.group(0).count("\n"), hors
+    )
+    for ligne in sans_commentaire.split("\n"):
+        if ligne.strip() and not _TITRE.match(ligne) and not _ITALIQUE.fullmatch(ligne.strip()):
+            return False
+    return True
+
+
+def _dossier_sans_contenu(dossier: Path) -> bool:
+    """Vrai si le dossier n'a pas d'autre enfant direct que `README.md` et `.gitkeep`."""
+    try:
+        return not set(os.listdir(dossier)) - _SANS_CONTENU
+    except OSError:
+        return False
+
+
+def gabarits_vides(racine: Path) -> list[str]:
+    """Les constats du gabarit resté vide, dans l'ordre des liens de `README.md`, un par chemin.
+    Aucun sous-processus : la racine se lit telle quelle, sans git."""
+    try:
+        noms = os.listdir(racine)
+    except OSError:
+        noms = []
+    readme = _lire(racine, "README.md", noms)
+    if readme is None:
+        return ["pas de README.md"]
+    constats: list[str] = []
+    deja: set[str] = set()
+    documents = 0
+    for lien in liens(readme):
+        chemin = cible_locale(lien, racine)
+        if chemin is None or chemin in deja:
+            continue
+        deja.add(chemin)
+        cible, nom = racine / chemin, _affichable(chemin)
+        if cible.is_dir():
+            documents += 1
+            if not _sous_les_plans(chemin) and _dossier_sans_contenu(cible):
+                constats.append(f"{nom}/ : dossier sans autre fichier que README.md")
+        elif cible.is_file() and Path(chemin).suffix.lower() == ".md":
+            documents += 1
+            texte = None if _fichier_mis_de_cote(chemin) else _texte(cible)
+            if texte is None:
+                continue
+            if MARQUEUR in _preparer(texte):
+                constats.append(f"{nom} : garde le marqueur {MARQUEUR} du gabarit")
+            elif _corps_vide(texte):
+                constats.append(f"{nom} : corps vide (titres et consignes seulement)")
+    if not documents:
+        return ["le README ne lie aucun document du dépôt"]
+    return constats
+
+
 # --- ligne de commande -----------------------------------------------------------------------
 
 
@@ -391,9 +506,17 @@ def main(argv: list[str] | None = None) -> int:
             flux.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
         except (AttributeError, ValueError):
             pass
-    p = _Analyseur(prog="documentation.py", description="La licence et la carte de la racine.")
+    p = _Analyseur(
+        prog="documentation.py",
+        description="La licence et la carte de la racine, ou le gabarit resté vide.",
+    )
     p.add_argument(
         "--racine", type=Path, default=Path("."), help="racine du dépôt (défaut : le dossier courant)"
+    )
+    p.add_argument(
+        "--gabarits-vides",
+        action="store_true",
+        help="le seul gabarit resté vide : un constat par ligne, et toujours 0",
     )
     try:
         args = p.parse_args(argv)
@@ -402,6 +525,14 @@ def main(argv: list[str] | None = None) -> int:
     if not args.racine.is_dir():
         print("documentation : racine introuvable (voir --help)", file=sys.stderr)
         return EXIT_USAGE
+    if args.gabarits_vides:
+        try:
+            constats = gabarits_vides(args.racine)
+        except Exception:  # noqa: BLE001 - un avertissement ne fait jamais échouer
+            constats = ["non lue (erreur)"]
+        for constat in constats:
+            print(PREFIXE + constat)
+        return 0
     lignes_licence, refus_licence = licence(args.racine, _nature())
     lignes_carte, refus_carte = carte(args.racine)
     for ligne in (*lignes_licence, *lignes_carte):
