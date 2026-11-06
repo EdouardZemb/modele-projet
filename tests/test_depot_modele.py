@@ -6,10 +6,13 @@ import re
 import subprocess
 import sys
 
+import documentation
 import yaml
-from conftest import RACINE
+from conftest import PERIMES, RACINE
+from test_combinaisons import CLOTURE, SCHEMA, lien_casse
 
 CI = RACINE / ".github/workflows/ci.yml"
+COPIER = yaml.safe_load((RACINE / "copier.yml").read_text(encoding="utf-8"))
 
 
 def test_ruleset_du_depot_modele():
@@ -252,6 +255,61 @@ def test_licence_du_depot_modele(rendre):
     depot = hashlib.sha256((RACINE / "LICENSE").read_bytes()).hexdigest()
     rendu = hashlib.sha256((rendre() / "LICENSE").read_bytes()).hexdigest()
     assert depot == rendu
+
+
+def test_readme_nomme_chaque_reponse_a_choix():
+    """Le README nomme chaque réponse à choix de `copier.yml` et chacun de ses choix, entre accents
+    graves, dans un élément de liste d'une seule ligne : celle de sa question. Les choix se lisent
+    dans `copier.yml`, la liste ou les valeurs du dictionnaire (pas ses libellés). Entre accents
+    graves et sur la ligne de la question : une recherche nue passerait à vide, « code » ou
+    « serveur » paraissant partout."""
+    a_choix = {
+        nom: question["choices"]
+        for nom, question in COPIER.items()
+        if isinstance(question, dict) and "choices" in question
+    }
+    assert sorted(a_choix) == ["cible", "cible_code", "fusion", "nature"]
+    lignes = [
+        ligne
+        for ligne in (RACINE / "README.md").read_text(encoding="utf-8").splitlines()
+        if re.match(r"\s*[-*] ", ligne)
+    ]
+    for nom, choix in a_choix.items():
+        valeurs = list(choix.values()) if isinstance(choix, dict) else list(choix)
+        assert valeurs, nom
+        assert any(
+            f"`{nom}`" in ligne and all(f"`{valeur}`" in ligne for valeur in valeurs)
+            for ligne in lignes
+        ), (nom, valeurs)
+
+
+def test_readme_du_depot_modele():
+    """Le README de ce dépôt a la forme de la variante « code » : ses titres, dans l'ordre ; rien
+    qui se périme ; il lie `CLAUDE.md`, `docs/aligner.md`, `LICENSE` et les publications, et chaque
+    lien relatif (une ancre seule comprise) et chaque ancre mènent à un fichier et à un titre de ce
+    dépôt, à la casse près, comme sur GitHub."""
+    texte = (RACINE / "README.md").read_text(encoding="utf-8")
+    titres = re.findall(r"^## (.+)$", CLOTURE.sub("", texte), flags=re.MULTILINE)
+    assert titres == ["Pourquoi", "Démarrer", "Où lire quoi", "Contribuer", "Licence"]
+    perime = PERIMES.search(texte)
+    assert perime is None, perime
+    liens = documentation.liens(texte)
+    assert "https://github.com/EdouardZemb/modele-projet/releases" in liens
+    relatifs = [lien for lien in liens if not SCHEMA.match(lien)]
+    locaux = {documentation.cible_locale(lien, RACINE) for lien in relatifs}
+    assert {"CLAUDE.md", "docs/aligner.md", "LICENSE"} <= locaux, locaux
+    assert any("#" in lien for lien in relatifs), relatifs
+    casses = [lien for lien in relatifs if lien_casse(RACINE, "README.md", lien)]
+    assert not casses, casses
+
+
+def test_aides_de_copier_yml():
+    """L'aide de `description` dit ce qu'attend la première phrase du README ; celle de `cible` ne
+    promet aucune cible à venir."""
+    assert COPIER["description"]["help"] == "Le projet en une phrase : ce que c'est, et pour qui"
+    aide = COPIER["cible"]["help"].lower()
+    assert "lot" not in aide, aide
+    assert "statique" not in aide, aide
 
 
 def test_settings_du_depot_modele():
