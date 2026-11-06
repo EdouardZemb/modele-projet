@@ -1048,13 +1048,40 @@ def test_documentation_md(tmp_path):
         "licence : LICENSE absent ou vide, exigé en nature code",
         "carte : CLAUDE.md n'est pas lié par README.md",
         f"carte : <nom> {documentation.NON_LIE}",
+        "`refus`, en dernière ligne",
         "documentation : non lue (erreur)",
+        "le titre `documentation :` puis une ligne `- <constat>` chacun",
+        "imprime un constat par ligne et rend toujours 0",
+        # comment répondre à chaque sortie
+        "À `carte : README.md absent` ou `carte : CLAUDE.md absent`, rendre le fichier",
+        "À `pas de README.md`, de même",
+        # ce qui n'est pas local
+        "nomme un lecteur (`Z:`), en tête, ou plus loin sous Windows",
         # les écarts connus au rendu de GitHub, repris de la docstring du script
         "dans un bloc de code indenté",
+        "(`C:notes.md`), que Windows lit comme un lecteur, n'est jamais lié",
         "un lien `docs/Cadrage.md` vers `docs/cadrage.md`",
         "un avertissement de trop, jamais un refus",
     ):
         assert fragment in plat, fragment
+    # Les lignes de la licence et de la carte, telles que le script les écrit sur une racine, sont
+    # chacune dans la liste de leur contrôle.
+    section = texte.split("### La licence", 1)[1].split("### Le gabarit resté vide", 1)[0]
+    listes = " ".join(ligne for ligne in section.splitlines() if ligne.startswith("- `"))
+    racine = tmp_path / "racine"
+    racine.mkdir()
+    # Une racine vide : la licence absente, puis, après la tête, README.md et CLAUDE.md absents.
+    sorties = [*documentation.licence(racine, "code")[0], *documentation.carte(racine)[0][1:]]
+    (racine / "LICENSE").write_text("MIT\n", encoding="utf-8")
+    (racine / "README.md").write_text("[c](CLAUDE.md) [n](NOTICE.md)\n", encoding="utf-8")
+    (racine / "CLAUDE.md").write_text("# C\n", encoding="utf-8")
+    (racine / "NOTICE.md").write_text("# N\n", encoding="utf-8")
+    # Une racine en ordre : la licence présente, et la tête de la carte, son nombre en place.
+    sorties += documentation.licence(racine, "code")[0]
+    sorties.append(documentation.carte(racine)[0][0].replace(" 2 ", " <n> ", 1))
+    assert len(sorties) == 5, sorties
+    for ligne in sorties:
+        assert f"`{ligne}`" in listes, ligne
     decisions = "| [Les décisions](docs/decisions/) |"
     assert any(decisions in bloc.group(0) for bloc in CLOTURE.finditer(texte))
     assert decisions not in hors_du_code
@@ -1086,6 +1113,12 @@ def test_m0002_amende_par_le_lot_14():
     corps = " ".join(brut.split("## Décision", 1)[1].split("## Conséquences", 1)[0].split())
     assert "la licence et la carte de la racine" in corps
     assert "gabarit resté vide" in corps
+    # Le hook lance `gh` : seul le contrôle du gabarit resté vide se passe de sous-processus.
+    assert "Ce contrôle avertit, sans jamais refuser, et lit la copie sans lancer" in corps
+    assert "Il avertit, sans jamais refuser" not in corps
+    # La carte, comme le script la tient.
+    assert "chaque fichier `.md` de la racine, sauf `README.md`, est lié" in corps
+    assert "`README.md` et `CLAUDE.md` doivent exister" in corps
     assert not RENVOI_AU_PLAN.search(texte)
     (amendement,) = [
         b for b in blocs(brut) if b[0].startswith("- **Amendé** le 2026-11-06, avec le lot 14")

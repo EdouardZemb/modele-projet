@@ -139,14 +139,15 @@ pas de la discipline de celui qui travaille ?
   nom. La CI du socle exige ce hook comme elle exige le garde : sans lui, un rouge passerait
   inaperçu jusqu'à la prochaine PR. Il signale aussi un gabarit resté vide que le README lie, et un
   README qui ne lie aucun document du dépôt (amendement du 2026-11-06) : personne n'ouvre une
-  exécution verte, et ce hook est le seul canal qu'une session lit. Il avertit, sans jamais refuser,
-  et lit la copie sans lancer de sous-processus.
+  exécution verte, et ce hook est le seul canal qu'une session lit. Ce contrôle avertit, sans
+  jamais refuser, et lit la copie sans lancer de sous-processus.
 - **La CI refuse la licence et la carte de la racine** (amendement du 2026-11-06), par
   `scripts/modele/documentation.py`, à la dernière étape du job `confidentialite` du socle, déjà
   requis par la règle de protection. En nature `code`, `LICENSE` doit être présent et non vide ; la
   nature s'y lit comme la lit la porte, jamais dans la PR. Dans tout dépôt, chaque fichier `.md` de
-  la racine est lié par un lien Markdown, `CLAUDE.md` depuis le README, un autre depuis le README
-  ou depuis « Ce qui fait foi » de `CLAUDE.md` : un nom entre accents graves ne se suit pas.
+  la racine, sauf `README.md`, est lié par un lien Markdown, `CLAUDE.md` depuis le README, un autre
+  depuis le README ou depuis « Ce qui fait foi » de `CLAUDE.md` : un nom entre accents graves ne se
+  suit pas ; `README.md` et `CLAUDE.md` doivent exister.
 - **Le modèle lui-même est public.** Rien de ce qu'il contient ne nomme le serveur, son utilisateur
   ou son réseau.
 - **Un refus se corrige, il ne se contourne jamais.**

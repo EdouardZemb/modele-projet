@@ -238,8 +238,9 @@ Ses lignes, chacune après `documentation : ` :
 - `refus`, en dernière ligne, quand la licence ou la carte refuse.
 
 Y répondre en ajoutant le lien : dans le tableau « Où lire quoi » du README, ou dans « Ce qui fait
-foi ». `python scripts/modele/documentation.py`, lancé depuis la racine, donne les mêmes lignes que
-la CI.
+foi ». À `carte : README.md absent` ou `carte : CLAUDE.md absent`, rendre le fichier : un semé
+retiré revient au `copier update` suivant (« Retirer un texte »).
+`python scripts/modele/documentation.py`, lancé depuis la racine, donne les mêmes lignes que la CI.
 
 ### Le gabarit resté vide (avertit au démarrage d'une session)
 
@@ -270,7 +271,9 @@ toujours 0.
 
 Y répondre en remplissant le document, ou en retirant son lien du README tant qu'il est vide ; pour
 un dossier, en y posant son premier fichier ; pour le marqueur, en écrivant la date qu'il réserve.
-À un README qui ne lie aucun document du dépôt, ajouter au moins le lien de `CLAUDE.md`.
+À un README qui ne lie aucun document du dépôt, ajouter au moins le lien de `CLAUDE.md`. À
+`pas de README.md`, de même que pour la carte : rendre le fichier, que le `copier update` suivant
+sème à neuf.
 
 ### Ce qui compte comme un lien
 
@@ -286,10 +289,10 @@ Pour la carte comme pour le gabarit resté vide :
 Rien ne compte dans un bloc de code, dans un code en ligne ni dans un commentaire HTML : GitHub n'y
 rend aucun lien. La cible perd son ancre et sa requête, puis elle est décodée (`%20`) ; un `/` en
 tête part de la racine. Une cible n'est pas locale quand elle a un schéma (`https:`, `mailto:`) ou
-commence par `//`, n'est qu'une ancre, garde une barre oblique inverse, nomme un lecteur (`Z:`), ou
-sort du dépôt, par `..` ou par un lien symbolique. La casse compte, comme sur GitHub :
-`[x](claude.md)` ne lie pas `CLAUDE.md`. Un document est un fichier dont le suffixe est `.md`, sans
-égard à la casse.
+commence par `//`, n'est qu'une ancre, garde une barre oblique inverse, nomme un lecteur (`Z:`), en
+tête, ou plus loin sous Windows (`docs/Z:x.md` : tout deux-points), ou sort du dépôt, par `..` ou
+par un lien symbolique. La casse compte, comme sur GitHub : `[x](claude.md)` ne lie pas
+`CLAUDE.md`. Un document est un fichier dont le suffixe est `.md`, sans égard à la casse.
 
 ### Les écarts connus au rendu de GitHub
 
@@ -308,6 +311,8 @@ D'autres font refuser à tort :
 - un accent grave échappé (`` \` ``) ouvre quand même un code en ligne ;
 - une entité dans la cible (`&#46;`) n'est pas décodée ;
 - un fichier dont le nom porte une barre oblique inverse, que Windows refuse, n'est jamais lié ;
+- un fichier dont le nom commence par un caractère suivi d'un deux-points (`C:notes.md`), que
+  Windows lit comme un lecteur, n'est jamais lié, même sous Linux ;
 - un commentaire HTML ouvert dans un paragraphe court jusqu'à sa fermeture, plus loin ;
 - une définition n'est pas lue quand elle suit une ligne de commentaire (`<!-- liens -->`, puis les
   définitions), quand elle est dans un élément de liste ou dans une citation, quand elle suit une

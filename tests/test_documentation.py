@@ -534,32 +534,54 @@ def test_cible_locale_sans_reseau(tmp_path, monkeypatch):
 
 
 def test_cible_locale_sans_lecteur(tmp_path, monkeypatch):
-    """Une cible qui nomme un lecteur (`Z:`) n'est pas locale, et `resolve` ne la voit pas. Le
-    schéma ne lit que la cible brute : `./Z:/x.md`, `/Z:/x.md`, `%5A:/x.md` ou `./Q:x.md` lui
-    échappent. Sous Windows, le lecteur ferait du chemin un chemin absolu, que `resolve` ouvrirait
-    au `SessionStart` (un lecteur réseau injoignable attendrait au-delà du délai du hook) ; sous
-    Linux, la même cible serait un sous-dossier. Un deux-points plus loin ne nomme pas de lecteur :
-    `docs/a:b.md` atteint `resolve`, et reste locale là où un tel nom peut exister. L'espion n'ouvre
-    jamais un lecteur : rouge, ce test ne touche pas le réseau."""
+    """Une cible qui nomme un lecteur (`Z:`) n'est pas locale, et rien ne touche ce lecteur : sous
+    Windows, il ferait du chemin un chemin absolu, que `resolve` ouvrirait au `SessionStart` (un
+    lecteur réseau injoignable attendrait au-delà du délai du hook).
+    - En tête, le schéma ne le voit pas, puisqu'il ne lit que la cible brute : `./Z:/x.md`,
+      `/Z:/x.md`, `%5A:/x.md` ou `./Q:x.md` sont refusés sous tout système, avant `resolve`.
+    - Plus loin (`docs/Z:x.md`), Windows le lit encore : en mode non strict, `resolve` remonte
+      jusqu'à un dossier qui existe, y joint `Z:x.md`, qui repart du lecteur, puis lit l'état de ce
+      chemin. Sous Windows, un nom de fichier ne porte jamais de deux-points : une cible qui en
+      porte un est refusée avant `resolve`, `docs/a:b.md` comprise. Sous Linux, c'est un nom comme
+      un autre, et la cible reste locale.
+    Les espions lisent `resolve`, et l'état d'un chemin (`os.stat`), là où se fait l'accès. Ils
+    n'ouvrent jamais un lecteur : rouge, ce test ne touche pas le réseau."""
     vus, lecteurs = [], []
-    resolve = d.Path.resolve
+    resolve, stat = d.Path.resolve, os.stat
 
-    def espion(self, *args, **kwargs):
+    def espion_resolve(self, *args, **kwargs):
         vus.append(str(self))
-        if "Z:" in str(self) or "Q:" in str(self):
-            lecteurs.append(str(self))
-            raise OSError("aucun lecteur ouvert dans un test")
         return resolve(self, *args, **kwargs)
 
-    monkeypatch.setattr(d.Path, "resolve", espion)
+    def espion_stat(chemin, *args, **kwargs):
+        if isinstance(chemin, (str, os.PathLike)):
+            lecteur = d.PureWindowsPath(os.fspath(chemin)).drive.upper()
+            if lecteur.endswith(("Z:", "Q:")):
+                lecteurs.append(os.fspath(chemin))
+                raise OSError("aucun lecteur ouvert dans un test")
+        return stat(chemin, *args, **kwargs)
+
+    (tmp_path / "docs").mkdir()
+    monkeypatch.setattr(d.Path, "resolve", espion_resolve)
+    monkeypatch.setattr(os, "stat", espion_stat)
     for cible in ("./Z:/x.md", "/Z:/x.md", "%5A:/x.md", "./Q:x.md"):
+        vus.clear()
         assert d.cible_locale(cible, tmp_path) is None, cible
+        assert vus == [], cible
+    plus_loin = {
+        "docs/Z:x.md": "docs/Z:x.md",
+        "docs/%5A:x.md": "docs/Z:x.md",
+        "docs/Z:/x.md": "docs/Z:/x.md",
+        "docs/a:b.md": "docs/a:b.md",
+    }
+    for cible, attendu in plus_loin.items():
+        vus.clear()
+        local = d.cible_locale(cible, tmp_path)
+        if sys.platform == "win32":
+            assert (local, vus) == (None, []), cible
+        else:
+            assert local == attendu, cible
     assert lecteurs == []
-    vus.clear()
-    local = d.cible_locale("docs/a:b.md", tmp_path)
-    assert any(v.endswith("a:b.md") for v in vus), vus
-    if sys.platform != "win32":  # Windows refuse ce nom de fichier
-        assert local == "docs/a:b.md"
 
 
 # --- le gabarit resté vide -------------------------------------------------------------------
