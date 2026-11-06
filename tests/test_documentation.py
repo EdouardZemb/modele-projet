@@ -350,6 +350,8 @@ def test_affichable_remplace_les_caracteres_de_controle():
     # UTF-8 strict, refuserait d'écrire.
     assert d._affichable("\udcff.md") == "?.md"
     assert d._affichable("a\x01b\nc\x7fd") == "a?b?c?d"
+    # Les séparateurs de ligne et de paragraphe coupent aussi une ligne (`splitlines`).
+    assert d._affichable("a b c") == "a?b?c"
 
 
 def test_carte_affiche_un_nom_a_caractere_de_controle(tmp_path, monkeypatch):

@@ -58,7 +58,8 @@ définitions), quand elle est dans un élément de liste ou dans une citation, q
 ligne de séparation (`***`), ou quand son titre tient sur deux lignes.
 
 La sortie ne cite jamais le contenu d'un fichier, seulement des chemins, chaque caractère de
-contrôle ou non décodable (un nom qui n'est pas de l'UTF-8) remplacé par `?`.
+contrôle, séparateur de ligne ou de paragraphe (U+2028, U+2029) ou non décodable (un nom qui n'est
+pas de l'UTF-8) remplacé par `?`.
 
 Bibliothèque standard seule, Python 3.10 ou plus.
 
@@ -288,9 +289,12 @@ def cible_locale(cible: str, racine: Path) -> str | None:
 
 
 def _affichable(texte: str) -> str:
-    """Le texte, chaque caractère de contrôle (catégorie Unicode `Cc`) ou non décodable (`Cs`, ce
-    que donne sous Linux un nom qui n'est pas de l'UTF-8) remplacé par `?`."""
-    return "".join("?" if unicodedata.category(c) in ("Cc", "Cs") else c for c in texte)
+    """Le texte, chaque caractère de contrôle (catégorie Unicode `Cc`), séparateur de ligne ou de
+    paragraphe (`Zl`, `Zp`, que `splitlines` coupe aussi) ou non décodable (`Cs`, ce que donne
+    sous Linux un nom qui n'est pas de l'UTF-8) remplacé par `?`."""
+    return "".join(
+        "?" if unicodedata.category(c) in ("Cc", "Zl", "Zp", "Cs") else c for c in texte
+    )
 
 
 # --- les contrôles ---------------------------------------------------------------------------
