@@ -5,6 +5,7 @@ _templates_suffix: .jinja
 _skip_if_exists:
   - CLAUDE.md
   - README.md
+  - LICENSE
   - .gitattributes
   - .gitignore
   - .editorconfig

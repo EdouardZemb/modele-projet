@@ -669,6 +669,7 @@ def fichiers(rendu: Path) -> list[str]:
 SEMES_DU_PROJET = {
     "CLAUDE.md",
     "README.md",
+    "LICENSE",
     ".gitattributes",
     ".gitignore",
     ".editorconfig",

@@ -1,9 +1,17 @@
 """Les fichiers semés : donnés une fois par le modèle, puis propres au projet."""
 
+import hashlib
 import re
 
+import pytest
 import yaml
-from conftest import RACINE, REGISTRE_ENTETE, REPONSES_DONNEES_SERVEUR, REPONSES_SERVEUR
+from conftest import (
+    RACINE,
+    REGISTRE_ENTETE,
+    REPONSES_DONNEES_SERVEUR,
+    REPONSES_SERVEUR,
+    REPONSES_SERVEUR_CODE,
+)
 
 
 def lire(rendu, chemin):
@@ -62,6 +70,38 @@ def test_semes_declares(rendre):
         rendu = rendre(**reponses)
         rendus |= {p.relative_to(rendu).as_posix() for p in rendu.rglob("*") if p.is_file()}
     assert set(copier_yml["_skip_if_exists"]) <= rendus
+
+
+# Lot 14 : un LICENSE MIT, semé dans tout dépôt de code, au titulaire de la réponse `compte`. Ni un
+# dépôt de nature `donnees`, ni la cible `donnees`, même avec une `nature` passée par `--data`.
+@pytest.mark.parametrize(
+    ("reponses", "titulaire"),
+    [
+        ({}, "EdouardZemb"),
+        ({"compte": "Autre-Compte"}, "Autre-Compte"),
+        (REPONSES_SERVEUR_CODE, "EdouardZemb"),
+        ({"nature": "donnees"}, None),
+        (REPONSES_SERVEUR, None),
+        ({"nom": "essai-donnees", "cible": "donnees", "nature": "code"}, None),  # la garde de cible
+        (REPONSES_DONNEES_SERVEUR, None),
+    ],
+)
+def test_licence_selon_la_nature(rendre, reponses, titulaire):
+    licence = rendre(**reponses) / "LICENSE"
+    if titulaire is None:
+        assert not licence.exists()
+    else:
+        texte = licence.read_text(encoding="utf-8")
+        assert texte.startswith("MIT License\n\nCopyright (c) 2026 " + titulaire + "\n")
+        assert "THE SOFTWARE IS PROVIDED \"AS IS\"" in texte
+        # Le texte archivé fait foi, à l'octet près : son empreinte, titulaire remis en variable.
+        # Une empreinte, pour qu'un échec n'imprime pas les deux textes.
+        gabarit = texte.replace(
+            f"Copyright (c) 2026 {titulaire}\n", "Copyright (c) 2026 {{ compte }}\n", 1
+        )
+        assert hashlib.sha256(gabarit.encode("utf-8")).hexdigest() == (
+            "80459fc9ced0428542d09320c70850954d5ef46f1d1ba2dd0ceb02da27634db8"
+        )
 
 
 # Lot 12 (M-0006, § 9) : les fichiers de l'instance sont semés. Un projet à un dépôt garde ses clés,
