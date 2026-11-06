@@ -554,7 +554,7 @@ def test_controle_pendant_les_lectures(monkeypatch, capsys):
     monkeypatch.setattr(signaux, "_documentation", faux_controle)
     code, texte = lancer(capsys)
     assert code == 0
-    assert texte == RIEN_DE_ROUGE  # appelé après les résultats, il aurait laissé expirer les lectures
+    assert texte == RIEN_DE_ROUGE  # appelé après les résultats : les lectures auraient expiré
     assert vus == [True]  # appelé avant les lectures, il n'en aurait vu commencer aucune
 
 

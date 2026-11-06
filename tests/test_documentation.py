@@ -351,7 +351,7 @@ def test_affichable_remplace_les_caracteres_de_controle():
     assert d._affichable("\udcff.md") == "?.md"
     assert d._affichable("a\x01b\nc\x7fd") == "a?b?c?d"
     # Les séparateurs de ligne et de paragraphe coupent aussi une ligne (`splitlines`).
-    assert d._affichable("a b c") == "a?b?c"
+    assert d._affichable(f"a{chr(0x2028)}b{chr(0x2029)}c") == "a?b?c"
 
 
 def test_carte_affiche_un_nom_a_caractere_de_controle(tmp_path, monkeypatch):
@@ -649,7 +649,8 @@ def test_mis_de_cote(tmp_path):
     # Le dossier des plans échappe aussi à la règle du dossier : la clôture d'un lot supprime son
     # plan, et le dossier reste, vide ou réduit à `.gitkeep`.
     (tmp_path / ".claude/plans/2026-11-06-x.md").unlink()
-    arbre(tmp_path, {"README.md": "# E\n\n[Les plans](.claude/plans/)\n", ".claude/plans/.gitkeep": ""})
+    arbre(tmp_path, {"README.md": "# E\n\n[Les plans](.claude/plans/)\n"})
+    arbre(tmp_path, {".claude/plans/.gitkeep": ""})
     assert d.gabarits_vides(tmp_path) == []
 
 
