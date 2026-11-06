@@ -41,13 +41,13 @@ Les blocs de code clôturés, le code en ligne et les commentaires HTML sont ret
 n'y rend aucun lien. La cible perd son ancre et sa requête, ses échappements (`\\.`), puis elle est
 décodée (`%20`) ; un `/` en tête part de la racine ; une cible avec un schéma (`https:`, `mailto:`)
 ou sans (`//hôte`), une ancre seule, une cible où reste une barre oblique inverse (GitHub ne la lit
-pas comme un séparateur ; sous Windows, deux en tête nommeraient un partage réseau), une cible qui
-nomme un lecteur, en tête (`./Z:/x.md`, `%5A:/x.md` : sous Windows, un chemin absolu), ou plus
-loin sous Windows (`docs/Z:x.md`, qu'il lit encore comme un lecteur : tout deux-points), ou une
-cible qui sort de la racine, par `..` ou par un lien symbolique, n'est pas locale. Les chemins se
-comparent à la casse près, comme sur GitHub ; un document est un fichier dont le suffixe est `.md`,
-sans égard à la casse. Un texte en CRLF se lit comme en LF, un BOM en tête est ignoré, et un octet
-qui n'est pas de l'UTF-8 est remplacé, sans erreur.
+pas comme un séparateur ; sous Windows, deux en tête nommeraient un partage réseau), sous Windows
+une cible qui porte un deux-points (il y nomme un lecteur, en tête comme plus loin : `./Z:/x.md`,
+`docs/Z:x.md` ; sous Linux, c'est un caractère comme un autre), ou une cible qui sort de la racine,
+par `..` ou par un lien symbolique, n'est pas locale. Les chemins se comparent à la casse près,
+comme sur GitHub ; un document est un fichier dont le suffixe est `.md`, sans égard à la casse. Un
+texte en CRLF se lit comme en LF, un BOM en tête est ignoré, et un octet qui n'est pas de l'UTF-8
+est remplacé, sans erreur.
 
 Des écarts connus au rendu de GitHub, rares. Quatre laissent passer à tort un lien que GitHub ne
 rend pas : dans un bloc de code indenté, que GitHub rend en code ; dans un bloc HTML sans ligne
@@ -59,9 +59,8 @@ du fichier s'il ne se ferme jamais. Dans ces blocs, GitHub ne lit pas le Markdow
 refuser à tort. Un titre souligné (`Ce qui fait foi` sur une ligne de `---`) n'est pas lu ; un
 accent grave échappé (`` \\` ``) ouvre quand même un code en ligne ; une entité dans la cible
 (`&#46;`) n'est pas décodée ; un fichier dont le nom porte une barre oblique inverse, que Windows
-refuse, n'est jamais lié ; un fichier dont le nom commence par un caractère suivi d'un deux-points
-(`C:notes.md`), que Windows lit comme un lecteur, n'est jamais lié, même sous Linux ; un
-commentaire HTML ouvert dans un paragraphe court jusqu'à sa fermeture, plus loin.
+refuse, n'est jamais lié ; un commentaire HTML ouvert dans un paragraphe court jusqu'à sa
+fermeture, plus loin.
 Une définition n'est pas lue quand elle suit une ligne de commentaire (`<!-- liens -->`, puis les
 définitions), quand elle est dans un élément de liste ou dans une citation, quand elle suit une
 ligne de séparation (`***`), ou quand son titre tient sur deux lignes.
@@ -92,7 +91,7 @@ import re
 import subprocess
 import sys
 import unicodedata
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 from urllib.parse import unquote
 
 EXIT_USAGE = 64
@@ -269,9 +268,8 @@ def liens(texte: str, document: str | None = None) -> list[str]:
 def cible_locale(cible: str, racine: Path) -> str | None:
     """Le chemin, relatif à la racine et en `/`, sans `/` final (`.` pour la racine), que vise une
     cible ; `None` si elle n'est pas locale : un schéma, une ancre seule, une barre oblique inverse
-    restée après les échappements, un lecteur (`Z:`) en tête du chemin, ou plus loin sous Windows
-    (`docs/Z:x.md` : tout deux-points), ou une sortie de la racine, par `..` ou par un lien
-    symbolique."""
+    restée après les échappements, sous Windows un deux-points (un lecteur, `Z:`, en tête ou plus
+    loin : `docs/Z:x.md`), ou une sortie de la racine, par `..` ou par un lien symbolique."""
     if _SCHEMA.match(cible) or cible.startswith("//"):
         return None
     chemin = cible.split("#", 1)[0].split("?", 1)[0]
@@ -290,15 +288,13 @@ def cible_locale(cible: str, racine: Path) -> str | None:
             segments.append(segment)
     relatif = "/".join(segments) or "."
     # GitHub ne lit pas `\` comme un séparateur : une telle cible n'est jamais un chemin du dépôt.
-    # Sous Windows, deux en tête nommeraient un partage réseau, que `resolve` ouvrirait ; un lecteur
-    # en tête (`Z:/x.md`, `Q:x.md`, qu'un `./` ou un `%5A` cachent au schéma) ferait du chemin un
-    # chemin absolu, de même. Sous tout système, la cible est refusée avant `resolve`.
-    if "\\" in relatif or PureWindowsPath(relatif).drive:
-        return None
-    # Un lecteur plus loin (`docs/Z:x.md`) touche encore, sous Windows : en mode non strict,
-    # `resolve` joint `Z:x.md` au dernier dossier qui existe, ce qui repart du lecteur, puis lit
-    # l'état de ce chemin. Sous Windows, un nom de fichier ne porte jamais de deux-points.
-    if os.name == "nt" and ":" in relatif:
+    # Sous Windows, deux en tête nommeraient un partage réseau, que `resolve` ouvrirait. Un
+    # deux-points y nomme un lecteur, en tête (`Z:/x.md`, `Q:x.md`, qu'un `./` ou un `%5A` cachent
+    # au schéma) comme plus loin (`docs/Z:x.md` : en mode non strict, `resolve` joint `Z:x.md` au
+    # dernier dossier qui existe, ce qui repart du lecteur, puis lit l'état de ce chemin), et un nom
+    # de fichier Windows n'en porte jamais. Ces cibles sont refusées avant `resolve`. Sous Linux, un
+    # deux-points ne nomme aucun lecteur : la cible reste locale.
+    if "\\" in relatif or (os.name == "nt" and ":" in relatif):
         return None
     try:
         base = racine.resolve()

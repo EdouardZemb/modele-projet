@@ -289,9 +289,9 @@ Pour la carte comme pour le gabarit resté vide :
 Rien ne compte dans un bloc de code, dans un code en ligne ni dans un commentaire HTML : GitHub n'y
 rend aucun lien. La cible perd son ancre et sa requête, puis elle est décodée (`%20`) ; un `/` en
 tête part de la racine. Une cible n'est pas locale quand elle a un schéma (`https:`, `mailto:`) ou
-commence par `//`, n'est qu'une ancre, garde une barre oblique inverse, nomme un lecteur (`Z:`), en
-tête, ou plus loin sous Windows (`docs/Z:x.md` : tout deux-points), ou sort du dépôt, par `..` ou
-par un lien symbolique. La casse compte, comme sur GitHub : `[x](claude.md)` ne lie pas
+commence par `//`, n'est qu'une ancre, garde une barre oblique inverse, porte un deux-points sous
+Windows, qui y nomme un lecteur (`Z:`, en tête comme plus loin : `docs/Z:x.md`), ou sort du dépôt,
+par `..` ou par un lien symbolique. La casse compte, comme sur GitHub : `[x](claude.md)` ne lie pas
 `CLAUDE.md`. Un document est un fichier dont le suffixe est `.md`, sans égard à la casse.
 
 ### Les écarts connus au rendu de GitHub
@@ -311,8 +311,6 @@ D'autres font refuser à tort :
 - un accent grave échappé (`` \` ``) ouvre quand même un code en ligne ;
 - une entité dans la cible (`&#46;`) n'est pas décodée ;
 - un fichier dont le nom porte une barre oblique inverse, que Windows refuse, n'est jamais lié ;
-- un fichier dont le nom commence par un caractère suivi d'un deux-points (`C:notes.md`), que
-  Windows lit comme un lecteur, n'est jamais lié, même sous Linux ;
 - un commentaire HTML ouvert dans un paragraphe court jusqu'à sa fermeture, plus loin ;
 - une définition n'est pas lue quand elle suit une ligne de commentaire (`<!-- liens -->`, puis les
   définitions), quand elle est dans un élément de liste ou dans une citation, quand elle suit une

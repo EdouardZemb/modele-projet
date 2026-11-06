@@ -1056,10 +1056,9 @@ def test_documentation_md(tmp_path):
         "À `carte : README.md absent` ou `carte : CLAUDE.md absent`, rendre le fichier",
         "À `pas de README.md`, de même",
         # ce qui n'est pas local
-        "nomme un lecteur (`Z:`), en tête, ou plus loin sous Windows",
+        "porte un deux-points sous Windows, qui y nomme un lecteur (`Z:`, en tête comme plus loin",
         # les écarts connus au rendu de GitHub, repris de la docstring du script
         "dans un bloc de code indenté",
-        "(`C:notes.md`), que Windows lit comme un lecteur, n'est jamais lié",
         "un lien `docs/Cadrage.md` vers `docs/cadrage.md`",
         "un avertissement de trop, jamais un refus",
     ):
