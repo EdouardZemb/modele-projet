@@ -42,17 +42,23 @@ n'y rend aucun lien. La cible perd son ancre et sa requête, ses échappements (
 décodée (`%20`) ; un `/` en tête part de la racine ; une cible avec un schéma (`https:`, `mailto:`)
 ou sans (`//hôte`), une ancre seule, une cible où reste une barre oblique inverse (GitHub ne la lit
 pas comme un séparateur ; sous Windows, deux en tête nommeraient un partage réseau), ou une cible
-qui sort de la racine, par `..` ou par un lien symbolique, n'est pas locale. Les chemins se comparent à la casse près, comme sur GitHub ; un
-document est un fichier dont le suffixe est `.md`, sans égard à la casse. Un texte en CRLF se lit
-comme en LF, un BOM en tête est ignoré, et un octet qui n'est pas de l'UTF-8 est remplacé, sans
-erreur.
+qui sort de la racine, par `..` ou par un lien symbolique, n'est pas locale. Les chemins se
+comparent à la casse près, comme sur GitHub ; un document est un fichier dont le suffixe est `.md`,
+sans égard à la casse. Un texte en CRLF se lit comme en LF, un BOM en tête est ignoré, et un octet
+qui n'est pas de l'UTF-8 est remplacé, sans erreur.
 
-Des écarts connus au rendu de GitHub, rares. Deux laissent passer à tort : un lien dans un bloc de
-code indenté, que GitHub rend en code, et un lien dans un bloc HTML sans ligne vide (`<details>`
-collé à son contenu), où GitHub ne lit pas le Markdown. Les autres font refuser à tort. Un titre
-souligné (`Ce qui fait foi` sur une ligne de `---`) n'est pas lu ; un accent grave échappé
-(`` \\` ``) ouvre quand même un code en ligne ; une entité dans la cible (`&#46;`) n'est pas
-décodée ; un commentaire HTML ouvert dans un paragraphe court jusqu'à sa fermeture, plus loin.
+Des écarts connus au rendu de GitHub, rares. Quatre laissent passer à tort un lien que GitHub ne
+rend pas : dans un bloc de code indenté, que GitHub rend en code ; dans un bloc HTML sans ligne
+vide (`<details>` collé à son contenu) ; dans un bloc `<pre>`, `<script>`, `<style>` ou
+`<textarea>`, lignes vides comprises, jusqu'à la fin de la ligne qui porte sa balise fermante ;
+dans un bloc ouvert en tête de ligne par `<!--` (ou par `<?`, `<!DOCTYPE`, `<![CDATA[`), jusqu'à
+la fin de la ligne qui le ferme (`<!-- liens --> [n](NOTICE.md)` ne lie rien), ou jusqu'à la fin
+du fichier s'il ne se ferme jamais. Dans ces blocs, GitHub ne lit pas le Markdown. Les autres font
+refuser à tort. Un titre souligné (`Ce qui fait foi` sur une ligne de `---`) n'est pas lu ; un
+accent grave échappé (`` \\` ``) ouvre quand même un code en ligne ; une entité dans la cible
+(`&#46;`) n'est pas décodée ; un fichier dont le nom porte une barre oblique inverse, que Windows
+refuse, n'est jamais lié ; un commentaire HTML ouvert dans un paragraphe court jusqu'à sa
+fermeture, plus loin.
 Une définition n'est pas lue quand elle suit une ligne de commentaire (`<!-- liens -->`, puis les
 définitions), quand elle est dans un élément de liste ou dans une citation, quand elle suit une
 ligne de séparation (`***`), ou quand son titre tient sur deux lignes.
