@@ -27,6 +27,22 @@ RENVOI_AU_PLAN = re.compile(
     r"|\bconstat \d"
 )
 
+# Ce qu'un README ne porte pas, parce que cela se périme : une version, un lot numéroté, une heure,
+# et les mots qui datent un état. Le lot, sans égard à la casse (« Lot 14 » en tête de phrase), au
+# pluriel (« les lots 8 à 13 »), et séparé de son numéro par tout blanc : une espace insécable, ou
+# la fin d'une ligne de prose repliée.
+PERIMES = re.compile(
+    r"\bv?\d+\.\d+\.\d+\b|\b(?i:lots?)\s+\d+\b|\b\d{1,2}[:h]\d{2}\b"
+    r"|\b(?i:actuellement|bientôt|prochainement)\b"
+)
+
+
+def slug_github(titre: str) -> str:
+    """L'ancre que GitHub donne à un titre : en minuscules, sans ce qui n'est ni `\\w`, ni `-`, ni
+    espace, puis chaque espace en `-`. « Invariants — ne jamais violer » donne
+    `invariants--ne-jamais-violer`."""
+    return re.sub(r"[^\w\- ]", "", titre.lower()).replace(" ", "-")
+
 REPONSES_PAR_DEFAUT = {
     "nom": "essai",
     "description": "Projet d'essai",
