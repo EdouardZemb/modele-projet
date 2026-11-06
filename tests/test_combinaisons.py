@@ -259,9 +259,22 @@ def test_combinaison(rendre, env_isole, cible, nature, fusion):
         f.write("\nUn [document vide](docs/vide.md).\n")
     r = lancer(gabarits_vides, rendu, env)
     assert r.returncode == 0, r.stdout + r.stderr
-    assert r.stdout.splitlines() == [
-        "documentation : docs/vide.md : corps vide (titres et consignes seulement)"
-    ], r.stdout
+    vide = "documentation : docs/vide.md : corps vide (titres et consignes seulement)"
+    assert r.stdout.splitlines() == [vide], r.stdout
+    if not cible.startswith("donnees"):
+        # Les vrais gabarits du modèle, laissés tels quels et liés par le README, donnent chacun
+        # leur constat, dans l'ordre des liens : si leurs consignes changeaient de forme, le
+        # contrôle cesserait de les voir.
+        with (rendu / "README.md").open("a", encoding="utf-8", newline="\n") as f:
+            f.write("[b](docs/00-brief-initial.md) [c](docs/cadrage.md) [d](docs/decisions/)\n")
+        r = lancer(gabarits_vides, rendu, env)
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert r.stdout.splitlines() == [
+            vide,
+            "documentation : docs/00-brief-initial.md : corps vide (titres et consignes seulement)",
+            "documentation : docs/cadrage.md : garde le marqueur *AAAA-MM-JJ* du gabarit",
+            "documentation : docs/decisions/ : dossier sans autre fichier que README.md",
+        ], r.stdout
 
 
 def scripts_shell(rendu):
