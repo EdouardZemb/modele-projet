@@ -38,11 +38,11 @@ nom:
   validator: "{% if not (nom | regex_search('^[a-z][a-z0-9-]*$')) %}minuscules, chiffres et tirets, en commençant par une lettre{% endif %}"
 description:
   type: str
-  help: Le projet en une phrase
+  help: "Le projet en une phrase : ce que c'est, et pour qui"
   validator: "{% if not description.strip() %}une phrase est requise{% endif %}"
 cible:
   type: str
-  help: Ce que le modèle rend (aucune, serveur, ou donnees pour un dépôt de données ; le lot 3 ajoutera statique)
+  help: Ce que le modèle rend (aucune, serveur, ou donnees pour un dépôt de données)
   choices: [aucune, serveur, donnees]
   default: aucune
   validator: "{% if cible == 'donnees' and not (nom | regex_search('-donnees$')) %}un dépôt de données se nomme <nom>-donnees{% endif %}"

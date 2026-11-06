@@ -18,7 +18,7 @@
     avant toute étape.
 
     Usage :
-      .\Nouveau-Projet.ps1 -Nom mon-outil -Description "Ce que fait l'outil"
+      .\Nouveau-Projet.ps1 -Nom mon-outil -Description "Ce qu'est l'outil, et pour qui"
       .\Nouveau-Projet.ps1 -Nom mon-outil -Description "..." -Visibilite prive
       .\Nouveau-Projet.ps1 -Nom mon-outil -Description "..." -Fusion edouard
       .\Nouveau-Projet.ps1 -Nom mon-outil -Description "..." -Donnees
