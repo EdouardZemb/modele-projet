@@ -119,8 +119,96 @@ def test_carte_lien_hors_de_ce_qui_fait_foi(tmp_path):
     lignes, refus = d.carte(tmp_path)
     assert refus
     assert lignes[-1] == f"carte : NOTICE.md {NON_LIE}"
+    # Un titre d'un niveau supérieur ferme aussi la section.
+    ecrire(tmp_path, CLAUDE_md=CLAUDE + "\n# Annexe\n\n- [La notice](NOTICE.md).\n")
+    lignes, refus = d.carte(tmp_path)
+    assert refus
+    assert lignes[-1] == f"carte : NOTICE.md {NON_LIE}"
     # Un sous-titre reste dans la section ; le titre suivant de même niveau la ferme.
     ecrire(tmp_path, CLAUDE_md=CLAUDE + "\n### Détail\n\n- [La notice](NOTICE.md).\n")
+    assert d.carte(tmp_path) == (["carte : 2 fichiers .md à la racine, tous liés"], False)
+
+
+def test_carte_suffixe_sans_casse_et_fichiers_seuls(tmp_path):
+    ecrire(tmp_path, README_md=README, CLAUDE_md=CLAUDE)
+    (tmp_path / "NOTICE.MD").write_text("# N\n", encoding="utf-8")
+    (tmp_path / "docs.md").mkdir()
+    assert d.carte(tmp_path) == (
+        ["carte : 2 fichiers .md à la racine, 1 non lié", f"carte : NOTICE.MD {NON_LIE}"],
+        True,
+    )
+
+
+def test_carte_ne_voit_pas_ce_que_git_ignore(tmp_path, env_isole):
+    """À la racine d'un dépôt git, la carte lit ce que git suit ou suivrait, comme la CI : un
+    `CLAUDE.local.md` ignoré n'est pas compté, un fichier non suivi et non ignoré l'est."""
+    env = env_isole()
+    racine = tmp_path / "depot"
+    racine.mkdir()
+    git(racine, env, "init", "-q", "-b", "main")
+    ecrire(
+        racine,
+        README_md=README,
+        CLAUDE_md=CLAUDE,
+        CLAUDE_local_md="# Local\n",
+        _gitignore="/CLAUDE.local.md\n",
+    )
+    assert d.carte(racine) == (["carte : 1 fichier .md à la racine, lié"], False)
+    ecrire(racine, NOTICE_md="# Notice\n")
+    assert d.carte(racine) == (
+        ["carte : 2 fichiers .md à la racine, 1 non lié", f"carte : NOTICE.md {NON_LIE}"],
+        True,
+    )
+    (racine / "NOTICE.md").unlink()
+    git(racine, env, "add", "-f", "CLAUDE.local.md")  # suivi malgré la règle : la CI le verrait
+    lignes, refus = d.carte(racine)
+    assert refus
+    assert lignes[-1] == f"carte : CLAUDE.local.md {NON_LIE}"
+
+
+def test_carte_reference_comme_sur_github(tmp_path):
+    """Un lien de référence compte par son emploi ; sa définition peut être n'importe où dans le
+    fichier, hors de « Ce qui fait foi » comprise. Une définition seule, ou qui coupe un paragraphe,
+    ne se rend pas : elle ne lie rien."""
+    for readme in (
+        "# Essai\n\n[claude]: CLAUDE.md\n",
+        "# Essai\n\nVoir le fichier\n[claude]: CLAUDE.md\n",
+    ):
+        ecrire(tmp_path, README_md=readme, CLAUDE_md=CLAUDE)
+        lignes, refus = d.carte(tmp_path)
+        assert refus, readme
+        assert lignes[-1] == "carte : CLAUDE.md n'est pas lié par README.md", readme
+    ecrire(
+        tmp_path,
+        README_md=README,
+        CLAUDE_md=(
+            "# Essai\n\n## Ce qui fait foi\n\n- La [notice][n].\n\n## Invariants\n\n- Rien.\n\n"
+            "[n]: NOTICE.md\n"
+        ),
+        NOTICE_md="# Notice\n",
+    )
+    assert d.carte(tmp_path) == (["carte : 2 fichiers .md à la racine, tous liés"], False)
+    ecrire(
+        tmp_path,
+        CLAUDE_md=(
+            "# Essai\n\n## Ce qui fait foi\n\n[n]: NOTICE.md\n\n"
+            "## Invariants\n\n- La [notice][n].\n"
+        ),
+    )
+    lignes, refus = d.carte(tmp_path)
+    assert refus
+    assert lignes[-1] == f"carte : NOTICE.md {NON_LIE}"
+
+
+def test_carte_lit_un_texte_avec_bom(tmp_path):
+    """PowerShell 5.1 écrit l'UTF-8 avec un BOM : il ne cache ni un titre ni une définition."""
+    (tmp_path / "README.md").write_bytes(
+        b"\xef\xbb\xbf[claude]: CLAUDE.md\n\nVoir [le fichier][claude].\n"
+    )
+    (tmp_path / "CLAUDE.md").write_bytes(
+        "\ufeff## Ce qui fait foi\n\n- [La notice](NOTICE.md).\n".encode()
+    )
+    ecrire(tmp_path, NOTICE_md="# Notice\n")
     assert d.carte(tmp_path) == (["carte : 2 fichiers .md à la racine, tous liés"], False)
 
 
@@ -210,9 +298,38 @@ def test_carte_lit_un_fichier_mal_encode(tmp_path):
     assert d.carte(tmp_path) == (["carte : 2 fichiers .md à la racine, tous liés"], False)
 
 
-def test_carte_affiche_les_noms_sans_caractere_de_controle():
+def test_affichable_remplace_les_caracteres_de_controle():
     assert d._affichable("a\x1b[31mb\nc\x7f.md") == "a?[31mb?c?.md"
     assert d._affichable("état — ok.md") == "état — ok.md"
+    # Sous Linux, un nom qui n'est pas de l'UTF-8 arrive avec un « surrogate », que stdout, en
+    # UTF-8 strict, refuserait d'écrire.
+    assert d._affichable("\udcff.md") == "?.md"
+
+
+def test_carte_affiche_un_nom_a_caractere_de_controle(tmp_path, monkeypatch):
+    """Windows refuse ces noms : `os.listdir` et `is_file` sont simulés pour eux."""
+    ecrire(tmp_path, README_md=README, CLAUDE_md=CLAUDE)
+    noms = ["README.md", "CLAUDE.md", "a\x1bb.md", "\udcff.md"]
+    monkeypatch.setattr(d.os, "listdir", lambda racine: list(noms))
+    vrai = d.Path.is_file
+    monkeypatch.setattr(d.Path, "is_file", lambda self: self.name in noms[2:] or vrai(self))
+    assert d.carte(tmp_path) == (
+        [
+            "carte : 3 fichiers .md à la racine, 2 non liés",
+            f"carte : a?b.md {NON_LIE}",
+            f"carte : ?.md {NON_LIE}",
+        ],
+        True,
+    )
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows refuse un saut de ligne dans un nom")
+def test_carte_nom_reel_a_caractere_de_controle(tmp_path):
+    ecrire(tmp_path, README_md=README, CLAUDE_md=CLAUDE)
+    (tmp_path / "a\nb.md").write_text("# N\n", encoding="utf-8")
+    lignes, refus = d.carte(tmp_path)
+    assert refus
+    assert lignes[-1] == f"carte : a?b.md {NON_LIE}"
 
 
 def test_liens_et_cible_locale(tmp_path):
@@ -221,16 +338,22 @@ def test_liens_et_cible_locale(tmp_path):
         '[t](trois.md "titre") [c](<quatre et cinq.md>)\n'
         "[![badge](six.png)](sept.md)\n"
         "[a [b] c](huit.md)\n"
-        "[sur deux\nlignes](neuf.md#ancre)\n"
-        "`[code](non1.md)` et ``[x](non2.md)``\n"
-        "<!-- [commentaire](non3.md) -->\n"
-        "```\n[bloc](non4.md)\n```\n"
-        "~~~~\n[bloc](non5.md)\n~~~~\n"
-        "\\[échappé](non6.md)\n"
-        "[texte\n\ncoupé par un paragraphe](non7.md)\n"
+        "[a [b](neuf.md) c](non1.md)\n"
+        "[sur deux\nlignes](dix.md#ancre)\n"
+        "`[code](non2.md)` et ``[x](non3.md)``\n"
+        "<!-- [commentaire](non4.md) -->\n"
+        "```\n[bloc](non5.md)\n```\n"
+        "~~~~\n[bloc](non6.md)\n~~~~\n"
+        "```\n~~~\n[bloc](non7.md)\n```\n"
+        "```bash```\n[après](onze.md)\n"
+        "\\[échappé](non8.md)\n"
+        "[texte\n\ncoupé par un paragraphe](non9.md)\n"
+        "[voir][ref] et [ref2][]\n"
+        "\n"
+        "[ref]: douze.md\n"
+        "[ref2]:\n  <treize.md>\n"
+        "\n"
         "[^1]: une note, pas un lien\n"
-        "[ref]: dix.md\n"
-        "[ref2]:\n  <onze.md>\n"
     )
     assert d.liens(texte) == [
         "un.md",
@@ -240,12 +363,18 @@ def test_liens_et_cible_locale(tmp_path):
         "six.png",
         "sept.md",
         "huit.md",
-        "neuf.md#ancre",
-        "dix.md",
+        "neuf.md",
+        "dix.md#ancre",
         "onze.md",
+        "douze.md",
+        "treize.md",
     ]
     assert d.liens(texte.replace("\n", "\r\n")) == d.liens(texte)
-    for cible in ("https://x", "mailto:a", "#état", "../hors.md", "docs/../../hors.md", ""):
+    # L'ordre est celui où les liens paraissent, celui d'une référence étant celui de son emploi.
+    assert d.liens("[b][r] puis [a](un.md)\n\n[r]: zero.md\n") == ["zero.md", "un.md"]
+    for cible in (
+        "https://x", "mailto:a", "#état", "../hors.md", "docs/../../hors.md", "", "//CLAUDE.md",
+    ):
         assert d.cible_locale(cible, tmp_path) is None, cible
     assert d.cible_locale("./CLAUDE.md#état", tmp_path) == "CLAUDE.md"
     assert d.cible_locale("docs/a%20b.md", tmp_path) == "docs/a b.md"
@@ -253,6 +382,75 @@ def test_liens_et_cible_locale(tmp_path):
     assert d.cible_locale("docs/a.md?plain=1#l1", tmp_path) == "docs/a.md"
     assert d.cible_locale("docs/../CLAUDE.md", tmp_path) == "CLAUDE.md"
     assert d.cible_locale("%C3%A9tat.md", tmp_path) == "état.md"
+    assert d.cible_locale("CLAUDE\\.md", tmp_path) == "CLAUDE.md"
+
+
+def test_liens_de_reference():
+    """Un lien de référence, `[texte][x]`, `[x][]` ou `[x]`, compte par son emploi, quand une
+    définition `[x]: cible` de son étiquette (sans égard à la casse ni aux blancs) est dans le
+    texte ; la première définition l'emporte. Une définition seule n'est pas un lien, ni une
+    définition qui coupe un paragraphe, ni une définition dans un bloc de code."""
+    texte = (
+        "[plein][Note] [note][] [NOTE]\n"
+        "[sur\ndeux] et ![image][sur deux]\n"
+        "[a][absente](suite.md)\n"
+        "[^1] et [jamais] et [bloc]\n"
+        "\n"
+        "[note]: notice.md\n"
+        "[NOTE]: autre.md\n"
+        "[sur deux]: <deux.md> \"titre\"\n"
+        "[seule]: seule.md\n"
+        "\n"
+        "Une ligne de prose\n"
+        "[jamais]: coupe.md\n"
+        "\n"
+        "```\n[bloc]: bloc.md\n```\n"
+    )
+    assert d.liens(texte) == [
+        "notice.md", "notice.md", "notice.md", "deux.md", "deux.md", "suite.md",
+    ]
+    # Une définition peut suivre un titre ; son titre peut tenir sur la ligne suivante, et une
+    # autre définition la suivre ; un reste sur sa ligne en fait du texte (CommonMark).
+    assert d.liens("# Titre\n[t]: titre.md\n\n[voir][t]\n") == ["titre.md"]
+    assert d.liens('[a][a] [b][b]\n\n[a]: a.md\n  "titre"\n[b]: b.md\n') == ["a.md", "b.md"]
+    assert d.liens("[voir][r]\n\n[r]: r.md suite\n") == []
+    assert d.liens('[voir][r]\n\n[r]: r.md "titre" suite\n') == []
+    # Un lien dans le texte d'une référence pleine l'emporte, et son étiquette reste un lien
+    # (CommonMark, `[foo [bar](/uri)][ref]`).
+    assert d.liens("[a [b](c.md) d][r]\n\n[r]: r.md\n") == ["c.md", "r.md"]
+    # Une étiquette blanche, ou de plus de 999 caractères, n'en est pas une.
+    assert d.liens("[t][ ]\n\n[ ]: blanc.md\n") == []
+    for n, attendu in ((999, ["long.md"]), (1000, [])):
+        assert d.liens(f"[t][{'a' * n}]\n\n[{'a' * n}]: long.md\n") == attendu, n
+    # Les définitions peuvent se lire dans un autre texte, le fichier entier d'une section.
+    section = "- La [notice][n].\n"
+    assert d.liens(section) == []
+    assert d.liens(section, document="# T\n\n" + section + "\n# U\n\n[n]: NOTICE.md\n") == [
+        "NOTICE.md"
+    ]
+    assert d.liens("[n]: NOTICE.md\n", document="[voir][n]\n\n[n]: NOTICE.md\n") == []
+
+
+def lien_de_dossier(lien, cible):
+    """Un lien symbolique vers un dossier ; sous Windows sans le droit d'en créer, une jonction."""
+    try:
+        lien.symlink_to(cible, target_is_directory=True)
+    except OSError:
+        if sys.platform != "win32":
+            raise
+        subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(lien), str(cible)], check=True, capture_output=True
+        )
+
+
+def test_cible_locale_refuse_une_sortie_par_un_lien(tmp_path):
+    racine = tmp_path / "racine"
+    (racine / "docs").mkdir(parents=True)
+    dehors = tmp_path / "dehors"
+    dehors.mkdir()
+    lien_de_dossier(racine / "lien", dehors)
+    assert d.cible_locale("lien/x.md", racine) is None
+    assert d.cible_locale("docs/x.md", racine) == "docs/x.md"
 
 
 # --- la ligne de commande --------------------------------------------------------------------
@@ -344,3 +542,7 @@ def test_main_nature_lue_sur_la_branche_par_defaut(tmp_path, env_isole):
     r = lancer(env=en_ci, cwd=clone, script=script)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "documentation : licence : non exigée (nature donnees)" in r.stdout
+    # Un dépôt public est de code, quoi que dise sa branche par défaut.
+    r = lancer(env={**en_ci, "DEPOT_PRIVE": "false"}, cwd=clone, script=script)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "documentation : licence : LICENSE absent ou vide, exigé en nature code" in r.stdout

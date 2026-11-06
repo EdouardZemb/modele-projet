@@ -151,9 +151,9 @@ def test_perimes_et_slug_github():
 def test_verification_des_liens_mord(tmp_path):
     """Les formes de lien de ce test sont vues (un titre, des chevrons, une ancre seule, un texte
     sur deux lignes, entre accents graves ou entre crochets, une image cliquable et ses deux cibles,
-    une référence, sa cible sur la ligne suivante comprise), et un lien cassé de chaque forme est
-    refusé ; un lien en code en ligne, ou un lien ou un titre d'un bloc de code clôturé, ne compte
-    pas."""
+    une référence employée, sa définition sur deux lignes comprise), et un lien cassé de chaque
+    forme est refusé ; un lien en code en ligne, une définition qui coupe un paragraphe, ou un lien
+    ou un titre d'un bloc de code clôturé, ne compte pas."""
     (tmp_path / "docs").mkdir()
     (tmp_path / "docs/a.md").write_text("# A\n", encoding="utf-8")
     (tmp_path / "docs/c.png").write_bytes(b"\x89PNG")
@@ -171,8 +171,12 @@ def test_verification_des_liens_mord(tmp_path):
         "[![capture](docs/c.png)](docs/a.md)\n"
         "[a [b] c](docs/a.md)\n"
         "Un exemple : `[x](NOTICE.md)`.\n"
+        "Voir [la référence][ref] et [ref2][].\n"
+        "[colle]: NOTICE.md\n"
+        "\n"
         "[ref]: /docs/a.md\n"
         "[ref2]:\n  docs/a.md\n"
+        "\n"
         "[^1]: une note, pas un lien\n"
     )
     vus = documentation.liens(bons)
@@ -189,6 +193,8 @@ def test_verification_des_liens_mord(tmp_path):
         "[![capture](docs/absent.png)](docs/absent.md)\n"
         "[a [b] c](docs/absent.md)\n"
         "Un exemple : `[x](docs/a.md)`.\n"
+        "Voir [la référence][ref] et [ref2][].\n"
+        "\n"
         "[ref]: docs/absent.md\n"
         "[ref2]:\n  docs/absent.md\n"
         "```\n[code](docs/absent.md)\n```\n"
