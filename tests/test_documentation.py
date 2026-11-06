@@ -501,6 +501,36 @@ def test_cible_locale_refuse_une_sortie_par_un_lien(tmp_path):
     assert d.cible_locale("docs/x.md", racine) == "docs/x.md"
 
 
+def test_cible_locale_sans_reseau(tmp_path, monkeypatch):
+    """Une barre oblique inverse restée après les échappements n'est jamais un chemin du dépôt, et
+    `resolve` ne la voit pas : sous Windows, deux en tête nomment un partage réseau, que `resolve`
+    ouvrirait au `SessionStart`, au-delà du délai du hook. L'espion n'ouvre jamais rien : rouge, ce
+    test ne touche pas le réseau."""
+    vus = []
+    resolve = d.Path.resolve
+
+    def espion(self, *args, **kwargs):
+        if "hote.exemple.org" in str(self):
+            vus.append(str(self))
+            raise OSError("pas de réseau dans un test")
+        return resolve(self, *args, **kwargs)
+
+    monkeypatch.setattr(d.Path, "resolve", espion)
+    b = chr(92)  # les outils décodent les barres obliques inverses écrites en clair
+    partage = f"{b * 4}hote.exemple.org{b * 2}p{b * 2}x.md"  # deux en tête, une fois lues
+    readme = (
+        f"# E\n\n[CLAUDE.md](CLAUDE.md) [p]({partage}) [q](</{partage}>)\n"
+        "[r](%5C%5Chote.exemple.org%5Cx.md)\n"
+    )
+    arbre(tmp_path, {"README.md": readme, "CLAUDE.md": "# C\n\nDu texte.\n"})
+    assert d.gabarits_vides(tmp_path) == []
+    assert vus == []
+    # Le même lien, sous Linux, ne nomme pas un sous-dossier : GitHub ne lit pas `\` comme un
+    # séparateur, et la cible n'est locale nulle part.
+    arbre(tmp_path, {"docs/x.md": ""})
+    assert d.cible_locale(f"docs{b}x.md", tmp_path) is None
+
+
 # --- le gabarit resté vide -------------------------------------------------------------------
 
 MARQUEUR = "garde le marqueur *AAAA-MM-JJ* du gabarit"

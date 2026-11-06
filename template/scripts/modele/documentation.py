@@ -40,8 +40,9 @@ tout `CLAUDE.md`.
 Les blocs de code clôturés, le code en ligne et les commentaires HTML sont retirés avant : GitHub
 n'y rend aucun lien. La cible perd son ancre et sa requête, ses échappements (`\\.`), puis elle est
 décodée (`%20`) ; un `/` en tête part de la racine ; une cible avec un schéma (`https:`, `mailto:`)
-ou sans (`//hôte`), une ancre seule, ou une cible qui sort de la racine, par `..` ou par un lien
-symbolique, n'est pas locale. Les chemins se comparent à la casse près, comme sur GitHub ; un
+ou sans (`//hôte`), une ancre seule, une cible où reste une barre oblique inverse (GitHub ne la lit
+pas comme un séparateur ; sous Windows, deux en tête nommeraient un partage réseau), ou une cible
+qui sort de la racine, par `..` ou par un lien symbolique, n'est pas locale. Les chemins se comparent à la casse près, comme sur GitHub ; un
 document est un fichier dont le suffixe est `.md`, sans égard à la casse. Un texte en CRLF se lit
 comme en LF, un BOM en tête est ignoré, et un octet qui n'est pas de l'UTF-8 est remplacé, sans
 erreur.
@@ -253,8 +254,9 @@ def liens(texte: str, document: str | None = None) -> list[str]:
 
 def cible_locale(cible: str, racine: Path) -> str | None:
     """Le chemin, relatif à la racine et en `/`, sans `/` final (`.` pour la racine), que vise une
-    cible ; `None` si elle n'est pas locale : un schéma, une ancre seule, ou une sortie de la
-    racine, par `..` ou par un lien symbolique."""
+    cible ; `None` si elle n'est pas locale : un schéma, une ancre seule, une barre oblique inverse
+    restée après les échappements, ou une sortie de la racine, par `..` ou par un lien
+    symbolique."""
     if _SCHEMA.match(cible) or cible.startswith("//"):
         return None
     chemin = cible.split("#", 1)[0].split("?", 1)[0]
@@ -272,6 +274,10 @@ def cible_locale(cible: str, racine: Path) -> str | None:
         else:
             segments.append(segment)
     relatif = "/".join(segments) or "."
+    # GitHub ne lit pas `\` comme un séparateur : une telle cible n'est jamais un chemin du dépôt.
+    # Sous Windows, deux en tête nommeraient un partage réseau, que `resolve` ouvrirait.
+    if "\\" in relatif:
+        return None
     try:
         base = racine.resolve()
         if not (base / relatif).resolve().is_relative_to(base):
