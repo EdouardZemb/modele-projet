@@ -1,5 +1,6 @@
 """Les fichiers semés : donnés une fois par le modèle, puis propres au projet."""
 
+import hashlib
 import re
 
 import pytest
@@ -81,8 +82,7 @@ def test_semes_declares(rendre):
         (REPONSES_SERVEUR_CODE, "EdouardZemb"),
         ({"nature": "donnees"}, None),
         (REPONSES_SERVEUR, None),
-        # la garde de cible
-        ({"nom": "essai-donnees", "cible": "donnees", "nature": "code"}, None),
+        ({"nom": "essai-donnees", "cible": "donnees", "nature": "code"}, None),  # la garde de cible
         (REPONSES_DONNEES_SERVEUR, None),
     ],
 )
@@ -94,6 +94,14 @@ def test_licence_selon_la_nature(rendre, reponses, titulaire):
         texte = licence.read_text(encoding="utf-8")
         assert texte.startswith("MIT License\n\nCopyright (c) 2026 " + titulaire + "\n")
         assert "THE SOFTWARE IS PROVIDED \"AS IS\"" in texte
+        # Le texte archivé fait foi, à l'octet près : son empreinte, titulaire remis en variable.
+        # Une empreinte, pour qu'un échec n'imprime pas les deux textes.
+        gabarit = texte.replace(
+            f"Copyright (c) 2026 {titulaire}\n", "Copyright (c) 2026 {{ compte }}\n", 1
+        )
+        assert hashlib.sha256(gabarit.encode("utf-8")).hexdigest() == (
+            "80459fc9ced0428542d09320c70850954d5ef46f1d1ba2dd0ceb02da27634db8"
+        )
 
 
 # Lot 12 (M-0006, § 9) : les fichiers de l'instance sont semés. Un projet à un dépôt garde ses clés,
