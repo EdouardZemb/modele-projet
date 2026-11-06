@@ -113,7 +113,8 @@ ne portent pas de lien : à la naissance, `config/` et `contenu/` n'ont que leur
 
 ## Ce qui n'y va jamais
 
-Ce qui se périme sans que personne le voie, parce que sa source est ailleurs :
+Un README ne porte pas ce qui se périme sans que personne le voie, parce que sa source est
+ailleurs :
 
 - **une heure** (`7h15`) : elle vit dans la configuration ou dans le code ;
 - **une version** (`v1.2.3`) : le lien vers les publications la dit toujours juste ;

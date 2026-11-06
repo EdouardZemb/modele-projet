@@ -1016,7 +1016,7 @@ TITRES_DOCUMENTATION = [
 ]
 
 
-def test_documentation_md():
+def test_documentation_md(tmp_path):
     """Le texte géré de la documentation (spec du lot 14, § 4) : sans Jinja ni renvoi au plan, ses
     sections, la règle du semé, les sorties des trois contrôles telles que `documentation.py` les
     écrit, et la ligne des décisions dans un bloc de code : hors de lui, elle serait un lien mort
@@ -1060,6 +1060,14 @@ def test_documentation_md():
     assert decisions not in hors_du_code
     # Le gabarit se montre par ses places, jamais par sa syntaxe.
     assert any("# <nom>" in bloc.group(0) for bloc in CLOTURE.finditer(texte))
+    # Aucun lien hors du code : depuis `docs/modele/`, un chemin de la racine mènerait nulle part.
+    assert documentation.liens(texte) == []
+    # Lié par un README, le texte ne se signale pas lui-même : il ne cite le marqueur qu'en code.
+    assert documentation.MARQUEUR in texte
+    (tmp_path / "docs/modele").mkdir(parents=True)
+    (tmp_path / "docs/modele/documentation.md").write_text(texte, encoding="utf-8")
+    (tmp_path / "README.md").write_text("[d](docs/modele/documentation.md)\n", encoding="utf-8")
+    assert documentation.gabarits_vides(tmp_path) == []
 
 
 def test_methode_nomme_documentation_md():
