@@ -248,6 +248,34 @@ def test_combinaison(rendre, env_isole, cible, nature, fusion):
     else:
         assert "documentation : licence : non exigée (nature donnees)" in sortie, sortie
 
+    # Le gabarit resté vide : un projet qui vient de naître ne donne rien. Pour ne pas passer à
+    # vide, un document vide que le README lie donne ensuite son constat.
+    gabarits_vides = [sys.executable, "scripts/modele/documentation.py", "--gabarits-vides"]
+    r = lancer(gabarits_vides, rendu, env)
+    assert (r.returncode, r.stdout) == (0, ""), r.stdout + r.stderr
+    (rendu / "docs").mkdir(exist_ok=True)
+    (rendu / "docs/vide.md").write_bytes(b"")
+    with (rendu / "README.md").open("a", encoding="utf-8", newline="\n") as f:
+        f.write("\nUn [document vide](docs/vide.md).\n")
+    r = lancer(gabarits_vides, rendu, env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    vide = "documentation : docs/vide.md : corps vide (titres et consignes seulement)"
+    assert r.stdout.splitlines() == [vide], r.stdout
+    if not cible.startswith("donnees"):
+        # Les vrais gabarits du modèle, laissés tels quels et liés par le README, donnent chacun
+        # leur constat, dans l'ordre des liens : si leurs consignes changeaient de forme, le
+        # contrôle cesserait de les voir.
+        with (rendu / "README.md").open("a", encoding="utf-8", newline="\n") as f:
+            f.write("[b](docs/00-brief-initial.md) [c](docs/cadrage.md) [d](docs/decisions/)\n")
+        r = lancer(gabarits_vides, rendu, env)
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert r.stdout.splitlines() == [
+            vide,
+            "documentation : docs/00-brief-initial.md : corps vide (titres et consignes seulement)",
+            "documentation : docs/cadrage.md : garde le marqueur *AAAA-MM-JJ* du gabarit",
+            "documentation : docs/decisions/ : dossier sans autre fichier que README.md",
+        ], r.stdout
+
 
 def scripts_shell(rendu):
     """Les scripts shell de la mécanique rendue : deploiement/ et son banc bats."""
