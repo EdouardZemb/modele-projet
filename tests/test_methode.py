@@ -192,6 +192,19 @@ def test_modele_de_pr():
         assert titre in texte.splitlines(), titre
 
 
+def test_modele_de_pr_a_la_case_du_readme():
+    """La case du README relu, une ligne entière, après les trois cases d'aujourd'hui : elle paraît
+    sur toute PR, et son libellé dit quand elle compte (lot 14)."""
+    lignes = lire(TEMPLATE / ".github/pull_request_template.md").splitlines()
+    cases = [ligne for ligne in lignes if ligne.startswith("- [ ] ")]
+    assert cases == [
+        "- [ ] Tests verts",
+        "- [ ] CI verte",
+        "- [ ] `CLAUDE.md` et ADR à jour si la PR change une règle ou une décision",
+        "- [ ] README relu, à la clôture d'un lot (`docs/modele/documentation.md`)",
+    ]
+
+
 def test_modele_de_pr_ferme_l_issue():
     # GitHub ne ferme l'issue à la fusion que sur un mot-clé anglais (LE-30).
     texte = lire(TEMPLATE / ".github/pull_request_template.md")
@@ -248,8 +261,12 @@ def test_garde_fous_a_jour():
         "la branche courante est illisible",
         # revue de la PR du lot 13 (tour 1) : les blocs et les affectations de PowerShell
         "les blocs PowerShell (`try { … }`, `& { … }`, `% { … }`) et ses affectations (`$x = …`)",
+        # lot 14 : la licence et la carte de la racine refusent en CI
+        "la licence et la carte de la racine",
     ):
         assert fragment in section, fragment
+    (ci,) = [ligne for ligne in section.splitlines() if ligne.startswith("| CI de base |")]
+    assert "la licence et la carte de la racine (`scripts/modele/documentation.py`)" in ci
     assert "gitleaks sur tout l'historique ;" not in section
     assert "quatre étapes obligatoires" not in section
     assert "VISIBILITE" not in lire(METHODE)
@@ -450,6 +467,7 @@ def test_m0002_amende():
         "2026-10-29",
         "2026-10-29",
         "2026-11-04",
+        "2026-11-06",
     ]
     assert (
         "- **Amendé** le 2026-10-29, avec le lot 11 : la porte suit la nature du dépôt, de code ou "
@@ -480,8 +498,8 @@ def test_m0002_amende_par_le_correctif_94():
     texte = " ".join(brut.split())
     # La porte suit la cible, comme `chemins_examines`, et, en cible `serveur`, la nature.
     assert (
-        "- **Amendé** le 2026-11-04, avec le correctif #94 : en cible `donnees`, la porte des "
-        "fichiers masqués examine aussi l'instance"
+        "- **Amendé** le 2026-11-04, avec le correctif modele-projet#94 : en cible `donnees`, la "
+        "porte des fichiers masqués examine aussi l'instance"
     ) in texte
     for fragment in (
         "En cible `donnees`, elle examine aussi `config/README.md` et `contenu/README.md`",
@@ -534,7 +552,7 @@ def test_m0006_dit_ce_que_la_scission_refait():
     """La scission ne fait pas que déplacer : `env/` et `cles/` sont rendus à neuf, et
     `.sops.yaml`, resté à la racine, se refait pour le nouveau chemin des secrets (#94)."""
     brut = lire(DECISIONS / "M-0006-code-et-donnees.md")
-    assert "- **Amendé** le 2026-11-04, avec le correctif #94 : à la scission," in brut
+    assert "- **Amendé** le 2026-11-04, avec le correctif modele-projet#94 : à la scission," in brut
     texte = " ".join(brut.split())
     assert "ne fait ensuite que déplacer ces dossiers, avec `deploiement/env/`" not in texte
     for fragment in (
@@ -569,6 +587,24 @@ def test_methode_ligne_signaux():
     texte = lire(METHODE)
     assert "| hook Claude `SessionStart`" in texte
     assert "le garde de Claude **et les signaux** toujours branchés" in texte
+    # lot 14 : le gabarit resté vide, après « Il ne bloque jamais. », avant les phrases des forks
+    (ligne,) = [lig for lig in texte.splitlines() if lig.startswith("| hook Claude `SessionStart`")]
+    assert ligne.startswith(
+        "| hook Claude `SessionStart` (au démarrage et à la reprise) | affiche ce qui est rouge sur "
+        "GitHub : les exécutions de la branche principale, les PR ouvertes et les workflows "
+        "désactivés. Il ne bloque jamais. Il signale aussi un gabarit resté vide que le README lie, "
+        "et un README qui ne lie aucun document du dépôt. Ce que n'importe qui écrit depuis un fork "
+        "n'entre pas dans le contexte de Claude : "
+    )
+    for phrase in (
+        "les exécutions de PR (`pull_request…`) sont écartées",
+        "une PR ou un workflow venus d'ailleurs que le dépôt s'affichent sans le texte qu'ils portent",
+        (
+            "Une PR d'un fork paraît ainsi sans titre ni nom de contrôle, un workflow absent de la "
+            "copie, sans son nom |"
+        ),
+    ):
+        assert phrase in ligne, phrase
     texte = lire(DECISIONS / "M-0002-garde-fous-et-confidentialite.md")
     assert "`SessionStart`" in texte
     assert "signaux.py" in texte
@@ -961,3 +997,130 @@ def test_le_principe_du_remede_dit_une_fois(texte, fragment, anciens):
     assert lu.count(fragment) == 1, fragment
     for ancien in anciens:
         assert ancien not in lu, ancien
+
+
+# --- lot 14 : le README des projets ---
+
+DOCUMENTATION = TEMPLATE / "docs/modele/documentation.md"
+M0002 = DECISIONS / "M-0002-garde-fous-et-confidentialite.md"
+# Un bloc de code clôturé, de sa clôture d'ouverture à sa clôture de fermeture.
+CLOTURE = re.compile(r"^ {0,3}(`{3,}|~{3,})[^\n]*\n.*?^ {0,3}\1[ \t]*$", re.MULTILINE | re.DOTALL)
+TITRES_DOCUMENTATION = [
+    "## Le README",
+    "## Ce qui n'y va jamais",
+    "## Sur un téléphone",
+    "## Un fait une fois",
+    "## Les textes d'un projet",
+    "## Retirer un texte",
+    "## Les trois contrôles",
+]
+
+
+def test_documentation_md(tmp_path):
+    """Le texte géré de la documentation (spec du lot 14, § 4) : sans Jinja ni renvoi au plan, ses
+    sections, la règle du semé, les sorties des trois contrôles telles que `documentation.py` les
+    écrit, et la ligne des décisions dans un bloc de code : hors de lui, elle serait un lien mort
+    depuis `docs/modele/`."""
+    import documentation
+
+    texte = lire(DOCUMENTATION)
+    assert "{{" not in texte
+    assert "{%" not in texte
+    assert not RENVOI_AU_PLAN.search(texte)
+    assert texte.splitlines()[0] == "# Documenter un projet né du modèle"
+    hors_du_code = CLOTURE.sub("", texte)
+    assert [ligne for ligne in hors_du_code.splitlines() if ligne.startswith("## ")] == (
+        TITRES_DOCUMENTATION
+    )
+    plat = " ".join(texte.split())
+    for fragment in (
+        "semé se vide ou se réécrit, il ne se supprime pas",
+        "fichier de la racine se cite par un lien",
+        "`python scripts/modele/documentation.py --gabarits-vides`",
+        "La documentation de la racine (licence, carte)",
+        # les sorties, telles que le script les écrit
+        "<chemin> : garde le marqueur *AAAA-MM-JJ* du gabarit",
+        "<chemin> : corps vide (titres et consignes seulement)",
+        "<chemin>/ : dossier sans autre fichier que README.md",
+        "le README ne lie aucun document du dépôt",
+        "pas de README.md",
+        "licence : non exigée (nature donnees)",
+        "licence : LICENSE absent ou vide, exigé en nature code",
+        "carte : CLAUDE.md n'est pas lié par README.md",
+        f"carte : <nom> {documentation.NON_LIE}",
+        "`refus`, en dernière ligne",
+        "documentation : non lue (erreur)",
+        "le titre `documentation :` puis une ligne `- <constat>` chacun",
+        "imprime un constat par ligne et rend toujours 0",
+        # comment répondre à chaque sortie
+        "À `carte : README.md absent` ou `carte : CLAUDE.md absent`, rendre le fichier",
+        "À `pas de README.md`, de même",
+        # ce qui n'est pas local
+        "porte un deux-points sous Windows, qui y nomme un lecteur (`Z:`, en tête comme plus loin",
+        # les écarts connus au rendu de GitHub, repris de la docstring du script
+        "dans un bloc de code indenté",
+        "un lien `docs/Cadrage.md` vers `docs/cadrage.md`",
+        "un avertissement de trop, jamais un refus",
+    ):
+        assert fragment in plat, fragment
+    # Les lignes de la licence et de la carte, telles que le script les écrit sur une racine, sont
+    # chacune dans la liste de leur contrôle.
+    section = texte.split("### La licence", 1)[1].split("### Le gabarit resté vide", 1)[0]
+    listes = " ".join(ligne for ligne in section.splitlines() if ligne.startswith("- `"))
+    racine = tmp_path / "racine"
+    racine.mkdir()
+    # Une racine vide : la licence absente, puis, après la tête, README.md et CLAUDE.md absents.
+    sorties = [*documentation.licence(racine, "code")[0], *documentation.carte(racine)[0][1:]]
+    (racine / "LICENSE").write_text("MIT\n", encoding="utf-8")
+    (racine / "README.md").write_text("[c](CLAUDE.md) [n](NOTICE.md)\n", encoding="utf-8")
+    (racine / "CLAUDE.md").write_text("# C\n", encoding="utf-8")
+    (racine / "NOTICE.md").write_text("# N\n", encoding="utf-8")
+    # Une racine en ordre : la licence présente, et la tête de la carte, son nombre en place.
+    sorties += documentation.licence(racine, "code")[0]
+    sorties.append(documentation.carte(racine)[0][0].replace(" 2 ", " <n> ", 1))
+    assert len(sorties) == 5, sorties
+    for ligne in sorties:
+        assert f"`{ligne}`" in listes, ligne
+    decisions = "| [Les décisions](docs/decisions/) |"
+    assert any(decisions in bloc.group(0) for bloc in CLOTURE.finditer(texte))
+    assert decisions not in hors_du_code
+    # Le gabarit se montre par ses places, jamais par sa syntaxe.
+    assert any("# <nom>" in bloc.group(0) for bloc in CLOTURE.finditer(texte))
+    # Aucun lien hors du code : depuis `docs/modele/`, un chemin de la racine mènerait nulle part.
+    assert documentation.liens(texte) == []
+    # Lié par un README, le texte ne se signale pas lui-même : il ne cite le marqueur qu'en code.
+    assert documentation.MARQUEUR in texte
+    (tmp_path / "docs/modele").mkdir(parents=True)
+    (tmp_path / "docs/modele/documentation.md").write_text(texte, encoding="utf-8")
+    (tmp_path / "README.md").write_text("[d](docs/modele/documentation.md)\n", encoding="utf-8")
+    assert documentation.gabarits_vides(tmp_path) == []
+
+
+def test_methode_nomme_documentation_md():
+    section = lire(METHODE).split("## Le cycle d'un lot", 1)[1].split("\n## ", 1)[0]
+    (point,) = [b for b in blocs(section) if b[0].startswith("5. ")]
+    assert "`docs/modele/documentation.md`" in " ".join(point)
+    assert "relit le README" in " ".join(" ".join(point).split())
+
+
+def test_m0002_amende_par_le_lot_14():
+    """La CI refuse la licence et la carte de la racine ; le `SessionStart` signale le gabarit
+    resté vide. L'amendement est daté, sans numéro du plan."""
+    brut = lire(M0002)
+    texte = " ".join(brut.split())
+    assert "- **Amendé** le 2026-11-06, avec le lot 14 :" in texte
+    corps = " ".join(brut.split("## Décision", 1)[1].split("## Conséquences", 1)[0].split())
+    assert "la licence et la carte de la racine" in corps
+    assert "gabarit resté vide" in corps
+    # Le hook lance `gh` : seul le contrôle du gabarit resté vide se passe de sous-processus.
+    assert "Ce contrôle avertit, sans jamais refuser, et lit la copie sans lancer" in corps
+    assert "Il avertit, sans jamais refuser" not in corps
+    # La carte, comme le script la tient.
+    assert "chaque fichier `.md` de la racine, sauf `README.md`, est lié" in corps
+    assert "`README.md` et `CLAUDE.md` doivent exister" in corps
+    assert not RENVOI_AU_PLAN.search(texte)
+    (amendement,) = [
+        b for b in blocs(brut) if b[0].startswith("- **Amendé** le 2026-11-06, avec le lot 14")
+    ]
+    longues = [ligne for ligne in amendement if len(ligne) > 100]
+    assert not longues, longues

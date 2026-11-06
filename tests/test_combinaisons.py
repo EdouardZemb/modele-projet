@@ -211,6 +211,8 @@ def test_combinaison(rendre, env_isole, cible, nature, fusion):
     rendu = rendre(**reponses(cible, nature, fusion))
     fichiers = fichiers_texte(rendu)
     assert fichiers
+    # Le texte de la documentation est géré, et rendu dans toutes les cibles.
+    assert (rendu / "docs/modele/documentation.md").is_file()
     for chemin in fichiers:
         assert not chemin.name.endswith(".jinja"), chemin
         octets = chemin.read_bytes()

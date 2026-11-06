@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import sys
+from pathlib import PureWindowsPath
 
 import documentation as d
 import pytest
@@ -531,6 +532,60 @@ def test_cible_locale_sans_reseau(tmp_path, monkeypatch):
     # séparateur, et la cible n'est locale nulle part.
     arbre(tmp_path, {"docs/x.md": ""})
     assert d.cible_locale(f"docs{b}x.md", tmp_path) is None
+
+
+def test_cible_locale_sans_lecteur(tmp_path, monkeypatch):
+    """Sous Windows, une cible qui porte un deux-points n'est pas locale, et rien ne touche le
+    lecteur qu'il nomme : un chemin qui nomme un lecteur (`Z:`) est un chemin absolu, que `resolve`
+    ouvrirait au `SessionStart` (un lecteur réseau injoignable attendrait au-delà du délai du hook).
+    - En tête, le schéma ne le voit pas, puisqu'il ne lit que la cible brute : `./Z:/x.md`,
+      `/Z:/x.md`, `%5A:/x.md` ou `./Q:x.md`.
+    - Plus loin (`docs/Z:x.md`), Windows le lit encore : en mode non strict, `resolve` remonte
+      jusqu'à un dossier qui existe, y joint `Z:x.md`, qui repart du lecteur, puis lit l'état de ce
+      chemin.
+    Un nom de fichier Windows ne porte jamais de deux-points : la cible est refusée avant
+    `resolve`, `docs/a:b.md` comprise. Sous Linux, un deux-points est un caractère comme un autre,
+    sans lecteur : la cible reste locale, en tête comme plus loin, et un fichier `C:notes.md` de la
+    racine peut être lié (`./C:notes.md`).
+    Les espions lisent `resolve`, et l'état d'un chemin (`os.stat`), là où se fait l'accès. Ils
+    n'ouvrent jamais un lecteur : rouge, ce test ne touche pas le réseau."""
+    vus, lecteurs = [], []
+    resolve, stat = d.Path.resolve, os.stat
+
+    def espion_resolve(self, *args, **kwargs):
+        vus.append(str(self))
+        return resolve(self, *args, **kwargs)
+
+    def espion_stat(chemin, *args, **kwargs):
+        if isinstance(chemin, (str, os.PathLike)):
+            lecteur = PureWindowsPath(os.fspath(chemin)).drive.upper()
+            if lecteur.endswith(("Z:", "Q:")):
+                lecteurs.append(os.fspath(chemin))
+                raise OSError("aucun lecteur ouvert dans un test")
+        return stat(chemin, *args, **kwargs)
+
+    (tmp_path / "docs").mkdir()
+    monkeypatch.setattr(d.Path, "resolve", espion_resolve)
+    monkeypatch.setattr(os, "stat", espion_stat)
+    cibles = {
+        "./Z:/x.md": "Z:/x.md",
+        "/Z:/x.md": "Z:/x.md",
+        "%5A:/x.md": "Z:/x.md",
+        "./Q:x.md": "Q:x.md",
+        "./C:notes.md": "C:notes.md",
+        "docs/Z:x.md": "docs/Z:x.md",
+        "docs/%5A:x.md": "docs/Z:x.md",
+        "docs/Z:/x.md": "docs/Z:/x.md",
+        "docs/a:b.md": "docs/a:b.md",
+    }
+    for cible, attendu in cibles.items():
+        vus.clear()
+        local = d.cible_locale(cible, tmp_path)
+        if sys.platform == "win32":
+            assert (local, vus) == (None, []), cible
+        else:
+            assert local == attendu, cible
+    assert lecteurs == []
 
 
 # --- le gabarit resté vide -------------------------------------------------------------------

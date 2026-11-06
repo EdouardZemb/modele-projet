@@ -41,11 +41,13 @@ Les blocs de code clôturés, le code en ligne et les commentaires HTML sont ret
 n'y rend aucun lien. La cible perd son ancre et sa requête, ses échappements (`\\.`), puis elle est
 décodée (`%20`) ; un `/` en tête part de la racine ; une cible avec un schéma (`https:`, `mailto:`)
 ou sans (`//hôte`), une ancre seule, une cible où reste une barre oblique inverse (GitHub ne la lit
-pas comme un séparateur ; sous Windows, deux en tête nommeraient un partage réseau), ou une cible
-qui sort de la racine, par `..` ou par un lien symbolique, n'est pas locale. Les chemins se
-comparent à la casse près, comme sur GitHub ; un document est un fichier dont le suffixe est `.md`,
-sans égard à la casse. Un texte en CRLF se lit comme en LF, un BOM en tête est ignoré, et un octet
-qui n'est pas de l'UTF-8 est remplacé, sans erreur.
+pas comme un séparateur ; sous Windows, deux en tête nommeraient un partage réseau), sous Windows
+une cible qui porte un deux-points (il y nomme un lecteur, en tête comme plus loin : `./Z:/x.md`,
+`docs/Z:x.md` ; sous Linux, c'est un caractère comme un autre), ou une cible qui sort de la racine,
+par `..` ou par un lien symbolique, n'est pas locale. Les chemins se comparent à la casse près,
+comme sur GitHub ; un document est un fichier dont le suffixe est `.md`, sans égard à la casse. Un
+texte en CRLF se lit comme en LF, un BOM en tête est ignoré, et un octet qui n'est pas de l'UTF-8
+est remplacé, sans erreur.
 
 Des écarts connus au rendu de GitHub, rares. Quatre laissent passer à tort un lien que GitHub ne
 rend pas : dans un bloc de code indenté, que GitHub rend en code ; dans un bloc HTML sans ligne
@@ -62,6 +64,10 @@ fermeture, plus loin.
 Une définition n'est pas lue quand elle suit une ligne de commentaire (`<!-- liens -->`, puis les
 définitions), quand elle est dans un élément de liste ou dans une citation, quand elle suit une
 ligne de séparation (`***`), ou quand son titre tient sur deux lignes.
+Un dernier ne touche que le gabarit resté vide. Sous Windows, il lit l'existence d'un chemin lié
+sans égard à la casse : un lien `docs/Cadrage.md` vers `docs/cadrage.md` y est lu, et peut
+avertir, alors que GitHub casse ce lien ; sous Linux, il est ignoré. C'est un avertissement de
+trop, jamais un refus.
 
 La sortie ne cite jamais le contenu d'un fichier, seulement des chemins, chaque caractère de
 contrôle, séparateur de ligne ou de paragraphe (U+2028, U+2029) ou non décodable (un nom qui n'est
@@ -262,8 +268,8 @@ def liens(texte: str, document: str | None = None) -> list[str]:
 def cible_locale(cible: str, racine: Path) -> str | None:
     """Le chemin, relatif à la racine et en `/`, sans `/` final (`.` pour la racine), que vise une
     cible ; `None` si elle n'est pas locale : un schéma, une ancre seule, une barre oblique inverse
-    restée après les échappements, ou une sortie de la racine, par `..` ou par un lien
-    symbolique."""
+    restée après les échappements, sous Windows un deux-points (un lecteur, `Z:`, en tête ou plus
+    loin : `docs/Z:x.md`), ou une sortie de la racine, par `..` ou par un lien symbolique."""
     if _SCHEMA.match(cible) or cible.startswith("//"):
         return None
     chemin = cible.split("#", 1)[0].split("?", 1)[0]
@@ -282,8 +288,13 @@ def cible_locale(cible: str, racine: Path) -> str | None:
             segments.append(segment)
     relatif = "/".join(segments) or "."
     # GitHub ne lit pas `\` comme un séparateur : une telle cible n'est jamais un chemin du dépôt.
-    # Sous Windows, deux en tête nommeraient un partage réseau, que `resolve` ouvrirait.
-    if "\\" in relatif:
+    # Sous Windows, deux en tête nommeraient un partage réseau, que `resolve` ouvrirait. Un
+    # deux-points y nomme un lecteur, en tête (`Z:/x.md`, `Q:x.md`, qu'un `./` ou un `%5A` cachent
+    # au schéma) comme plus loin (`docs/Z:x.md` : en mode non strict, `resolve` joint `Z:x.md` au
+    # dernier dossier qui existe, ce qui repart du lecteur, puis lit l'état de ce chemin), et un nom
+    # de fichier Windows n'en porte jamais. Ces cibles sont refusées avant `resolve`. Sous Linux, un
+    # deux-points ne nomme aucun lecteur : la cible reste locale.
+    if "\\" in relatif or (os.name == "nt" and ":" in relatif):
         return None
     try:
         base = racine.resolve()

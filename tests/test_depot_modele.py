@@ -341,6 +341,9 @@ def test_liste_d_alignement():
         "copier copy --defaults --vcs-ref",
         "git diff --name-only",
         "@docs/modele/methode.md",
+        # lot 14 : le README à la forme de sa variante, et la licence d'un dépôt de code
+        "docs/modele/documentation.md",
+        "`LICENSE`",
         "needs:",
         "edited",
         "`.claude/settings.local.json` et `__pycache__/`",
