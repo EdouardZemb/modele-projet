@@ -36,6 +36,20 @@ def test_claude_md_importe_la_methode(rendre):
     assert "## Exploitation" not in texte
 
 
+# « Ce qui fait foi » cite ses chemins par des liens, jamais entre accents graves : la carte de la
+# racine ne compte que les liens. Le brief et le cadrage y sont, puisque le README ne les lie plus.
+def test_ce_qui_fait_foi_cite_par_des_liens(rendre):
+    rendu = rendre()
+    texte = (rendu / "CLAUDE.md").read_text(encoding="utf-8")
+    section = texte.split("## Ce qui fait foi\n", 1)[1].split("\n## ", 1)[0]
+    assert "Un fichier de la racine s'y cite par un lien." in section
+    assert "[le brief](docs/00-brief-initial.md)" in section
+    assert "[le cadrage](docs/cadrage.md)" in section
+    assert "`docs/" not in section
+    for cible in re.findall(r"\]\(([^)]+)\)", section):
+        assert (rendu / cible).exists(), cible
+
+
 def test_registre_entete(rendre):
     lignes = lire(rendre(), "docs/registre.md").splitlines()
     i = lignes.index(REGISTRE_ENTETE)

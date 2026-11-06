@@ -1,11 +1,21 @@
 """Les vingt combinaisons du rendu : cible (cinq) x nature x fusion."""
 
+import re
 import shutil
 import subprocess
 import sys
+from pathlib import Path
+from urllib.parse import unquote
 
 import pytest
-from conftest import INSTANCE_DE_TEST, REPONSES_DONNEES_SERVEUR, exiger, fichiers_texte
+from conftest import (
+    INSTANCE_DE_TEST,
+    PERIMES,
+    REPONSES_DONNEES_SERVEUR,
+    exiger,
+    fichiers_texte,
+    slug_github,
+)
 from test_rendu import RESTE_DE_JINJA
 
 CIBLES = {
@@ -39,6 +49,53 @@ def lancer(commande, rendu, env=None):
     )
 
 
+LIEN = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
+TITRE = re.compile(r"^#{1,6} (.+)$", re.MULTILINE)
+
+
+def verifier_readme(rendu: Path, cible: str, nature: str) -> None:
+    """Le README rendu : les titres de sa variante, dans l'ordre ; chaque lien relatif mène à un
+    fichier ou à un dossier du rendu, et chaque ancre à un titre de son fichier ; rien qui se périme.
+    Un compte de liens minimal, pour ne pas passer à vide."""
+    texte = (rendu / "README.md").read_text(encoding="utf-8")
+    titres = re.findall(r"^## (.+)$", texte, flags=re.MULTILINE)
+    liens = LIEN.findall(texte)
+    relatifs = [
+        lien for lien in liens if not re.match(r"[a-z][a-z0-9+.-]*:", lien) and lien[0] != "#"
+    ]
+    if cible.startswith("donnees"):
+        assert titres == ["Carte", "Ce qui n'y va jamais"]
+        assert "[CLAUDE.md](CLAUDE.md)" in texte
+        assert "https://github.com/EdouardZemb/essai" in liens
+        # Les dossiers ne portent pas de lien : à la naissance, ils sont vides ou absents.
+        for dossier in ("config/", "contenu/", "env/", "cles/", "secrets/"):
+            assert f"]({dossier}" not in texte, dossier
+        carte = [
+            ligne.split("|")[1].strip() for ligne in texte.splitlines() if ligne.startswith("| `")
+        ]
+        for dossier in ("`env/`", "`cles/`", "`secrets/`"):
+            assert (dossier in carte) == (cible == "donnees-serveur"), dossier
+        assert len(relatifs) >= 1, relatifs
+    else:
+        attendus = ["Pourquoi", "Démarrer", "Où lire quoi", "Contribuer"]
+        if nature == "code":
+            attendus.append("Licence")
+        assert titres == attendus
+        assert ("](docs/exploitation.md)" in texte) == cible.startswith("serveur")
+        assert "https://github.com/EdouardZemb/essai/releases" in liens
+        assert len(relatifs) >= 6, relatifs
+        assert sum("#" in lien for lien in relatifs) >= 2, relatifs
+    assert (rendu / "LICENSE").exists() == ("Licence" in titres)
+    for lien in relatifs:
+        chemin, _, ancre = lien.partition("#")
+        assert (rendu / chemin).exists(), lien
+        if ancre:
+            vise = (rendu / chemin).read_text(encoding="utf-8")
+            assert unquote(ancre) in {slug_github(t) for t in TITRE.findall(vise)}, lien
+    perime = PERIMES.search(texte)
+    assert perime is None, perime
+
+
 @pytest.mark.parametrize("fusion", ["session", "edouard"])
 @pytest.mark.parametrize("nature", ["code", "donnees"])
 @pytest.mark.parametrize("cible", list(CIBLES))
@@ -70,6 +127,8 @@ def test_combinaison(rendre, env_isole, cible, nature, fusion):
 
     r = lancer([sys.executable, "scripts/modele/verifier_secrets.py"], rendu, env)
     assert r.returncode == 0, r.stdout + r.stderr
+
+    verifier_readme(rendu, cible, nature)
 
 
 def scripts_shell(rendu):

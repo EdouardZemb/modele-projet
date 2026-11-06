@@ -162,7 +162,12 @@ def test_nom_sans_suffixe_refuse(rendre):
 def test_textes_du_depot_de_donnees(rendre):
     rendu = rendre(**DONNEES)
     attendus = {
-        "README.md": ["Ce dépôt est le dépôt de données de `essai` : il ne porte aucun code."],
+        "README.md": [
+            (
+                "Les données de l'instance de [essai](https://github.com/EdouardZemb/essai)."
+                " Dépôt privé, sans code."
+            )
+        ],
         "CLAUDE.md": [
             "Les leçons de ce dépôt vont au registre du dépôt de code.",
             "Le contenu d'un secret est un geste 👤 d'Edouard.",
@@ -216,26 +221,24 @@ def test_textes_du_depot_de_donnees(rendre):
     assert "lot 12" not in serveur
 
 
-# Le README d'un dépôt de données cite chacun de ses dossiers, une ligne chacun : en cible_code
-# `serveur`, aussi env/, cles/ et secrets/, que le gabarit ne rend pas (le premier secret le crée).
-LIGNES_DU_README = [
-    "- [`CLAUDE.md`](CLAUDE.md) : ce que ce dépôt porte, ses règles, ce qui fait foi.",
-    "- [`config/`](config/) : la configuration personnelle de l'application.",
-    "- [`contenu/`](contenu/) : le contenu de l'instance.",
-]
-LIGNES_DU_README_SERVEUR = [
-    "- [`env/`](env/) : l'environnement de la prod et du staging, sur le serveur.",
-    "- [`cles/`](cles/) : les clés publiques age du serveur et de la clé hors ligne.",
-    "- `secrets/` : les secrets chiffrés, `<env>.env.enc`, que crée le premier `secrets.ps1 refaire`.",
-]
+# Le README d'un dépôt de données cite chacun de ses dossiers dans sa carte, une ligne chacun, sans
+# lien : en cible_code `serveur`, aussi env/, cles/ et secrets/, que le gabarit ne rend pas (le
+# premier secret le crée).
+DOSSIERS_DU_README = ["`config/`", "`contenu/`"]
+DOSSIERS_DU_README_SERVEUR = ["`env/`", "`cles/`", "`secrets/`"]
 
 
 def test_readme_du_depot_de_donnees_cite_ses_dossiers(rendre):
-    def liste(rendu):
-        return [ligne for ligne in lire(rendu, "README.md").splitlines() if ligne.startswith("- ")]
+    def carte(rendu):
+        lignes = lire(rendu, "README.md").splitlines()
+        cellules = [ligne.split("|")[1].strip() for ligne in lignes if ligne.startswith("| `")]
+        assert cellules
+        return cellules
 
-    assert liste(rendre(**DONNEES)) == LIGNES_DU_README
-    assert liste(rendre(**REPONSES_DONNEES_SERVEUR)) == LIGNES_DU_README + LIGNES_DU_README_SERVEUR
+    assert carte(rendre(**DONNEES)) == DOSSIERS_DU_README
+    assert carte(rendre(**REPONSES_DONNEES_SERVEUR)) == (
+        DOSSIERS_DU_README + DOSSIERS_DU_README_SERVEUR
+    )
 
 
 def test_claude_md_du_depot_de_donnees_dit_la_fusion_reelle(rendre):
