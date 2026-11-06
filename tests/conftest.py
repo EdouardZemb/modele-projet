@@ -29,11 +29,13 @@ RENVOI_AU_PLAN = re.compile(
 
 # Ce qu'un README ne porte pas, parce que cela se périme : une version, un lot numéroté, une heure,
 # et les mots qui datent un état. Le lot, sans égard à la casse (« Lot 14 » en tête de phrase), au
-# pluriel (« les lots 8 à 13 »), et séparé de son numéro par tout blanc : une espace insécable, ou
-# la fin d'une ligne de prose repliée.
+# pluriel (« les lots 8 à 13 »), numéroté par `#` ou `n°` (« lot #22 », « lot n° 3 »), et séparé
+# de son numéro par des blancs, une espace insécable comprise, ou par la fin d'une ligne de prose
+# repliée, jamais par une ligne vide : « ## Le cycle d'un lot », suivi d'une liste, est sain.
 PERIMES = re.compile(
-    r"\bv?\d+\.\d+\.\d+\b|\b(?i:lots?)\s+\d+\b|\b\d{1,2}[:h]\d{2}\b"
-    r"|\b(?i:actuellement|bientôt|prochainement)\b"
+    r"\bv?\d+\.\d+\.\d+\b"
+    r"|\b(?i:lots?)(?:[^\S\n]+|[^\S\n]*\n[^\S\n]*)(?:n[°º][^\S\n]*|#)?\d+\b"
+    r"|\b\d{1,2}[:h]\d{2}\b|\b(?i:actuellement|bientôt|prochainement)\b"
 )
 
 

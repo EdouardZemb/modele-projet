@@ -1,5 +1,6 @@
 """Le dépôt modèle applique ses propres garde-fous, à sa racine."""
 
+import hashlib
 import json
 import re
 import subprocess
@@ -224,6 +225,33 @@ def test_depot_modele_passe_sa_porte(env_isole):
         check=False,
     )
     assert r.returncode == 0, r.stderr
+
+
+def test_documentation_du_depot_modele(env_isole):
+    """La licence et la carte passent sur ce dépôt, lancées comme en CI, depuis la racine : son
+    README lie `CLAUDE.md`, le seul autre `.md` de sa racine, et son `LICENSE` est là."""
+    r = subprocess.run(
+        [sys.executable, str(RACINE / "template/scripts/modele/documentation.py")],
+        cwd=RACINE,
+        env=env_isole(),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert r.stdout.splitlines() == [
+        "documentation : licence : LICENSE présent (nature code)",
+        "documentation : carte : 1 fichier .md à la racine, lié",
+    ]
+
+
+def test_licence_du_depot_modele(rendre):
+    """Le `LICENSE` de ce dépôt est celui d'un rendu par défaut, à l'octet près. Par empreinte,
+    pour qu'un échec n'imprime pas les deux textes."""
+    depot = hashlib.sha256((RACINE / "LICENSE").read_bytes()).hexdigest()
+    rendu = hashlib.sha256((rendre() / "LICENSE").read_bytes()).hexdigest()
+    assert depot == rendu
 
 
 def test_settings_du_depot_modele():

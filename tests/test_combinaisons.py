@@ -8,6 +8,7 @@ import sys
 from pathlib import Path, PurePosixPath
 from urllib.parse import unquote
 
+import documentation
 import pytest
 from conftest import (
     INSTANCE_DE_TEST,
@@ -50,25 +51,15 @@ def lancer(commande, rendu, env=None):
     )
 
 
-# Un lien en ligne, avec des chevrons ou un titre, son texte sur deux lignes au besoin ; une
-# définition de référence, hors d'une note (`[^1]:`) ; un titre, sans ses espaces de fin ni sa
-# séquence fermante (`## Titre ##`), comme GitHub les retire avant de calculer l'ancre ; un bloc de
-# code clôturé, où GitHub ne rend ni lien ni titre.
-LIEN = re.compile(
-    r"\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+(?:\"[^\"]*\"|'[^']*'|\([^)]*\)))?\s*\)"
-)
-REFERENCE = re.compile(r"^ {0,3}\[(?!\^)[^\]]+\]:[ \t]*<?([^\s>]+)>?", re.MULTILINE)
+# Les liens se lisent par `documentation.liens`, le script que lance la CI des projets : un seul
+# analyseur. Ici, un titre, sans ses espaces de fin ni sa séquence fermante (`## Titre ##`), comme
+# GitHub les retire avant de calculer l'ancre ; un bloc de code clôturé, où GitHub ne rend aucun
+# titre.
 TITRE = re.compile(r"^ {0,3}#{1,6}[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$", re.MULTILINE)
 CLOTURE = re.compile(
     r"^ {0,3}(`{3,}|~{3,})[^\n]*\n.*?^ {0,3}\1[`~]*[ \t]*$", re.MULTILINE | re.DOTALL
 )
 SCHEMA = re.compile(r"[a-z][a-z0-9+.-]*:", re.IGNORECASE)
-
-
-def liens_de(texte: str) -> list[str]:
-    """Les cibles des liens que GitHub rend dans un texte : en ligne, puis de référence."""
-    texte = CLOTURE.sub("", texte)
-    return LIEN.findall(texte) + REFERENCE.findall(texte)
 
 
 def ancres_de(texte: str) -> set[str]:
@@ -77,15 +68,20 @@ def ancres_de(texte: str) -> set[str]:
 
 
 def lien_casse(racine: Path, source: str, lien: str) -> bool:
-    """Un lien relatif de `source`, un fichier de la racine, qui ne mène à rien : un chemin absent,
-    à la casse près de chaque segment, comme le lit GitHub (sous Windows, `exists()` ne voit pas la
-    casse), ou une ancre qui n'est le `slug_github` d'aucun titre du fichier visé. Une ancre seule
-    vise `source`, un `/` en tête part de la racine, un `..` en sort."""
-    chemin, _, ancre = lien.partition("#")
-    chemin = unquote(chemin.partition("?")[0]).lstrip("/") or source
+    """Un lien relatif de `source`, un fichier de la racine, qui ne mène à rien : une cible qui sort
+    de la racine, que `documentation.cible_locale` refuse ; un chemin absent, à la casse près de
+    chaque segment, comme le lit GitHub (sous Windows, `exists()` ne voit pas la casse) ; ou une
+    ancre qui n'est le `slug_github` d'aucun titre du fichier visé. Une ancre seule vise `source`."""
+    avant, _, ancre = lien.partition("#")
+    if avant.partition("?")[0]:
+        chemin = documentation.cible_locale(lien, racine)
+        if chemin is None:
+            return True
+    else:
+        chemin = source
     courant = racine
     for segment in PurePosixPath(chemin).parts:
-        if segment == ".." or not courant.is_dir() or segment not in os.listdir(courant):
+        if not courant.is_dir() or segment not in os.listdir(courant):
             return True
         courant = courant / segment
     if not ancre:
@@ -96,13 +92,13 @@ def lien_casse(racine: Path, source: str, lien: str) -> bool:
 
 
 def verifier_readme(rendu: Path, cible: str, nature: str) -> None:
-    """Le README rendu : les titres de sa variante, dans l'ordre ; chaque lien relatif (en ligne ou
-    de référence, une ancre seule comprise) mène à un fichier ou à un dossier du rendu, et chaque
-    ancre à un titre de son fichier ; rien qui se périme. Un compte de liens minimal, pour ne pas
-    passer à vide."""
+    """Le README rendu : les titres de sa variante, dans l'ordre ; chaque lien relatif que lit
+    `documentation.liens` (une ancre seule comprise) mène à un fichier ou à un dossier du rendu, et
+    chaque ancre à un titre de son fichier ; rien qui se périme. Un compte de liens minimal, pour ne
+    pas passer à vide."""
     texte = (rendu / "README.md").read_text(encoding="utf-8")
     titres = re.findall(r"^## (.+)$", CLOTURE.sub("", texte), flags=re.MULTILINE)
-    liens = liens_de(texte)
+    liens = documentation.liens(texte)
     relatifs = [lien for lien in liens if not SCHEMA.match(lien)]
     if cible.startswith("donnees"):
         assert titres == ["Carte", "Ce qui n'y va jamais"]
@@ -136,12 +132,16 @@ def verifier_readme(rendu: Path, cible: str, nature: str) -> None:
 def test_perimes_et_slug_github():
     """Les aides du README savent mordre : un motif cassé laisserait passer les rendus à vide."""
     perimes = (
-        "v1.2.3", "1.2.3", "lot 14", "Lot 14", "les lots 8", "lot 3", "lot\n14",
-        "10h30", "03:30", "Actuellement", "bientôt", "PROCHAINEMENT",
+        "v1.2.3", "1.2.3", "lot 14", "Lot 14", "les lots 8", "lot 3", "lot\n14", "lot #22",
+        "lot n° 3", "lot nº3", "10h30", "03:30", "Actuellement", "bientôt", "PROCHAINEMENT",
     )
     for mot in perimes:
         assert PERIMES.search(f"x {mot} y"), mot
-    for sain in ("M-0006", "secrets.ps1", "CLAUDE.md#état", "ce que les lots ont appris", "le lot"):
+    sains = (
+        "M-0006", "secrets.ps1", "CLAUDE.md#état", "ce que les lots ont appris", "le lot",
+        "## Le cycle d'un lot\n\n1. Une issue",
+    )
+    for sain in sains:
         assert not PERIMES.search(sain), sain
     assert slug_github("Invariants — ne jamais violer") == "invariants--ne-jamais-violer"
     assert slug_github("État") == "état"
@@ -149,10 +149,14 @@ def test_perimes_et_slug_github():
 
 
 def test_verification_des_liens_mord(tmp_path):
-    """Chaque forme de lien que GitHub rend est vue, et un lien cassé de chaque forme est refusé ;
-    un lien ou un titre d'un bloc de code clôturé ne compte pas."""
+    """Les formes de lien de ce test sont vues (un titre, des chevrons, une ancre seule, un texte
+    sur deux lignes, entre accents graves ou entre crochets, une image cliquable et ses deux cibles,
+    une référence, sa cible sur la ligne suivante comprise), et un lien cassé de chaque forme est
+    refusé ; un lien en code en ligne, ou un lien ou un titre d'un bloc de code clôturé, ne compte
+    pas."""
     (tmp_path / "docs").mkdir()
     (tmp_path / "docs/a.md").write_text("# A\n", encoding="utf-8")
+    (tmp_path / "docs/c.png").write_bytes(b"\x89PNG")
     (tmp_path / "CLAUDE.md").write_text(
         "## État \n## Commandes ##\n```\n# Pas un titre\n```\n", encoding="utf-8"
     )
@@ -164,11 +168,16 @@ def test_verification_des_liens_mord(tmp_path):
         "[les\ncommandes](CLAUDE.md#commandes)\n"
         "[seul](#démarrer)\n"
         "[dossier](docs)\n"
+        "[![capture](docs/c.png)](docs/a.md)\n"
+        "[a [b] c](docs/a.md)\n"
+        "Un exemple : `[x](NOTICE.md)`.\n"
         "[ref]: /docs/a.md\n"
+        "[ref2]:\n  docs/a.md\n"
         "[^1]: une note, pas un lien\n"
     )
-    vus = liens_de(bons)
-    assert len(vus) == 7, vus
+    vus = documentation.liens(bons)
+    assert len(vus) == 11, vus
+    assert "NOTICE.md" not in vus
     assert [lien for lien in vus if lien_casse(tmp_path, "README.md", lien)] == []
     casses = (
         '[x](docs/absent.md "titre")\n'
@@ -177,11 +186,15 @@ def test_verification_des_liens_mord(tmp_path):
         "[casse](claude.md)\n"
         "[ancre](CLAUDE.md#pas-un-titre)\n"
         "[sortie](../README.md)\n"
+        "[![capture](docs/absent.png)](docs/absent.md)\n"
+        "[a [b] c](docs/absent.md)\n"
+        "Un exemple : `[x](docs/a.md)`.\n"
         "[ref]: docs/absent.md\n"
+        "[ref2]:\n  docs/absent.md\n"
         "```\n[code](docs/absent.md)\n```\n"
     )
-    vus = liens_de(casses)
-    assert len(vus) == 7, vus
+    vus = documentation.liens(casses)
+    assert len(vus) == 11, vus
     assert [lien for lien in vus if not lien_casse(tmp_path, "README.md", lien)] == []
 
 
@@ -218,6 +231,16 @@ def test_combinaison(rendre, env_isole, cible, nature, fusion):
     assert r.returncode == 0, r.stdout + r.stderr
 
     verifier_readme(rendu, cible, nature)
+
+    # La licence et la carte, comme en CI : elles passent, et disent ce qu'elles ont vu.
+    r = lancer([sys.executable, "scripts/modele/documentation.py"], rendu, env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    sortie = r.stdout.splitlines()
+    assert "documentation : carte : 1 fichier .md à la racine, lié" in sortie, sortie
+    if nature == "code" and not cible.startswith("donnees"):
+        assert "documentation : licence : LICENSE présent (nature code)" in sortie, sortie
+    else:
+        assert "documentation : licence : non exigée (nature donnees)" in sortie, sortie
 
 
 def scripts_shell(rendu):
