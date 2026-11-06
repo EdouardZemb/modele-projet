@@ -2,7 +2,9 @@
 
 import json
 import os
+import subprocess
 import sys
+import threading
 import time
 import types
 from datetime import datetime, timedelta, timezone
@@ -11,7 +13,7 @@ from pathlib import Path
 import documentation
 import pytest
 import signaux
-from conftest import RACINE, appels_de, faux_gh, faux_gh_lent
+from conftest import RACINE, SCRIPTS, appels_de, faux_gh, faux_gh_lent
 
 MAINTENANT = datetime(2026, 10, 27, 12, 0, tzinfo=timezone.utc)
 RIEN_DE_ROUGE = "signaux de la CI : rien de rouge (0 workflow exécuté en 7 jours, 0 PR ouverte)"
@@ -516,6 +518,44 @@ def test_erreur_du_controle_laisse_les_signaux(tmp_path, monkeypatch, capsys):
     assert code == 0
     assert texte == RIEN_DE_ROUGE + "\ndocumentation : non lue (erreur)"
     assert len(appels) == 1  # le faux a tourné : l'erreur est la sienne
+
+
+def test_documentation_importee_a_l_appel_seulement():
+    """Une erreur d'import de `documentation` ne sort jamais du hook : `signaux` ne l'importe que
+    dans `_documentation`, sous son `try`."""
+    code = "import sys, signaux; print('documentation' in sys.modules)"
+    r = subprocess.run(
+        [sys.executable, "-B", "-c", code],
+        cwd=SCRIPTS,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert r.stdout.strip() == "False", r.stdout + r.stderr
+
+
+def test_controle_pendant_les_lectures(monkeypatch, capsys):
+    """Le gabarit resté vide se lit pendant que les lectures de gh tournent, ni avant ni après :
+    chaque lecture attend la fin du contrôle, et le contrôle attend qu'une lecture ait commencé."""
+    lecture_commencee = threading.Event()
+    controle_fait = threading.Event()
+    vus = []
+
+    def faux_lire(args, cwd, echeance):
+        lecture_commencee.set()
+        return ([], "") if controle_fait.wait(5) else (None, "délai dépassé")
+
+    def faux_controle(racine):
+        vus.append(lecture_commencee.wait(5))
+        controle_fait.set()
+        return []
+
+    monkeypatch.setattr(signaux, "lire", faux_lire)
+    monkeypatch.setattr(signaux, "_documentation", faux_controle)
+    code, texte = lancer(capsys)
+    assert code == 0
+    assert texte == RIEN_DE_ROUGE  # appelé après les résultats, il aurait laissé expirer les lectures
+    assert vus == [True]  # appelé avant les lectures, il n'en aurait vu commencer aucune
 
 
 def test_sortie_ascii_et_json(tmp_path, monkeypatch, capsys):

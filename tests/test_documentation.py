@@ -573,6 +573,9 @@ def test_marqueur(tmp_path):
     ):
         arbre(tmp_path, {"docs/cadrage.md": f"# Cadrage\n\n{cite}"})
         assert d.gabarits_vides(tmp_path) == [], cite
+    # Seul le marqueur en italique compte : nu, c'est un nom de dossier ou de fichier daté.
+    arbre(tmp_path, {"docs/cadrage.md": "# Cadrage\n\nLes dossiers AAAA-MM-JJ-nom/ par lot.\n"})
+    assert d.gabarits_vides(tmp_path) == []
 
 
 def test_corps_vide(tmp_path):
@@ -640,6 +643,14 @@ def test_mis_de_cote(tmp_path):
     arbre(tmp_path, {"README.md": "# E\n\n[Les décisions](docs/decisions/README.md)\n"})
     arbre(tmp_path, {"docs/decisions/README.md": "# Décisions\n"})
     assert d.gabarits_vides(tmp_path) == [f"docs/decisions/README.md : {VIDE}"]
+    arbre(tmp_path, {"README.md": "# E\n\n[Les ADR](docs/adr/README.md)\n"})
+    arbre(tmp_path, {"docs/adr/README.md": "# ADR\n"})
+    assert d.gabarits_vides(tmp_path) == [f"docs/adr/README.md : {VIDE}"]
+    # Le dossier des plans échappe aussi à la règle du dossier : la clôture d'un lot supprime son
+    # plan, et le dossier reste, vide ou réduit à `.gitkeep`.
+    (tmp_path / ".claude/plans/2026-11-06-x.md").unlink()
+    arbre(tmp_path, {"README.md": "# E\n\n[Les plans](.claude/plans/)\n", ".claude/plans/.gitkeep": ""})
+    assert d.gabarits_vides(tmp_path) == []
 
 
 def test_readme_ne_lie_rien(tmp_path):
@@ -676,6 +687,20 @@ def test_ignores(tmp_path):
     assert d.gabarits_vides(tmp_path) == []
     arbre(tmp_path, {"README.md": "# E\n\n![capture](docs/capture.png)\n"})
     assert d.gabarits_vides(tmp_path) == [AUCUN]
+
+
+def test_gabarits_vides_sans_sous_processus(tmp_path, monkeypatch):
+    """Le contrôle tourne au `SessionStart`, hors du budget des lectures de gh : aucun
+    sous-processus, même à la racine d'un dépôt git."""
+
+    def interdit(*_, **__):
+        raise AssertionError("sous-processus")
+
+    monkeypatch.setattr(d.subprocess, "run", interdit)
+    monkeypatch.setattr(d.subprocess, "Popen", interdit)
+    (tmp_path / ".git").mkdir()
+    arbre(tmp_path, {"README.md": "# E\n\n[a](docs/a.md)\n", "docs/a.md": ""})
+    assert d.gabarits_vides(tmp_path) == [f"docs/a.md : {VIDE}"]
 
 
 def test_gabarits_vides_ordre_et_doublons(tmp_path):
