@@ -257,44 +257,77 @@ def test_licence_du_depot_modele(rendre):
     assert depot == rendu
 
 
+COMMENTAIRE_HTML = re.compile(r"<!--.*?-->", re.DOTALL)
+
+
+def visible(texte: str) -> str:
+    """Un texte Markdown sans ce que GitHub n'y affiche pas comme du texte : ses blocs de code
+    clôturés et ses commentaires HTML."""
+    return COMMENTAIRE_HTML.sub("", CLOTURE.sub("", texte))
+
+
+def sections(texte: str) -> dict[str, str]:
+    """Le corps de chaque titre `##` d'un texte, jusqu'au titre `##` suivant ; sous `""`, ce qui
+    précède le premier."""
+    morceaux = re.split(r"^## (.+)\n", texte, flags=re.MULTILINE)
+    return {"": morceaux[0], **dict(zip(morceaux[1::2], morceaux[2::2], strict=True))}
+
+
 def test_readme_nomme_chaque_reponse_a_choix():
     """Le README nomme chaque réponse à choix de `copier.yml` et chacun de ses choix, entre accents
-    graves, dans un élément de liste d'une seule ligne : celle de sa question. Les choix se lisent
-    dans `copier.yml`, la liste ou les valeurs du dictionnaire (pas ses libellés). Entre accents
-    graves et sur la ligne de la question : une recherche nue passerait à vide, « code » ou
-    « serveur » paraissant partout."""
+    graves, sous « Démarrer », dans un élément de liste d'une seule ligne qu'ouvre sa question. Les
+    choix se lisent dans `copier.yml`, la liste ou les valeurs du dictionnaire (pas ses libellés).
+    Entre accents graves et sur la ligne de la question : une recherche nue passerait à vide,
+    « code » ou « serveur » paraissant partout ; une puce qui nommerait plusieurs questions, ou une
+    question nommée dans la puce d'une autre, ne rattacherait pas ses choix à leur question. Une
+    liste dans un bloc de code ou dans un commentaire HTML ne compte pas : GitHub ne l'affiche pas
+    comme une liste."""
     a_choix = {
         nom: question["choices"]
         for nom, question in COPIER.items()
         if isinstance(question, dict) and "choices" in question
     }
     assert sorted(a_choix) == ["cible", "cible_code", "fusion", "nature"]
-    lignes = [
-        ligne
-        for ligne in (RACINE / "README.md").read_text(encoding="utf-8").splitlines()
-        if re.match(r"\s*[-*] ", ligne)
-    ]
+    demarrer = sections(visible((RACINE / "README.md").read_text(encoding="utf-8")))
+    lignes = demarrer.get("Démarrer", "").splitlines()
     for nom, choix in a_choix.items():
         valeurs = list(choix.values()) if isinstance(choix, dict) else list(choix)
         assert valeurs, nom
-        assert any(
-            f"`{nom}`" in ligne and all(f"`{valeur}`" in ligne for valeur in valeurs)
-            for ligne in lignes
-        ), (nom, valeurs)
+        propres = [ligne for ligne in lignes if re.match(rf"\s*[-*+] `{re.escape(nom)}`", ligne)]
+        assert any(all(f"`{valeur}`" in ligne for valeur in valeurs) for ligne in propres), (
+            nom,
+            valeurs,
+        )
 
 
 def test_readme_du_depot_modele():
-    """Le README de ce dépôt a la forme de la variante « code » : ses titres, dans l'ordre ; rien
-    qui se périme ; il lie `CLAUDE.md`, `docs/aligner.md`, `LICENSE` et les publications, et chaque
-    lien relatif (une ancre seule comprise) et chaque ancre mènent à un fichier et à un titre de ce
-    dépôt, à la casse près, comme sur GitHub."""
+    """Le README de ce dépôt a la forme de la variante « code » : une phrase d'ouverture ; ses
+    titres, dans l'ordre, ceux de « Démarrer » compris ; « Pourquoi » qui renvoie à l'état de
+    `CLAUDE.md` et aux publications ; la colonne « À lire quand » ; la phrase de « Contribuer » ;
+    `[MIT](LICENSE)` ; rien qui se périme ; il lie `CLAUDE.md`, `docs/aligner.md` et `LICENSE`, et
+    chaque lien relatif (une ancre seule comprise) et chaque ancre mènent à un fichier et à un titre
+    de ce dépôt, à la casse près, comme sur GitHub. Les titres se lisent dans ce que GitHub affiche,
+    hors des blocs de code et des commentaires HTML."""
     texte = (RACINE / "README.md").read_text(encoding="utf-8")
-    titres = re.findall(r"^## (.+)$", CLOTURE.sub("", texte), flags=re.MULTILINE)
+    titres = re.findall(r"^## (.+)$", visible(texte), flags=re.MULTILINE)
     assert titres == ["Pourquoi", "Démarrer", "Où lire quoi", "Contribuer", "Licence"]
+    corps = sections(visible(texte))
+    ouverture = re.sub(r"^# .*$", "", corps[""], flags=re.MULTILINE).strip()
+    assert ouverture.endswith("."), "pas de phrase d'ouverture avant « Pourquoi »"
+    pourquoi = documentation.liens(corps["Pourquoi"], texte)
+    assert "CLAUDE.md#état" in pourquoi, pourquoi
+    assert "https://github.com/EdouardZemb/modele-projet/releases" in pourquoi, pourquoi
+    assert re.findall(r"^### (.+)$", corps["Démarrer"], flags=re.MULTILINE) == [
+        "Créer un projet",
+        "Mettre à jour un projet",
+        "Aligner un projet existant",
+    ]
+    assert "| Document | À lire quand |" in corps["Où lire quoi"]
+    assert "Projet personnel : aucune contribution n'est attendue." in corps["Contribuer"]
+    assert "[MIT](LICENSE)" in corps["Licence"]
     perime = PERIMES.search(texte)
     assert perime is None, perime
     liens = documentation.liens(texte)
-    assert "https://github.com/EdouardZemb/modele-projet/releases" in liens
     relatifs = [lien for lien in liens if not SCHEMA.match(lien)]
     locaux = {documentation.cible_locale(lien, RACINE) for lien in relatifs}
     assert {"CLAUDE.md", "docs/aligner.md", "LICENSE"} <= locaux, locaux
@@ -304,12 +337,25 @@ def test_readme_du_depot_modele():
 
 
 def test_aides_de_copier_yml():
-    """L'aide de `description` dit ce qu'attend la première phrase du README ; celle de `cible` ne
-    promet aucune cible à venir."""
+    """Les aides de `description` et de `cible` valent celles que pose la spec du lot 14 :
+    `description` dit ce qu'attend la première phrase du README ; `cible` ne promet aucune cible à
+    venir, ni par un lot, ni par la cible statique (des mots entiers : « pilote » n'est pas un
+    lot)."""
     assert COPIER["description"]["help"] == "Le projet en une phrase : ce que c'est, et pour qui"
-    aide = COPIER["cible"]["help"].lower()
-    assert "lot" not in aide, aide
-    assert "statique" not in aide, aide
+    aide = COPIER["cible"]["help"]
+    assert aide == "Ce que le modèle rend (aucune, serveur, ou donnees pour un dépôt de données)"
+    assert re.search(r"\b(lots?|statiques?)\b", aide, flags=re.IGNORECASE) is None, aide
+
+
+def test_exemples_de_description_suivent_l_aide():
+    """Les exemples de `-Description`, dans ce README et dans l'aide du script du poste, disent
+    comme l'aide de `description` ce qu'est le projet, et pour qui, et non ce qu'il fait. Un
+    exemple sans un mot (`"..."`, `"<…>"`) ne compte pas ; chaque fichier en a au moins un."""
+    for chemin in ("README.md", "poste/Nouveau-Projet.ps1"):
+        texte = (RACINE / chemin).read_text(encoding="utf-8-sig")
+        exemples = [e for e in re.findall(r'-Description "([^"]*)"', texte) if re.search(r"\w", e)]
+        assert exemples, chemin
+        assert all("pour qui" in exemple for exemple in exemples), (chemin, exemples)
 
 
 def test_settings_du_depot_modele():
