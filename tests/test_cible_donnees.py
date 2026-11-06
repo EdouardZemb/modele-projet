@@ -33,6 +33,7 @@ def test_rend_le_socle_et_les_dossiers(rendre):
         ".github/workflows/ci.yml",
         ".github/pull_request_template.md",
         "docs/modele/methode.md",
+        "docs/modele/documentation.md",
         "docs/modele/decisions/M-0001-ecosysteme-des-applications-personnelles.md",
         "docs/modele/decisions/M-0002-garde-fous-et-confidentialite.md",
         "docs/modele/decisions/M-0006-code-et-donnees.md",

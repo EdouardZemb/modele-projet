@@ -1036,6 +1036,10 @@ def test_compte_rendu_partout(rendre):
 # fichier rendu de la chaîne (scripts, bancs bats, doubles, documents), ni les épreuves du modèle,
 # ne les citent (RENVOI_AU_PLAN, dans conftest). Les quatre rendus du banc de la mécanique, et le
 # dépôt de données d'un projet `serveur`.
+# Aucun renvoi nu non plus (RENVOI_NU, le motif d'`ancrage`) : un fichier rendu vit dans un autre
+# dépôt que le modèle, où `#94` nommerait une issue du projet. Un renvoi au modèle s'écrit
+# `modele-projet#94`. Ce n'est pas une porte des projets : dans un projet, `#12` nomme à bon droit
+# sa propre issue.
 RENDUS_DE_LA_CHAINE = {
     "un-depot-avec-sauvegardes": REPONSES_SERVEUR,
     "un-depot-sans-sauvegardes": {**REPONSES_SERVEUR, "sauvegardes": False},
@@ -1057,9 +1061,26 @@ def renvois_au_plan(racine):
     ]
 
 
+RENVOI_NU = re.compile(r"(^|[^\w&#/-])#\d{1,5}\b(?!;)")
+
+
+def renvois_nus(racine):
+    """Les lignes des fichiers texte de `racine` qui portent un renvoi nu à une issue (`#94`)."""
+    return [
+        f"{chemin.relative_to(racine).as_posix()}:{numero}: {ligne.strip()}"
+        for chemin in fichiers_texte(racine)
+        for numero, ligne in enumerate(
+            chemin.read_bytes().decode("utf-8", errors="replace").splitlines(), start=1
+        )
+        if RENVOI_NU.search(ligne)
+    ]
+
+
 @pytest.mark.parametrize("reponses", RENDUS_DE_LA_CHAINE.values(), ids=RENDUS_DE_LA_CHAINE.keys())
 def test_aucun_renvoi_au_plan_dans_un_rendu(rendre, reponses):
-    assert renvois_au_plan(rendre(**reponses)) == []
+    racine = rendre(**reponses)
+    assert renvois_au_plan(racine) == []
+    assert renvois_nus(racine) == []
 
 
 def test_aucun_renvoi_au_plan_dans_les_epreuves():

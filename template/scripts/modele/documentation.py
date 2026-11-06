@@ -41,8 +41,9 @@ Les blocs de code clôturés, le code en ligne et les commentaires HTML sont ret
 n'y rend aucun lien. La cible perd son ancre et sa requête, ses échappements (`\\.`), puis elle est
 décodée (`%20`) ; un `/` en tête part de la racine ; une cible avec un schéma (`https:`, `mailto:`)
 ou sans (`//hôte`), une ancre seule, une cible où reste une barre oblique inverse (GitHub ne la lit
-pas comme un séparateur ; sous Windows, deux en tête nommeraient un partage réseau), ou une cible
-qui sort de la racine, par `..` ou par un lien symbolique, n'est pas locale. Les chemins se
+pas comme un séparateur ; sous Windows, deux en tête nommeraient un partage réseau), une cible qui
+nomme un lecteur (`./Z:/x.md`, `%5A:/x.md` : sous Windows, un chemin absolu), ou une cible qui
+sort de la racine, par `..` ou par un lien symbolique, n'est pas locale. Les chemins se
 comparent à la casse près, comme sur GitHub ; un document est un fichier dont le suffixe est `.md`,
 sans égard à la casse. Un texte en CRLF se lit comme en LF, un BOM en tête est ignoré, et un octet
 qui n'est pas de l'UTF-8 est remplacé, sans erreur.
@@ -62,6 +63,10 @@ fermeture, plus loin.
 Une définition n'est pas lue quand elle suit une ligne de commentaire (`<!-- liens -->`, puis les
 définitions), quand elle est dans un élément de liste ou dans une citation, quand elle suit une
 ligne de séparation (`***`), ou quand son titre tient sur deux lignes.
+Un dernier ne touche que le gabarit resté vide. Sous Windows, il lit l'existence d'un chemin lié
+sans égard à la casse : un lien `docs/Cadrage.md` vers `docs/cadrage.md` y est lu, et peut
+avertir, alors que GitHub casse ce lien ; sous Linux, il est ignoré. C'est un avertissement de
+trop, jamais un refus.
 
 La sortie ne cite jamais le contenu d'un fichier, seulement des chemins, chaque caractère de
 contrôle, séparateur de ligne ou de paragraphe (U+2028, U+2029) ou non décodable (un nom qui n'est
@@ -85,7 +90,7 @@ import re
 import subprocess
 import sys
 import unicodedata
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from urllib.parse import unquote
 
 EXIT_USAGE = 64
@@ -262,8 +267,8 @@ def liens(texte: str, document: str | None = None) -> list[str]:
 def cible_locale(cible: str, racine: Path) -> str | None:
     """Le chemin, relatif à la racine et en `/`, sans `/` final (`.` pour la racine), que vise une
     cible ; `None` si elle n'est pas locale : un schéma, une ancre seule, une barre oblique inverse
-    restée après les échappements, ou une sortie de la racine, par `..` ou par un lien
-    symbolique."""
+    restée après les échappements, un lecteur (`Z:`) en tête du chemin, ou une sortie de la
+    racine, par `..` ou par un lien symbolique."""
     if _SCHEMA.match(cible) or cible.startswith("//"):
         return None
     chemin = cible.split("#", 1)[0].split("?", 1)[0]
@@ -282,8 +287,10 @@ def cible_locale(cible: str, racine: Path) -> str | None:
             segments.append(segment)
     relatif = "/".join(segments) or "."
     # GitHub ne lit pas `\` comme un séparateur : une telle cible n'est jamais un chemin du dépôt.
-    # Sous Windows, deux en tête nommeraient un partage réseau, que `resolve` ouvrirait.
-    if "\\" in relatif:
+    # Sous Windows, deux en tête nommeraient un partage réseau, que `resolve` ouvrirait ; un lecteur
+    # en tête (`Z:/x.md`, `Q:x.md`, qu'un `./` ou un `%5A` cachent au schéma) ferait du chemin un
+    # chemin absolu, de même. Sous tout système, la cible est refusée avant `resolve`.
+    if "\\" in relatif or PureWindowsPath(relatif).drive:
         return None
     try:
         base = racine.resolve()

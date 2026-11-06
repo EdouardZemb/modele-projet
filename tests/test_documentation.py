@@ -533,6 +533,35 @@ def test_cible_locale_sans_reseau(tmp_path, monkeypatch):
     assert d.cible_locale(f"docs{b}x.md", tmp_path) is None
 
 
+def test_cible_locale_sans_lecteur(tmp_path, monkeypatch):
+    """Une cible qui nomme un lecteur (`Z:`) n'est pas locale, et `resolve` ne la voit pas. Le
+    schéma ne lit que la cible brute : `./Z:/x.md`, `/Z:/x.md`, `%5A:/x.md` ou `./Q:x.md` lui
+    échappent. Sous Windows, le lecteur ferait du chemin un chemin absolu, que `resolve` ouvrirait
+    au `SessionStart` (un lecteur réseau injoignable attendrait au-delà du délai du hook) ; sous
+    Linux, la même cible serait un sous-dossier. Un deux-points plus loin ne nomme pas de lecteur :
+    `docs/a:b.md` atteint `resolve`, et reste locale là où un tel nom peut exister. L'espion n'ouvre
+    jamais un lecteur : rouge, ce test ne touche pas le réseau."""
+    vus, lecteurs = [], []
+    resolve = d.Path.resolve
+
+    def espion(self, *args, **kwargs):
+        vus.append(str(self))
+        if "Z:" in str(self) or "Q:" in str(self):
+            lecteurs.append(str(self))
+            raise OSError("aucun lecteur ouvert dans un test")
+        return resolve(self, *args, **kwargs)
+
+    monkeypatch.setattr(d.Path, "resolve", espion)
+    for cible in ("./Z:/x.md", "/Z:/x.md", "%5A:/x.md", "./Q:x.md"):
+        assert d.cible_locale(cible, tmp_path) is None, cible
+    assert lecteurs == []
+    vus.clear()
+    local = d.cible_locale("docs/a:b.md", tmp_path)
+    assert any(v.endswith("a:b.md") for v in vus), vus
+    if sys.platform != "win32":  # Windows refuse ce nom de fichier
+        assert local == "docs/a:b.md"
+
+
 # --- le gabarit resté vide -------------------------------------------------------------------
 
 MARQUEUR = "garde le marqueur *AAAA-MM-JJ* du gabarit"

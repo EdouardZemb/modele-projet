@@ -66,6 +66,11 @@ Chaque case se coche dans la PR d'alignement. Une case qui ne s'applique pas au 
 - [ ] **`CLAUDE.md`** : la ligne 1 devient `@docs/modele/methode.md`, suivie d'une ligne vide. Retirer
       ce que `methode.md` couvre désormais (le cycle d'un lot, « Fini », les commits, les questions
       groupées) ; garder ce qui est propre au projet.
+- [ ] **`README.md`** à la forme de sa variante, code ou données (`docs/modele/documentation.md`,
+      « Le README ») : il lie `CLAUDE.md` par un lien Markdown, et chaque autre `.md` de la racine
+      est lié par le README ou par « Ce qui fait foi » de `CLAUDE.md`. En nature `code`, `LICENSE`
+      est présent à la racine et indexé : sans lui, la CI refuse. Lancé depuis la racine,
+      `python scripts/modele/documentation.py` dit ce que la CI dira.
 - [ ] **`.github/workflows/ci.yml`** :
   - ajouter le job `socle` : `uses: ./.github/workflows/modele-socle.yml`, `secrets: inherit`,
     `permissions: {contents: read, pull-requests: read}` ;
