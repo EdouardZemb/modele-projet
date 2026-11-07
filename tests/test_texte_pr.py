@@ -1,6 +1,7 @@
 """Le texte de la PR (`scripts/modele/texte_pr.py`) : la section « Écarts à la spec » (LE-37), et la
 tête relue d'une PR qui ferme une issue (LE-55)."""
 
+import json
 import shutil
 import subprocess
 import sys
@@ -17,6 +18,13 @@ FERME_RIEN = (
     '{"closingIssuesReferences":{"totalCount":0,"nodes":[]}}}}}'
 )
 FERME_UNE = FERME_RIEN.replace('"totalCount":0', '"totalCount":1')
+# une réponse partielle : le compte est lu, mais une erreur l'accompagne (le doute d'un dépôt privé
+# et de `issues: read`) ; seule la clé `errors` la fait refuser
+FERME_EN_ERREUR = FERME_RIEN[:-1] + ',"errors":[{"type":"FORBIDDEN"}]}'
+FERME_NEGATIF = FERME_RIEN.replace('"totalCount":0', '"totalCount":-1')
+# un booléen est un entier pour Python : `false` passerait pour 0, `true` pour 1
+FERME_FAUX = FERME_RIEN.replace('"totalCount":0', '"totalCount":false')
+FERME_VRAI = FERME_RIEN.replace('"totalCount":0', '"totalCount":true')
 REFUS = "texte de la PR : refus"
 ABSENTE = "ferme une issue : ligne « Tête relue : <SHA complet> » absente"
 ILLISIBLES = "fermetures illisibles (réponse de l'API absente, en erreur ou mal formée)"
@@ -163,6 +171,11 @@ def test_auteurs(lancer):
         ("", "", 1, ILLISIBLES),  # un fichier vide
         ("", None, 1, ILLISIBLES),  # un fichier absent
         ("", FERME_UNE.replace('"totalCount":1', '"totalCount":"1"'), 1, ILLISIBLES),
+        ("", FERME_EN_ERREUR, 1, ILLISIBLES),
+        ("", FERME_NEGATIF, 1, ILLISIBLES),
+        ("", FERME_FAUX, 1, ILLISIBLES),
+        ("", FERME_VRAI, 1, ILLISIBLES),
+        ("", "null", 1, ILLISIBLES),  # un JSON qui n'est pas un objet
     ],
 )
 def test_tete_relue(lancer, ligne, fermetures, code, attendu):
@@ -173,6 +186,20 @@ def test_tete_relue(lancer, ligne, fermetures, code, attendu):
     assert (REFUS in sortie) == (code == 1), sortie
     if "b" * 40 in ligne:  # le refus nomme les deux SHA
         assert f"ferme une issue : tête relue {'b' * 40} différente de la tête {TETE}" in sortie
+
+
+@pytest.mark.parametrize(
+    ("fermetures", "total"),
+    [(FERME_EN_ERREUR, 0), (FERME_NEGATIF, -1), (FERME_FAUX, False), (FERME_VRAI, True)],
+)
+def test_reponses_refusees_par_leur_seule_valeur(fermetures, total):
+    """Ces réponses se lisent en JSON, avec la PR et son compte : elles ne refusent que par la clé
+    `errors` ou par la valeur du compte. Mal formées, elles refuseraient pour une autre raison, et
+    leur cas de `test_tete_relue` passerait à vide (LE-62)."""
+    reponse = json.loads(fermetures)
+    compte = reponse["data"]["repository"]["pullRequest"]["closingIssuesReferences"]["totalCount"]
+    assert (compte, type(compte)) == (total, type(total))
+    assert ("errors" in reponse) == (fermetures == FERME_EN_ERREUR)
 
 
 def test_le_gabarit_de_pr_passe_tel_quel(lancer):
