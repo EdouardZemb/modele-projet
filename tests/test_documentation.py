@@ -371,6 +371,26 @@ def test_carte_lien_sur_deux_lignes_et_code_en_ligne(tmp_path):
     assert lignes[-1] == f"carte : NOTICE.md {NON_LIE}"
 
 
+def test_carte_lien_html_ne_compte_pas(tmp_path):
+    """Un lien HTML, que GitHub rend, ne compte pas : la carte demande un lien Markdown."""
+    ecrire(
+        tmp_path,
+        README_md=README + '\n<a href="NOTICE.md">la notice</a>\n',
+        CLAUDE_md=CLAUDE,
+        NOTICE_md="# N\n",
+    )
+    lignes, refus = d.carte(tmp_path)
+    assert refus
+    assert lignes[-1] == f"carte : NOTICE.md {NON_LIE}"
+
+
+def test_ecart_connu_un_bloc_dans_une_citation():
+    """Un écart connu, dans la liste des faux passages de `docs/modele/documentation.md` (« Les
+    écarts connus au rendu de GitHub ») : un bloc clôturé dans une citation n'est pas vu comme du
+    code, et son lien compte, alors que GitHub n'en rend aucun."""
+    assert d.liens("> ~~~\n> [n](N.md)\n> ~~~\n") == ["N.md"]
+
+
 def test_carte_lit_un_fichier_mal_encode(tmp_path):
     (tmp_path / "README.md").write_bytes(b"# \xff\xfe\x80\n\n[CLAUDE.md](CLAUDE.md)\n")
     (tmp_path / "CLAUDE.md").write_bytes(b"# \x80\n\n## Ce qui fait foi\n\n- [N](NOTICE.md)\n")

@@ -14,8 +14,16 @@ La carte. Chaque fichier `.md` de la racine, sauf `README.md`, doit être lié p
 de `CLAUDE.md` (jusqu'au titre suivant de même niveau ou d'un niveau supérieur). Un nom entre
 accents graves ne suffit pas : on ne peut pas le suivre. `README.md` et `CLAUDE.md` doivent exister.
 La sortie dit le nombre de fichiers vus, puis nomme chaque fichier non lié. À la racine d'un dépôt
-git, les fichiers vus sont ceux que git suit ou suivrait, comme en CI : un fichier qu'il ignore,
-comme `CLAUDE.local.md`, n'est pas compté. Ailleurs, c'est tout le dossier.
+git, les fichiers vus sont ceux que git suit ou suivrait : un fichier qu'il ignore n'est pas compté
+(`CLAUDE.local.md`, que le `.gitignore` semé exclut ; un projet né plus tôt l'y ajoute). Ailleurs,
+c'est tout le dossier.
+
+Lancé sur le poste, depuis la racine, le script donne les lignes de la CI, à trois écarts près : un
+`.md` de la racine non suivi compte en local, et la CI ne le voit pas ; le README et `CLAUDE.md` se
+lisent tels qu'ils sont dans la copie, validés ou non ; la nature se lit dans la copie, alors qu'en
+CI un dépôt privé prend celle de sa branche par défaut (la PR qui pose ou change la nature d'un
+dépôt privé y est jugée sous l'ancienne). La licence, elle, ne compte en local qu'un `LICENSE`
+suivi, comme la CI.
 
 Le gabarit resté vide. Chaque fichier `.md` et chaque dossier que `README.md` lie, et qui existent
 sous la racine, sont lus ; le reste est ignoré : une image, un script, un lien externe, une cible
@@ -38,7 +46,8 @@ ses deux cibles ; un lien de référence, `[texte][x]`, `[x][]` ou `[x]`, quand 
 d'une liste ou d'une citation, sa cible au besoin sur la ligne suivante. Comme sur GitHub, une
 définition ne se rend pas : seule, elle ne lie rien, et une définition qui coupe un paragraphe n'en
 est pas une. Pour « Ce qui fait foi », les emplois se lisent dans la section, les définitions dans
-tout `CLAUDE.md`.
+tout `CLAUDE.md`. Un lien HTML (`<a href="…">`) ne compte pas : la carte demande un lien Markdown,
+et le remède est la forme `[texte](cible)`.
 Les blocs de code clôturés, le code en ligne et les commentaires HTML sont retirés avant : GitHub
 n'y rend aucun lien. La cible perd son ancre et sa requête, ses échappements (`\\.`), puis elle est
 décodée (`%20`) ; un `/` en tête part de la racine ; une cible avec un schéma (`https:`, `mailto:`)
@@ -51,21 +60,29 @@ comme sur GitHub ; un document est un fichier dont le suffixe est `.md`, sans é
 texte en CRLF se lit comme en LF, un BOM en tête est ignoré, et un octet qui n'est pas de l'UTF-8
 est remplacé, sans erreur.
 
-Des écarts connus au rendu de GitHub, rares. Quatre laissent passer à tort un lien que GitHub ne
-rend pas : dans un bloc de code indenté, que GitHub rend en code ; dans un bloc HTML sans ligne
-vide (`<details>` collé à son contenu) ; dans un bloc `<pre>`, `<script>`, `<style>` ou
-`<textarea>`, lignes vides comprises, jusqu'à la fin de la ligne qui porte sa balise fermante ;
-dans un bloc ouvert en tête de ligne par `<!--` (ou par `<?`, `<!DOCTYPE`, `<![CDATA[`), jusqu'à
-la fin de la ligne qui le ferme (`<!-- liens --> [n](NOTICE.md)` ne lie rien), ou jusqu'à la fin
-du fichier s'il ne se ferme jamais. Dans ces blocs, GitHub ne lit pas le Markdown. Les autres font
-refuser à tort. Un titre souligné (`Ce qui fait foi` sur une ligne de `---`) n'est pas lu ; un
+Des écarts connus au rendu de GitHub, rares. Certains laissent passer à tort un lien que GitHub ne
+rend pas : dans un bloc de code indenté, que GitHub rend en code ; dans un bloc clôturé à
+l'intérieur d'une citation, ou d'un élément de liste indenté de quatre colonnes ou plus, s'il
+s'ouvre par des tildes ou qu'une ligne vide le coupe ; dans un bloc HTML sans ligne vide
+(`<details>` collé à son contenu) ; dans un bloc `<pre>`, `<script>`, `<style>` ou `<textarea>`,
+lignes vides comprises, jusqu'à la fin de la ligne qui porte sa balise fermante ; dans un bloc
+ouvert en tête de ligne par `<!--` (ou par `<?`, `<!DOCTYPE`, `<![CDATA[`), jusqu'à la fin de la
+ligne qui le ferme (`<!-- liens --> [n](NOTICE.md)` ne lie rien), ou jusqu'à la fin du fichier
+s'il ne se ferme jamais ; dans une citation ou un élément de liste, dans un bloc ouvert par
+`<!--`, de même. Dans ces blocs, GitHub ne lit pas le Markdown. S'y ajoute un lien dont le texte
+porte un `|` dans une cellule de tableau, que GitHub coupe. Les autres font refuser à tort. Un
+titre souligné (`Ce qui fait foi` sur une ligne de `---`) n'est pas lu ; un
 accent grave échappé (`` \\` ``) ouvre quand même un code en ligne ; une entité dans la cible
 (`&#46;`) n'est pas décodée ; un fichier dont le nom porte une barre oblique inverse, que Windows
 refuse, n'est jamais lié ; un commentaire HTML ouvert dans un paragraphe court jusqu'à sa
 fermeture, plus loin.
 Une définition n'est pas lue quand elle suit une ligne de commentaire (`<!-- liens -->`, puis les
 définitions), quand elle est dans un élément de liste ou dans une citation, quand elle suit une
-ligne de séparation (`***`), ou quand son titre tient sur deux lignes.
+ligne de séparation (`***`), ou quand son titre tient sur deux lignes ; et d'autres formes rares
+des conteneurs et des commentaires (un bloc clôturé non fermé dans un élément de liste, un code en
+ligne qui franchit une ligne `>` vide, un texte de lien à plus de trois niveaux de crochets, une
+définition après un titre souligné, `<!-->` et `--->` dans un paragraphe) font aussi refuser à
+tort.
 Un dernier ne touche que le gabarit resté vide. Sous Windows, il lit l'existence d'un chemin lié
 sans égard à la casse : un lien `docs/Cadrage.md` vers `docs/cadrage.md` y est lu, et peut
 avertir, alors que GitHub casse ce lien ; sous Linux, il est ignoré. C'est un avertissement de

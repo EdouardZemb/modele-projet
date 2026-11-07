@@ -206,19 +206,22 @@ citent des chemins, jamais le contenu d'un fichier.
 
 ### La licence (refuse en CI)
 
-En nature `code`, `LICENSE` doit être à la racine, sous ce nom exact, et non vide. La nature se lit
-comme la lit la porte de confidentialité : en CI, un dépôt public est de code, et un dépôt privé
-prend la nature de sa branche par défaut, jamais celle de la PR ; hors CI, celle de
-`scripts/modele/reglages.py`.
+En nature `code`, `LICENSE` doit être à la racine, sous ce nom exact, non vide, et suivi par git :
+la CI lit le commit. La nature se lit comme la lit la porte de confidentialité : en CI, un dépôt
+public est de code, et un dépôt privé prend la nature de sa branche par défaut, jamais celle de la
+PR ; hors CI, celle de `scripts/modele/reglages.py`.
 
 Ses lignes, chacune après `documentation : ` :
 
 - `licence : LICENSE présent (nature code)` ;
 - `licence : non exigée (nature donnees)` ;
-- `licence : LICENSE absent ou vide, exigé en nature code` : le refus.
+- `licence : LICENSE absent ou vide, exigé en nature code` : le refus ;
+- `licence : LICENSE présent mais non suivi par git, exigé en nature code` : le refus d'un
+  `LICENSE` que git ne suit pas, à la racine d'un dépôt git.
 
 Y répondre en rendant son texte à `LICENSE`. Un `copier update` recrée un `LICENSE` absent, pas un
-`LICENSE` vide.
+`LICENSE` vide. Un `LICENSE` qu'un `copier update` vient de créer n'est pas suivi : il s'indexe
+(`git add LICENSE`).
 
 ### La carte de la racine (refuse en CI)
 
@@ -226,12 +229,15 @@ Chaque fichier `.md` de la racine, sauf `README.md`, est lié : `CLAUDE.md` depu
 autre depuis le README, ou depuis la section « Ce qui fait foi » de `CLAUDE.md`. Un fichier de la
 racine se cite par un lien, `` [la notice](NOTICE.md) ``, et non par son nom entre accents graves :
 un nom qu'on ne peut pas suivre ne mène nulle part. `README.md` et `CLAUDE.md` doivent exister. Un
-fichier que git ignore, comme `CLAUDE.local.md`, n'est pas compté.
+fichier que git ignore n'est pas compté : `CLAUDE.local.md`, que le `.gitignore` semé exclut ; un
+projet né plus tôt l'y ajoute.
 
 Ses lignes, chacune après `documentation : ` :
 
-- `carte : <n> fichiers .md à la racine, tous liés` : la première ligne dit le nombre de fichiers
-  vus, et combien ne sont pas liés ;
+- `carte : 1 fichier .md à la racine, lié` : la première ligne, quand le seul fichier vu est lié ;
+- `carte : <n> fichiers .md à la racine, tous liés` : la première ligne, quand tous le sont ;
+- `carte : <n> fichiers .md à la racine, <k> non lié` : la première ligne d'un refus, qui dit
+  aussi combien ne sont pas liés, au pluriel quand il le faut (`1 fichier`, `2 non liés`) ;
 - `carte : README.md absent`, ou `carte : CLAUDE.md absent` ;
 - `carte : CLAUDE.md n'est pas lié par README.md` ;
 - `carte : <nom> n'est lié ni par README.md ni par « Ce qui fait foi » de CLAUDE.md` ;
@@ -240,7 +246,14 @@ Ses lignes, chacune après `documentation : ` :
 Y répondre en ajoutant le lien : dans le tableau « Où lire quoi » du README, ou dans « Ce qui fait
 foi ». À `carte : README.md absent` ou `carte : CLAUDE.md absent`, rendre le fichier : un semé
 retiré revient au `copier update` suivant (« Retirer un texte »).
-`python scripts/modele/documentation.py`, lancé depuis la racine, donne les mêmes lignes que la CI.
+
+`python -B scripts/modele/documentation.py`, lancé depuis la racine, donne les lignes de la CI, à
+trois écarts près : un `.md` de la racine non suivi compte en local, et la CI ne le voit pas ; le
+README et `CLAUDE.md` se lisent tels qu'ils sont dans la copie, validés ou non ; la nature se lit
+dans la copie, alors qu'en CI un dépôt privé prend celle de sa branche par défaut. La PR qui pose
+ou change la nature d'un dépôt privé y est donc jugée sous l'ancienne : en régime `code` si la
+branche par défaut ne porte pas encore `NATURE`, et la licence y est exigée. La licence, elle, ne
+compte en local qu'un `LICENSE` suivi, comme la CI.
 
 ### Le gabarit resté vide (avertit au démarrage d'une session)
 
@@ -266,8 +279,8 @@ Un constat donne la ligne `documentation : <constat>` ; plusieurs, le titre `doc
 une ligne `- <constat>` chacun. Une erreur du contrôle donne `documentation : non lue (erreur)`, et
 laisse les signaux de la CI : c'est un défaut du modèle, qui se corrige dans `modele-projet`. Ce
 contrôle ne refuse jamais, et la CI ne le lance pas. Pour le relancer, depuis la racine :
-`python scripts/modele/documentation.py --gabarits-vides`, qui imprime un constat par ligne et rend
-toujours 0.
+`python -B scripts/modele/documentation.py --gabarits-vides`, qui imprime un constat par ligne et
+rend toujours 0.
 
 Y répondre en remplissant le document, ou en retirant son lien du README tant qu'il est vide ; pour
 un dossier, en y posant son premier fichier ; pour le marqueur, en écrivant la date qu'il réserve.
@@ -286,6 +299,9 @@ Pour la carte comme pour le gabarit resté vide :
   lie rien, puisque GitHub ne l'affiche pas, et une définition qui coupe un paragraphe n'en est pas
   une. Pour « Ce qui fait foi », l'emploi est dans la section, la définition dans tout `CLAUDE.md`.
 
+Un lien HTML (`<a href="…">`) ne compte pas : la carte demande un lien Markdown, et le remède est la
+forme `[texte](cible)`.
+
 Rien ne compte dans un bloc de code, dans un code en ligne ni dans un commentaire HTML : GitHub n'y
 rend aucun lien. La cible perd son ancre et sa requête, puis elle est décodée (`%20`) ; un `/` en
 tête part de la racine. Une cible n'est pas locale quand elle a un schéma (`https:`, `mailto:`) ou
@@ -296,14 +312,19 @@ par `..` ou par un lien symbolique. La casse compte, comme sur GitHub : `[x](cla
 
 ### Les écarts connus au rendu de GitHub
 
-Ils sont rares. Quatre laissent passer à tort un lien que GitHub ne rend pas :
+Ils sont rares. Certains laissent passer à tort un lien que GitHub ne rend pas :
 
 - dans un bloc de code indenté, que GitHub rend en code ;
+- dans un bloc clôturé à l'intérieur d'une citation, ou d'un élément de liste indenté de quatre
+  colonnes ou plus, s'il s'ouvre par des tildes ou qu'une ligne vide le coupe ;
 - dans un bloc HTML sans ligne vide (`<details>` collé à son contenu) ;
 - dans un bloc `<pre>`, `<script>`, `<style>` ou `<textarea>`, lignes vides comprises, jusqu'à la
   fin de la ligne qui porte sa balise fermante ;
 - dans un bloc ouvert en tête de ligne par `<!--` (ou par `<?`, `<!DOCTYPE`, `<![CDATA[`), jusqu'à
-  la fin de la ligne qui le ferme, ou jusqu'à la fin du fichier s'il ne se ferme jamais.
+  la fin de la ligne qui le ferme, ou jusqu'à la fin du fichier s'il ne se ferme jamais ;
+- dans une citation ou un élément de liste, dans un bloc ouvert par `<!--`, de même ;
+- un lien dont le texte porte un `|` dans une cellule de tableau (`| [a|b](CLAUDE.md) |`), que
+  GitHub coupe.
 
 D'autres font refuser à tort :
 
@@ -314,7 +335,11 @@ D'autres font refuser à tort :
 - un commentaire HTML ouvert dans un paragraphe court jusqu'à sa fermeture, plus loin ;
 - une définition n'est pas lue quand elle suit une ligne de commentaire (`<!-- liens -->`, puis les
   définitions), quand elle est dans un élément de liste ou dans une citation, quand elle suit une
-  ligne de séparation (`***`), ou quand son titre tient sur deux lignes.
+  ligne de séparation (`***`), ou quand son titre tient sur deux lignes ;
+- et d'autres formes rares des conteneurs et des commentaires (un bloc clôturé non fermé dans un
+  élément de liste, un code en ligne qui franchit une ligne `>` vide, un texte de lien à plus de
+  trois niveaux de crochets, une définition après un titre souligné, `<!-->` et `--->` dans un
+  paragraphe).
 
 Un dernier ne touche que le gabarit resté vide. Sous Windows, l'existence d'un chemin lié s'y lit
 sans égard à la casse : un lien `docs/Cadrage.md` vers `docs/cadrage.md` y est lu, et peut avertir,
