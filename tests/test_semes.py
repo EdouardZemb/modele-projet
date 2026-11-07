@@ -2,6 +2,8 @@
 
 import hashlib
 import re
+import subprocess
+import sys
 
 import pytest
 import yaml
@@ -11,6 +13,7 @@ from conftest import (
     REPONSES_DONNEES_SERVEUR,
     REPONSES_SERVEUR,
     REPONSES_SERVEUR_CODE,
+    git,
 )
 
 
@@ -116,6 +119,39 @@ def test_licence_selon_la_nature(rendre, reponses, titulaire):
         assert hashlib.sha256(gabarit.encode("utf-8")).hexdigest() == (
             "80459fc9ced0428542d09320c70850954d5ef46f1d1ba2dd0ceb02da27634db8"
         )
+
+
+# `CLAUDE.local.md`, les notes de Claude Code propres au poste, n'entre jamais dans le dépôt : le
+# .gitignore semé l'exclut, dans toutes les cibles, et la carte de la racine ne le compte donc pas.
+@pytest.mark.parametrize(
+    "reponses", [{}, {"nom": "essai-donnees", "cible": "donnees"}], ids=["aucune", "donnees"]
+)
+def test_claude_local_md_ignore(rendre, env_isole, reponses):
+    rendu = rendre(**reponses)
+    assert "CLAUDE.local.md" in lire(rendu, ".gitignore").splitlines()
+    env = env_isole()
+    git(rendu, env, "init", "-q", "-b", "main")
+    (rendu / "CLAUDE.local.md").write_text("# Notes du poste\n", encoding="utf-8")
+    if (rendu / "LICENSE").exists():
+        git(rendu, env, "add", "--", "LICENSE")  # la licence ne compte qu'un LICENSE suivi
+    r = subprocess.run(
+        [sys.executable, "-B", "scripts/modele/documentation.py"],
+        cwd=rendu,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "documentation : carte : 1 fichier .md à la racine, lié" in r.stdout.splitlines()
+
+
+# Le README semé fait foi à l'octet près : le texte archivé le 05/11, essayé sur un téléphone et
+# accepté, est celui du gabarit. Une empreinte, pour qu'un échec n'imprime pas les deux textes.
+def test_readme_seme_est_le_gabarit_archive():
+    empreinte = hashlib.sha256((RACINE / "template/README.md.jinja").read_bytes()).hexdigest()
+    assert empreinte == "570f96113f97683a610e45be092c54c75836feeb5034589f1f4047a5f83ae2c1"
 
 
 # Lot 12 (M-0006, § 9) : les fichiers de l'instance sont semés. Un projet à un dépôt garde ses clés,
