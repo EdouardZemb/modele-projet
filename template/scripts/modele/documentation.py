@@ -123,12 +123,14 @@ NON_LIE = "n'est lié ni par README.md ni par « Ce qui fait foi » de CLAUDE.md
 
 _OUVERTURE = re.compile(r" {0,3}(`{3,}|~{3,})(.*)$")
 _FERMETURE = re.compile(r" {0,3}(`{3,}|~{3,})[ \t]*$")
-# Un commentaire HTML (`<!-->` et `<!--->` en sont deux, complets), ou un code en ligne : une suite
-# d'accents graves, refermée par une suite de même longueur, sans franchir une ligne vide. Le plus
-# à gauche l'emporte, comme sur GitHub.
-_CODE_OU_COMMENTAIRE = re.compile(
-    r"<!--(?:-?>|.*?-->)|(?<!`)(`+)(?!`)(?:(?!\n[ \t]*\n).)*?(?<!`)\1(?!`)", re.DOTALL
-)
+# Un commentaire HTML (`<!-->` et `<!--->` en sont deux, complets).
+COMMENTAIRE = re.compile(r"<!--(?:-?>|.*?-->)", re.DOTALL)
+# Un code en ligne : une suite d'accents graves, refermée par une suite de même longueur, sans
+# franchir une ligne vide.
+CODE_EN_LIGNE = re.compile(r"(?<!`)(`+)(?!`)(?:(?!\n[ \t]*\n).)*?(?<!`)\1(?!`)", re.DOTALL)
+# L'un ou l'autre : le plus à gauche l'emporte, comme sur GitHub. Le groupe 1 n'est pris que par un
+# code en ligne.
+_CODE_OU_COMMENTAIRE = re.compile(COMMENTAIRE.pattern + "|" + CODE_EN_LIGNE.pattern, re.DOTALL)
 _ECHAPPEMENT = re.compile(r"\\(.)", re.DOTALL)
 # Un caractère du texte d'un lien : ni crochet, ni barre oblique inverse nue, ni ligne vide.
 _CAR = r"(?:[^\[\]\\\n]|\\.|\n(?![ \t]*\n))"
@@ -165,13 +167,15 @@ _SCHEMA = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*:")
 _PONCTUATION_ECHAPPEE = re.compile(r"\\([!-/:-@\[-`{-~])")
 _TITRE = re.compile(r" {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$")
 _FERMANTE = re.compile(r"(?:^|[ \t]+)#+$")
-_COMMENTAIRE = re.compile(r"<!--(?:-?>|.*?-->)")
+_COMMENTAIRE = re.compile(COMMENTAIRE.pattern)
+# Ce qui peut précéder, sur sa ligne, un `<!--` qui ouvre un bloc de commentaire : au plus trois
+# espaces, après une puce, un numéro ou `>`. À composer, en mode MULTILINE.
+DEBUT_DE_BLOC = r"^(?: {0,3}(?:>[ \t]?|(?:[-*+]|\d{1,9}[.)])[ \t]+))* {0,3}"
 # Un bloc de commentaire HTML : ouvert par `<!--` en tête de ligne, ou après une puce, un numéro ou
 # `>`, il court jusqu'à la fin de la ligne qui porte `-->`, la sienne comprise (`<!-->` se ferme
 # aussitôt), ou jusqu'à la fin.
 _BLOC_DE_COMMENTAIRE = re.compile(
-    r"^(?: {0,3}(?:>[ \t]?|(?:[-*+]|\d{1,9}[.)])[ \t]+))* {0,3}<!(?=--).*?(?:-->[^\n]*|\Z)",
-    re.MULTILINE | re.DOTALL,
+    DEBUT_DE_BLOC + r"<!(?=--).*?(?:-->[^\n]*|\Z)", re.MULTILINE | re.DOTALL
 )
 
 
@@ -414,13 +418,22 @@ def section(
     texte: str, titre: str, niveau: int | None = None, bornee: bool = False
 ) -> str | None:
     """Les lignes d'origine, en LF, des sections d'un titre donné, ou `None` si aucun titre ne lui
-    correspond. Le titre se compare en NFC, sans égard à la casse ; avec `niveau`, seul un titre de
-    ce niveau compte. Une section court jusqu'au titre suivant de même niveau ou d'un niveau
-    supérieur ; bornée, jusqu'au premier titre, quel que soit son niveau, ou à la première ligne de
-    séparation (`---`, `***`, `___`). Les titres et les séparateurs se lisent hors des blocs de code
-    clôturés et des blocs de commentaire HTML, où GitHub n'en affiche aucun. Un commentaire en
-    ligne est retiré du titre. Deux sections sont séparées par une ligne vide : la seconde ne
+    correspond (voir `sections`). Deux sections sont séparées par une ligne vide : la seconde ne
     prolonge pas un paragraphe de la première."""
+    morceaux = sections(texte, titre, niveau, bornee)
+    return "\n\n".join(morceaux) if morceaux else None
+
+
+def sections(
+    texte: str, titre: str, niveau: int | None = None, bornee: bool = False
+) -> list[str]:
+    """Les lignes d'origine, en LF, de chaque section d'un titre donné, dans l'ordre ; une liste
+    vide si aucun titre ne lui correspond. Le titre se compare en NFC, sans égard à la casse ; avec
+    `niveau`, seul un titre de ce niveau compte. Une section court jusqu'au titre suivant de même
+    niveau ou d'un niveau supérieur ; bornée, jusqu'au premier titre, quel que soit son niveau, ou à
+    la première ligne de séparation (`---`, `***`, `___`). Les titres et les séparateurs se lisent
+    hors des blocs de code clôturés et des blocs de commentaire HTML, où GitHub n'en affiche aucun.
+    Un commentaire en ligne est retiré du titre."""
     lignes = _en_lf(texte).split("\n")
     # Seul un bloc de commentaire cache un titre, ses fins de ligne gardées, qu'il s'ouvre en tête
     # de ligne ou après une puce, un numéro ou `>`. La structure des blocs passe avant le code en
@@ -450,7 +463,7 @@ def section(
         else:
             fin = next((j for j, autre, _ in titres[k + 1 :] if autre <= n), len(lignes))
         morceaux.append("\n".join(lignes[i + 1 : fin]))
-    return "\n\n".join(morceaux) if morceaux else None
+    return morceaux
 
 
 def _cibles(texte: str, racine: Path, document: str | None = None) -> set[str]:

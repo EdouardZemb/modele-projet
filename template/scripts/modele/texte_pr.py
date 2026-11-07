@@ -2,33 +2,43 @@
 issue. Le workflow `texte-pr` le lance, après la confidentialité du titre et du corps.
 
 Les écarts à la spec. Le corps de toute PR porte une section de niveau 2 `## Écarts à la spec`,
-sauf quand l'auteur de la PR est `dependabot[bot]` ; cette liste est fermée. La section court
-jusqu'au premier titre, quel que soit son niveau, ou à la première ligne de séparation. Elle
-contient « Aucun. » seul, ou une ligne par écart :
+une seule, sauf quand l'auteur de la PR est `dependabot[bot]` ; cette liste est fermée. La section
+court jusqu'au premier titre, quel que soit son niveau, ou à la première ligne de séparation : ce
+qui suit n'est pas lu. Elle contient « Aucun. » seul, ou une ligne par écart :
 `- <écart> — promesse : <§ de la spec, ou de l'issue> — accord d'Edouard : JJ/MM/AAAA`, une puce
-`-` ou `*`, au besoin continuée par des lignes indentées. Elle n'admet rien d'autre que des lignes
-vides, « Aucun. », des puces, et des lignes indentées qui continuent la puce d'avant. Le refus
-nomme la ligne par son rang dans la section, la ligne 1 étant celle qui suit le titre : une
-section absente ou vide ; une ligne qui n'est ni « Aucun. » ni un écart ; un écart sans
-« promesse : » suivi d'un texte, ou sans « accord d'Edouard : » suivi d'une vraie date à deux
-chiffres pour le jour et le mois ; « Aucun. » à côté d'un écart ; un commentaire HTML jamais
-fermé, puisque GitHub cache tout ce qui le suit. Les commentaires fermés et les blocs de code
-clôturés ne comptent pas : la forme d'une ligne, que le gabarit met en commentaire, n'est pas un
-écart.
+`-` ou `*`, au besoin continuée par des lignes indentées, jointes à elle. Dans cet ordre : l'écart,
+non vide, qui peut contenir un séparateur ; « promesse : » suivi d'un texte, sans séparateur ;
+« accord d'Edouard : » suivi d'une vraie date, à deux chiffres pour le jour et le mois, qui termine
+la ligne : rien ne la suit que des espaces. La section n'admet rien d'autre que des lignes vides,
+« Aucun. », des puces, et des lignes indentées qui continuent la puce d'avant ; une ligne indentée
+qui commence par une puce ou un numéro est une sous-liste, et ne la continue pas. Le refus nomme
+la ligne par son rang dans la section, la ligne 1 étant celle qui suit le titre : une section
+absente, vide ou en double ; une ligne qui n'est ni « Aucun. » ni un écart, une sous-liste
+comprise ; un écart vide, sans « promesse : » suivi d'un texte, sans « accord d'Edouard : » suivi
+d'une vraie date, avec un texte après la date, ou hors de cet ordre ; « Aucun. » à côté d'un
+écart ; un `<!--` jamais fermé dans la section, qui cacherait la suite. Les commentaires fermés et
+les blocs de code clôturés ne comptent pas : la forme d'une ligne, que le gabarit met en
+commentaire, n'est pas un écart. Une ligne qui commence par un commentaire, après au plus trois
+espaces, et porte un texte après sa fermeture n'est ni une puce ni la suite d'une puce : GitHub la
+rend en bloc HTML.
 
 La tête relue. Une PR qui ferme une issue porte la ligne `Tête relue : <SHA complet>`, égale à la
 tête de la PR. Les issues qu'elle ferme ne se lisent pas dans le corps : l'étape d'avant les
 demande à l'API (`closingIssuesReferences`, l'analyse de GitHub lui-même) et écrit la réponse dans
 le fichier de `--fermetures`. Une réponse absente, vide, en erreur, sans la PR ou au compte mal
-formé fait refuser : le contrôle reste fermé. La ligne se lit hors des commentaires et des blocs
-de code ; son SHA, aussi entre accents graves ou en majuscules.
+formé fait refuser : le contrôle reste fermé. La ligne se cherche dans le corps tel que GitHub le
+rend : hors des commentaires et des blocs de code, et avant tout commentaire jamais fermé ouvert
+en tête de ligne ou après une puce, qui cache tout ce qui le suit ; une ligne qu'il cache est
+absente. Un `<!--` au milieu d'un paragraphe reste du texte, et ne cache rien. Le SHA se lit aussi
+entre accents graves ou en majuscules.
 
 Avant toute lecture, hors du code en ligne : le texte en LF et en NFC ; l'apostrophe typographique
 et U+02BC deviennent `'`, une espace insécable devient une espace ; un séparateur est `—` ou `–`
 entouré d'espaces ; les étiquettes se lisent sans égard à la casse.
 
 La sortie ne cite jamais le corps : un corps de PR est public, et peut porter un motif privé. Elle
-nomme une ligne par son rang, et seuls des SHA de 40 caractères hexadécimaux paraissent.
+nomme une ligne par son rang, et seuls des SHA paraissent : les deux, complets, dans le refus d'une
+tête relue différente ; les 12 premiers caractères de la tête, dans un succès.
 
 Bibliothèque standard seule, Python 3.10 ou plus.
 
@@ -58,16 +68,22 @@ TITRE_ECARTS = "Écarts à la spec"
 ECARTS = "écarts à la spec : "
 FERME = "ferme une issue : "
 
-# Un code en ligne : une suite d'accents graves, refermée par une suite de même longueur, sans
-# franchir une ligne vide (la forme que lit documentation.py). Les commentaires sont déjà retirés.
-_CODE_EN_LIGNE = re.compile(r"(?<!`)(`+)(?!`)(?:(?!\n[ \t]*\n).)*?(?<!`)\1(?!`)", re.DOTALL)
 _TRADUCTION = str.maketrans({"\u2019": "'", "\u02bc": "'", "\u00a0": " ", "\u202f": " "})
 _PUCE = re.compile(r"[-*](?:[ \t]+|$)")
+# Une sous-liste : une ligne indentée qui commence par une puce ou par un numéro.
+_SOUS_LISTE = re.compile(r"[ \t]+(?:[-*+]|[0-9]{1,9}[.)])(?:[ \t]|$)")
 # Un séparateur : un tiret cadratin ou demi-cadratin, entouré d'espaces.
 _SEPARATEUR = re.compile(r"[ \t]+[\u2014\u2013][ \t]+")
 _PROMESSE = re.compile(r"promesse[ \t]*:(.*)$", re.IGNORECASE)
 _ACCORD = re.compile(r"accord d'edouard[ \t]*:[ \t]*(.*)$", re.IGNORECASE)
 _DATE = re.compile(r"([0-9]{2})/([0-9]{2})/([0-9]{4})(?![0-9/])")
+
+NI_AUCUN_NI_ECART = "ni « Aucun. » ni un écart"
+ECART_VIDE = "écart vide avant « promesse : »"
+PROMESSE_ABSENTE = "promesse absente"
+ACCORD_INVALIDE = "accord d'Edouard absent ou date invalide (JJ/MM/AAAA)"
+APRES_LA_DATE = "texte après la date de l'accord, qui termine la ligne"
+ORDRE = "l'écart, puis « promesse : », puis « accord d'Edouard : JJ/MM/AAAA » en fin de ligne"
 _TETE_RELUE = re.compile(r"[ \t]*tête relue[ \t]*:[ \t]*(`?)([0-9a-f]{40})\1[ \t]*", re.IGNORECASE)
 _SHA = re.compile(r"[0-9a-fA-F]{40}")
 
@@ -92,7 +108,7 @@ def _normaliser(texte: str) -> str:
     """Le texte, hors du code en ligne, en NFC, apostrophes droites et espaces ordinaires."""
     morceaux = []
     debut = 0
-    for m in _CODE_EN_LIGNE.finditer(texte):
+    for m in _documentation().CODE_EN_LIGNE.finditer(texte):
         morceaux.append(unicodedata.normalize("NFC", texte[debut : m.start()]))
         morceaux.append(m.group(0))
         debut = m.end()
@@ -102,44 +118,68 @@ def _normaliser(texte: str) -> str:
     )
 
 
-def _date_valide(texte: str) -> bool:
-    """Vrai si le texte commence par une vraie date `JJ/MM/AAAA`, deux chiffres au jour et au
-    mois : `strptime` seul admettrait `7/1/2026`."""
-    m = _DATE.match(texte)
+def _refus_de_la_date(valeur: str) -> str | None:
+    """Le refus de la valeur d'un accord, ou `None` : une vraie date `JJ/MM/AAAA`, deux chiffres au
+    jour et au mois (`strptime` seul admettrait `7/1/2026`), que rien ne suit que des espaces."""
+    m = _DATE.match(valeur)
     if m is None:
-        return False
+        return ACCORD_INVALIDE
     try:
         datetime.date(int(m.group(3)), int(m.group(2)), int(m.group(1)))
     except ValueError:
-        return False
-    return True
+        return ACCORD_INVALIDE
+    return APRES_LA_DATE if valeur[m.end() :].strip() else None
 
 
 def _verifier_ecart(rang: int, texte: str) -> list[str]:
-    """Les refus d'un écart, lu sur sa puce et ses lignes de continuation jointes."""
-    parties = _SEPARATEUR.split(texte)[1:]
-    promesse = any((m := _PROMESSE.match(p)) and m.group(1).strip() for p in parties)
-    accord = any((m := _ACCORD.match(p)) and _date_valide(m.group(1)) for p in parties)
-    refus = []
-    if not promesse:
-        refus.append(f"{ECARTS}ligne {rang} de la section : promesse absente")
-    if not accord:
-        refus.append(
-            f"{ECARTS}ligne {rang} de la section : accord d'Edouard absent ou date invalide"
-            " (JJ/MM/AAAA)"
-        )
-    return refus
+    """Les refus d'un écart, lu sur sa puce et ses lignes de continuation jointes. La dernière
+    partie est l'accord, dont la date termine la ligne ; l'avant-dernière, la promesse ; ce qui les
+    précède, non vide, l'écart, qui peut contenir un séparateur."""
+    # une espace devant : un séparateur en tête laisse une première partie, l'écart, vide
+    parties = [partie.strip() for partie in _SEPARATEUR.split(" " + texte)]
+    motifs = []
+    desordre = False
+    accord = _ACCORD.match(parties[-1])
+    fin = len(parties) - 1 if accord else len(parties)
+    promesse = _PROMESSE.match(parties[fin - 1]) if fin >= 1 else None
+    if promesse is not None:
+        if not any(parties[: fin - 1]):
+            motifs.append(ECART_VIDE)
+        if not promesse.group(1).strip():
+            motifs.append(PROMESSE_ABSENTE)
+    elif any((m := _PROMESSE.match(p)) and m.group(1).strip() for p in parties):
+        desordre = True
+    else:
+        motifs.append(PROMESSE_ABSENTE)
+    if accord is not None:
+        if (motif := _refus_de_la_date(accord.group(1))) is not None:
+            motifs.append(motif)
+    elif any(_ACCORD.match(p) for p in parties):
+        desordre = True
+    else:
+        motifs.append(ACCORD_INVALIDE)
+    if desordre:
+        motifs.append(ORDRE)
+    return [f"{ECARTS}ligne {rang} de la section : {motif}" for motif in motifs]
 
 
 def ecarts(corps: str) -> tuple[list[str], bool]:
     """La section « Écarts à la spec » : (lignes, refus)."""
     doc = _documentation()
-    brute = doc.section(corps, TITRE_ECARTS, niveau=2, bornee=True)
-    if brute is None:
+    trouvees = doc.sections(corps, TITRE_ECARTS, niveau=2, bornee=True)
+    if not trouvees:
         return [ECARTS + "section absente (titre de niveau 2 « Écarts à la spec »)"], True
+    if len(trouvees) > 1:
+        return [ECARTS + "section en double (un seul titre de niveau 2 « Écarts à la spec »)"], True
+    brute = trouvees[0]
     propre = doc.sans_bloc_ni_commentaire(brute)
-    if "<!--" in _CODE_EN_LIGNE.sub("", propre):
+    if "<!--" in doc.CODE_EN_LIGNE.sub("", propre):
         return [ECARTS + "commentaire HTML non fermé"], True
+    # Une ligne qui commence par un commentaire, puis porte un texte après sa fermeture : GitHub la
+    # rend en bloc HTML, ni puce ni suite d'une puce. Son rang est celui de la ligne qui ferme le
+    # commentaire ; dans un bloc clôturé, cette ligne est vide, et ne compte pas.
+    en_tete = re.compile(r"^ {0,3}(?:" + doc.COMMENTAIRE.pattern + ")", re.MULTILINE | re.DOTALL)
+    en_bloc_html = {brute.count("\n", 0, m.end()) + 1 for m in en_tete.finditer(brute)}
     refus: list[tuple[int, str]] = []
     aucun = False
     lus: list[tuple[int, list[str]]] = []
@@ -147,8 +187,10 @@ def ecarts(corps: str) -> tuple[list[str], bool]:
     for rang, ligne in enumerate(_normaliser(propre).split("\n"), start=1):
         if not ligne.strip():
             continue
-        if ligne[0] in " \t":  # une ligne indentée continue la puce d'avant, s'il y en a une
-            if puce_ouverte:
+        if rang in en_bloc_html:
+            pass
+        elif ligne[0] in " \t":  # une ligne indentée continue la puce d'avant, sauf une sous-liste
+            if puce_ouverte and _SOUS_LISTE.match(ligne) is None:
                 lus[-1][1].append(ligne.strip())
                 continue
         elif ligne.rstrip() == "Aucun.":
@@ -159,7 +201,7 @@ def ecarts(corps: str) -> tuple[list[str], bool]:
             puce_ouverte = True
             continue
         puce_ouverte = False
-        refus.append((rang, f"{ECARTS}ligne {rang} de la section : ni « Aucun. » ni un écart"))
+        refus.append((rang, f"{ECARTS}ligne {rang} de la section : {NI_AUCUN_NI_ECART}"))
     for rang, morceaux in lus:
         refus.extend((rang, r) for r in _verifier_ecart(rang, " ".join(morceaux)))
     refus.sort(key=lambda r: r[0])
@@ -204,7 +246,12 @@ def tete_relue(corps: str, tete: str, fermetures: str | None) -> tuple[list[str]
         return ["fermetures illisibles (réponse de l'API absente, en erreur ou mal formée)"], True
     if not total > 0:
         return ["ne ferme aucune issue : tête relue non exigée"], False
-    texte = _normaliser(_documentation().sans_bloc_ni_commentaire(corps))
+    doc = _documentation()
+    visible = doc.sans_bloc_ni_commentaire(corps)
+    # un commentaire jamais fermé, ouvert en tête de ligne ou après une puce, cache sur GitHub tout
+    # ce qui le suit ; au milieu d'un paragraphe, il reste du texte
+    cache = re.search(doc.DEBUT_DE_BLOC + "<!--", visible, re.MULTILINE)
+    texte = _normaliser(visible if cache is None else visible[: cache.start()])
     relues = [m.group(2).lower() for m in map(_TETE_RELUE.fullmatch, texte.split("\n")) if m]
     tete = tete.lower()
     if not relues:

@@ -96,6 +96,49 @@ def corps_avec(section):
         ),
         ("Aucun.\n\n```\n" + ECART + "\n```", 0, "aucun"),
         ("Aucun.\n\n<!--\n" + ECART, 1, "commentaire HTML non fermé"),
+        # la forme stricte : l'écart, puis la promesse, puis l'accord, dont la date termine la ligne
+        (
+            ECART.replace("07/11/2026", "07/11/2026 puis"),
+            1,
+            "ligne 2 de la section : texte après la date de l'accord, qui termine la ligne",
+        ),
+        (
+            ECART + "\n  à l'oral",  # une ligne de continuation après la date
+            1,
+            "ligne 2 de la section : texte après la date de l'accord, qui termine la ligne",
+        ),
+        (
+            "- x — accord d'Edouard : 07/11/2026 — promesse : § 2",
+            1,
+            (
+                "ligne 2 de la section : l'écart, puis « promesse : », puis « accord d'Edouard :"
+                " JJ/MM/AAAA » en fin de ligne"
+            ),
+        ),
+        (
+            "- — promesse : § 2 — accord d'Edouard : 07/11/2026",
+            1,
+            "ligne 2 de la section : écart vide avant « promesse : »",
+        ),
+        # l'écart peut contenir un séparateur
+        ("- a — b — promesse : § 2 — accord d'Edouard : 07/11/2026", 0, "1 déclaré"),
+        # un commentaire en tête de ligne, collé à la puce : GitHub rend la ligne en bloc HTML,
+        # jamais en puce ; de même après un écart, où il ne le continue pas
+        (
+            ECART + "\n<!-- x -->- y — promesse : § 1 — accord d'Edouard : 07/11/2026",
+            1,
+            "ligne 3 de la section : ni « Aucun. » ni un écart",
+        ),
+        (ECART + "\n   <!-- x --> suite", 1, "ligne 3 de la section : ni « Aucun. » ni un écart"),
+        (
+            ECART + "\n<!-- x\ny --> suite",  # le texte suit la fermeture, sur sa ligne
+            1,
+            "ligne 4 de la section : ni « Aucun. » ni un écart",
+        ),
+        ("Aucun.\n\n```\n<!-- x -->- y\n```", 0, "aucun"),  # dans un bloc clôturé
+        # un bloc indenté de quatre espaces : il continue l'écart d'avant, ou il refuse
+        ("- un écart long\n    — promesse : § 2 — accord d'Edouard : 07/11/2026", 0, "1 déclaré"),
+        ("Aucun.\n\n    un bloc indenté", 1, "ligne 4 de la section : ni « Aucun. » ni un écart"),
     ],
 )
 def test_ecarts(lancer, section, code, attendu):
@@ -103,6 +146,33 @@ def test_ecarts(lancer, section, code, attendu):
     assert rendu == code, sortie
     assert attendu in sortie, sortie
     assert (REFUS in sortie) == (code == 1), sortie
+
+
+@pytest.mark.parametrize("puce", ["-", "*", "+", "1."])
+def test_ecarts_sous_liste(lancer, puce):
+    """Une ligne indentée qui commence par une puce est une sous-liste, pas la suite de l'écart
+    d'avant : elle refuse, à son rang, au lieu d'être jointe sans être lue."""
+    code, sortie = lancer(corps_avec(ECART + f"\n  {puce} une sous-puce"))
+    assert code == 1, sortie
+    assert "ligne 3 de la section : ni « Aucun. » ni un écart" in sortie, sortie
+
+
+def test_ecarts_section_en_double(lancer):
+    """Deux sections « Écarts à la spec » : la seconde refuse, au lieu d'être jointe à la première."""
+    corps = "## Écarts à la spec\n\nAucun.\n\n## Écarts à la spec\n\n" + ECART + "\n"
+    code, sortie = lancer(corps)
+    assert code == 1, sortie
+    assert "écarts à la spec : section en double (un seul titre de niveau 2" in sortie, sortie
+    assert REFUS in sortie, sortie
+
+
+def test_le_code_en_ligne_vient_de_documentation():
+    """`texte_pr.py` lit le code en ligne comme `documentation.py`, sans sa propre copie."""
+    import documentation as d
+
+    assert not hasattr(t, "_CODE_EN_LIGNE")
+    assert d._CODE_OU_COMMENTAIRE.pattern.endswith("|" + d.CODE_EN_LIGNE.pattern)
+    assert d._CODE_OU_COMMENTAIRE.pattern.startswith(d.COMMENTAIRE.pattern + "|")
 
 
 def test_ecarts_titres_varies(lancer):
@@ -159,6 +229,12 @@ def test_auteurs(lancer):
         ("Tête relue : ", FERME_UNE, 1, ABSENTE),
         (f"Tête relue : {TETE[:12]}", FERME_UNE, 1, ABSENTE),
         (f"<!-- Tête relue : {TETE} -->", FERME_UNE, 1, ABSENTE),
+        # un commentaire jamais fermé, ouvert en tête de ligne ou après une puce, cache sur GitHub
+        # tout ce qui le suit ; au milieu d'un paragraphe, il reste du texte, et la ligne se voit
+        (f"<!-- note\n\nTête relue : {TETE}", FERME_UNE, 1, ABSENTE),
+        (f"- <!-- note\n\nTête relue : {TETE}", FERME_UNE, 1, ABSENTE),
+        (f"texte <!-- note\n\nTête relue : {TETE}", FERME_UNE, 0, "égale à la tête aaaaaaaaaaaa"),
+        (f"Tête relue : {TETE}\n\n<!-- note", FERME_UNE, 0, "égale à la tête aaaaaaaaaaaa"),
         ("", FERME_RIEN, 0, "ne ferme aucune issue : tête relue non exigée"),
         # l'API en erreur : un JSON sur la sortie, et une clé `errors`
         (

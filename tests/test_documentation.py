@@ -2,6 +2,7 @@
 vide, qui avertit au `SessionStart`."""
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -750,6 +751,26 @@ def test_section_bornee():
         assert d.section(f"## A\n\n- x\n{separateur}\n- z\n", "a", bornee=True) == "\n- x"
     assert d.section("## A\n\n```\n---\n```\n- x\n", "a", bornee=True) == "\n```\n---\n```\n- x\n"
     assert d.section("## A\n\n- x\n\n## B\n", "a", niveau=2, bornee=True) == "\n- x\n"
+
+
+def test_sections_une_par_titre():
+    """`sections` rend chaque section du titre à part, dans l'ordre ; `section` les joint, ou rend
+    `None` quand il n'y en a aucune."""
+    texte = "## A\n\n- x\n\n## B\n\n## A\n\n- y\n"
+    assert d.sections(texte, "a", niveau=2, bornee=True) == ["\n- x\n", "\n- y\n"]
+    assert d.section(texte, "a", niveau=2, bornee=True) == "\n- x\n\n\n\n- y\n"
+    assert d.sections("## B\n", "a") == []
+    assert d.section("## B\n", "a") is None
+
+
+def test_debut_de_bloc():
+    """Ce qui peut précéder, sur sa ligne, un `<!--` qui ouvre un bloc de commentaire : au plus
+    trois espaces, une puce, un numéro ou `>` ; pas un texte."""
+    ouverture = re.compile(d.DEBUT_DE_BLOC + "<!--", re.MULTILINE)
+    for ligne in ("<!-- x", "   <!-- x", "- <!-- x", "1. <!-- x", "> <!-- x"):
+        assert ouverture.search("a\n\n" + ligne), ligne
+    for ligne in ("texte <!-- x", "    <!-- x", "- [ ] case <!-- x"):
+        assert not ouverture.search("a\n\n" + ligne), ligne
 
 
 def test_sans_bloc_ni_commentaire():
