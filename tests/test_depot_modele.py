@@ -232,7 +232,15 @@ def test_depot_modele_passe_sa_porte(env_isole):
 
 def test_documentation_du_depot_modele(env_isole):
     """La licence et la carte passent sur ce dépôt, lancées comme en CI, depuis la racine : son
-    README lie `CLAUDE.md`, le seul autre `.md` de sa racine, et son `LICENSE` est là."""
+    README lie `CLAUDE.md`, le seul autre `.md` de sa racine, et son `LICENSE` est là. Un
+    `CLAUDE.local.md` posé dans un clone du modèle (par `/memory`) n'y est pas compté : le
+    `.gitignore` de ce dépôt l'exclut, comme celui des projets, sans l'ignore global du poste."""
+    ignores = (RACINE / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert "CLAUDE.local.md" in ignores
+    git = subprocess.run(
+        ["git", "check-ignore", "-q", "CLAUDE.local.md"], cwd=RACINE, env=env_isole(), check=False
+    )
+    assert git.returncode == 0, "git n'ignore pas CLAUDE.local.md à la racine du modèle"
     r = subprocess.run(
         [sys.executable, str(RACINE / "template/scripts/modele/documentation.py")],
         cwd=RACINE,
