@@ -171,9 +171,9 @@ M-0006 § 6 et 7, étiquetée `v0.8.0`.
   persistantes, qui restent (serveur#34, une piste). Les quatre contrôles Healthchecks sont
   supprimés, et les deux routes Cloudflare aussi, leurs CNAME avec elles ; `essai-chaine` est
   archivé, et `essai-chaine-donnees` aussi, sans sa clé de déploiement. Restent à Edouard : les deux
-  horodatages (geste 👤 de serveur#34), le paquet GHCR `essai-chaine`, l'effacement des sauvegardes
-  distantes, et l'archivage d'`essai-naissance` et d'`essai-naissance-donnees`. À l'arrêt,
-  l'application d'essai a mis 10 s : elle ignore SIGTERM (une piste).
+  horodatages (geste 👤 de serveur#34), le paquet GHCR `essai-chaine` et l'effacement des
+  sauvegardes distantes. `essai-naissance` et `essai-naissance-donnees` sont archivés le 07/11, avec
+  le oui d'Edouard. À l'arrêt, l'application d'essai a mis 10 s : elle ignore SIGTERM (une piste).
   Le complément de la revue finale, sur les tâches 10 et 11, n'a tourné qu'après la fusion de #92 ;
   ses constats ont fait corriger ces textes (LE-54, LE-55).
 
@@ -265,6 +265,8 @@ Prochain, au choix d'Edouard :
   copie qui se périme (un arbre de fichiers, une heure, une version) et le signal d'une issue citée
   au futur mais fermée ; la ligne « Confirmation » et le régime des ADR ; les blocs engendrés ;
 - le lot 3 (la cible `statique`) ;
+- le lot 5 (`partition` aligné en cible `aucune`) ;
+- le lot 7 (`creche-planner` aligné en cible `aucune`) ;
 - la porte due par LE-37, au 3e constat du motif « écart à la spec mal pesé », dont LE-49 est le
   4e : sa forme revient à Edouard, et le registre en propose une. À peser avec la piste du workflow
   `publier`, qui ferait publier Edouard depuis son téléphone ;

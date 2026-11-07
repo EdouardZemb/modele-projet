@@ -1280,6 +1280,28 @@ def test_documentation_md(tmp_path, env_isole):
     assert documentation.gabarits_vides(tmp_path) == []
 
 
+def test_documentation_md_avant_de_reecrire_un_readme():
+    """Trois gestes avant de réécrire un README, relevés par les projets à leur passage à la
+    `v0.9.0` : une ancre de l'ancien README citée ailleurs, un brief figé compris ; un fait que seul
+    le README portait ; la section « Licence », dont le lien attend le `LICENSE` de la mise à jour.
+    Dans la section « Le README », hors des blocs de code."""
+    hors_du_code = CLOTURE.sub("", lire(DOCUMENTATION))
+    section = hors_du_code.split("\n## Le README\n", 1)[1].split("\n## ", 1)[0]
+    plat = " ".join(section.split())
+    for phrase in (
+        (
+            "Avant de réécrire un README, chercher dans tout le dépôt `README.md#` et tout renvoi "
+            "au README, ceux d'un texte figé compris."
+        ),
+        "Ce que seul le README porte se déplace ailleurs avant d'en être retiré.",
+        (
+            "Un projet de code né avant la `v0.9.0` met la section « Licence » dans la PR de mise "
+            "à jour, qui apporte `LICENSE`."
+        ),
+    ):
+        assert phrase in plat, phrase
+
+
 def test_docstring_suit_documentation_md():
     """La docstring de `documentation.py` dit ce que dit le texte géré, dans les mêmes mots, sans
     l'ancien décompte des écarts ni la promesse d'un lancement local identique à la CI."""

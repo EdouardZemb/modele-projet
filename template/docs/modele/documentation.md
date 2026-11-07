@@ -111,6 +111,14 @@ ne portent pas de lien : à la naissance, `config/` et `contenu/` n'ont que leur
 `secrets/` n'existe pas encore. Un dossier ne se lie qu'une fois qu'il porte autre chose que son
 `README.md`.
 
+### Réécrire un README
+
+Avant de réécrire un README, chercher dans tout le dépôt `README.md#` et tout renvoi au README,
+ceux d'un texte figé compris. Une ancre suit son titre, et aucun des trois contrôles ne lit l'ancre
+d'un lien. Ce que seul le README porte se déplace ailleurs avant d'en être retiré. Un projet de
+code né avant la `v0.9.0` met la section « Licence » dans la PR de mise à jour, qui apporte
+`LICENSE`. Dans une PR à part, le lien `[MIT](LICENSE)` mènerait à un fichier absent.
+
 ## Ce qui n'y va jamais
 
 Un README ne porte pas ce qui se périme sans que personne le voie, parce que sa source est
