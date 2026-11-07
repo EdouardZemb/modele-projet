@@ -144,7 +144,8 @@ def test_auteurs(lancer):
     [
         (f"Tête relue : {TETE}", FERME_UNE, 0, "tête relue égale à la tête aaaaaaaaaaaa"),
         (f"Tête relue : `{TETE}`", FERME_UNE, 0, "tête relue égale à la tête aaaaaaaaaaaa"),
-        (f"TÊTE RELUE : {TETE.upper()}", FERME_UNE, 0, "tête relue égale à la tête aaaaaaaaaaaa"),
+        (f"Tête relue : {TETE.upper()}", FERME_UNE, 0, "tête relue égale à la tête aaaaaaaaaaaa"),
+        (f"TÊTE RELUE : {TETE}", FERME_UNE, 0, "tête relue égale à la tête aaaaaaaaaaaa"),
         (f"Tête relue : {'b' * 40}", FERME_UNE, 1, f"différente de la tête {TETE}"),
         ("", FERME_UNE, 1, ABSENTE),
         ("Tête relue : ", FERME_UNE, 1, ABSENTE),

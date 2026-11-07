@@ -110,8 +110,8 @@ qui lit le corps dans son environnement, jamais dans ses arguments, et contrôle
   seule ; hors des lots, un correctif qui ferme une issue par `Fixes #N` nomme aussi la tête
   relue. Les issues que la PR ferme se lisent par l'API (`closingIssuesReferences`), l'analyse de
   GitHub lui-même, jamais dans le corps ; une réponse absente, en erreur ou mal formée fait
-  refuser. Le contrôle refuse aussi une ligne absente, ou un SHA autre que la tête de la PR, et
-  nomme alors les deux. Un commit poussé après la dernière relecture fait donc refuser la PR,
+  refuser. Le contrôle refuse aussi une ligne absente, ou un SHA autre que la tête de la PR, en
+  nommant les deux SHA. Un commit poussé après la dernière relecture fait donc refuser la PR,
   jusqu'à ce que le corps nomme la nouvelle tête, relue ; cette retouche ne relance que `texte-pr`.
 - **Les limites de la tête relue.** Le contrôle force à nommer une tête, pas à la relire : la
   relecture reste une tâche du plan. Dans un lot, la PR de revue finale n'est pas visée : sa
