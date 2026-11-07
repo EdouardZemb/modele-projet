@@ -237,8 +237,9 @@ documentation, étiqueté `v0.9.0`.
   fait foi » ne lient, `CLAUDE.md` devant l'être depuis le README. Le gabarit resté vide avertit au
   `SessionStart`, sans bloquer : un document ou un dossier que le README lie, et qui n'a que son
   gabarit. Un lien est un lien Markdown que GitHub rend ; les écarts connus au rendu de GitHub sont
-  écrits dans `documentation.md` et dans la docstring, et deux ont un test qui fige leur
-  comportement : le bloc clôturé dans une citation, et le commentaire fermé par `--->`.
+  écrits dans `documentation.md` et dans la docstring. Deux ont un test à leur nom, le bloc
+  clôturé dans une citation et le commentaire fermé par `--->` ; celui de la barre oblique
+  inverse est tenu par le test du refus avant `resolve`.
 - **Le README du modèle** nomme chaque réponse à choix de `copier.yml`, et un test l'y tient.
 - **La revue finale** a retenu 27 constats : 25 confirmés par leur contre-vérification, et 2 de sa
   lecture de complétude ; 22 sont corrigés dans #112, 5 à la clôture. Elle a mesuré à `b1cc47c` les
