@@ -158,7 +158,7 @@ pas de la discipline de celui qui travaille ?
   option, et un secret poussé est à considérer comme compromis, même supprimé ensuite.
 - Un dépôt privé est moins bien protégé qu'un dépôt public : rien ne retient un contournement des
   hooks. C'est un risque accepté : le garde de Claude est alors la seule serrure côté agent, et la
-  CI du socle le seul filet.
+  CI (le socle et `texte-pr`) le seul filet.
 - Dans un dépôt de données, la porte n'empêche plus un nom de serveur ou une adresse d'entrer dans
   l'historique : elle le signale. Elle y refuse toujours les secrets. L'historique d'un dépôt de
   données n'est donc pas prêt à être publié : il ne le sera jamais, et un dépôt d'avant M-0006 se

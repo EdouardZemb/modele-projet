@@ -219,13 +219,20 @@ def test_modele_de_pr_ferme_l_issue():
     texte = lire(TEMPLATE / ".github/pull_request_template.md")
     assert "« Closes #n »" in texte
     assert "« Partie de #n »" in texte
-    assert "clôture" in texte
+    assert "Dans la seule PR de clôture du lot : « Closes #n »" in texte
     assert "Ferme #" not in texte
     # la tête relue : une ligne, pas une case, après les cases de « Vérifications »
     lignes = texte.splitlines()
     (rang,) = [i for i, ligne in enumerate(lignes) if ligne.rstrip() == "Tête relue :"]
     assert rang > max(i for i, ligne in enumerate(lignes) if ligne.startswith("- [ ] "))
-    assert "le SHA complet de la tête qu'a lue la dernière relecture" in " ".join(texte.split())
+    a_plat = " ".join(texte.split())
+    assert "le SHA complet de la tête qu'a lue la dernière relecture" in a_plat
+    # hors des lots, un correctif qui ferme une issue nomme aussi la tête relue, comme le dit la
+    # méthode
+    assert (
+        "Dans la PR de clôture, ou dans un correctif hors des lots qui ferme une issue par "
+        "`Fixes #N` : le SHA complet"
+    ) in a_plat
 
 
 def test_modele_de_pr_renvoie_un_depot_de_donnees_au_registre_du_code():
@@ -313,8 +320,37 @@ def test_methode_dit_le_texte_de_la_pr():
         "la branche par défaut",
         "seul à écouter `edited`",
         "le garde lit tous les contrôles, `texte-pr` compris",
+        # la revue de la tâche (ronde 2) : la forme stricte, ses refus et ses bornes
+        (
+            "La section s'arrête au premier titre, quel que soit son niveau, ou à la première ligne de "
+            "séparation (`---`) : un écart écrit après n'est pas lu"
+        ),
+        (
+            "dans cet ordre : l'écart, qui peut contenir un séparateur, puis la promesse, qui n'en "
+            "contient pas, puis l'accord, dont la date termine la ligne"
+        ),
+        (
+            "Une ligne indentée qui commence par une puce ou un numéro (`-`, `*`, `+`, `1.`) est une "
+            "sous-liste, et ne continue pas l'écart"
+        ),
+        "une section absente, vide ou en double",
+        "avec un texte après la date, ou hors de cet ordre",
+        "Un commentaire fermé ou un bloc clôturé ne compte pas",
+        (
+            "Un bloc indenté de quatre espaces n'est pas écarté : après une puce, il continue l'écart ; "
+            "sans puce avant lui, il refuse"
+        ),
+        "dès que le `ci.yml` du projet n'écoute plus `edited`",
+        "à sa mise à jour, un projet déjà né retire `edited` de son `ci.yml`",
+        (
+            "En mode `edouard`, le garde refuse toute fusion de la session : Edouard fusionne, et rien "
+            "ne lit les contrôles à sa place"
+        ),
+        "la CI (le socle et `texte-pr`) le seul filet",
     ):
         assert fragment in texte, fragment
+    for perime in ("un bloc de code ne compte pas", "rien ne bloque côté agent"):
+        assert perime not in texte, perime
     lignes = section.splitlines()
     (ci,) = [ligne for ligne in lignes if ligne.startswith("| CI de base |")]
     assert "du texte de la PR" not in ci
@@ -497,6 +533,9 @@ def test_m0002_amende():
     texte = lire(DECISIONS / "M-0002-garde-fous-et-confidentialite.md")
     assert "le contrôle de dérive en tient compte" not in texte
     assert "le garde de Claude est alors la seule serrure côté agent" in texte
+    # lot 15 : le texte de la PR sort du socle, vers `texte-pr`, qui fait partie du filet
+    assert "la CI (le socle et `texte-pr`) le seul filet" in " ".join(texte.split())
+    assert "CI du socle le seul filet" not in " ".join(texte.split())
     assert "avertit sur ce qui identifie" in texte
     assert "refuse toujours les secrets" in texte
     assert "gitleaks n'est pas concerné" not in texte

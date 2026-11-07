@@ -87,24 +87,34 @@ sessions à distance.
 | règle de protection GitHub | tout commit qui arrive sur la branche principale est la tête d'une PR dont les contrôles requis sont verts ; un envoi direct de cette tête est accepté et marque la PR fusionnée, sans squash. Côté agent, c'est le refus de pousser vers la branche principale par le garde qui ferme ce chemin. Ni force-push ni suppression de la branche principale. Posée sur les dépôts publics |
 
 **Le texte de la PR.** Le workflow géré `texte-pr` (`modele-texte-pr.yml`) est seul à écouter
-`edited` : une retouche du titre ou du corps d'une PR ne relance que lui, jamais toute la CI. Il
-porte la confidentialité et le format du titre et du corps, puis lance `scripts/modele/texte_pr.py`,
-qui lit le corps dans son environnement, jamais dans ses arguments, et contrôle deux choses.
+`edited` : une retouche du titre ou du corps d'une PR ne relance que lui, jamais toute la CI, dès
+que le `ci.yml` du projet n'écoute plus `edited`. Ce fichier est semé : à sa mise à jour, un projet
+déjà né retire `edited` de son `ci.yml`. Le workflow porte la confidentialité et le format du
+titre et du corps, puis lance `scripts/modele/texte_pr.py`, qui lit le corps dans son
+environnement, jamais dans ses arguments, et contrôle deux choses.
 
-- **Les écarts à la spec.** Le corps de toute PR porte une section `## Écarts à la spec`, sauf
-  quand l'auteur de la PR est `dependabot[bot]` : cette liste est fermée, et toute autre
-  application y est soumise. La section contient « Aucun. » seul, ou une ligne par écart,
+- **Les écarts à la spec.** Le corps de toute PR porte une section `## Écarts à la spec`, une
+  seule, sauf quand l'auteur de la PR est `dependabot[bot]` : cette liste est fermée, et toute
+  autre application y est soumise. La section s'arrête au premier titre, quel que soit son niveau,
+  ou à la première ligne de séparation (`---`) : un écart écrit après n'est pas lu. Elle contient
+  « Aucun. » seul, ou une ligne par écart,
   `- <écart> — promesse : <§ de la spec, ou de l'issue> — accord d'Edouard : JJ/MM/AAAA`, au
-  besoin continuée par des lignes indentées. Le contrôle refuse, en nommant la ligne par son rang
-  dans la section : une section absente ou vide ; une ligne qui n'est ni « Aucun. » ni un écart ;
-  un écart sans « promesse : » suivi d'un texte, ou sans « accord d'Edouard : » suivi d'une date
-  valide `JJ/MM/AAAA` ; « Aucun. » à côté d'un écart ; un commentaire HTML jamais fermé, qui
-  cacherait la suite. Un commentaire fermé ou un bloc de code ne compte pas : la forme d'une ligne,
-  que le gabarit de PR met en commentaire, n'est pas un écart. Le contrôle ne vérifie ni que
-  l'accord est réel, ni qu'un écart n'a pas été tu : il force à écrire l'écart, la promesse qu'il
-  touche et la date de l'accord. Un écart se pèse contre la promesse de la spec, jamais contre
-  l'ancien comportement, ni contre le seul mécanisme principal : l'accord d'Edouard porte sur
-  cette promesse, citée.
+  besoin continuée par des lignes indentées, dans cet ordre : l'écart, qui peut contenir un
+  séparateur, puis la promesse, qui n'en contient pas, puis l'accord, dont la date termine la
+  ligne. Une ligne indentée qui commence par une puce ou un numéro (`-`, `*`, `+`, `1.`) est une
+  sous-liste, et ne continue pas l'écart. Le contrôle refuse, en nommant la ligne par son rang dans
+  la section : une section absente, vide ou en double ; une ligne qui n'est ni « Aucun. » ni un
+  écart, une sous-liste comprise ; un écart vide, sans « promesse : » suivi d'un texte, sans
+  « accord d'Edouard : » suivi d'une date valide `JJ/MM/AAAA`, avec un texte après la date, ou
+  hors de cet ordre ; « Aucun. » à côté d'un écart ; un commentaire HTML jamais fermé, qui
+  cacherait la suite. Un commentaire fermé ou un bloc clôturé ne compte pas : la forme d'une
+  ligne, que le gabarit de PR met en commentaire, n'est pas un écart. Une ligne qui commence par
+  un commentaire et porte un texte après lui n'est pas un écart : GitHub la rend hors de toute
+  liste. Un bloc indenté de quatre espaces n'est pas écarté : après une puce, il continue l'écart ;
+  sans puce avant lui, il refuse. Le contrôle ne vérifie ni que l'accord est réel, ni qu'un écart
+  n'a pas été tu : il force à écrire l'écart, la promesse qu'il touche et la date de l'accord. Un
+  écart se pèse contre la promesse de la spec, jamais contre l'ancien comportement, ni contre le
+  seul mécanisme principal : l'accord d'Edouard porte sur cette promesse, citée.
 - **La tête relue.** Une PR qui ferme une issue porte la ligne `Tête relue : <SHA>`, le SHA
   complet de la tête qu'a lue la dernière relecture. Dans un lot, c'est la PR de clôture, et elle
   seule ; hors des lots, un correctif qui ferme une issue par `Fixes #N` nomme aussi la tête
@@ -113,6 +123,8 @@ qui lit le corps dans son environnement, jamais dans ses arguments, et contrôle
   refuser. Le contrôle refuse aussi une ligne absente, ou un SHA autre que la tête de la PR, en
   nommant les deux SHA. Un commit poussé après la dernière relecture fait donc refuser la PR,
   jusqu'à ce que le corps nomme la nouvelle tête, relue ; cette retouche ne relance que `texte-pr`.
+  La ligne se cherche telle que GitHub la montre : un commentaire jamais fermé, ouvert en tête de
+  ligne ou après une puce, cache tout ce qui le suit, et une ligne cachée est absente.
 - **Les limites de la tête relue.** Le contrôle force à nommer une tête, pas à la relire : la
   relecture reste une tâche du plan. Dans un lot, la PR de revue finale n'est pas visée : sa
   relecture est une tâche du plan, et la PR de clôture relit ensuite la tête qui part. GitHub ne
@@ -186,7 +198,8 @@ stricte. Hors CI, aux hooks, la porte lit le `reglages.py` de la copie ; sans lu
 c'est `code`. Un dépôt privé n'a pas de règle de protection : le garde de Claude y est la seule
 serrure côté agent, et la CI (le socle et `texte-pr`) le seul filet ; avant une fusion en mode
 `session`, le garde lit tous les contrôles, `texte-pr` compris (`gh pr checks`). En mode `edouard`,
-rien ne bloque côté agent, et Edouard fusionne.
+le garde refuse toute fusion de la session : Edouard fusionne, et rien ne lit les contrôles à sa
+place.
 
 **L'historique d'un dépôt de code.** `modele-historique.yml` relit tout l'historique chaque semaine
 et à la demande, après gitleaks. Chaque constat se nomme `<commit>:<chemin>:<ligne>` ; le message

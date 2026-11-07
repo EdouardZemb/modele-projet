@@ -471,6 +471,14 @@ def test_texte_pr_du_depot_modele():
     assert any("template/scripts/modele/texte_pr.py" in e.get("run", "") for e in attendues)
     for cle in ("on", True, "permissions", "concurrency", "name"):
         assert racine.get(cle) == modele.get(cle), cle
+    # l'en-tête aussi, après sa première ligne (« Géré par le modèle »), que la copie remplace par
+    # deux lignes qui disent d'où elle vient
+    gere = RACINE / "template/.github/workflows/modele-texte-pr.yml"
+    entetes = [
+        [ligne for ligne in chemin.read_text(encoding="utf-8").splitlines() if ligne[:1] == "#"]
+        for chemin in (TEXTE_PR, gere)
+    ]
+    assert entetes[0][2:] == entetes[1][1:]
 
 
 def test_ci_ne_revoit_plus_une_pr_modifiee(rendre):
@@ -629,6 +637,22 @@ def test_liste_d_alignement():
     for tout_indexer in ("git add -A", "git add ."):
         assert tout_indexer not in texte, tout_indexer
     assert "git add -- <chemins>" in texte
+    # lot 15 : une règle qui existe déjà se met à jour après la fusion (§ 7), jamais avant la PR
+    # (§ 6), puis les PR de Dependabot ouvertes se relancent
+    six = texte.split("\n## 6. ", 1)[1].split("\n## ", 1)[0]
+    sept = texte.split("\n## 7. ", 1)[1].split("\n## ", 1)[0]
+    assert "PUT" not in six
+    put = sept.index("gh api -X PUT repos/<dépôt>/rulesets/<id>")
+    assert sept.index("Fusion en squash") < put < sept.index("@dependabot rebase")
+    sept = " ".join(sept.split())
+    assert "Un `POST` crée une règle ; il ne met pas à jour celle qui existe." in sept
+    assert "en créerait une seconde" not in texte
+    # le modèle de PR que propose GitHub vient de la branche par défaut, encore sans la section
+    assert (
+        "le modèle de PR que propose GitHub est celui de la branche par défaut, encore sans la "
+        "section « Écarts à la spec » : l'écrire à la main dans le corps, `## Écarts à la spec` "
+        "puis « Aucun. », ou les écarts"
+    ) in sept
     for lien in ("CLAUDE.md", "README.md"):
         assert "docs/aligner.md" in (RACINE / lien).read_text(encoding="utf-8"), lien
 

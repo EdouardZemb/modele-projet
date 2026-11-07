@@ -18,7 +18,7 @@ Aucun.
 - [ ] README relu, à la clôture d'un lot (`docs/modele/documentation.md`)
 
 Tête relue : 
-<!-- Dans la PR de clôture : le SHA complet de la tête qu'a lue la dernière relecture. -->
+<!-- Dans la PR de clôture, ou dans un correctif hors des lots qui ferme une issue par `Fixes #N` : le SHA complet de la tête qu'a lue la dernière relecture. -->
 
 ## Reste ouvert
 

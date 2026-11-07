@@ -1,8 +1,10 @@
 # Le dépôt modèle applique son propre workflow géré : les mêmes étapes que
 # template/.github/workflows/modele-texte-pr.yml, chemins préfixés de `template/`.
 # Le texte de la PR, seul à écouter `edited` : une retouche du titre ou du corps ne relance que ce
-# contrôle, et pas toute la CI. La confidentialité et le format du titre et du corps ; puis les
-# écarts à la spec, et la tête relue d'une PR qui ferme une issue (scripts/modele/texte_pr.py).
+# contrôle, et pas toute la CI, dès que le `ci.yml` du projet n'écoute plus `edited` ; ce fichier
+# est semé : à sa mise à jour, un projet déjà né retire `edited` de son `ci.yml`. La
+# confidentialité et le format du titre et du corps ; puis les écarts à la spec, et la tête relue
+# d'une PR qui ferme une issue (scripts/modele/texte_pr.py).
 # Ni le job ni ses étapes n'ont de condition : un job sauté compterait « succès ».
 name: texte-pr
 

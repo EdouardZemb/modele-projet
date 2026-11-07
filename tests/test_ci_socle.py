@@ -387,6 +387,9 @@ def test_texte_pr_yml(rendre):
     assert texte.splitlines()[0] == (
         "# Géré par le modèle — ne pas modifier ici (docs/modele/methode.md)."
     )
+    # le `ci.yml` d'un projet déjà né, semé, écoute encore `edited` jusqu'à ce qu'il le retire
+    entete = " ".join(ligne[1:].strip() for ligne in texte.splitlines() if ligne.startswith("#"))
+    assert "à sa mise à jour, un projet déjà né retire `edited` de son `ci.yml`" in entete
 
     # chaque action épinglée par SHA, celui du socle
     socle = dict(
@@ -416,8 +419,17 @@ def test_texte_pr_yml(rendre):
     noms = [e.get("name") for e in job["steps"]]
     assert [n for n in noms if n in ETAPES_TEXTE_PR] == list(ETAPES_TEXTE_PR)
 
+    deplacee = etape_texte_pr(rendu, "Confidentialité et format du titre et du corps de la PR")
+    assert 'python scripts/modele/commits.py --titre "$TITRE"' in deplacee["run"].splitlines()
     api = etape_texte_pr(rendu, "Les issues que la PR ferme (API)")
-    assert api["env"]["GH_TOKEN"] == "${{ github.token }}"
+    assert api["env"] == {
+        "GH_TOKEN": "${{ github.token }}",
+        "DEPOT": "${{ github.repository }}",
+        "NUMERO": "${{ github.event.pull_request.number }}",
+    }
+    # la réponse de l'API, écrite dans le fichier que lit l'étape du script, plus bas
+    ecrits = re.findall(r'> ("\$RUNNER_TEMP/[^"]*")', api["run"])
+    assert ecrits == ['"$RUNNER_TEMP/fermetures.json"'], ecrits
     for fragment in (
         "closingIssuesReferences",
         "totalCount",
@@ -436,6 +448,7 @@ def test_texte_pr_yml(rendre):
     assert script["run"] == (
         'python scripts/modele/texte_pr.py --fermetures "$RUNNER_TEMP/fermetures.json"'
     )
+    assert script["run"].endswith(" --fermetures " + ecrits[0])  # le fichier que l'API a écrit
     for e in job["steps"]:
         for ligne in e.get("run", "").splitlines():
             if "texte_pr.py" in ligne:
