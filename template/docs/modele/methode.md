@@ -138,9 +138,10 @@ environnement, jamais dans ses arguments, et contrôle deux choses.
 - **Ne jamais relancer `texte-pr`.** Une relance, par `gh run rerun` ou depuis l'interface de
   GitHub, rejoue l'événement d'origine : elle relit le titre et le corps de ce moment-là, pas ceux
   de la PR telle qu'elle est. Éprouvé dans le dépôt modèle le 07/11/2026 : après une retouche qui
-  retirait la section des écarts, la relance de la première exécution a relu le corps d'avant et
-  a passé, et `gh pr checks` a montré `texte-pr` vert sur un corps qui refusait. Pour relire le
-  texte, on retouche le titre ou le corps : la retouche relance `texte-pr` sur le texte en cours.
+  retirait la section des écarts, la relance de la première exécution par `gh run rerun` a relu
+  le corps d'avant et est passée, et `gh pr checks` a montré `texte-pr` vert sur un corps qui
+  refusait. Pour relire le texte, on retouche le titre ou le corps : la retouche relance
+  `texte-pr` sur le texte en cours.
 
 **Qui fusionne : la réponse `fusion`.** Deux modes, choisis à la création du projet et enregistrés
 dans `.copier-answers.yml` :

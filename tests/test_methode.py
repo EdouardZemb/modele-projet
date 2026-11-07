@@ -366,7 +366,12 @@ def test_methode_dit_le_texte_de_la_pr():
             "d'origine : elle relit le titre et le corps de ce moment-là, pas ceux de la PR telle "
             "qu'elle est."
         ),
-        "`gh pr checks` a montré `texte-pr` vert sur un corps qui refusait",
+        "**Ne jamais relancer `texte-pr`.**",
+        "Éprouvé dans le dépôt modèle le 07/11/2026",
+        (
+            "la relance de la première exécution par `gh run rerun` a relu le corps d'avant et est "
+            "passée, et `gh pr checks` a montré `texte-pr` vert sur un corps qui refusait"
+        ),
         (
             "Pour relire le texte, on retouche le titre ou le corps : la retouche relance "
             "`texte-pr` sur le texte en cours."
