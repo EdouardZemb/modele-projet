@@ -60,7 +60,9 @@ AUCUN_CACHE = "Aucun cache Python sous template/scripts/modele"
 def test_aucun_cache_apres_les_tests(tmp_path):
     """AM-1 : après `pytest`, sur les deux systèmes, une étape échoue sur tout `__pycache__` sous
     `template/scripts/modele/`, que le garde protège. Elle lit le disque, pas git, qui ignore ce
-    dossier ; sans le mot `pytest`, dont une seule commande du job peut porter le nom."""
+    dossier ; sans le mot `pytest`, dont une seule commande du job peut porter le nom. Un `find` en
+    échec (le dossier absent ou renommé) la fait échouer aussi, sans compter sur `-e` : sinon elle
+    passerait à vide (LE-55)."""
     job = yaml.safe_load(CI.read_text(encoding="utf-8"))["jobs"]["tests"]
     etapes = job["steps"]
     (lancement,) = [e for e in etapes if "pytest" in e.get("run", "")]
@@ -72,10 +74,9 @@ def test_aucun_cache_apres_les_tests(tmp_path):
     for mot in ("pytest", "git"):
         assert mot not in etape["run"], mot
 
-    def lancer(dossier):
-        # Comme GitHub lance une étape `shell: bash`.
+    def lancer(dossier, options):
         return subprocess.run(
-            [trouver_bash(), "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", etape["run"]],
+            [trouver_bash(), "--noprofile", "--norc", *options, "-c", etape["run"]],
             cwd=dossier,
             capture_output=True,
             text=True,
@@ -85,14 +86,21 @@ def test_aucun_cache_apres_les_tests(tmp_path):
 
     propre = tmp_path / "propre"
     (propre / "template/scripts/modele").mkdir(parents=True)
-    r = lancer(propre)
-    assert r.returncode == 0, r.stdout + r.stderr
     sale = tmp_path / "sale"
     (sale / "template/scripts/modele/__pycache__").mkdir(parents=True)
     (sale / "template/scripts/modele/__pycache__/x.pyc").write_bytes(b"")
-    r = lancer(sale)
-    assert r.returncode == 1, r.stdout + r.stderr
-    assert "::error::un cache Python sous template/scripts/modele" in r.stdout
+    absent = tmp_path / "absent"
+    (absent / "template/scripts").mkdir(parents=True)
+    # Comme GitHub lance une étape `shell: bash`, puis sans `-e` ni `pipefail` : le refus est écrit.
+    for options in (["-e", "-o", "pipefail"], []):
+        r = lancer(propre, options)
+        assert r.returncode == 0, (options, r.stdout + r.stderr)
+        r = lancer(sale, options)
+        assert r.returncode == 1, (options, r.stdout + r.stderr)
+        assert "::error::un cache Python sous template/scripts/modele" in r.stdout, options
+        r = lancer(absent, options)
+        assert r.returncode == 1, (options, r.stdout + r.stderr)
+        assert "::error::template/scripts/modele illisible" in r.stdout, options
 
 
 def test_conftest_coupe_le_cache(tmp_path):

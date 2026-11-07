@@ -78,10 +78,13 @@ jobs:
       # tests/test_mecanique.py tourne dans le job mecanique, et seulement là.
       - run: python -m pytest -q --ignore=tests/test_mecanique.py
       # AM-1 : les tests ne laissent aucun cache sous template/scripts/modele, que le garde protège.
-      # find, pas git, qui ignore ce dossier ; bash, car pwsh a un autre find sous Windows.
+      # find, pas git, qui ignore ce dossier ; bash, car pwsh a un autre find sous Windows. Un find
+      # en échec (dossier absent ou renommé) refuse aussi, sans compter sur -e.
       - name: Aucun cache Python sous template/scripts/modele
         shell: bash
-        run: if find template/scripts/modele -name __pycache__ | grep -q .; then echo "::error::un cache Python sous template/scripts/modele"; exit 1; fi
+        run: |
+          caches=$(find template/scripts/modele -name __pycache__) || { echo "::error::template/scripts/modele illisible"; exit 1; }
+          [ -z "$caches" ] || { echo "::error::un cache Python sous template/scripts/modele"; exit 1; }
 
   # Les tests bats de la mécanique `serveur` (tests/deploiement/ d'un projet rendu, avec et sans
   # sauvegardes), dans leur image Docker : le seul job qui lance tests/test_mecanique.py. Docker
