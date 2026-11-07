@@ -169,8 +169,12 @@ _TITRE = re.compile(r" {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$")
 _FERMANTE = re.compile(r"(?:^|[ \t]+)#+$")
 _COMMENTAIRE = re.compile(COMMENTAIRE.pattern)
 # Ce qui peut précéder, sur sa ligne, un `<!--` qui ouvre un bloc de commentaire : au plus trois
-# espaces, après une puce, un numéro ou `>`. À composer, en mode MULTILINE.
-DEBUT_DE_BLOC = r"^(?: {0,3}(?:>[ \t]?|(?:[-*+]|\d{1,9}[.)])[ \t]+))* {0,3}"
+# espaces, après une puce, un numéro ou `>`. À composer, en mode MULTILINE. Chaque espace n'a
+# qu'une lecture : après `>`, une tabulation et trois espaces au plus, ou quatre espaces au plus ;
+# après une puce ou un numéro, toutes les espaces et tabulations. Un motif où l'espace qui suit un
+# `>` se prendrait aussi par le tour suivant reculerait de façon exponentielle sur une ligne de `> `
+# sans `<!--`, et Python 3.10 n'a pas de groupe atomique.
+DEBUT_DE_BLOC = r"^ {0,3}(?:>(?:\t {0,3}| {0,4})|(?:[-*+]|\d{1,9}[.)])[ \t]+)*"
 # Un bloc de commentaire HTML : ouvert par `<!--` en tête de ligne, ou après une puce, un numéro ou
 # `>`, il court jusqu'à la fin de la ligne qui porte `-->`, la sienne comprise (`<!-->` se ferme
 # aussitôt), ou jusqu'à la fin.

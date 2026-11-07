@@ -1,6 +1,7 @@
 """La documentation de la racine : la licence et la carte, qui refusent en CI, et le gabarit resté
 vide, qui avertit au `SessionStart`."""
 
+import itertools
 import os
 import re
 import shutil
@@ -771,6 +772,63 @@ def test_debut_de_bloc():
         assert ouverture.search("a\n\n" + ligne), ligne
     for ligne in ("texte <!-- x", "    <!-- x", "- [ ] case <!-- x"):
         assert not ouverture.search("a\n\n" + ligne), ligne
+
+
+# Le motif d'avant, ambigu : l'espace qui suit un `>` se prenait par `[ \t]?` ou par le ` {0,3}` du
+# tour suivant, celles qui suivent une puce par `[ \t]+` ou par ce même ` {0,3}`. Il recule de façon
+# exponentielle : il ne sert ici que de référence, sur des chaînes courtes.
+DEBUT_DE_BLOC_AMBIGU = r"^(?: {0,3}(?:>[ \t]?|(?:[-*+]|\d{1,9}[.)])[ \t]+))* {0,3}"
+# Des lignes sans `<!--` qui font reculer un motif ambigu à chaque niveau.
+LIGNES_SANS_COMMENTAIRE = "> " * 40 + "\n\n" + "-  " * 40 + "\n"
+
+
+def test_debut_de_bloc_reconnait_ce_que_reconnaissait_l_ancien():
+    """Réécrit sans ambiguïté, le motif reconnaît exactement ce que reconnaissait l'ancien : toute
+    chaîne de six caractères au plus, sur un alphabet qui couvre chaque branche, suivie de `<!--`."""
+    neuf = re.compile(d.DEBUT_DE_BLOC + "<!--")
+    ancien = re.compile(DEBUT_DE_BLOC_AMBIGU + "<!--")
+    for longueur in range(7):
+        for lettres in itertools.product((" ", "\t", ">", "-", "1", ")", "a"), repeat=longueur):
+            chaine = "".join(lettres) + "<!--"
+            assert bool(neuf.fullmatch(chaine)) == bool(ancien.fullmatch(chaine)), repr(chaine)
+
+
+def test_quarante_citations_sans_commentaire_se_lisent_vite(tmp_path, env_isole):
+    """Une ligne de 40 `> `, puis une de 40 puces suivies de deux espaces, sans `<!--` : la licence
+    et la carte se lisent en moins de 2 s. Le README les porte, et CLAUDE.md aussi, dont la carte lit
+    « Ce qui fait foi » par `section`. Le contrôle tourne dans un sous-processus tué au bout de
+    30 s : un recul ne fige pas la suite."""
+    ecrire(
+        tmp_path,
+        README_md=README + "\n" + LIGNES_SANS_COMMENTAIRE,
+        CLAUDE_md=CLAUDE + "\n" + LIGNES_SANS_COMMENTAIRE,
+        LICENSE="MIT License\n",
+    )
+    mesure = (
+        "import sys, time\n"
+        "import documentation\n"
+        "debut = time.perf_counter()\n"
+        "code = documentation.main(['--racine', sys.argv[1]])\n"
+        "print('mesure', code, time.perf_counter() - debut)\n"
+    )
+    try:
+        r = subprocess.run(
+            [sys.executable, "-B", "-c", mesure, str(tmp_path)],
+            cwd=SCRIPTS,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            env=env_isole(),
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.fail("la lecture ne finit pas en 30 s : le motif recule")
+    mesures = [ligne.split() for ligne in r.stdout.splitlines() if ligne.startswith("mesure ")]
+    assert mesures, r.stdout + r.stderr
+    _, code, duree = mesures[-1]
+    assert code == "0", r.stdout + r.stderr
+    assert float(duree) < 2, r.stdout
 
 
 def test_sans_bloc_ni_commentaire():

@@ -87,7 +87,8 @@ def corps_avec(section):
         (ECART.replace("07/11/2026", "31/02/2026"), 1, "date invalide"),
         ("Aucun.\n" + ECART, 1, "« Aucun. » à côté d'un écart"),
         ("Rien de neuf.", 1, "ligne 2 de la section : ni « Aucun. » ni un écart"),
-        # un commentaire en tête de ligne, puis un écart : GitHub rend la suite hors de toute liste
+        # un commentaire en tête de ligne, puis un écart : GitHub rend la ligne en bloc HTML, son
+        # texte tel quel, jamais en puce
         ("Aucun.\n<!-- x --> " + ECART, 1, "ligne 3 de la section : ni « Aucun. » ni un écart"),
         (
             "Aucun.\n\n<!-- - <écart> — promesse : <§> — accord d'Edouard : JJ/MM/AAAA -->",
@@ -311,6 +312,48 @@ def test_ne_cite_jamais_le_corps(lancer):
     assert "ligne 3 de la section : ni « Aucun. » ni un écart" in sortie, sortie
     assert "SENTINELLE" not in sortie, sortie
     assert "le seuil" not in sortie, sortie
+
+
+def test_quarante_citations_sans_commentaire_se_lisent_vite(tmp_path, env_isole):
+    """Un corps de PR, que n'importe qui peut écrire dans un dépôt public, ne fige pas le contrôle :
+    une ligne de 40 `> `, puis une de 40 puces suivies de deux espaces, sans `<!--`, se lisent en
+    moins de 2 s, les écarts comme la tête relue. Le contrôle tourne dans un sous-processus tué au
+    bout de 30 s : un recul ne fige pas la suite."""
+    fermetures = tmp_path / "fermetures.json"
+    fermetures.write_text(FERME_UNE, encoding="utf-8")
+    lignes = "> " * 40 + "\n\n" + "-  " * 40 + "\n"
+    env = env_isole()
+    env.update(
+        CORPS=corps_avec("Aucun.") + "\n" + lignes + "\nTête relue : " + TETE + "\n",
+        AUTEUR="EdouardZemb",
+        TETE=TETE,
+    )
+    mesure = (
+        "import sys, time\n"
+        "import texte_pr\n"
+        "debut = time.perf_counter()\n"
+        "code = texte_pr.main(['--fermetures', sys.argv[1]])\n"
+        "print('mesure', code, time.perf_counter() - debut)\n"
+    )
+    try:
+        r = subprocess.run(
+            [sys.executable, "-B", "-c", mesure, str(fermetures)],
+            cwd=SCRIPTS,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            env=env,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.fail("la lecture ne finit pas en 30 s : le motif recule")
+    mesures = [ligne.split() for ligne in r.stdout.splitlines() if ligne.startswith("mesure ")]
+    assert mesures, r.stdout + r.stderr
+    _, code, duree = mesures[-1]
+    assert code == "0", r.stdout + r.stderr
+    assert "tête relue égale à la tête aaaaaaaaaaaa" in r.stdout, r.stdout
+    assert float(duree) < 2, r.stdout
 
 
 def test_lancement_sans_b_n_ecrit_aucun_cache(tmp_path, env_isole):
