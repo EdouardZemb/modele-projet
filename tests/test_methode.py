@@ -354,7 +354,8 @@ def test_methode_dit_le_texte_de_la_pr():
         # une ligne qui commence par un commentaire refuse, et le rendu de GitHub dit pourquoi
         # (ronde 3) : sous une puce, indentée comme son texte, elle paraît dans la puce
         (
-            "Une ligne qui commence par un commentaire et porte un texte après lui refuse, comme une "
+            "Une ligne qui commence par un commentaire, après au plus trois espaces, et porte un texte "
+            "après lui refuse, comme une "
             "ligne qui n'est ni « Aucun. » ni un écart : GitHub la rend en bloc HTML, son texte tel "
             "quel, sans Markdown, jamais en puce ; sous une puce, il ne la montre dans la puce que si "
             "elle est indentée au moins autant que le texte de la puce"

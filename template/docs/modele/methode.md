@@ -109,14 +109,15 @@ environnement, jamais dans ses arguments, et contrôle deux choses.
   hors de cet ordre ; « Aucun. » à côté d'un écart ; un commentaire HTML jamais fermé, qui
   cacherait la suite. Un commentaire fermé ou un bloc clôturé ne compte pas : la forme d'une
   ligne, que le gabarit de PR met en commentaire, n'est pas un écart. Une ligne qui commence par
-  un commentaire et porte un texte après lui refuse, comme une ligne qui n'est ni « Aucun. » ni un
-  écart : GitHub la rend en bloc HTML, son texte tel quel, sans Markdown, jamais en puce ; sous une
-  puce, il ne la montre dans la puce que si elle est indentée au moins autant que le texte de la
-  puce. Un bloc indenté de quatre espaces n'est pas écarté : après une puce, il continue l'écart ;
-  sans puce avant lui, il refuse. Le contrôle ne vérifie ni que l'accord est réel, ni qu'un écart
-  n'a pas été tu : il force à écrire l'écart, la promesse qu'il touche et la date de l'accord. Un
-  écart se pèse contre la promesse de la spec, jamais contre l'ancien comportement, ni contre le
-  seul mécanisme principal : l'accord d'Edouard porte sur cette promesse, citée.
+  un commentaire, après au plus trois espaces, et porte un texte après lui refuse, comme une
+  ligne qui n'est ni « Aucun. » ni un écart : GitHub la rend en bloc HTML, son texte tel quel,
+  sans Markdown, jamais en puce ; sous une puce, il ne la montre dans la puce que si elle est
+  indentée au moins autant que le texte de la puce. Un bloc indenté de quatre espaces n'est pas
+  écarté : après une puce, il continue l'écart ; sans puce avant lui, il refuse. Le contrôle ne
+  vérifie ni que l'accord est réel, ni qu'un écart n'a pas été tu : il force à écrire l'écart, la
+  promesse qu'il touche et la date de l'accord. Un écart se pèse contre la promesse de la spec,
+  jamais contre l'ancien comportement, ni contre le seul mécanisme principal : l'accord d'Edouard
+  porte sur cette promesse, citée.
 - **La tête relue.** Une PR qui ferme une issue porte la ligne `Tête relue : <SHA>`, le SHA
   complet de la tête qu'a lue la dernière relecture. Dans un lot, c'est la PR de clôture, et elle
   seule ; hors des lots, un correctif qui ferme une issue par `Fixes #N` nomme aussi la tête
