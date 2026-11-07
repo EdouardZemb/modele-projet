@@ -485,7 +485,8 @@ def test_exception_interne_rend_zero(monkeypatch, capsys):
 
 
 def test_main_passe_la_racine_au_controle(tmp_path, monkeypatch, capsys):
-    """Le gabarit resté vide se lit dans la racine du dépôt où tourne le script : ici, le clone."""
+    """Le gabarit resté vide se lit dans la racine du dépôt où tourne le script : ici, le clone. Le
+    dossier courant n'est pas la racine."""
     racines = []
 
     def faux(racine):
@@ -496,6 +497,7 @@ def test_main_passe_la_racine_au_controle(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(documentation, "gabarits_vides", faux, raising=False)
     faux_gh(tmp_path, sorties())
     gh_en_tete(monkeypatch, tmp_path)
+    monkeypatch.chdir(tmp_path)
     code, texte = lancer(capsys)
     assert code == 0
     assert texte == RIEN_DE_ROUGE + "\ndocumentation : x : y"

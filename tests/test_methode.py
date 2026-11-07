@@ -1162,6 +1162,18 @@ def test_docstring_suit_documentation_md():
         assert ancien not in docstring, ancien
 
 
+def test_renvoi_au_plan_sait_mordre():
+    """Le garde des renvois au plan voit les décisions du plan jusqu'à P19, et une tâche ou un
+    constat en tête de phrase : un motif cassé laisserait passer les textes à vide."""
+    for renvoi in (
+        "P1", "P8", "P9", "P13", "P19", "tâche 3", "Tâche 3", "constat 2", "Constat 2",
+        "Ruling 4", "ruling 4", "décision 2 du lot", "Review Focus",
+    ):
+        assert RENVOI_AU_PLAN.search(f"x {renvoi} y"), renvoi
+    for sain in ("PR 12", "P20", "PR", "les tâches", "un constat", "M-0006", "LE-41", "P1a"):
+        assert not RENVOI_AU_PLAN.search(f"x {sain} y"), sain
+
+
 def test_methode_dit_qu_un_seme_absent_revient():
     """`copier update` sème à neuf un semé absent, retiré ou nouveau dans le modèle comme
     `LICENSE` : la méthode ne dit plus qu'il ne touche jamais un semé, et dit quoi faire du fichier

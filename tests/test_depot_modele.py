@@ -257,12 +257,12 @@ def test_licence_du_depot_modele(rendre):
     assert depot == rendu
 
 
-COMMENTAIRE_HTML = re.compile(r"<!--.*?-->", re.DOTALL)
+COMMENTAIRE_HTML = re.compile(r"<!--.*?-->|<pre\b.*?</pre>", re.DOTALL | re.IGNORECASE)
 
 
 def visible(texte: str) -> str:
     """Un texte Markdown sans ce que GitHub n'y affiche pas comme du texte : ses blocs de code
-    clôturés et ses commentaires HTML."""
+    clôturés, ses commentaires HTML et ses blocs `<pre>`."""
     return COMMENTAIRE_HTML.sub("", CLOTURE.sub("", texte))
 
 
@@ -275,13 +275,13 @@ def sections(texte: str) -> dict[str, str]:
 
 def test_readme_nomme_chaque_reponse_a_choix():
     """Le README nomme chaque réponse à choix de `copier.yml` et chacun de ses choix, entre accents
-    graves, sous « Démarrer », dans un élément de liste d'une seule ligne qu'ouvre sa question. Les
-    choix se lisent dans `copier.yml`, la liste ou les valeurs du dictionnaire (pas ses libellés).
-    Entre accents graves et sur la ligne de la question : une recherche nue passerait à vide,
-    « code » ou « serveur » paraissant partout ; une puce qui nommerait plusieurs questions, ou une
-    question nommée dans la puce d'une autre, ne rattacherait pas ses choix à leur question. Une
-    liste dans un bloc de code ou dans un commentaire HTML ne compte pas : GitHub ne l'affiche pas
-    comme une liste."""
+    graves, sous « Démarrer », dans un élément de liste de premier niveau, d'une seule ligne,
+    qu'ouvre sa question. Les choix se lisent dans `copier.yml`, la liste ou les valeurs du
+    dictionnaire (pas ses libellés). Entre accents graves et sur la ligne de la question : une
+    recherche nue passerait à vide, « code » ou « serveur » paraissant partout ; une puce qui
+    nommerait plusieurs questions, ou une question nommée dans la puce d'une autre, ne rattacherait
+    pas ses choix à leur question. Une liste dans un bloc de code, indenté ou clôturé, dans un bloc
+    `<pre>` ou dans un commentaire HTML ne compte pas : GitHub ne l'affiche pas comme une liste."""
     a_choix = {
         nom: question["choices"]
         for nom, question in COPIER.items()
@@ -293,7 +293,7 @@ def test_readme_nomme_chaque_reponse_a_choix():
     for nom, choix in a_choix.items():
         valeurs = list(choix.values()) if isinstance(choix, dict) else list(choix)
         assert valeurs, nom
-        propres = [ligne for ligne in lignes if re.match(rf"\s*[-*+] `{re.escape(nom)}`", ligne)]
+        propres = [ligne for ligne in lignes if re.match(rf" {{0,3}}[-*+] `{re.escape(nom)}`", ligne)]
         assert any(all(f"`{valeur}`" in ligne for valeur in valeurs) for ligne in propres), (
             nom,
             valeurs,
@@ -314,6 +314,9 @@ def test_readme_du_depot_modele():
     corps = sections(visible(texte))
     ouverture = re.sub(r"^# .*$", "", corps[""], flags=re.MULTILINE).strip()
     assert ouverture.endswith("."), "pas de phrase d'ouverture avant « Pourquoi »"
+    # Ce qu'est le modèle, et pour qui.
+    assert "d'où naissent les projets d'Edouard" in " ".join(ouverture.split()), ouverture
+    assert re.search(r"\bpour\b", ouverture), ouverture
     pourquoi = documentation.liens(corps["Pourquoi"], texte)
     assert "CLAUDE.md#état" in pourquoi, pourquoi
     assert "https://github.com/EdouardZemb/modele-projet/releases" in pourquoi, pourquoi
@@ -322,9 +325,12 @@ def test_readme_du_depot_modele():
         "Mettre à jour un projet",
         "Aligner un projet existant",
     ]
-    assert "| Document | À lire quand |" in corps["Où lire quoi"]
-    assert "Projet personnel : aucune contribution n'est attendue." in corps["Contribuer"]
-    assert "[MIT](LICENSE)" in corps["Licence"]
+    # En début de ligne : un bloc indenté, que GitHub rend en code, ne compte pas.
+    entete = r"^ {0,3}\| Document \| À lire quand \|$"
+    assert re.search(entete, corps["Où lire quoi"], re.MULTILINE)
+    contribuer = r"^ {0,3}Projet personnel : aucune contribution n'est attendue\.$"
+    assert re.search(contribuer, corps["Contribuer"], re.MULTILINE)
+    assert re.search(r"^ {0,3}\[MIT\]\(LICENSE\)$", corps["Licence"], re.MULTILINE)
     perime = PERIMES.search(texte)
     assert perime is None, perime
     liens = documentation.liens(texte)
@@ -369,7 +375,9 @@ def test_exemples_de_description_suivent_l_aide():
         texte = (RACINE / chemin).read_text(encoding="utf-8-sig")
         exemples = [e for e in re.findall(r'-Description "([^"]*)"', texte) if re.search(r"\w", e)]
         assert exemples, chemin
-        assert all("pour qui" in exemple for exemple in exemples), (chemin, exemples)
+        assert all(
+            "pour qui" in e and re.search(r"\bce qu'est\b", e, re.IGNORECASE) for e in exemples
+        ), (chemin, exemples)
 
 
 def test_settings_du_depot_modele():

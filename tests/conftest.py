@@ -23,8 +23,8 @@ REGISTRE_ENTETE = "| N° | Famille | Date | Constat | Motif | Prévention | Crit
 # Les numéros du plan d'un lot (ses décisions, ses tâches, les points de ses revues) ne vivent que
 # dans le plan, qui disparaît à la clôture : aucun fichier distribué ne les cite.
 RENVOI_AU_PLAN = re.compile(
-    r"\b(?:Ruling|ruling) \d|\bP[1-8]\b|\btâche \d|\b[Dd]écision \d+ du lot|\bReview Focus\b"
-    r"|\bconstat \d"
+    r"\b(?:Ruling|ruling) \d|\bP(?:[1-9]|1\d)\b|\b[Tt]âche \d|\b[Dd]écision \d+ du lot"
+    r"|\bReview Focus\b|\b[Cc]onstat \d"
 )
 
 # Ce qu'un README ne porte pas, parce que cela se périme : une version, un lot numéroté, une heure,

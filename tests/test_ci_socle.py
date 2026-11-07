@@ -333,15 +333,17 @@ def test_la_porte_recoit_la_visibilite_et_la_branche_par_defaut(rendre):
 def test_etape_de_la_documentation(rendre):
     """La licence et la carte de la racine : la dernière étape du job `confidentialite`, pour qu'un
     refus n'arrête pas le contrôle du garde, avec la visibilité et la branche par défaut que lit la
-    nature. Le job garde son seul `setup-python`."""
+    nature. Le job garde son seul `setup-python`. L'étape entière : un `continue-on-error` ou un
+    `if:` ferait taire le refus."""
     etapes = charger(rendre(), SOCLE)["jobs"]["confidentialite"]["steps"]
-    derniere = etapes[-1]
-    assert derniere["name"] == "La documentation de la racine (licence, carte)"
-    assert derniere["env"] == {
-        "DEPOT_PRIVE": "${{ github.event.repository.private }}",
-        "BRANCHE_DEFAUT": "${{ github.event.repository.default_branch }}",
+    assert etapes[-1] == {
+        "name": "La documentation de la racine (licence, carte)",
+        "env": {
+            "DEPOT_PRIVE": "${{ github.event.repository.private }}",
+            "BRANCHE_DEFAUT": "${{ github.event.repository.default_branch }}",
+        },
+        "run": "python scripts/modele/documentation.py",
     }
-    assert derniere["run"] == "python scripts/modele/documentation.py"
     assert sum("setup-python" in e.get("uses", "") for e in etapes) == 1
 
 
