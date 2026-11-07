@@ -497,7 +497,12 @@ def test_main_passe_la_racine_au_controle(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(documentation, "gabarits_vides", faux, raising=False)
     faux_gh(tmp_path, sorties())
     gh_en_tete(monkeypatch, tmp_path)
-    monkeypatch.chdir(tmp_path)
+    # Un autre dossier que celui du faux gh : sous Windows, sans NoDefaultCurrentDirectoryInExePath
+    # (que pose Claude Code, pas la CI), `shutil.which` le chercherait d'abord dans le dossier
+    # courant, et rendrait un chemin relatif, que gh, lancé depuis la racine, ne trouverait pas.
+    ailleurs = tmp_path / "ailleurs"
+    ailleurs.mkdir()
+    monkeypatch.chdir(ailleurs)
     code, texte = lancer(capsys)
     assert code == 0
     assert texte == RIEN_DE_ROUGE + "\ndocumentation : x : y"
