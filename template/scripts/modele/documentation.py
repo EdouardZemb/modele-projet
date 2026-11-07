@@ -2,7 +2,9 @@
 gabarit resté vide, qui avertit au démarrage d'une session.
 
 La licence. En nature `code`, `LICENSE` doit être présent à la racine, sous ce nom exact, et non
-vide ; en nature `donnees`, il n'est pas exigé. La nature se lit comme la lit la porte de
+vide, et, à la racine d'un dépôt git, suivi par git, comme dans le commit que lit la CI : un
+`LICENSE` qu'un `copier update` vient de créer refuse tant qu'il n'est pas indexé. En nature
+`donnees`, il n'est pas exigé. La nature se lit comme la lit la porte de
 confidentialité, par `nature()` de `confidentialite.py` : en CI, un dépôt public est de code, et un
 dépôt privé prend la nature de sa branche par défaut, jamais celle de la PR ; hors CI, c'est le
 `reglages.py` voisin, et `code` sans lui.
@@ -76,7 +78,9 @@ pas de l'UTF-8) remplacé par `?`.
 Bibliothèque standard seule, Python 3.10 ou plus.
 
 Usage : documentation.py [--racine DOSSIER] [--gabarits-vides]  (racine par défaut : le dossier
-        courant ; la CI lance la licence et la carte depuis la racine du dépôt.
+        courant ; la CI lance la licence et la carte depuis la racine du dépôt. --racine change
+        les fichiers lus, pas la nature : hors CI, c'est celle du `reglages.py` voisin du
+        script ; en CI, celle de la branche par défaut, lue dans le dossier courant.
         --gabarits-vides lance le seul gabarit resté vide, et imprime un constat par ligne)
 
 Retour : 0 rien à signaler, 1 refus, 64 erreur d'usage ; avec --gabarits-vides, toujours 0, hors
@@ -317,16 +321,20 @@ def _affichable(texte: str) -> str:
 # --- les contrôles ---------------------------------------------------------------------------
 
 
-def _noms(racine: Path) -> list[str]:
+def _noms(racine: Path, suivis_seulement: bool = False) -> list[str]:
     """Les noms du premier niveau de la racine. À la racine d'un dépôt git (un `.git` y est), ceux
-    que git suit ou suivrait : un fichier qu'il ignore n'en est pas, et le poste voit ce que verra
-    la CI. Ailleurs, ou si git ne répond pas, tout le dossier."""
+    que git suit ou suivrait, pour la carte : un fichier qu'il ignore n'en est pas, un fichier non
+    suivi en est. Avec `suivis_seulement`, pour la licence, ceux que git suit seulement (l'index) :
+    la CI lit le commit, et un fichier non suivi n'y est pas. Ailleurs, ou si git ne répond pas,
+    tout le dossier."""
     if (racine / ".git").exists():
         env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-        commande = ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"]
+        commande = ["git", "ls-files", "-z", "--cached"]
+        if not suivis_seulement:
+            commande += ["--others", "--exclude-standard", "--directory"]
         try:
             r = subprocess.run(
-                [*commande, "--directory"],
+                commande,
                 cwd=racine,
                 env=env,
                 capture_output=True,
@@ -360,11 +368,18 @@ def _lire(racine: Path, nom: str, noms: list[str]) -> str | None:
 
 def _section(texte: str, titre: str) -> str:
     """Les lignes des sections d'un titre donné (sans égard à la casse), jusqu'au titre suivant de
-    même niveau ou d'un niveau supérieur ; hors des blocs de code clôturés. Deux sections sont
-    séparées par une ligne vide : la seconde ne prolonge pas un paragraphe de la première."""
+    même niveau ou d'un niveau supérieur ; hors des blocs de code clôturés et des commentaires
+    HTML, où GitHub n'affiche aucun titre. Deux sections sont séparées par une ligne vide : la
+    seconde ne prolonge pas un paragraphe de la première."""
     lignes = texte.split("\n")
+    # Les commentaires neutralisés, leurs fins de ligne gardées ; un code en ligne reste, et
+    # protège le `<!--` qu'il contiendrait.
+    visibles = _CODE_OU_COMMENTAIRE.sub(
+        lambda m: m.group(0) if m.group(1) else re.sub(r"[^\n]", "x", m.group(0)),
+        _hors_des_blocs(texte),
+    )
     niveaux: list[tuple[int, int, str]] = []
-    for i, ligne in enumerate(_hors_des_blocs(texte).split("\n")):
+    for i, ligne in enumerate(visibles.split("\n")):
         m = _TITRE.match(ligne)
         if m:
             contenu = _FERMANTE.sub("", m.group(2) or "").strip()
@@ -384,12 +399,15 @@ def _cibles(texte: str, racine: Path, document: str | None = None) -> set[str]:
 
 
 def licence(racine: Path, nature: str) -> tuple[list[str], bool]:
-    """La licence : (lignes, refus)."""
+    """La licence : (lignes, refus). Le texte se lit dans le dossier ; à la racine d'un dépôt git,
+    `LICENSE` doit en plus être suivi, comme dans le commit que lit la CI."""
     if nature == "donnees":
         return ["licence : non exigée (nature donnees)"], False
-    texte = _lire(racine, "LICENSE", _noms(racine))
+    texte = _lire(racine, "LICENSE", os.listdir(racine))
     if texte is None or not texte.strip():
         return ["licence : LICENSE absent ou vide, exigé en nature code"], True
+    if "LICENSE" not in _noms(racine, suivis_seulement=True):
+        return ["licence : LICENSE présent mais non suivi par git, exigé en nature code"], True
     return ["licence : LICENSE présent (nature code)"], False
 
 
@@ -516,7 +534,9 @@ def gabarits_vides(racine: Path) -> list[str]:
 
 
 def _nature() -> str:
-    """La nature, lue par la porte de confidentialité : importée ici seulement, à l'appel."""
+    """La nature, lue par la porte de confidentialité : importée ici seulement, à l'appel, sans
+    écrire de cache, même lancé sans `-B` : aucun `__pycache__` dans le projet."""
+    sys.dont_write_bytecode = True
     from confidentialite import nature
 
     return nature()
@@ -538,7 +558,14 @@ def main(argv: list[str] | None = None) -> int:
         description="La licence et la carte de la racine, ou le gabarit resté vide.",
     )
     p.add_argument(
-        "--racine", type=Path, default=Path("."), help="racine du dépôt (défaut : le dossier courant)"
+        "--racine",
+        type=Path,
+        default=Path("."),
+        help=(
+            "racine du dépôt (défaut : le dossier courant) ; elle change les fichiers lus, pas la"
+            " nature : hors CI, c'est celle du reglages.py voisin du script ; en CI, celle de la"
+            " branche par défaut, lue dans le dossier courant"
+        ),
     )
     p.add_argument(
         "--gabarits-vides",
