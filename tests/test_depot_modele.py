@@ -232,7 +232,15 @@ def test_depot_modele_passe_sa_porte(env_isole):
 
 def test_documentation_du_depot_modele(env_isole):
     """La licence et la carte passent sur ce dépôt, lancées comme en CI, depuis la racine : son
-    README lie `CLAUDE.md`, le seul autre `.md` de sa racine, et son `LICENSE` est là."""
+    README lie `CLAUDE.md`, le seul autre `.md` de sa racine, et son `LICENSE` est là. Un
+    `CLAUDE.local.md` posé dans un clone du modèle (par `/memory`) n'y est pas compté : le
+    `.gitignore` de ce dépôt l'exclut, comme celui des projets, sans l'ignore global du poste."""
+    ignores = (RACINE / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert "CLAUDE.local.md" in ignores
+    git = subprocess.run(
+        ["git", "check-ignore", "-q", "CLAUDE.local.md"], cwd=RACINE, env=env_isole(), check=False
+    )
+    assert git.returncode == 0, "git n'ignore pas CLAUDE.local.md à la racine du modèle"
     r = subprocess.run(
         [sys.executable, str(RACINE / "template/scripts/modele/documentation.py")],
         cwd=RACINE,
@@ -257,12 +265,12 @@ def test_licence_du_depot_modele(rendre):
     assert depot == rendu
 
 
-COMMENTAIRE_HTML = re.compile(r"<!--.*?-->", re.DOTALL)
+COMMENTAIRE_HTML = re.compile(r"<!--.*?-->|<pre\b.*?</pre>", re.DOTALL | re.IGNORECASE)
 
 
 def visible(texte: str) -> str:
     """Un texte Markdown sans ce que GitHub n'y affiche pas comme du texte : ses blocs de code
-    clôturés et ses commentaires HTML."""
+    clôturés, ses commentaires HTML et ses blocs `<pre>`."""
     return COMMENTAIRE_HTML.sub("", CLOTURE.sub("", texte))
 
 
@@ -275,13 +283,14 @@ def sections(texte: str) -> dict[str, str]:
 
 def test_readme_nomme_chaque_reponse_a_choix():
     """Le README nomme chaque réponse à choix de `copier.yml` et chacun de ses choix, entre accents
-    graves, sous « Démarrer », dans un élément de liste d'une seule ligne qu'ouvre sa question. Les
-    choix se lisent dans `copier.yml`, la liste ou les valeurs du dictionnaire (pas ses libellés).
-    Entre accents graves et sur la ligne de la question : une recherche nue passerait à vide,
-    « code » ou « serveur » paraissant partout ; une puce qui nommerait plusieurs questions, ou une
-    question nommée dans la puce d'une autre, ne rattacherait pas ses choix à leur question. Une
-    liste dans un bloc de code ou dans un commentaire HTML ne compte pas : GitHub ne l'affiche pas
-    comme une liste."""
+    graves, sous « Démarrer », dans un élément de liste de premier niveau, ouvert en colonne 0
+    comme l'écrit le README (une puce indentée peut être imbriquée sous une autre), d'une seule
+    ligne, qu'ouvre sa question. Les choix se lisent dans `copier.yml`, la liste ou les valeurs du
+    dictionnaire (pas ses libellés). Entre accents graves et sur la ligne de la question : une
+    recherche nue passerait à vide, « code » ou « serveur » paraissant partout ; une puce qui
+    nommerait plusieurs questions, ou une question nommée dans la puce d'une autre, ne rattacherait
+    pas ses choix à leur question. Une liste dans un bloc de code, indenté ou clôturé, dans un bloc
+    `<pre>` ou dans un commentaire HTML ne compte pas : GitHub ne l'affiche pas comme une liste."""
     a_choix = {
         nom: question["choices"]
         for nom, question in COPIER.items()
@@ -293,7 +302,8 @@ def test_readme_nomme_chaque_reponse_a_choix():
     for nom, choix in a_choix.items():
         valeurs = list(choix.values()) if isinstance(choix, dict) else list(choix)
         assert valeurs, nom
-        propres = [ligne for ligne in lignes if re.match(rf"\s*[-*+] `{re.escape(nom)}`", ligne)]
+        tete = rf"[-*+] `{re.escape(nom)}`"
+        propres = [ligne for ligne in lignes if re.match(tete, ligne)]
         assert any(all(f"`{valeur}`" in ligne for valeur in valeurs) for ligne in propres), (
             nom,
             valeurs,
@@ -314,6 +324,9 @@ def test_readme_du_depot_modele():
     corps = sections(visible(texte))
     ouverture = re.sub(r"^# .*$", "", corps[""], flags=re.MULTILINE).strip()
     assert ouverture.endswith("."), "pas de phrase d'ouverture avant « Pourquoi »"
+    # Ce qu'est le modèle, et pour qui.
+    assert "d'où naissent les projets d'Edouard" in " ".join(ouverture.split()), ouverture
+    assert re.search(r"\bpour\b", ouverture), ouverture
     pourquoi = documentation.liens(corps["Pourquoi"], texte)
     assert "CLAUDE.md#état" in pourquoi, pourquoi
     assert "https://github.com/EdouardZemb/modele-projet/releases" in pourquoi, pourquoi
@@ -322,9 +335,12 @@ def test_readme_du_depot_modele():
         "Mettre à jour un projet",
         "Aligner un projet existant",
     ]
-    assert "| Document | À lire quand |" in corps["Où lire quoi"]
-    assert "Projet personnel : aucune contribution n'est attendue." in corps["Contribuer"]
-    assert "[MIT](LICENSE)" in corps["Licence"]
+    # En début de ligne : un bloc indenté, que GitHub rend en code, ne compte pas.
+    entete = r"^ {0,3}\| Document \| À lire quand \|$"
+    assert re.search(entete, corps["Où lire quoi"], re.MULTILINE)
+    contribuer = r"^ {0,3}Projet personnel : aucune contribution n'est attendue\.$"
+    assert re.search(contribuer, corps["Contribuer"], re.MULTILINE)
+    assert re.search(r"^ {0,3}\[MIT\]\(LICENSE\)$", corps["Licence"], re.MULTILINE)
     perime = PERIMES.search(texte)
     assert perime is None, perime
     liens = documentation.liens(texte)
@@ -334,6 +350,20 @@ def test_readme_du_depot_modele():
     assert any("#" in lien for lien in relatifs), relatifs
     casses = [lien for lien in relatifs if lien_casse(RACINE, "README.md", lien)]
     assert not casses, casses
+
+
+def test_readme_dit_qu_un_seme_absent_revient():
+    """« Mettre à jour un projet » dit, comme la méthode, qu'un semé absent revient à la mise à
+    jour, et d'indexer le `LICENSE` qu'elle crée."""
+    corps = sections(visible((RACINE / "README.md").read_text(encoding="utf-8")))
+    maj = corps["Démarrer"].split("### Mettre à jour un projet", 1)[1].split("\n### ", 1)[0]
+    plat = " ".join(maj.split())
+    assert (
+        "un semé présent n'est pas touché, mais un semé absent, retiré ou nouveau dans le modèle "
+        "comme `LICENSE`, est semé à neuf"
+    ) in plat
+    assert "(`git add LICENSE`)" in plat
+    assert "les fichiers semés ne sont pas touchés" not in plat
 
 
 def test_aides_de_copier_yml():
@@ -355,7 +385,9 @@ def test_exemples_de_description_suivent_l_aide():
         texte = (RACINE / chemin).read_text(encoding="utf-8-sig")
         exemples = [e for e in re.findall(r'-Description "([^"]*)"', texte) if re.search(r"\w", e)]
         assert exemples, chemin
-        assert all("pour qui" in exemple for exemple in exemples), (chemin, exemples)
+        assert all(
+            "pour qui" in e and re.search(r"\bce qu'est\b", e, re.IGNORECASE) for e in exemples
+        ), (chemin, exemples)
 
 
 def test_settings_du_depot_modele():
@@ -450,7 +482,7 @@ def test_liste_d_alignement():
         "`LICENSE`",
         "needs:",
         "edited",
-        "`.claude/settings.local.json` et `__pycache__/`",
+        "`.claude/settings.local.json`, `CLAUDE.local.md` et `__pycache__/`",
         # Le remède de la porte des masqués, ancré (#95, ronde 2).
         "le remède que donne la porte, des lignes ancrées qui n'admettent que ce qu'elle examine",
         # Un semé sous un ancêtre levé reste masqué : la porte ne l'examine pas (#95, ronde 3).
@@ -525,6 +557,25 @@ def test_liste_d_alignement():
             "La CI du code vérifie `instance/` comme le fera le déploiement : la règle des paires, "
             "puis chaque commande déclarée sur son dossier ; le déploiement revérifie"
         ),
+        # lot 14 : la PR d'alignement d'un dépôt privé de données est jugée en régime code en CI
+        (
+            "Dans un dépôt privé de nature `donnees`, la PR d'alignement est jugée en régime "
+            "`code` en CI, puisque sa branche par défaut ne porte pas encore `NATURE` : l'étape "
+            "« La documentation de la racine » y refuse la licence, et 👤 Edouard fusionne cette "
+            "PR, comme celle qui apporte `fusion`."
+        ),
+        (
+            "Dans un dépôt privé de nature `donnees`, `socle / confidentialite` y est rouge, par "
+            "la licence"
+        ),
+        # une licence sous un autre nom, que Copier doublerait
+        (
+            "Une licence déjà présente sous un autre nom (`LICENSE.md`, `COPYING`…) se renomme en "
+            "`LICENSE` avant le `copier copy`, sinon Copier en pose une seconde, MIT. La section "
+            "« Licence » du README nomme la licence du fichier."
+        ),
+        # le lancement local ne dit ce que dira la CI qu'une fois tout indexé et validé
+        "dit ce que la CI dira, LICENSE indexé, README et `CLAUDE.md` validés",
     ):
         assert regle in a_plat, regle
     assert "ne lit pas `instance/`" not in a_plat

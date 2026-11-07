@@ -400,6 +400,7 @@ GITIGNORE_DU_SOCLE = [
     ".venv/",
     ".superpowers/",
     ".claude/settings.local.json",
+    "CLAUDE.local.md",
 ]
 SECRETS_EN_CLAIR = (
     "secrets/prod.env",

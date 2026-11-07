@@ -2,18 +2,28 @@
 gabarit resté vide, qui avertit au démarrage d'une session.
 
 La licence. En nature `code`, `LICENSE` doit être présent à la racine, sous ce nom exact, et non
-vide ; en nature `donnees`, il n'est pas exigé. La nature se lit comme la lit la porte de
-confidentialité, par `nature()` de `confidentialite.py` : en CI, un dépôt public est de code, et un
-dépôt privé prend la nature de sa branche par défaut, jamais celle de la PR ; hors CI, c'est le
-`reglages.py` voisin, et `code` sans lui.
+vide, et, à la racine d'un dépôt git, suivi par git, comme dans le commit que lit la CI : un
+`LICENSE` qu'un `copier update` vient de créer refuse tant qu'il n'est pas indexé. En nature
+`donnees`, il n'est pas exigé. La nature se lit comme la lit la porte de confidentialité, par
+`nature()` de `confidentialite.py` : en CI, un dépôt public est de code, et un dépôt privé prend la
+nature de sa branche par défaut, jamais celle de la PR ; hors CI, c'est le `reglages.py` voisin, et
+`code` sans lui.
 
 La carte. Chaque fichier `.md` de la racine, sauf `README.md`, doit être lié par un lien Markdown :
 `CLAUDE.md` depuis `README.md`, un autre depuis `README.md` ou depuis la section « Ce qui fait foi »
 de `CLAUDE.md` (jusqu'au titre suivant de même niveau ou d'un niveau supérieur). Un nom entre
 accents graves ne suffit pas : on ne peut pas le suivre. `README.md` et `CLAUDE.md` doivent exister.
 La sortie dit le nombre de fichiers vus, puis nomme chaque fichier non lié. À la racine d'un dépôt
-git, les fichiers vus sont ceux que git suit ou suivrait, comme en CI : un fichier qu'il ignore,
-comme `CLAUDE.local.md`, n'est pas compté. Ailleurs, c'est tout le dossier.
+git, les fichiers vus sont ceux que git suit ou suivrait : un fichier qu'il ignore n'est pas compté
+(`CLAUDE.local.md`, que le `.gitignore` semé exclut ; un projet né plus tôt l'y ajoute). Ailleurs,
+c'est tout le dossier.
+
+Lancé sur le poste, depuis la racine, le script donne les lignes de la CI, à trois écarts près : un
+`.md` de la racine non suivi compte en local, et la CI ne le voit pas ; le README et `CLAUDE.md` se
+lisent tels qu'ils sont dans la copie, validés ou non ; la nature se lit dans la copie, alors qu'en
+CI un dépôt privé prend celle de sa branche par défaut (la PR qui pose ou change la nature d'un
+dépôt privé y est jugée sous l'ancienne). La licence, elle, ne compte en local qu'un `LICENSE`
+suivi, comme la CI.
 
 Le gabarit resté vide. Chaque fichier `.md` et chaque dossier que `README.md` lie, et qui existent
 sous la racine, sont lus ; le reste est ignoré : une image, un script, un lien externe, une cible
@@ -36,7 +46,8 @@ ses deux cibles ; un lien de référence, `[texte][x]`, `[x][]` ou `[x]`, quand 
 d'une liste ou d'une citation, sa cible au besoin sur la ligne suivante. Comme sur GitHub, une
 définition ne se rend pas : seule, elle ne lie rien, et une définition qui coupe un paragraphe n'en
 est pas une. Pour « Ce qui fait foi », les emplois se lisent dans la section, les définitions dans
-tout `CLAUDE.md`.
+tout `CLAUDE.md`. Un lien HTML (`<a href="…">`) ne compte pas : la carte demande un lien Markdown,
+et le remède est la forme `[texte](cible)`.
 Les blocs de code clôturés, le code en ligne et les commentaires HTML sont retirés avant : GitHub
 n'y rend aucun lien. La cible perd son ancre et sa requête, ses échappements (`\\.`), puis elle est
 décodée (`%20`) ; un `/` en tête part de la racine ; une cible avec un schéma (`https:`, `mailto:`)
@@ -49,21 +60,28 @@ comme sur GitHub ; un document est un fichier dont le suffixe est `.md`, sans é
 texte en CRLF se lit comme en LF, un BOM en tête est ignoré, et un octet qui n'est pas de l'UTF-8
 est remplacé, sans erreur.
 
-Des écarts connus au rendu de GitHub, rares. Quatre laissent passer à tort un lien que GitHub ne
-rend pas : dans un bloc de code indenté, que GitHub rend en code ; dans un bloc HTML sans ligne
-vide (`<details>` collé à son contenu) ; dans un bloc `<pre>`, `<script>`, `<style>` ou
-`<textarea>`, lignes vides comprises, jusqu'à la fin de la ligne qui porte sa balise fermante ;
-dans un bloc ouvert en tête de ligne par `<!--` (ou par `<?`, `<!DOCTYPE`, `<![CDATA[`), jusqu'à
-la fin de la ligne qui le ferme (`<!-- liens --> [n](NOTICE.md)` ne lie rien), ou jusqu'à la fin
-du fichier s'il ne se ferme jamais. Dans ces blocs, GitHub ne lit pas le Markdown. Les autres font
-refuser à tort. Un titre souligné (`Ce qui fait foi` sur une ligne de `---`) n'est pas lu ; un
-accent grave échappé (`` \\` ``) ouvre quand même un code en ligne ; une entité dans la cible
-(`&#46;`) n'est pas décodée ; un fichier dont le nom porte une barre oblique inverse, que Windows
-refuse, n'est jamais lié ; un commentaire HTML ouvert dans un paragraphe court jusqu'à sa
-fermeture, plus loin.
+Des écarts connus au rendu de GitHub, rares. Certains laissent passer à tort un lien que GitHub ne
+rend pas : dans un bloc de code indenté, que GitHub rend en code ; dans un bloc clôturé à
+l'intérieur d'une citation, ou d'un élément de liste indenté de quatre colonnes ou plus, s'il
+s'ouvre par des tildes ou qu'une ligne vide le coupe ; dans un bloc HTML sans ligne vide
+(`<details>` collé à son contenu) ; dans un bloc `<pre>`, `<script>`, `<style>` ou `<textarea>`,
+lignes vides comprises, jusqu'à la fin de la ligne qui porte sa balise fermante ; dans un bloc
+ouvert en tête de ligne par `<!--` (ou par `<?`, `<!DOCTYPE`, `<![CDATA[`), jusqu'à la fin de la
+ligne qui le ferme (`<!-- liens --> [n](NOTICE.md)` ne lie rien), ou jusqu'à la fin du fichier
+s'il ne se ferme jamais ; dans une citation ou un élément de liste, dans un bloc ouvert par
+`<!--`, de même. Dans ces blocs, GitHub ne lit pas le Markdown. S'y ajoute un lien dont le texte
+porte un `|` dans une cellule de tableau, que GitHub coupe. Les autres font refuser à tort. Un
+titre souligné (`Ce qui fait foi` sur une ligne de `---`) n'est pas lu ; un accent grave échappé
+(`` \\` ``) ouvre quand même un code en ligne ; une entité dans la cible (`&#46;`) n'est pas
+décodée ; un fichier dont le nom porte une barre oblique inverse, que Windows refuse, n'est jamais
+lié ; un commentaire HTML ouvert dans un paragraphe cache les liens jusqu'à sa fermeture, plus loin.
 Une définition n'est pas lue quand elle suit une ligne de commentaire (`<!-- liens -->`, puis les
 définitions), quand elle est dans un élément de liste ou dans une citation, quand elle suit une
-ligne de séparation (`***`), ou quand son titre tient sur deux lignes.
+ligne de séparation (`***`), ou quand son titre tient sur deux lignes ; et d'autres formes rares des
+conteneurs et des commentaires (un bloc clôturé non fermé dans un élément de liste, un code en ligne
+qui franchit une ligne `>` vide, un texte de lien à plus de trois niveaux de crochets, une
+définition après un titre souligné, un commentaire fermé par `--->` dans un paragraphe) font aussi
+refuser à tort.
 Un dernier ne touche que le gabarit resté vide. Sous Windows, il lit l'existence d'un chemin lié
 sans égard à la casse : un lien `docs/Cadrage.md` vers `docs/cadrage.md` y est lu, et peut
 avertir, alors que GitHub casse ce lien ; sous Linux, il est ignoré. C'est un avertissement de
@@ -76,7 +94,9 @@ pas de l'UTF-8) remplacé par `?`.
 Bibliothèque standard seule, Python 3.10 ou plus.
 
 Usage : documentation.py [--racine DOSSIER] [--gabarits-vides]  (racine par défaut : le dossier
-        courant ; la CI lance la licence et la carte depuis la racine du dépôt.
+        courant ; la CI lance la licence et la carte depuis la racine du dépôt. --racine change
+        les fichiers lus, pas la nature : hors CI, c'est celle du `reglages.py` voisin du
+        script ; en CI, celle de la branche par défaut, lue dans le dossier courant.
         --gabarits-vides lance le seul gabarit resté vide, et imprime un constat par ligne)
 
 Retour : 0 rien à signaler, 1 refus, 64 erreur d'usage ; avec --gabarits-vides, toujours 0, hors
@@ -103,10 +123,11 @@ NON_LIE = "n'est lié ni par README.md ni par « Ce qui fait foi » de CLAUDE.md
 
 _OUVERTURE = re.compile(r" {0,3}(`{3,}|~{3,})(.*)$")
 _FERMETURE = re.compile(r" {0,3}(`{3,}|~{3,})[ \t]*$")
-# Un commentaire HTML, ou un code en ligne : une suite d'accents graves, refermée par une suite de
-# même longueur, sans franchir une ligne vide. Le plus à gauche l'emporte, comme sur GitHub.
+# Un commentaire HTML (`<!-->` et `<!--->` en sont deux, complets), ou un code en ligne : une suite
+# d'accents graves, refermée par une suite de même longueur, sans franchir une ligne vide. Le plus
+# à gauche l'emporte, comme sur GitHub.
 _CODE_OU_COMMENTAIRE = re.compile(
-    r"<!--.*?-->|(?<!`)(`+)(?!`)(?:(?!\n[ \t]*\n).)*?(?<!`)\1(?!`)", re.DOTALL
+    r"<!--(?:-?>|.*?-->)|(?<!`)(`+)(?!`)(?:(?!\n[ \t]*\n).)*?(?<!`)\1(?!`)", re.DOTALL
 )
 _ECHAPPEMENT = re.compile(r"\\(.)", re.DOTALL)
 # Un caractère du texte d'un lien : ni crochet, ni barre oblique inverse nue, ni ligne vide.
@@ -144,6 +165,14 @@ _SCHEMA = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*:")
 _PONCTUATION_ECHAPPEE = re.compile(r"\\([!-/:-@\[-`{-~])")
 _TITRE = re.compile(r" {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$")
 _FERMANTE = re.compile(r"(?:^|[ \t]+)#+$")
+_COMMENTAIRE = re.compile(r"<!--(?:-?>|.*?-->)")
+# Un bloc de commentaire HTML : ouvert par `<!--` en tête de ligne, ou après une puce, un numéro ou
+# `>`, il court jusqu'à la fin de la ligne qui porte `-->`, la sienne comprise (`<!-->` se ferme
+# aussitôt), ou jusqu'à la fin.
+_BLOC_DE_COMMENTAIRE = re.compile(
+    r"^(?: {0,3}(?:>[ \t]?|(?:[-*+]|\d{1,9}[.)])[ \t]+))* {0,3}<!(?=--).*?(?:-->[^\n]*|\Z)",
+    re.MULTILINE | re.DOTALL,
+)
 
 
 def _en_lf(texte: str) -> str:
@@ -317,16 +346,20 @@ def _affichable(texte: str) -> str:
 # --- les contrôles ---------------------------------------------------------------------------
 
 
-def _noms(racine: Path) -> list[str]:
+def _noms(racine: Path, suivis_seulement: bool = False) -> list[str]:
     """Les noms du premier niveau de la racine. À la racine d'un dépôt git (un `.git` y est), ceux
-    que git suit ou suivrait : un fichier qu'il ignore n'en est pas, et le poste voit ce que verra
-    la CI. Ailleurs, ou si git ne répond pas, tout le dossier."""
+    que git suit ou suivrait, pour la carte : un fichier qu'il ignore n'en est pas, un fichier non
+    suivi en est. Avec `suivis_seulement`, pour la licence, ceux que git suit seulement (l'index) :
+    la CI lit le commit, et un fichier non suivi n'y est pas. Ailleurs, ou si git ne répond pas,
+    tout le dossier."""
     if (racine / ".git").exists():
         env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-        commande = ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"]
+        commande = ["git", "ls-files", "-z", "--cached"]
+        if not suivis_seulement:
+            commande += ["--others", "--exclude-standard", "--directory"]
         try:
             r = subprocess.run(
-                [*commande, "--directory"],
+                commande,
                 cwd=racine,
                 env=env,
                 capture_output=True,
@@ -360,14 +393,23 @@ def _lire(racine: Path, nom: str, noms: list[str]) -> str | None:
 
 def _section(texte: str, titre: str) -> str:
     """Les lignes des sections d'un titre donné (sans égard à la casse), jusqu'au titre suivant de
-    même niveau ou d'un niveau supérieur ; hors des blocs de code clôturés. Deux sections sont
-    séparées par une ligne vide : la seconde ne prolonge pas un paragraphe de la première."""
+    même niveau ou d'un niveau supérieur ; hors des blocs de code clôturés et des blocs de
+    commentaire HTML, où GitHub n'affiche aucun titre. Un commentaire en ligne est retiré du
+    titre. Deux sections sont séparées par une ligne vide : la seconde ne prolonge pas un
+    paragraphe de la première."""
     lignes = texte.split("\n")
+    # Seul un bloc de commentaire cache un titre, ses fins de ligne gardées, qu'il s'ouvre en tête
+    # de ligne ou après une puce, un numéro ou `>`. La structure des blocs passe avant le code en
+    # ligne : un accent grave isolé plus haut n'y change rien. Un `<!--` ouvert dans un paragraphe
+    # reste du texte : le titre qui suit coupe le paragraphe.
+    visibles = _BLOC_DE_COMMENTAIRE.sub(
+        lambda m: re.sub(r"[^\n]", "x", m.group(0)), _hors_des_blocs(texte)
+    )
     niveaux: list[tuple[int, int, str]] = []
-    for i, ligne in enumerate(_hors_des_blocs(texte).split("\n")):
+    for i, ligne in enumerate(visibles.split("\n")):
         m = _TITRE.match(ligne)
         if m:
-            contenu = _FERMANTE.sub("", m.group(2) or "").strip()
+            contenu = _FERMANTE.sub("", _COMMENTAIRE.sub("", m.group(2) or "")).strip()
             niveaux.append((i, len(m.group(1)), contenu.casefold()))
     morceaux = []
     for k, (i, niveau, contenu) in enumerate(niveaux):
@@ -384,12 +426,15 @@ def _cibles(texte: str, racine: Path, document: str | None = None) -> set[str]:
 
 
 def licence(racine: Path, nature: str) -> tuple[list[str], bool]:
-    """La licence : (lignes, refus)."""
+    """La licence : (lignes, refus). Le texte se lit dans le dossier ; à la racine d'un dépôt git,
+    `LICENSE` doit en plus être suivi, comme dans le commit que lit la CI."""
     if nature == "donnees":
         return ["licence : non exigée (nature donnees)"], False
-    texte = _lire(racine, "LICENSE", _noms(racine))
+    texte = _lire(racine, "LICENSE", os.listdir(racine))
     if texte is None or not texte.strip():
         return ["licence : LICENSE absent ou vide, exigé en nature code"], True
+    if "LICENSE" not in _noms(racine, suivis_seulement=True):
+        return ["licence : LICENSE présent mais non suivi par git, exigé en nature code"], True
     return ["licence : LICENSE présent (nature code)"], False
 
 
@@ -516,7 +561,9 @@ def gabarits_vides(racine: Path) -> list[str]:
 
 
 def _nature() -> str:
-    """La nature, lue par la porte de confidentialité : importée ici seulement, à l'appel."""
+    """La nature, lue par la porte de confidentialité : importée ici seulement, à l'appel, sans
+    écrire de cache, même lancé sans `-B` : aucun `__pycache__` dans le projet."""
+    sys.dont_write_bytecode = True
     from confidentialite import nature
 
     return nature()
@@ -538,7 +585,14 @@ def main(argv: list[str] | None = None) -> int:
         description="La licence et la carte de la racine, ou le gabarit resté vide.",
     )
     p.add_argument(
-        "--racine", type=Path, default=Path("."), help="racine du dépôt (défaut : le dossier courant)"
+        "--racine",
+        type=Path,
+        default=Path("."),
+        help=(
+            "racine du dépôt (défaut : le dossier courant) ; elle change les fichiers lus, pas la"
+            " nature : hors CI, c'est celle du reglages.py voisin du script ; en CI, celle de la"
+            " branche par défaut, lue dans le dossier courant"
+        ),
     )
     p.add_argument(
         "--gabarits-vides",

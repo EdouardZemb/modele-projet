@@ -11,6 +11,7 @@ from conftest import (
     RENVOI_AU_PLAN,
     REPONSES_SERVEUR,
     REPONSES_SERVEUR_CODE,
+    git,
 )
 
 TEMPLATE = RACINE / "template"
@@ -1014,9 +1015,39 @@ TITRES_DOCUMENTATION = [
     "## Retirer un texte",
     "## Les trois contrôles",
 ]
+# Ce que le texte géré et la docstring de `documentation.py` disent dans les mêmes mots : ce que
+# la carte ne compte pas, ce qu'un lancement local dit de la CI, et les écarts connus à GitHub.
+DOCUMENTATION_ET_DOCSTRING = (
+    "`CLAUDE.local.md`, que le `.gitignore` semé exclut ; un projet né plus tôt l'y ajoute",
+    "un `.md` de la racine non suivi compte en local, et la CI ne le voit pas",
+    "le README et `CLAUDE.md` se lisent tels qu'ils sont dans la copie, validés ou non",
+    (
+        "la nature se lit dans la copie, alors qu'en CI un dépôt privé prend celle de sa branche "
+        "par défaut"
+    ),
+    "ne compte en local qu'un `LICENSE` suivi, comme la CI",
+    (
+        'Un lien HTML (`<a href="…">`) ne compte pas : la carte demande un lien Markdown, et le '
+        "remède est la forme `[texte](cible)`"
+    ),
+    (
+        "dans un bloc clôturé à l'intérieur d'une citation, ou d'un élément de liste indenté de "
+        "quatre colonnes ou plus, s'il s'ouvre par des tildes ou qu'une ligne vide le coupe"
+    ),
+    "dans une citation ou un élément de liste, dans un bloc ouvert par `<!--`",
+    "un lien dont le texte porte un `|` dans une cellule de tableau",
+    # les liens seulement : un titre qui suit coupe le paragraphe, et reste lu, comme sur GitHub
+    "un commentaire HTML ouvert dans un paragraphe cache les liens jusqu'à sa fermeture, plus loin",
+    (
+        "et d'autres formes rares des conteneurs et des commentaires (un bloc clôturé non fermé "
+        "dans un élément de liste, un code en ligne qui franchit une ligne `>` vide, un texte de "
+        "lien à plus de trois niveaux de crochets, une définition après un titre souligné, un "
+        "commentaire fermé par `--->` dans un paragraphe)"
+    ),
+)
 
 
-def test_documentation_md(tmp_path):
+def test_documentation_md(tmp_path, env_isole):
     """Le texte géré de la documentation (spec du lot 14, § 4) : sans Jinja ni renvoi au plan, ses
     sections, la règle du semé, les sorties des trois contrôles telles que `documentation.py` les
     écrit, et la ligne des décisions dans un bloc de code : hors de lui, elle serait un lien mort
@@ -1036,8 +1067,12 @@ def test_documentation_md(tmp_path):
     for fragment in (
         "semé se vide ou se réécrit, il ne se supprime pas",
         "fichier de la racine se cite par un lien",
-        "`python scripts/modele/documentation.py --gabarits-vides`",
+        "`python -B scripts/modele/documentation.py --gabarits-vides`",
         "La documentation de la racine (licence, carte)",
+        # un lancement local, et ce qu'il dit de la CI : trois écarts, la licence comme en CI
+        "`python -B scripts/modele/documentation.py`, lancé depuis la racine",
+        "La PR qui pose ou change la nature d'un dépôt privé y est donc jugée sous l'ancienne",
+        "Un `LICENSE` qu'un `copier update` vient de créer n'est pas suivi : il s'indexe",
         # les sorties, telles que le script les écrit
         "<chemin> : garde le marqueur *AAAA-MM-JJ* du gabarit",
         "<chemin> : corps vide (titres et consignes seulement)",
@@ -1049,6 +1084,8 @@ def test_documentation_md(tmp_path):
         "carte : CLAUDE.md n'est pas lié par README.md",
         f"carte : <nom> {documentation.NON_LIE}",
         "`refus`, en dernière ligne",
+        "la première ligne, quand un fichier n'est pas lié",
+        "refusent quelle que soit la première ligne",
         "documentation : non lue (erreur)",
         "le titre `documentation :` puis une ligne `- <constat>` chacun",
         "imprime un constat par ligne et rend toujours 0",
@@ -1061,24 +1098,45 @@ def test_documentation_md(tmp_path):
         "dans un bloc de code indenté",
         "un lien `docs/Cadrage.md` vers `docs/cadrage.md`",
         "un avertissement de trop, jamais un refus",
+        *DOCUMENTATION_ET_DOCSTRING,
     ):
         assert fragment in plat, fragment
+    for ancien in (
+        "donne les mêmes lignes que la CI",
+        "comme `CLAUDE.local.md`, n'est pas compté",
+        "Quatre laissent passer",
+    ):
+        assert ancien not in plat, ancien
     # Les lignes de la licence et de la carte, telles que le script les écrit sur une racine, sont
     # chacune dans la liste de leur contrôle.
     section = texte.split("### La licence", 1)[1].split("### Le gabarit resté vide", 1)[0]
     listes = " ".join(ligne for ligne in section.splitlines() if ligne.startswith("- `"))
     racine = tmp_path / "racine"
     racine.mkdir()
-    # Une racine vide : la licence absente, puis, après la tête, README.md et CLAUDE.md absents.
-    sorties = [*documentation.licence(racine, "code")[0], *documentation.carte(racine)[0][1:]]
+    # Une racine vide : la licence absente, la tête à 0 fichier, README.md et CLAUDE.md absents.
+    sorties = [*documentation.licence(racine, "code")[0], *documentation.carte(racine)[0]]
     (racine / "LICENSE").write_text("MIT\n", encoding="utf-8")
-    (racine / "README.md").write_text("[c](CLAUDE.md) [n](NOTICE.md)\n", encoding="utf-8")
+    (racine / "README.md").write_text("[c](CLAUDE.md)\n", encoding="utf-8")
     (racine / "CLAUDE.md").write_text("# C\n", encoding="utf-8")
+    # README.md et CLAUDE.md seuls : la tête au singulier, sans nombre à remplacer.
+    sorties.append(documentation.carte(racine)[0][0])
     (racine / "NOTICE.md").write_text("# N\n", encoding="utf-8")
+    # Un `.md` non lié : la tête d'un refus, ses deux nombres en place.
+    sorties.append(
+        documentation.carte(racine)[0][0].replace(" 2 ", " <n> ", 1).replace(" 1 ", " <k> ", 1)
+    )
+    (racine / "README.md").write_text("[c](CLAUDE.md) [n](NOTICE.md)\n", encoding="utf-8")
     # Une racine en ordre : la licence présente, et la tête de la carte, son nombre en place.
     sorties += documentation.licence(racine, "code")[0]
     sorties.append(documentation.carte(racine)[0][0].replace(" 2 ", " <n> ", 1))
-    assert len(sorties) == 5, sorties
+    # À la racine d'un dépôt git, un LICENSE que git ne suit pas.
+    depot = tmp_path / "depot"
+    depot.mkdir()
+    git(depot, env_isole(), "init", "-q", "-b", "main")
+    (depot / "LICENSE").write_text("MIT\n", encoding="utf-8")
+    sorties += documentation.licence(depot, "code")[0]
+    assert len(sorties) == 9, sorties
+    assert len(set(sorties)) == 9, sorties
     for ligne in sorties:
         assert f"`{ligne}`" in listes, ligne
     decisions = "| [Les décisions](docs/decisions/) |"
@@ -1094,6 +1152,45 @@ def test_documentation_md(tmp_path):
     (tmp_path / "docs/modele/documentation.md").write_text(texte, encoding="utf-8")
     (tmp_path / "README.md").write_text("[d](docs/modele/documentation.md)\n", encoding="utf-8")
     assert documentation.gabarits_vides(tmp_path) == []
+
+
+def test_docstring_suit_documentation_md():
+    """La docstring de `documentation.py` dit ce que dit le texte géré, dans les mêmes mots, sans
+    l'ancien décompte des écarts ni la promesse d'un lancement local identique à la CI."""
+    import documentation
+
+    docstring = " ".join(documentation.__doc__.split())
+    for fragment in DOCUMENTATION_ET_DOCSTRING:
+        assert fragment in docstring, fragment
+    for ancien in ("Quatre laissent passer", "comme en CI : un fichier qu'il ignore"):
+        assert ancien not in docstring, ancien
+
+
+def test_renvoi_au_plan_sait_mordre():
+    """Le garde des renvois au plan voit les décisions du plan jusqu'à P19, et une tâche ou un
+    constat en tête de phrase : un motif cassé laisserait passer les textes à vide."""
+    for renvoi in (
+        "P1", "P8", "P9", "P13", "P19", "tâche 3", "Tâche 3", "constat 2", "Constat 2",
+        "Ruling 4", "ruling 4", "décision 2 du lot", "Review Focus",
+    ):
+        assert RENVOI_AU_PLAN.search(f"x {renvoi} y"), renvoi
+    for sain in ("PR 12", "P20", "PR", "les tâches", "un constat", "M-0006", "LE-41", "P1a"):
+        assert not RENVOI_AU_PLAN.search(f"x {sain} y"), sain
+
+
+def test_methode_dit_qu_un_seme_absent_revient():
+    """`copier update` sème à neuf un semé absent, retiré ou nouveau dans le modèle comme
+    `LICENSE` : la méthode ne dit plus qu'il ne touche jamais un semé, et dit quoi faire du fichier
+    non suivi qu'il laisse."""
+    section = lire(METHODE).split("## Les fichiers gérés par le modèle", 1)[1].split("\n## ", 1)[0]
+    plat = " ".join(section.split())
+    assert (
+        "Les fichiers **semés** sont créés une fois, puis appartiennent au projet : "
+        "`copier update` ne touche plus un semé présent, mais sème à neuf un semé absent, qu'il "
+        "ait été retiré ou qu'il soit nouveau dans le modèle, comme `LICENSE`. Un fichier non "
+        "suivi (`??`) après la mise à jour s'indexe, ou se retire."
+    ) in plat
+    assert "`copier update` ne les touche plus" not in plat
 
 
 def test_methode_nomme_documentation_md():

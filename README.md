@@ -55,11 +55,13 @@ Dans le projet, sur une branche :
 copier update --vcs-ref <étiquette>
 ```
 
-Les fichiers gérés par le modèle sont réécrits, les fichiers semés ne sont pas touchés. Un conflit
-dans un fichier géré se résout en faveur du modèle. Ensuite, sous les chemins gérés,
-`git status --short --ignored` ne doit montrer en `!!` que des caches (`__pycache__/`) : un fichier
-géré que le `.gitignore` du projet masque manquerait au commit (LE-23). Si on oublie ce contrôle,
-le `pre-commit` refuse le commit de la mise à jour et nomme le fichier masqué.
+Les fichiers gérés par le modèle sont réécrits ; un semé présent n'est pas touché, mais un semé
+absent, retiré ou nouveau dans le modèle comme `LICENSE`, est semé à neuf, non suivi : l'indexer
+(`git add LICENSE`). Un conflit dans un fichier géré se résout en faveur du modèle. Ensuite, sous
+les chemins gérés, `git status --short --ignored` ne doit montrer en `!!` que des caches
+(`__pycache__/`) : un fichier géré que le `.gitignore` du projet masque manquerait au commit
+(LE-23). Si on oublie ce contrôle, le `pre-commit` refuse le commit de la mise à jour et nomme le
+fichier masqué.
 
 ### Aligner un projet existant
 
