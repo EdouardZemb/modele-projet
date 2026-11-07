@@ -360,6 +360,17 @@ def test_methode_dit_le_texte_de_la_pr():
             "quel, sans Markdown, jamais en puce ; sous une puce, il ne la montre dans la puce que si "
             "elle est indentée au moins autant que le texte de la puce"
         ),
+        # l'épreuve de la relance (LE-56) : elle rejoue l'événement d'origine, et l'ancien corps
+        (
+            "Une relance, par `gh run rerun` ou depuis l'interface de GitHub, rejoue l'événement "
+            "d'origine : elle relit le titre et le corps de ce moment-là, pas ceux de la PR telle "
+            "qu'elle est."
+        ),
+        "`gh pr checks` a montré `texte-pr` vert sur un corps qui refusait",
+        (
+            "Pour relire le texte, on retouche le titre ou le corps : la retouche relance "
+            "`texte-pr` sur le texte en cours."
+        ),
     ):
         assert fragment in texte, fragment
     for perime in (
