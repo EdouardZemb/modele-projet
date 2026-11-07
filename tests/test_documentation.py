@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import sys
+import unicodedata
 from pathlib import PureWindowsPath
 
 import documentation as d
@@ -701,6 +702,62 @@ def test_cible_locale_sans_lecteur(tmp_path, monkeypatch):
         else:
             assert local == attendu, cible
     assert lecteurs == []
+
+
+# --- une section, et un texte sans blocs ni commentaires, que lisent d'autres scripts ---------
+
+
+def test_section_niveau():
+    """Avec `niveau`, seul un titre de ce niveau compte ; sans lui, tous les niveaux."""
+    texte = "# T\n\n### Écarts à la spec\n\n- trois\n\n## Écarts à la spec\n\n- deux\n"
+    assert d.section(texte, "Écarts à la spec", niveau=2) == "\n- deux\n"
+    assert d.section("### Écarts à la spec\n\n- x\n", "Écarts à la spec", niveau=2) is None
+    assert d.section(texte, "Écarts à la spec", niveau=3) == "\n- trois\n"
+    assert d.section(texte, "Écarts à la spec") == "\n- trois\n\n\n\n- deux\n"
+
+
+def test_section_absente_ou_vide():
+    assert d.section("# T\n\nx\n", "Écarts à la spec") is None
+    assert d.section("", "Écarts à la spec") is None
+    assert d.section("## Écarts à la spec\n## Suite\n", "Écarts à la spec") == ""
+    # un titre dans un bloc de code ou dans un bloc de commentaire n'ouvre rien
+    assert d.section("```\n## Écarts à la spec\n```\n", "Écarts à la spec") is None
+    assert d.section("<!--\n## Écarts à la spec\n-->\n", "Écarts à la spec") is None
+
+
+def test_section_nfd_et_casse():
+    """Le titre se compare en NFC, sans égard à la casse ; les lignes rendues sont celles d'origine,
+    en LF : un corps en NFD est rendu en NFD."""
+    nfd = unicodedata.normalize("NFD", "## Écarts à la spec\n\nDéjà vu.\n")
+    rendu = d.section(nfd, "écarts à la spec")
+    assert rendu == unicodedata.normalize("NFD", "\nDéjà vu.\n")
+    assert rendu != "\nDéjà vu.\n"
+    assert d.section("## ÉCARTS À LA SPEC\n\nx\n", "Écarts à la spec") == "\nx\n"
+    titre_nfd = unicodedata.normalize("NFD", "Écarts à la spec")
+    assert d.section("## Écarts à la spec\n\nx\n", titre_nfd) == "\nx\n"
+    assert d.section("## Écarts à la spec\r\n\r\nx\r\n", "Écarts à la spec") == "\nx\n"
+
+
+def test_section_bornee():
+    """Sans `bornee`, une section court jusqu'au titre suivant de même niveau ou d'un niveau
+    supérieur ; avec, jusqu'au premier titre, quel que soit son niveau, ou au premier séparateur.
+    Un séparateur dans un bloc de code ne borne rien."""
+    texte = "## A\n\n- x\n\n---\n\n### Task 1: y\n- z\n"
+    assert "### Task 1: y" in d.section(texte, "a")
+    assert d.section(texte, "a", bornee=True) == "\n- x\n"
+    assert d.section("## A\n\n- x\n### B\n- z\n", "a", bornee=True) == "\n- x"
+    for separateur in ("***", "___", " - - -"):
+        assert d.section(f"## A\n\n- x\n{separateur}\n- z\n", "a", bornee=True) == "\n- x"
+    assert d.section("## A\n\n```\n---\n```\n- x\n", "a", bornee=True) == "\n```\n---\n```\n- x\n"
+    assert d.section("## A\n\n- x\n\n## B\n", "a", niveau=2, bornee=True) == "\n- x\n"
+
+
+def test_sans_bloc_ni_commentaire():
+    """Les blocs de code clôturés vidés et les commentaires fermés retirés, leurs fins de ligne
+    gardées ; le code en ligne reste, et protège le `<!--` qu'il contient. Le texte en LF."""
+    texte = "a\n<!-- x\ny -->\n```\nz\n```\n`<!-- k -->` b\n"
+    assert d.sans_bloc_ni_commentaire(texte) == "a\n\n\n\n\n\n`<!-- k -->` b\n"
+    assert d.sans_bloc_ni_commentaire("a\r\n<!-- x -->b\r\n") == "a\nb\n"
 
 
 # --- le gabarit resté vide -------------------------------------------------------------------

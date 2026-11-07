@@ -11,7 +11,9 @@ modifie pas dans le projet. Un défaut se corrige dans `modele-projet`, pour tou
 3. Une ou plusieurs PR d'implémentation.
 4. Une PR de revue finale.
 5. Une PR de clôture : elle **supprime le plan**, reporte dans `CLAUDE.md` ou dans un ADR ce qui
-   doit survivre, et relit le README d'après `docs/modele/documentation.md`.
+   doit survivre, et relit le README d'après `docs/modele/documentation.md`. Elle seule porte
+   « Closes #N », les autres PR du lot disant « Partie de #N », et elle nomme la tête relue
+   (voir « Le texte de la PR »).
 6. L'étiquette `vX.Y.Z`, **avec l'accord d'Edouard**.
 
 ## Les outils
@@ -79,9 +81,45 @@ sessions à distance.
 | hook git `pre-push` | refus d'envoyer sur la branche principale |
 | hook Claude `PreToolUse` (outils `Bash`, `PowerShell`, `Monitor`, et tout outil MCP qui porte une commande) | bloque `git push` vers la branche principale, tout force-push vers elle, `--no-verify`, toute modification de `core.hooksPath` sauf la réparation `git config core.hooksPath .githooks` (variables `GIT_CONFIG_*` comprises), `gh pr merge` tant que les contrôles ne sont pas tous verts (et toute fusion en mode `edouard`), `gh pr merge --admin`, l'envoi d'une étiquette (`git push --tags`, `--follow-tags`, un refspec `refs/tags/…`, `v1.2.3` ou `donnees-…`) et toute écriture de publication (`gh release` hors `view`, `list`, `download` ; l'API `…/releases`), les alias et extensions de `gh`, ce qui affiche le jeton de `gh` ou les identifiants de git (`gh auth token`, `gh auth status --show-token`, `gh auth git-credential`, `git credential fill`, `git credential-manager get`), et l'effacement, le déplacement ou le renommage de `.githooks` et de `scripts/modele` (`rm`, `mv`, `Remove-Item`, `git rm`…). Il lit aussi les substitutions `$(…)`, même entre guillemets, les blocs PowerShell (`try { … }`, `& { … }`, `% { … }`) et ses affectations (`$x = …`), le texte d'une here-string (`bash <<< '…'`) passée à un interprète, et les enveloppes (`timeout`, `nice -n`, `env -C`, `env -S`, `exec -a`, `Start-Process`, `Start-Process -WorkingDirectory`, `Invoke-Expression`…). Après un retour de dossier qu'il ne suit pas (`cd -`, `cd ~`, `popd`, `Pop-Location`), la branche courante est illisible : un `git push` doit alors nommer sa branche |
 | hook Claude `SessionStart` (au démarrage et à la reprise) | affiche ce qui est rouge sur GitHub : les exécutions de la branche principale, les PR ouvertes et les workflows désactivés. Il ne bloque jamais. Il signale aussi un gabarit resté vide que le README lie, et un README qui ne lie aucun document du dépôt. Ce que n'importe qui écrit depuis un fork n'entre pas dans le contexte de Claude : les exécutions de PR (`pull_request…`) sont écartées, et une PR ou un workflow venus d'ailleurs que le dépôt s'affichent sans le texte qu'ils portent. Une PR d'un fork paraît ainsi sans titre ni nom de contrôle, un workflow absent de la copie, sans son nom |
-| CI de base | gitleaks examine les commits de chaque PR et de chaque envoi, et tout l'historique chaque semaine et à la demande (`modele-historique.yml`) ; la porte relit aussi l'historique d'un dépôt de code chaque semaine (`modele-historique.yml`), à côté de gitleaks, et refuse tout constat absent de `.github/constats-acceptes.txt` ; confidentialité du diff, des messages de commit et du texte de la PR ; format des commits ; le garde de Claude **et les signaux** toujours branchés dans `.claude/settings.json` ; la licence et la carte de la racine (`scripts/modele/documentation.py`) ; actions épinglées par SHA |
+| CI de base | gitleaks examine les commits de chaque PR et de chaque envoi, et tout l'historique chaque semaine et à la demande (`modele-historique.yml`) ; la porte relit aussi l'historique d'un dépôt de code chaque semaine (`modele-historique.yml`), à côté de gitleaks, et refuse tout constat absent de `.github/constats-acceptes.txt` ; confidentialité du diff et des messages de commit ; format des commits ; le garde de Claude **et les signaux** toujours branchés dans `.claude/settings.json` ; la licence et la carte de la racine (`scripts/modele/documentation.py`) ; actions épinglées par SHA |
+| workflow `texte-pr` | `modele-texte-pr.yml`, seul à écouter `edited` : il relit le texte de chaque PR à son ouverture, à chaque envoi et à chaque retouche de son titre ou de son corps. La confidentialité et le format du titre et du corps, puis la section des écarts à la spec et la tête relue d'une PR qui ferme une issue (`scripts/modele/texte_pr.py`, voir plus bas). Son job, `texte-pr`, est un contrôle requis |
 | Dependabot | chaque lundi, les versions des actions épinglées (`.github/dependabot.yml`), après trois jours de recul |
 | règle de protection GitHub | tout commit qui arrive sur la branche principale est la tête d'une PR dont les contrôles requis sont verts ; un envoi direct de cette tête est accepté et marque la PR fusionnée, sans squash. Côté agent, c'est le refus de pousser vers la branche principale par le garde qui ferme ce chemin. Ni force-push ni suppression de la branche principale. Posée sur les dépôts publics |
+
+**Le texte de la PR.** Le workflow géré `texte-pr` (`modele-texte-pr.yml`) est seul à écouter
+`edited` : une retouche du titre ou du corps d'une PR ne relance que lui, jamais toute la CI. Il
+porte la confidentialité et le format du titre et du corps, puis lance `scripts/modele/texte_pr.py`,
+qui lit le corps dans son environnement, jamais dans ses arguments, et contrôle deux choses.
+
+- **Les écarts à la spec.** Le corps de toute PR porte une section `## Écarts à la spec`, sauf
+  quand l'auteur de la PR est `dependabot[bot]` : cette liste est fermée, et toute autre
+  application y est soumise. La section contient « Aucun. » seul, ou une ligne par écart,
+  `- <écart> — promesse : <§ de la spec, ou de l'issue> — accord d'Edouard : JJ/MM/AAAA`, au
+  besoin continuée par des lignes indentées. Le contrôle refuse, en nommant la ligne par son rang
+  dans la section : une section absente ou vide ; une ligne qui n'est ni « Aucun. » ni un écart ;
+  un écart sans « promesse : » suivi d'un texte, ou sans « accord d'Edouard : » suivi d'une date
+  valide `JJ/MM/AAAA` ; « Aucun. » à côté d'un écart ; un commentaire HTML jamais fermé, qui
+  cacherait la suite. Un commentaire fermé ou un bloc de code ne compte pas : la forme d'une ligne,
+  que le gabarit de PR met en commentaire, n'est pas un écart. Le contrôle ne vérifie ni que
+  l'accord est réel, ni qu'un écart n'a pas été tu : il force à écrire l'écart, la promesse qu'il
+  touche et la date de l'accord. Un écart se pèse contre la promesse de la spec, jamais contre
+  l'ancien comportement, ni contre le seul mécanisme principal : l'accord d'Edouard porte sur
+  cette promesse, citée.
+- **La tête relue.** Une PR qui ferme une issue porte la ligne `Tête relue : <SHA>`, le SHA
+  complet de la tête qu'a lue la dernière relecture. Dans un lot, c'est la PR de clôture, et elle
+  seule ; hors des lots, un correctif qui ferme une issue par `Fixes #N` nomme aussi la tête
+  relue. Les issues que la PR ferme se lisent par l'API (`closingIssuesReferences`), l'analyse de
+  GitHub lui-même, jamais dans le corps ; une réponse absente, en erreur ou mal formée fait
+  refuser. Le contrôle refuse aussi une ligne absente, ou un SHA autre que la tête de la PR, et
+  nomme alors les deux. Un commit poussé après la dernière relecture fait donc refuser la PR,
+  jusqu'à ce que le corps nomme la nouvelle tête, relue ; cette retouche ne relance que `texte-pr`.
+- **Les limites de la tête relue.** Le contrôle force à nommer une tête, pas à la relire : la
+  relecture reste une tâche du plan. Dans un lot, la PR de revue finale n'est pas visée : sa
+  relecture est une tâche du plan, et la PR de clôture relit ensuite la tête qui part. GitHub ne
+  lit un mot-clé de fermeture que dans une PR qui vise la branche par défaut : une PR empilée sur
+  une autre branche ne ferme rien, et sa tête relue n'est pas exigée. Une issue liée depuis la
+  barre latérale de la PR compte aussi, mais aucun type d'événement documenté ne suit ce lien : le
+  contrôle repart au commit ou à la modification du corps suivants.
 
 **Qui fusionne : la réponse `fusion`.** Deux modes, choisis à la création du projet et enregistrés
 dans `.copier-answers.yml` :
@@ -146,7 +184,9 @@ la lit par `git show origin/<branche par défaut>:scripts/modele/reglages.py` (l
 `BRANCHE_DEFAUT`, la visibilité réelle par `DEPOT_PRIVE`). Une nature illisible vaut `code`, la plus
 stricte. Hors CI, aux hooks, la porte lit le `reglages.py` de la copie ; sans lui (le dépôt modèle),
 c'est `code`. Un dépôt privé n'a pas de règle de protection : le garde de Claude y est la seule
-serrure côté agent, et la CI du socle le seul filet.
+serrure côté agent, et la CI (le socle et `texte-pr`) le seul filet ; avant une fusion en mode
+`session`, le garde lit tous les contrôles, `texte-pr` compris (`gh pr checks`). En mode `edouard`,
+rien ne bloque côté agent, et Edouard fusionne.
 
 **L'historique d'un dépôt de code.** `modele-historique.yml` relit tout l'historique chaque semaine
 et à la demande, après gitleaks. Chaque constat se nomme `<commit>:<chemin>:<ligne>` ; le message

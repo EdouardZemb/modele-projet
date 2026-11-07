@@ -82,8 +82,9 @@ Chaque case se coche dans la PR d'alignement. Une case qui ne s'applique pas au 
     `permissions: {contents: read, pull-requests: read}` ;
   - retirer l'ancien job qu'il remplace (un gitleaks, par exemple) et renommer en `socle` chaque
     `needs:` qui le citait ;
-  - `pull_request: types: [opened, synchronize, reopened, edited]`, pour qu'un titre ou un corps de
-    PR modifié soit réexaminé.
+  - `pull_request: types: [opened, synchronize, reopened]` : retirer `edited`, que le workflow géré
+    `texte-pr` (`modele-texte-pr.yml`) écoute seul ; une retouche du titre ou du corps d'une PR ne
+    relance alors que lui, et pas toute la CI.
 - [ ] **`.gitignore`** : `.claude/settings.local.json`, `CLAUDE.local.md` et `__pycache__/`, s'ils
       n'y sont pas.
 - [ ] **`.dockerignore`**, s'il existe : `.githooks` et `scripts/modele`, pour qu'un `COPY` ne les
@@ -133,14 +134,18 @@ Chaque case se coche dans la PR d'alignement. Une case qui ne s'applique pas au 
   ```
 
 - [ ] 👤 **La règle de protection**, si le dépôt est public, après le premier envoi :
-      `gh api -X POST repos/<dépôt>/rulesets --input .github/modele/ruleset-main.json`.
+      `gh api -X POST repos/<dépôt>/rulesets --input .github/modele/ruleset-main.json`. Si le
+      dépôt a déjà sa règle (à une mise à jour qui change ses contrôles requis, comme l'arrivée de
+      `texte-pr`), la lire par `gh api repos/<dépôt>/rulesets`, puis la mettre à jour par son
+      identifiant, un `POST` en créerait une seconde :
+      `gh api -X PUT repos/<dépôt>/rulesets/<id> --input .github/modele/ruleset-main.json`.
       Un dépôt privé n'en a pas : le garde de Claude y est la seule serrure côté agent.
 
 ## 7. PR et CI
 
 - [ ] Envoyer la branche, ouvrir la PR avec le modèle de PR.
-- [ ] `gh pr checks` entièrement vert : `socle / secrets`, `socle / confidentialite`, et les
-      contrôles propres au projet. Dans un dépôt privé de nature `donnees`, `socle /
+- [ ] `gh pr checks` entièrement vert : `socle / secrets`, `socle / confidentialite`, `texte-pr`,
+      et les contrôles propres au projet. Dans un dépôt privé de nature `donnees`, `socle /
       confidentialite` y est rouge, par la licence que refuse l'étape « La documentation de la
       racine » (§3) : 👤 Edouard fusionne cette PR.
 - [ ] Fusion en squash, puis le déploiement éventuel vérifié là où l'application sert.

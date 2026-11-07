@@ -222,6 +222,19 @@ def trouver_bash():
     manque("bash", "bash absent")
 
 
+def sans_echappatoire(job: dict, *noms: str) -> None:
+    """Un contrôle sans échappatoire (LE-62) : le job n'a ni `if` ni `continue-on-error`, et chaque
+    étape nommée existe, une seule fois, sans l'un ni l'autre. GitHub compte « succès » un job sauté
+    par un `if:`, même pour un contrôle requis, et une étape qui échoue sous `continue-on-error`."""
+    for cle in ("if", "continue-on-error"):
+        assert cle not in job, f"job : {cle}"
+    for nom in noms:
+        trouvees = [e for e in job.get("steps", []) if e.get("name") == nom]
+        assert len(trouvees) == 1, f"étape « {nom} » : {len(trouvees)} trouvée(s)"
+        for cle in ("if", "continue-on-error"):
+            assert cle not in trouvees[0], f"étape « {nom} » : {cle}"
+
+
 def faux_gh(dossier, sorties):
     """Un faux « gh » dans `dossier`. `sorties` : {"pr checks": (code, texte), "api": (code, texte)}.
 

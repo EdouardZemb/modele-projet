@@ -183,14 +183,21 @@ def test_formulaire_lot():
 
 def test_modele_de_pr():
     texte = lire(TEMPLATE / ".github/pull_request_template.md")
+    lignes = texte.splitlines()
     for titre in (
         "## Ce que fait cette PR",
+        "## Écarts à la spec",
         "## Vérifications",
         "## Reste ouvert",
         "## Registre",
         "## Pour un fix : cause racine et prévention",
     ):
-        assert titre in texte.splitlines(), titre
+        assert titre in lignes, titre
+    # La section des écarts dit « Aucun. » par défaut : sa première ligne qui n'est ni vide ni un
+    # commentaire (lot 15, LE-37).
+    apres = lignes[lignes.index("## Écarts à la spec") + 1 :]
+    (premiere, *_) = [ligne for ligne in apres if ligne.strip() and not ligne.startswith("<!--")]
+    assert premiere == "Aucun."
 
 
 def test_modele_de_pr_a_la_case_du_readme():
@@ -207,10 +214,18 @@ def test_modele_de_pr_a_la_case_du_readme():
 
 
 def test_modele_de_pr_ferme_l_issue():
-    # GitHub ne ferme l'issue à la fusion que sur un mot-clé anglais (LE-30).
+    # GitHub ne ferme l'issue à la fusion que sur un mot-clé anglais (LE-30). Seule la PR de
+    # clôture d'un lot le porte ; les autres nomment l'issue sans mot-clé (lot 15, LE-55).
     texte = lire(TEMPLATE / ".github/pull_request_template.md")
     assert "« Closes #n »" in texte
+    assert "« Partie de #n »" in texte
+    assert "clôture" in texte
     assert "Ferme #" not in texte
+    # la tête relue : une ligne, pas une case, après les cases de « Vérifications »
+    lignes = texte.splitlines()
+    (rang,) = [i for i, ligne in enumerate(lignes) if ligne.rstrip() == "Tête relue :"]
+    assert rang > max(i for i, ligne in enumerate(lignes) if ligne.startswith("- [ ] "))
+    assert "le SHA complet de la tête qu'a lue la dernière relecture" in " ".join(texte.split())
 
 
 def test_modele_de_pr_renvoie_un_depot_de_donnees_au_registre_du_code():
@@ -274,6 +289,44 @@ def test_garde_fous_a_jour():
     assert "(voir plus bas)" in section
     assert "(voir plus haut)" not in section
     assert "visibilite" not in lire(METHODE)
+
+
+def test_methode_dit_le_texte_de_la_pr():
+    """Le workflow `texte-pr` (lot 15) : la section des écarts et sa règle (LE-37), la tête relue
+    lue par l'API (LE-55), leurs limites, et le garde qui lit tous les contrôles."""
+    section = lire(METHODE).split("## Les garde-fous", 1)[1].split("\n## ", 1)[0]
+    texte = " ".join(section.split())
+    for fragment in (
+        "`## Écarts à la spec`",
+        "« Aucun. »",
+        "`dependabot[bot]`",
+        "ni que l'accord est réel, ni qu'un écart n'a pas été tu",
+        "jamais contre l'ancien comportement",
+        "ni contre le seul mécanisme principal",
+        "l'accord d'Edouard porte sur cette promesse, citée",
+        "`Tête relue : <SHA>`",
+        "`closingIssuesReferences`",
+        "force à nommer une tête, pas à la relire",
+        "la PR de revue finale n'est pas visée",
+        "hors des lots, un correctif qui ferme une issue par `Fixes #N` nomme aussi la tête relue",
+        "aucun type d'événement documenté ne suit ce lien",
+        "la branche par défaut",
+        "seul à écouter `edited`",
+        "le garde lit tous les contrôles, `texte-pr` compris",
+    ):
+        assert fragment in texte, fragment
+    lignes = section.splitlines()
+    (ci,) = [ligne for ligne in lignes if ligne.startswith("| CI de base |")]
+    assert "du texte de la PR" not in ci
+    (rang,) = [i for i, ligne in enumerate(lignes) if ligne.startswith("| workflow `texte-pr` |")]
+    assert lignes[rang - 1] == ci
+    assert "**Le texte de la PR.**" in texte
+    # Le cycle : seule la PR de clôture ferme l'issue, et elle nomme la tête relue.
+    cycle = lire(METHODE).split("## Le cycle d'un lot", 1)[1].split("\n## ", 1)[0]
+    (point,) = [b for b in blocs(cycle) if b[0].startswith("5. ")]
+    point = " ".join(" ".join(point).split())
+    assert "« Closes #N »" in point
+    assert "tête relue" in point
 
 
 def test_methode_dit_l_ordre_du_passage_en_public():

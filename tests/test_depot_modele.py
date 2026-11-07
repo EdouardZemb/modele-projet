@@ -12,6 +12,7 @@ from conftest import PERIMES, RACINE
 from test_combinaisons import CLOTURE, SCHEMA, lien_casse
 
 CI = RACINE / ".github/workflows/ci.yml"
+TEXTE_PR = RACINE / ".github/workflows/texte-pr.yml"
 COPIER = yaml.safe_load((RACINE / "copier.yml").read_text(encoding="utf-8"))
 
 
@@ -29,11 +30,15 @@ def test_ruleset_du_depot_modele():
         "confidentialite",
         "mecanique",
         "fausse-app",
+        "texte-pr",
     }
 
-    jobs = yaml.safe_load(CI.read_text(encoding="utf-8"))["jobs"]
+    jobs = [
+        *yaml.safe_load(CI.read_text(encoding="utf-8"))["jobs"].values(),
+        *yaml.safe_load(TEXTE_PR.read_text(encoding="utf-8"))["jobs"].values(),
+    ]
     produits = set()
-    for job in jobs.values():
+    for job in jobs:
         oses = job.get("strategy", {}).get("matrix", {}).get("os")
         if oses:
             produits |= {f"{job['name']} ({os})" for os in oses}
@@ -449,10 +454,40 @@ def test_historique_du_depot_modele():
         assert racine.get(cle) == modele.get(cle)
 
 
-def test_ci_du_depot_modele_revoit_une_pr_modifiee():
-    doc = yaml.safe_load(CI.read_text(encoding="utf-8"))
-    on = doc.get("on", doc.get(True))
-    assert on["pull_request"]["types"] == ["opened", "synchronize", "reopened", "edited"]
+def test_texte_pr_du_depot_modele():
+    """Le dépôt modèle applique le workflow géré du texte de la PR : mêmes déclencheurs,
+    permissions, concurrence, nom et job, chaque `run` préfixé de `template/`."""
+    modele = yaml.safe_load(
+        (RACINE / "template/.github/workflows/modele-texte-pr.yml").read_text(encoding="utf-8")
+    )
+    racine = yaml.safe_load(TEXTE_PR.read_text(encoding="utf-8"))
+    attendues = [
+        {**e, "run": e["run"].replace("scripts/modele/", "template/scripts/modele/")}
+        if "run" in e
+        else e
+        for e in modele["jobs"]["texte-pr"]["steps"]
+    ]
+    assert racine["jobs"] == {"texte-pr": {**modele["jobs"]["texte-pr"], "steps": attendues}}
+    assert any("template/scripts/modele/texte_pr.py" in e.get("run", "") for e in attendues)
+    for cle in ("on", True, "permissions", "concurrency", "name"):
+        assert racine.get(cle) == modele.get(cle), cle
+
+
+def test_ci_ne_revoit_plus_une_pr_modifiee(rendre):
+    """Seul `texte-pr` écoute `edited` (AM-2) : une retouche du titre ou du corps d'une PR ne
+    relance plus toute la CI, ni ici, ni dans un projet à naître. Aucun job du socle ne lit plus le
+    corps de la PR."""
+    rendus = [
+        rendre() / ".github/workflows/ci.yml",
+        rendre(cible="serveur") / ".github/workflows/ci.yml",
+        rendre(nom="essai-donnees", cible="donnees") / ".github/workflows/ci.yml",
+    ]
+    for chemin in (CI, *rendus):
+        doc = yaml.safe_load(chemin.read_text(encoding="utf-8"))
+        on = doc.get("on", doc.get(True))
+        assert on["pull_request"]["types"] == ["opened", "synchronize", "reopened"], chemin
+    for chemin in (CI, RACINE / "template/.github/workflows/modele-socle.yml"):
+        assert "github.event.pull_request.body" not in chemin.read_text(encoding="utf-8"), chemin
 
 
 def test_ci_du_depot_modele_suit_le_socle():
@@ -482,6 +517,10 @@ def test_liste_d_alignement():
         "`LICENSE`",
         "needs:",
         "edited",
+        # lot 15 : `edited` se retire, `texte-pr` l'écoute seul ; la règle existante se met à jour
+        "retirer `edited`",
+        "texte-pr",
+        "PUT",
         "`.claude/settings.local.json`, `CLAUDE.local.md` et `__pycache__/`",
         # Le remède de la porte des masqués, ancré (#95, ronde 2).
         "le remède que donne la porte, des lignes ancrées qui n'admettent que ce qu'elle examine",
