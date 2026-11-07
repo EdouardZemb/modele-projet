@@ -88,9 +88,9 @@ sessions à distance.
 
 **Le texte de la PR.** Le workflow géré `texte-pr` (`modele-texte-pr.yml`) est seul à écouter
 `edited` : une retouche du titre ou du corps d'une PR ne relance que lui, jamais toute la CI, dès
-que le `ci.yml` du projet n'écoute plus `edited`. Ce fichier est semé : à sa mise à jour, un projet
-déjà né retire `edited` de son `ci.yml`. Le workflow porte la confidentialité et le format du
-titre et du corps, puis lance `scripts/modele/texte_pr.py`, qui lit le corps dans son
+que le `ci.yml` du projet n'écoute plus `edited`. Le `ci.yml` d'un projet est semé : à sa mise à
+jour, un projet déjà né en retire `edited` lui-même. Le workflow porte la confidentialité et le
+format du titre et du corps, puis lance `scripts/modele/texte_pr.py`, qui lit le corps dans son
 environnement, jamais dans ses arguments, et contrôle deux choses.
 
 - **Les écarts à la spec.** Le corps de toute PR porte une section `## Écarts à la spec`, une
@@ -109,8 +109,10 @@ environnement, jamais dans ses arguments, et contrôle deux choses.
   hors de cet ordre ; « Aucun. » à côté d'un écart ; un commentaire HTML jamais fermé, qui
   cacherait la suite. Un commentaire fermé ou un bloc clôturé ne compte pas : la forme d'une
   ligne, que le gabarit de PR met en commentaire, n'est pas un écart. Une ligne qui commence par
-  un commentaire et porte un texte après lui n'est pas un écart : GitHub la rend hors de toute
-  liste. Un bloc indenté de quatre espaces n'est pas écarté : après une puce, il continue l'écart ;
+  un commentaire et porte un texte après lui refuse, comme une ligne qui n'est ni « Aucun. » ni un
+  écart : GitHub la rend en bloc HTML, son texte tel quel, sans Markdown, jamais en puce ; sous une
+  puce, il ne la montre dans la puce que si elle est indentée au moins autant que le texte de la
+  puce. Un bloc indenté de quatre espaces n'est pas écarté : après une puce, il continue l'écart ;
   sans puce avant lui, il refuse. Le contrôle ne vérifie ni que l'accord est réel, ni qu'un écart
   n'a pas été tu : il force à écrire l'écart, la promesse qu'il touche et la date de l'accord. Un
   écart se pèse contre la promesse de la spec, jamais contre l'ancien comportement, ni contre le

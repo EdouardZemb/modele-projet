@@ -1,7 +1,7 @@
 # Géré par le modèle — ne pas modifier ici (docs/modele/methode.md).
 # Le texte de la PR, seul à écouter `edited` : une retouche du titre ou du corps ne relance que ce
-# contrôle, et pas toute la CI, dès que le `ci.yml` du projet n'écoute plus `edited` ; ce fichier
-# est semé : à sa mise à jour, un projet déjà né retire `edited` de son `ci.yml`. La
+# contrôle, et pas toute la CI, dès que le `ci.yml` du projet n'écoute plus `edited`. Le `ci.yml`
+# d'un projet est semé : à sa mise à jour, un projet déjà né en retire `edited` lui-même. La
 # confidentialité et le format du titre et du corps ; puis les écarts à la spec, et la tête relue
 # d'une PR qui ferme une issue (scripts/modele/texte_pr.py).
 # Ni le job ni ses étapes n'ont de condition : un job sauté compterait « succès ».

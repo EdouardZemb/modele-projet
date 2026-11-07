@@ -155,8 +155,10 @@ Chaque case se coche dans la PR d'alignement. Une case qui ne s'applique pas au 
       à jour de la branche principale :
       `gh api -X PUT repos/<dépôt>/rulesets/<id> --input .github/modele/ruleset-main.json`. Un
       `POST` crée une règle ; il ne met pas à jour celle qui existe. Aucune autre PR n'est
-      fusionnée entre la fusion et ce geste. Ensuite, `@dependabot rebase` sur chaque PR de
-      Dependabot ouverte : aucune n'a reçu d'exécution de `texte-pr`.
+      fusionnée entre la fusion et ce geste.
+- [ ] Après ce geste, relire la règle par `gh api repos/<dépôt>/rulesets/<id>` : le contrôle neuf
+      y est (`texte-pr`). Puis commenter `@dependabot rebase` sur chaque PR de Dependabot ouverte :
+      aucune n'a reçu d'exécution du contrôle neuf.
 - [ ] **L'historique complet**, une fois après la fusion : lancer `modele-historique.yml` à la main
       (`gh workflow run modele-historique.yml`, ou l'onglet Actions). gitleaks n'examine sinon que
       les commits de chaque PR et de chaque envoi, et l'historique antérieur à l'alignement

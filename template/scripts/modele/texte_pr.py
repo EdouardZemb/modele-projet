@@ -176,8 +176,9 @@ def ecarts(corps: str) -> tuple[list[str], bool]:
     if "<!--" in doc.CODE_EN_LIGNE.sub("", propre):
         return [ECARTS + "commentaire HTML non fermé"], True
     # Une ligne qui commence par un commentaire, puis porte un texte après sa fermeture : GitHub la
-    # rend en bloc HTML, ni puce ni suite d'une puce. Son rang est celui de la ligne qui ferme le
-    # commentaire ; dans un bloc clôturé, cette ligne est vide, et ne compte pas.
+    # rend en bloc HTML, son texte tel quel, jamais en puce, et le contrôle n'y lit ni une puce ni
+    # la suite d'une puce. Son rang est celui de la ligne qui ferme le commentaire ; dans un bloc
+    # clôturé, cette ligne est vide, et ne compte pas.
     en_tete = re.compile(r"^ {0,3}(?:" + doc.COMMENTAIRE.pattern + ")", re.MULTILINE | re.DOTALL)
     en_bloc_html = {brute.count("\n", 0, m.end()) + 1 for m in en_tete.finditer(brute)}
     refus: list[tuple[int, str]] = []

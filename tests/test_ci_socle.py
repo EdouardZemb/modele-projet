@@ -387,9 +387,14 @@ def test_texte_pr_yml(rendre):
     assert texte.splitlines()[0] == (
         "# Géré par le modèle — ne pas modifier ici (docs/modele/methode.md)."
     )
-    # le `ci.yml` d'un projet déjà né, semé, écoute encore `edited` jusqu'à ce qu'il le retire
+    # le `ci.yml` d'un projet déjà né, semé, écoute encore `edited` jusqu'à ce qu'il le retire ;
+    # le workflow lui-même est géré : « ce fichier est semé » se lisait comme s'il parlait de lui
     entete = " ".join(ligne[1:].strip() for ligne in texte.splitlines() if ligne.startswith("#"))
-    assert "à sa mise à jour, un projet déjà né retire `edited` de son `ci.yml`" in entete
+    assert (
+        "Le `ci.yml` d'un projet est semé : à sa mise à jour, un projet déjà né en retire `edited` "
+        "lui-même"
+    ) in entete
+    assert "ce fichier est semé" not in entete.lower()
 
     # chaque action épinglée par SHA, celui du socle
     socle = dict(

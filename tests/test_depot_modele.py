@@ -644,6 +644,16 @@ def test_liste_d_alignement():
     assert "PUT" not in six
     put = sept.index("gh api -X PUT repos/<dépôt>/rulesets/<id>")
     assert sept.index("Fusion en squash") < put < sept.index("@dependabot rebase")
+    # la mise à jour est à Edouard (👤) ; la relecture de la règle et la relance des PR de
+    # Dependabot, à la session, dans la case qui suit, sans 👤 (ronde 3)
+    cases = sept.split("\n- [ ] ")[1:]
+    (mise_a_jour,) = [case for case in cases if "gh api -X PUT" in case]
+    assert mise_a_jour.startswith("👤 ")
+    assert "@dependabot rebase" not in mise_a_jour
+    suivante = cases[cases.index(mise_a_jour) + 1]
+    assert "👤" not in suivante
+    for fragment in ("gh api repos/<dépôt>/rulesets/<id>", "`texte-pr`", "@dependabot rebase"):
+        assert fragment in suivante, fragment
     sept = " ".join(sept.split())
     assert "Un `POST` crée une règle ; il ne met pas à jour celle qui existe." in sept
     assert "en créerait une seconde" not in texte
