@@ -50,9 +50,10 @@ def test_scripts_sous_python_isole(rendre, env_isole, tmp_path):
     Six lancements exigent un texte que seul le `reglages.py` du projet permet d'écrire : la
     branche, qu'aucun script n'a par défaut, pour `garde_claude.py`, `pre_push.py` et `signaux.py`
     sans argument ; la nature pour `documentation.py` ; le dépôt de code d'un dépôt de données pour
-    `verifier_secrets.py` et `verifier_donnees.py`. Les deux autres ne lisent pas les réglages :
-    `signaux.py --branche` et `texte_pr.py` exigent un texte que seul l'import de leur voisin
-    `documentation` permet d'écrire."""
+    `verifier_secrets.py` et `verifier_donnees.py`. Les deux autres ne lisent pas les réglages, et
+    prouvent l'import de leur voisin `documentation` : `texte_pr.py` par un texte qu'il n'écrit pas
+    sans lui, `signaux.py --branche` par l'absence de « non lue (erreur) », qu'il écrit quand cet
+    import échoue."""
     # Les réponses par défaut portent déjà la branche : elle se change en fusionnant les deux.
     rendu = rendre(**{**REPONSES_DONNEES_SERVEUR, "branche_principale": BRANCHE})
     env = env_isole()
