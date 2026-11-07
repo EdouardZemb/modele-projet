@@ -234,11 +234,15 @@ projet né plus tôt l'y ajoute.
 
 Ses lignes, chacune après `documentation : ` :
 
+- `carte : 0 fichier .md à la racine` : la première ligne, quand la racine n'a pas d'autre `.md`
+  que `README.md` ;
 - `carte : 1 fichier .md à la racine, lié` : la première ligne, quand le seul fichier vu est lié ;
 - `carte : <n> fichiers .md à la racine, tous liés` : la première ligne, quand tous le sont ;
-- `carte : <n> fichiers .md à la racine, <k> non lié` : la première ligne d'un refus, qui dit
-  aussi combien ne sont pas liés, au pluriel quand il le faut (`1 fichier`, `2 non liés`) ;
-- `carte : README.md absent`, ou `carte : CLAUDE.md absent` ;
+- `carte : <n> fichiers .md à la racine, <k> non lié` : la première ligne, quand un fichier n'est
+  pas lié ; elle dit aussi combien ne le sont pas, au pluriel quand il le faut (`1 fichier`,
+  `2 non liés`) ;
+- `carte : README.md absent`, ou `carte : CLAUDE.md absent` : ces deux lignes refusent quelle que
+  soit la première ligne ;
 - `carte : CLAUDE.md n'est pas lié par README.md` ;
 - `carte : <nom> n'est lié ni par README.md ni par « Ce qui fait foi » de CLAUDE.md` ;
 - `refus`, en dernière ligne, quand la licence ou la carte refuse.

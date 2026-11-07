@@ -1084,6 +1084,8 @@ def test_documentation_md(tmp_path, env_isole):
         "carte : CLAUDE.md n'est pas lié par README.md",
         f"carte : <nom> {documentation.NON_LIE}",
         "`refus`, en dernière ligne",
+        "la première ligne, quand un fichier n'est pas lié",
+        "refusent quelle que soit la première ligne",
         "documentation : non lue (erreur)",
         "le titre `documentation :` puis une ligne `- <constat>` chacun",
         "imprime un constat par ligne et rend toujours 0",
@@ -1111,8 +1113,8 @@ def test_documentation_md(tmp_path, env_isole):
     listes = " ".join(ligne for ligne in section.splitlines() if ligne.startswith("- `"))
     racine = tmp_path / "racine"
     racine.mkdir()
-    # Une racine vide : la licence absente, puis, après la tête, README.md et CLAUDE.md absents.
-    sorties = [*documentation.licence(racine, "code")[0], *documentation.carte(racine)[0][1:]]
+    # Une racine vide : la licence absente, la tête à 0 fichier, README.md et CLAUDE.md absents.
+    sorties = [*documentation.licence(racine, "code")[0], *documentation.carte(racine)[0]]
     (racine / "LICENSE").write_text("MIT\n", encoding="utf-8")
     (racine / "README.md").write_text("[c](CLAUDE.md)\n", encoding="utf-8")
     (racine / "CLAUDE.md").write_text("# C\n", encoding="utf-8")
@@ -1133,8 +1135,8 @@ def test_documentation_md(tmp_path, env_isole):
     git(depot, env_isole(), "init", "-q", "-b", "main")
     (depot / "LICENSE").write_text("MIT\n", encoding="utf-8")
     sorties += documentation.licence(depot, "code")[0]
-    assert len(sorties) == 8, sorties
-    assert len(set(sorties)) == 8, sorties
+    assert len(sorties) == 9, sorties
+    assert len(set(sorties)) == 9, sorties
     for ligne in sorties:
         assert f"`{ligne}`" in listes, ligne
     decisions = "| [Les décisions](docs/decisions/) |"
