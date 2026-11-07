@@ -12,6 +12,7 @@ from conftest import PERIMES, RACINE
 from test_combinaisons import CLOTURE, SCHEMA, lien_casse
 
 CI = RACINE / ".github/workflows/ci.yml"
+TEXTE_PR = RACINE / ".github/workflows/texte-pr.yml"
 COPIER = yaml.safe_load((RACINE / "copier.yml").read_text(encoding="utf-8"))
 
 
@@ -29,11 +30,15 @@ def test_ruleset_du_depot_modele():
         "confidentialite",
         "mecanique",
         "fausse-app",
+        "texte-pr",
     }
 
-    jobs = yaml.safe_load(CI.read_text(encoding="utf-8"))["jobs"]
+    jobs = [
+        *yaml.safe_load(CI.read_text(encoding="utf-8"))["jobs"].values(),
+        *yaml.safe_load(TEXTE_PR.read_text(encoding="utf-8"))["jobs"].values(),
+    ]
     produits = set()
-    for job in jobs.values():
+    for job in jobs:
         oses = job.get("strategy", {}).get("matrix", {}).get("os")
         if oses:
             produits |= {f"{job['name']} ({os})" for os in oses}
@@ -449,10 +454,48 @@ def test_historique_du_depot_modele():
         assert racine.get(cle) == modele.get(cle)
 
 
-def test_ci_du_depot_modele_revoit_une_pr_modifiee():
-    doc = yaml.safe_load(CI.read_text(encoding="utf-8"))
-    on = doc.get("on", doc.get(True))
-    assert on["pull_request"]["types"] == ["opened", "synchronize", "reopened", "edited"]
+def test_texte_pr_du_depot_modele():
+    """Le dépôt modèle applique le workflow géré du texte de la PR : mêmes déclencheurs,
+    permissions, concurrence, nom et job, chaque `run` préfixé de `template/`."""
+    modele = yaml.safe_load(
+        (RACINE / "template/.github/workflows/modele-texte-pr.yml").read_text(encoding="utf-8")
+    )
+    racine = yaml.safe_load(TEXTE_PR.read_text(encoding="utf-8"))
+    attendues = [
+        {**e, "run": e["run"].replace("scripts/modele/", "template/scripts/modele/")}
+        if "run" in e
+        else e
+        for e in modele["jobs"]["texte-pr"]["steps"]
+    ]
+    assert racine["jobs"] == {"texte-pr": {**modele["jobs"]["texte-pr"], "steps": attendues}}
+    assert any("template/scripts/modele/texte_pr.py" in e.get("run", "") for e in attendues)
+    for cle in ("on", True, "permissions", "concurrency", "name"):
+        assert racine.get(cle) == modele.get(cle), cle
+    # l'en-tête aussi, après sa première ligne (« Géré par le modèle »), que la copie remplace par
+    # deux lignes qui disent d'où elle vient
+    gere = RACINE / "template/.github/workflows/modele-texte-pr.yml"
+    entetes = [
+        [ligne for ligne in chemin.read_text(encoding="utf-8").splitlines() if ligne[:1] == "#"]
+        for chemin in (TEXTE_PR, gere)
+    ]
+    assert entetes[0][2:] == entetes[1][1:]
+
+
+def test_ci_ne_revoit_plus_une_pr_modifiee(rendre):
+    """Seul `texte-pr` écoute `edited` (AM-2) : une retouche du titre ou du corps d'une PR ne
+    relance plus toute la CI, ni ici, ni dans un projet à naître. Aucun job du socle ne lit plus le
+    corps de la PR."""
+    rendus = [
+        rendre() / ".github/workflows/ci.yml",
+        rendre(cible="serveur") / ".github/workflows/ci.yml",
+        rendre(nom="essai-donnees", cible="donnees") / ".github/workflows/ci.yml",
+    ]
+    for chemin in (CI, *rendus):
+        doc = yaml.safe_load(chemin.read_text(encoding="utf-8"))
+        on = doc.get("on", doc.get(True))
+        assert on["pull_request"]["types"] == ["opened", "synchronize", "reopened"], chemin
+    for chemin in (CI, RACINE / "template/.github/workflows/modele-socle.yml"):
+        assert "github.event.pull_request.body" not in chemin.read_text(encoding="utf-8"), chemin
 
 
 def test_ci_du_depot_modele_suit_le_socle():
@@ -482,6 +525,10 @@ def test_liste_d_alignement():
         "`LICENSE`",
         "needs:",
         "edited",
+        # lot 15 : `edited` se retire, `texte-pr` l'écoute seul ; la règle existante se met à jour
+        "retirer `edited`",
+        "texte-pr",
+        "PUT",
         "`.claude/settings.local.json`, `CLAUDE.local.md` et `__pycache__/`",
         # Le remède de la porte des masqués, ancré (#95, ronde 2).
         "le remède que donne la porte, des lignes ancrées qui n'admettent que ce qu'elle examine",
@@ -590,6 +637,32 @@ def test_liste_d_alignement():
     for tout_indexer in ("git add -A", "git add ."):
         assert tout_indexer not in texte, tout_indexer
     assert "git add -- <chemins>" in texte
+    # lot 15 : une règle qui existe déjà se met à jour après la fusion (§ 7), jamais avant la PR
+    # (§ 6), puis les PR de Dependabot ouvertes se relancent
+    six = texte.split("\n## 6. ", 1)[1].split("\n## ", 1)[0]
+    sept = texte.split("\n## 7. ", 1)[1].split("\n## ", 1)[0]
+    assert "PUT" not in six
+    put = sept.index("gh api -X PUT repos/<dépôt>/rulesets/<id>")
+    assert sept.index("Fusion en squash") < put < sept.index("@dependabot rebase")
+    # la mise à jour est à Edouard (👤) ; la relecture de la règle et la relance des PR de
+    # Dependabot, à la session, dans la case qui suit, sans 👤 (ronde 3)
+    cases = sept.split("\n- [ ] ")[1:]
+    (mise_a_jour,) = [case for case in cases if "gh api -X PUT" in case]
+    assert mise_a_jour.startswith("👤 ")
+    assert "@dependabot rebase" not in mise_a_jour
+    suivante = cases[cases.index(mise_a_jour) + 1]
+    assert "👤" not in suivante
+    for fragment in ("gh api repos/<dépôt>/rulesets/<id>", "`texte-pr`", "@dependabot rebase"):
+        assert fragment in suivante, fragment
+    sept = " ".join(sept.split())
+    assert "Un `POST` crée une règle ; il ne met pas à jour celle qui existe." in sept
+    assert "en créerait une seconde" not in texte
+    # le modèle de PR que propose GitHub vient de la branche par défaut, encore sans la section
+    assert (
+        "le modèle de PR que propose GitHub est celui de la branche par défaut, encore sans la "
+        "section « Écarts à la spec » : l'écrire à la main dans le corps, `## Écarts à la spec` "
+        "puis « Aucun. », ou les écarts"
+    ) in sept
     for lien in ("CLAUDE.md", "README.md"):
         assert "docs/aligner.md" in (RACINE / lien).read_text(encoding="utf-8"), lien
 

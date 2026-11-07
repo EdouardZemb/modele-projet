@@ -183,14 +183,21 @@ def test_formulaire_lot():
 
 def test_modele_de_pr():
     texte = lire(TEMPLATE / ".github/pull_request_template.md")
+    lignes = texte.splitlines()
     for titre in (
         "## Ce que fait cette PR",
+        "## Écarts à la spec",
         "## Vérifications",
         "## Reste ouvert",
         "## Registre",
         "## Pour un fix : cause racine et prévention",
     ):
-        assert titre in texte.splitlines(), titre
+        assert titre in lignes, titre
+    # La section des écarts dit « Aucun. » par défaut : sa première ligne qui n'est ni vide ni un
+    # commentaire (lot 15, LE-37).
+    apres = lignes[lignes.index("## Écarts à la spec") + 1 :]
+    (premiere, *_) = [ligne for ligne in apres if ligne.strip() and not ligne.startswith("<!--")]
+    assert premiere == "Aucun."
 
 
 def test_modele_de_pr_a_la_case_du_readme():
@@ -207,10 +214,25 @@ def test_modele_de_pr_a_la_case_du_readme():
 
 
 def test_modele_de_pr_ferme_l_issue():
-    # GitHub ne ferme l'issue à la fusion que sur un mot-clé anglais (LE-30).
+    # GitHub ne ferme l'issue à la fusion que sur un mot-clé anglais (LE-30). Seule la PR de
+    # clôture d'un lot le porte ; les autres nomment l'issue sans mot-clé (lot 15, LE-55).
     texte = lire(TEMPLATE / ".github/pull_request_template.md")
     assert "« Closes #n »" in texte
+    assert "« Partie de #n »" in texte
+    assert "Dans la seule PR de clôture du lot : « Closes #n »" in texte
     assert "Ferme #" not in texte
+    # la tête relue : une ligne, pas une case, après les cases de « Vérifications »
+    lignes = texte.splitlines()
+    (rang,) = [i for i, ligne in enumerate(lignes) if ligne.rstrip() == "Tête relue :"]
+    assert rang > max(i for i, ligne in enumerate(lignes) if ligne.startswith("- [ ] "))
+    a_plat = " ".join(texte.split())
+    assert "le SHA complet de la tête qu'a lue la dernière relecture" in a_plat
+    # hors des lots, un correctif qui ferme une issue nomme aussi la tête relue, comme le dit la
+    # méthode
+    assert (
+        "Dans la PR de clôture, ou dans un correctif hors des lots qui ferme une issue par "
+        "`Fixes #N` : le SHA complet"
+    ) in a_plat
 
 
 def test_modele_de_pr_renvoie_un_depot_de_donnees_au_registre_du_code():
@@ -274,6 +296,107 @@ def test_garde_fous_a_jour():
     assert "(voir plus bas)" in section
     assert "(voir plus haut)" not in section
     assert "visibilite" not in lire(METHODE)
+
+
+def test_methode_dit_le_texte_de_la_pr():
+    """Le workflow `texte-pr` (lot 15) : la section des écarts et sa règle (LE-37), la tête relue
+    lue par l'API (LE-55), leurs limites, et le garde qui lit tous les contrôles."""
+    section = lire(METHODE).split("## Les garde-fous", 1)[1].split("\n## ", 1)[0]
+    texte = " ".join(section.split())
+    for fragment in (
+        "`## Écarts à la spec`",
+        "« Aucun. »",
+        "`dependabot[bot]`",
+        "ni que l'accord est réel, ni qu'un écart n'a pas été tu",
+        "jamais contre l'ancien comportement",
+        "ni contre le seul mécanisme principal",
+        "l'accord d'Edouard porte sur cette promesse, citée",
+        "`Tête relue : <SHA>`",
+        "`closingIssuesReferences`",
+        "force à nommer une tête, pas à la relire",
+        "la PR de revue finale n'est pas visée",
+        "hors des lots, un correctif qui ferme une issue par `Fixes #N` nomme aussi la tête relue",
+        "aucun type d'événement documenté ne suit ce lien",
+        "la branche par défaut",
+        "seul à écouter `edited`",
+        "le garde lit tous les contrôles, `texte-pr` compris",
+        # la revue de la tâche (ronde 2) : la forme stricte, ses refus et ses bornes
+        (
+            "La section s'arrête au premier titre, quel que soit son niveau, ou à la première ligne de "
+            "séparation (`---`) : un écart écrit après n'est pas lu"
+        ),
+        (
+            "dans cet ordre : l'écart, qui peut contenir un séparateur, puis la promesse, qui n'en "
+            "contient pas, puis l'accord, dont la date termine la ligne"
+        ),
+        (
+            "Une ligne indentée qui commence par une puce ou un numéro (`-`, `*`, `+`, `1.`) est une "
+            "sous-liste, et ne continue pas l'écart"
+        ),
+        "une section absente, vide ou en double",
+        "avec un texte après la date, ou hors de cet ordre",
+        "Un commentaire fermé ou un bloc clôturé ne compte pas",
+        (
+            "Un bloc indenté de quatre espaces n'est pas écarté : après une puce, il continue l'écart ; "
+            "sans puce avant lui, il refuse"
+        ),
+        "dès que le `ci.yml` du projet n'écoute plus `edited`",
+        # le workflow est géré : c'est le `ci.yml` du projet qui est semé (ronde 3)
+        (
+            "Le `ci.yml` d'un projet est semé : à sa mise à jour, un projet déjà né en retire "
+            "`edited` lui-même"
+        ),
+        (
+            "En mode `edouard`, le garde refuse toute fusion de la session : Edouard fusionne, et rien "
+            "ne lit les contrôles à sa place"
+        ),
+        "la CI (le socle et `texte-pr`) le seul filet",
+        # une ligne qui commence par un commentaire refuse, et le rendu de GitHub dit pourquoi
+        # (ronde 3) : sous une puce, indentée comme son texte, elle paraît dans la puce
+        (
+            "Une ligne qui commence par un commentaire, après au plus trois espaces, et porte un texte "
+            "après lui refuse, comme une "
+            "ligne qui n'est ni « Aucun. » ni un écart : GitHub la rend en bloc HTML, son texte tel "
+            "quel, sans Markdown, jamais en puce ; sous une puce, il ne la montre dans la puce que si "
+            "elle est indentée au moins autant que le texte de la puce"
+        ),
+        # l'épreuve de la relance (LE-56) : elle rejoue l'événement d'origine, et l'ancien corps
+        (
+            "Une relance, par `gh run rerun` ou depuis l'interface de GitHub, rejoue l'événement "
+            "d'origine : elle relit le titre et le corps de ce moment-là, pas ceux de la PR telle "
+            "qu'elle est."
+        ),
+        "**Ne jamais relancer `texte-pr`.**",
+        "Éprouvé dans le dépôt modèle le 07/11/2026",
+        (
+            "la relance de la première exécution par `gh run rerun` a relu le corps d'avant et est "
+            "passée, et `gh pr checks` a montré `texte-pr` vert sur un corps qui refusait"
+        ),
+        (
+            "Pour relire le texte, on retouche le titre ou le corps : la retouche relance "
+            "`texte-pr` sur le texte en cours."
+        ),
+    ):
+        assert fragment in texte, fragment
+    for perime in (
+        "un bloc de code ne compte pas",
+        "rien ne bloque côté agent",
+        "Ce fichier est semé",
+        "GitHub la rend hors de toute liste",
+    ):
+        assert perime not in texte, perime
+    lignes = section.splitlines()
+    (ci,) = [ligne for ligne in lignes if ligne.startswith("| CI de base |")]
+    assert "du texte de la PR" not in ci
+    (rang,) = [i for i, ligne in enumerate(lignes) if ligne.startswith("| workflow `texte-pr` |")]
+    assert lignes[rang - 1] == ci
+    assert "**Le texte de la PR.**" in texte
+    # Le cycle : seule la PR de clôture ferme l'issue, et elle nomme la tête relue.
+    cycle = lire(METHODE).split("## Le cycle d'un lot", 1)[1].split("\n## ", 1)[0]
+    (point,) = [b for b in blocs(cycle) if b[0].startswith("5. ")]
+    point = " ".join(" ".join(point).split())
+    assert "« Closes #N »" in point
+    assert "tête relue" in point
 
 
 def test_methode_dit_l_ordre_du_passage_en_public():
@@ -444,6 +567,9 @@ def test_m0002_amende():
     texte = lire(DECISIONS / "M-0002-garde-fous-et-confidentialite.md")
     assert "le contrôle de dérive en tient compte" not in texte
     assert "le garde de Claude est alors la seule serrure côté agent" in texte
+    # lot 15 : le texte de la PR sort du socle, vers `texte-pr`, qui fait partie du filet
+    assert "la CI (le socle et `texte-pr`) le seul filet" in " ".join(texte.split())
+    assert "CI du socle le seul filet" not in " ".join(texte.split())
     assert "avertit sur ce qui identifie" in texte
     assert "refuse toujours les secrets" in texte
     assert "gitleaks n'est pas concerné" not in texte

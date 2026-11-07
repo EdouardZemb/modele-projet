@@ -1,10 +1,13 @@
 """La documentation de la racine : la licence et la carte, qui refusent en CI, et le gabarit resté
 vide, qui avertit au `SessionStart`."""
 
+import itertools
 import os
+import re
 import shutil
 import subprocess
 import sys
+import unicodedata
 from pathlib import PureWindowsPath
 
 import documentation as d
@@ -701,6 +704,139 @@ def test_cible_locale_sans_lecteur(tmp_path, monkeypatch):
         else:
             assert local == attendu, cible
     assert lecteurs == []
+
+
+# --- une section, et un texte sans blocs ni commentaires, que lisent d'autres scripts ---------
+
+
+def test_section_niveau():
+    """Avec `niveau`, seul un titre de ce niveau compte ; sans lui, tous les niveaux."""
+    texte = "# T\n\n### Écarts à la spec\n\n- trois\n\n## Écarts à la spec\n\n- deux\n"
+    assert d.section(texte, "Écarts à la spec", niveau=2) == "\n- deux\n"
+    assert d.section("### Écarts à la spec\n\n- x\n", "Écarts à la spec", niveau=2) is None
+    assert d.section(texte, "Écarts à la spec", niveau=3) == "\n- trois\n"
+    assert d.section(texte, "Écarts à la spec") == "\n- trois\n\n\n\n- deux\n"
+
+
+def test_section_absente_ou_vide():
+    assert d.section("# T\n\nx\n", "Écarts à la spec") is None
+    assert d.section("", "Écarts à la spec") is None
+    assert d.section("## Écarts à la spec\n## Suite\n", "Écarts à la spec") == ""
+    # un titre dans un bloc de code ou dans un bloc de commentaire n'ouvre rien
+    assert d.section("```\n## Écarts à la spec\n```\n", "Écarts à la spec") is None
+    assert d.section("<!--\n## Écarts à la spec\n-->\n", "Écarts à la spec") is None
+
+
+def test_section_nfd_et_casse():
+    """Le titre se compare en NFC, sans égard à la casse ; les lignes rendues sont celles d'origine,
+    en LF : un corps en NFD est rendu en NFD."""
+    nfd = unicodedata.normalize("NFD", "## Écarts à la spec\n\nDéjà vu.\n")
+    rendu = d.section(nfd, "écarts à la spec")
+    assert rendu == unicodedata.normalize("NFD", "\nDéjà vu.\n")
+    assert rendu != "\nDéjà vu.\n"
+    assert d.section("## ÉCARTS À LA SPEC\n\nx\n", "Écarts à la spec") == "\nx\n"
+    titre_nfd = unicodedata.normalize("NFD", "Écarts à la spec")
+    assert d.section("## Écarts à la spec\n\nx\n", titre_nfd) == "\nx\n"
+    assert d.section("## Écarts à la spec\r\n\r\nx\r\n", "Écarts à la spec") == "\nx\n"
+
+
+def test_section_bornee():
+    """Sans `bornee`, une section court jusqu'au titre suivant de même niveau ou d'un niveau
+    supérieur ; avec, jusqu'au premier titre, quel que soit son niveau, ou au premier séparateur.
+    Un séparateur dans un bloc de code ne borne rien."""
+    texte = "## A\n\n- x\n\n---\n\n### Task 1: y\n- z\n"
+    assert "### Task 1: y" in d.section(texte, "a")
+    assert d.section(texte, "a", bornee=True) == "\n- x\n"
+    assert d.section("## A\n\n- x\n### B\n- z\n", "a", bornee=True) == "\n- x"
+    for separateur in ("***", "___", " - - -"):
+        assert d.section(f"## A\n\n- x\n{separateur}\n- z\n", "a", bornee=True) == "\n- x"
+    assert d.section("## A\n\n```\n---\n```\n- x\n", "a", bornee=True) == "\n```\n---\n```\n- x\n"
+    assert d.section("## A\n\n- x\n\n## B\n", "a", niveau=2, bornee=True) == "\n- x\n"
+
+
+def test_sections_une_par_titre():
+    """`sections` rend chaque section du titre à part, dans l'ordre ; `section` les joint, ou rend
+    `None` quand il n'y en a aucune."""
+    texte = "## A\n\n- x\n\n## B\n\n## A\n\n- y\n"
+    assert d.sections(texte, "a", niveau=2, bornee=True) == ["\n- x\n", "\n- y\n"]
+    assert d.section(texte, "a", niveau=2, bornee=True) == "\n- x\n\n\n\n- y\n"
+    assert d.sections("## B\n", "a") == []
+    assert d.section("## B\n", "a") is None
+
+
+def test_debut_de_bloc():
+    """Ce qui peut précéder, sur sa ligne, un `<!--` qui ouvre un bloc de commentaire : au plus
+    trois espaces, une puce, un numéro ou `>` ; pas un texte."""
+    ouverture = re.compile(d.DEBUT_DE_BLOC + "<!--", re.MULTILINE)
+    for ligne in ("<!-- x", "   <!-- x", "- <!-- x", "1. <!-- x", "> <!-- x"):
+        assert ouverture.search("a\n\n" + ligne), ligne
+    for ligne in ("texte <!-- x", "    <!-- x", "- [ ] case <!-- x"):
+        assert not ouverture.search("a\n\n" + ligne), ligne
+
+
+# Le motif d'avant, ambigu : l'espace qui suit un `>` se prenait par `[ \t]?` ou par le ` {0,3}` du
+# tour suivant, celles qui suivent une puce par `[ \t]+` ou par ce même ` {0,3}`. Il recule de façon
+# exponentielle : il ne sert ici que de référence, sur des chaînes courtes.
+DEBUT_DE_BLOC_AMBIGU = r"^(?: {0,3}(?:>[ \t]?|(?:[-*+]|\d{1,9}[.)])[ \t]+))* {0,3}"
+# Des lignes sans `<!--` qui font reculer un motif ambigu à chaque niveau.
+LIGNES_SANS_COMMENTAIRE = "> " * 40 + "\n\n" + "-  " * 40 + "\n"
+
+
+def test_debut_de_bloc_reconnait_ce_que_reconnaissait_l_ancien():
+    """Réécrit sans ambiguïté, le motif reconnaît exactement ce que reconnaissait l'ancien : toute
+    chaîne de six caractères au plus, sur un alphabet qui couvre chaque branche, suivie de `<!--`."""
+    neuf = re.compile(d.DEBUT_DE_BLOC + "<!--")
+    ancien = re.compile(DEBUT_DE_BLOC_AMBIGU + "<!--")
+    for longueur in range(7):
+        for lettres in itertools.product((" ", "\t", ">", "-", "1", ")", "a"), repeat=longueur):
+            chaine = "".join(lettres) + "<!--"
+            assert bool(neuf.fullmatch(chaine)) == bool(ancien.fullmatch(chaine)), repr(chaine)
+
+
+def test_quarante_citations_sans_commentaire_se_lisent_vite(tmp_path, env_isole):
+    """Une ligne de 40 `> `, puis une de 40 puces suivies de deux espaces, sans `<!--` : la licence
+    et la carte se lisent en moins de 2 s. Le README les porte, et CLAUDE.md aussi, dont la carte lit
+    « Ce qui fait foi » par `section`. Le contrôle tourne dans un sous-processus tué au bout de
+    30 s : un recul ne fige pas la suite."""
+    ecrire(
+        tmp_path,
+        README_md=README + "\n" + LIGNES_SANS_COMMENTAIRE,
+        CLAUDE_md=CLAUDE + "\n" + LIGNES_SANS_COMMENTAIRE,
+        LICENSE="MIT License\n",
+    )
+    mesure = (
+        "import sys, time\n"
+        "import documentation\n"
+        "debut = time.perf_counter()\n"
+        "code = documentation.main(['--racine', sys.argv[1]])\n"
+        "print('mesure', code, time.perf_counter() - debut)\n"
+    )
+    try:
+        r = subprocess.run(
+            [sys.executable, "-B", "-c", mesure, str(tmp_path)],
+            cwd=SCRIPTS,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            env=env_isole(),
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.fail("la lecture ne finit pas en 30 s : le motif recule")
+    mesures = [ligne.split() for ligne in r.stdout.splitlines() if ligne.startswith("mesure ")]
+    assert mesures, r.stdout + r.stderr
+    _, code, duree = mesures[-1]
+    assert code == "0", r.stdout + r.stderr
+    assert float(duree) < 2, r.stdout
+
+
+def test_sans_bloc_ni_commentaire():
+    """Les blocs de code clôturés vidés et les commentaires fermés retirés, leurs fins de ligne
+    gardées ; le code en ligne reste, et protège le `<!--` qu'il contient. Le texte en LF."""
+    texte = "a\n<!-- x\ny -->\n```\nz\n```\n`<!-- k -->` b\n"
+    assert d.sans_bloc_ni_commentaire(texte) == "a\n\n\n\n\n\n`<!-- k -->` b\n"
+    assert d.sans_bloc_ni_commentaire("a\r\n<!-- x -->b\r\n") == "a\nb\n"
 
 
 # --- le gabarit resté vide -------------------------------------------------------------------

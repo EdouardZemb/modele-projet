@@ -82,8 +82,9 @@ Chaque case se coche dans la PR d'alignement. Une case qui ne s'applique pas au 
     `permissions: {contents: read, pull-requests: read}` ;
   - retirer l'ancien job qu'il remplace (un gitleaks, par exemple) et renommer en `socle` chaque
     `needs:` qui le citait ;
-  - `pull_request: types: [opened, synchronize, reopened, edited]`, pour qu'un titre ou un corps de
-    PR modifié soit réexaminé.
+  - `pull_request: types: [opened, synchronize, reopened]` : retirer `edited`, que le workflow géré
+    `texte-pr` (`modele-texte-pr.yml`) écoute seul ; une retouche du titre ou du corps d'une PR ne
+    relance alors que lui, et pas toute la CI.
 - [ ] **`.gitignore`** : `.claude/settings.local.json`, `CLAUDE.local.md` et `__pycache__/`, s'ils
       n'y sont pas.
 - [ ] **`.dockerignore`**, s'il existe : `.githooks` et `scripts/modele`, pour qu'un `COPY` ne les
@@ -133,17 +134,31 @@ Chaque case se coche dans la PR d'alignement. Une case qui ne s'applique pas au 
   ```
 
 - [ ] 👤 **La règle de protection**, si le dépôt est public, après le premier envoi :
-      `gh api -X POST repos/<dépôt>/rulesets --input .github/modele/ruleset-main.json`.
-      Un dépôt privé n'en a pas : le garde de Claude y est la seule serrure côté agent.
+      `gh api -X POST repos/<dépôt>/rulesets --input .github/modele/ruleset-main.json`. Un dépôt
+      qui a déjà sa règle la met à jour après la fusion (§7). Un dépôt privé n'en a pas : le garde
+      de Claude y est la seule serrure côté agent.
 
 ## 7. PR et CI
 
-- [ ] Envoyer la branche, ouvrir la PR avec le modèle de PR.
-- [ ] `gh pr checks` entièrement vert : `socle / secrets`, `socle / confidentialite`, et les
-      contrôles propres au projet. Dans un dépôt privé de nature `donnees`, `socle /
+- [ ] Envoyer la branche, ouvrir la PR avec le modèle de PR. À un alignement ou à une mise à
+      jour, le modèle de PR que propose GitHub est celui de la branche par défaut, encore sans la
+      section « Écarts à la spec » : l'écrire à la main dans le corps, `## Écarts à la spec` puis
+      « Aucun. », ou les écarts.
+- [ ] `gh pr checks` entièrement vert : `socle / secrets`, `socle / confidentialite`, `texte-pr`,
+      et les contrôles propres au projet. Dans un dépôt privé de nature `donnees`, `socle /
       confidentialite` y est rouge, par la licence que refuse l'étape « La documentation de la
       racine » (§3) : 👤 Edouard fusionne cette PR.
 - [ ] Fusion en squash, puis le déploiement éventuel vérifié là où l'application sert.
+- [ ] 👤 **La règle de protection d'un dépôt qui l'a déjà**, après la fusion, quand la mise à jour
+      change ses contrôles requis (comme l'arrivée de `texte-pr`) : la lire par
+      `gh api repos/<dépôt>/rulesets`, puis la mettre à jour par son identifiant, depuis le clone
+      à jour de la branche principale :
+      `gh api -X PUT repos/<dépôt>/rulesets/<id> --input .github/modele/ruleset-main.json`. Un
+      `POST` crée une règle ; il ne met pas à jour celle qui existe. Aucune autre PR n'est
+      fusionnée entre la fusion et ce geste.
+- [ ] Après ce geste, relire la règle par `gh api repos/<dépôt>/rulesets/<id>` : le contrôle neuf
+      y est (`texte-pr`). Puis commenter `@dependabot rebase` sur chaque PR de Dependabot ouverte :
+      aucune n'a reçu d'exécution du contrôle neuf.
 - [ ] **L'historique complet**, une fois après la fusion : lancer `modele-historique.yml` à la main
       (`gh workflow run modele-historique.yml`, ou l'onglet Actions). gitleaks n'examine sinon que
       les commits de chaque PR et de chaque envoi, et l'historique antérieur à l'alignement

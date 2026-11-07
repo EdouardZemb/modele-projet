@@ -10,10 +10,17 @@ from pathlib import Path
 
 import pytest
 import yaml
-from conftest import REPONSES_SERVEUR, git
+from conftest import RACINE, REPONSES_SERVEUR, git, sans_echappatoire
 
 SOCLE = ".github/workflows/modele-socle.yml"
 CI = ".github/workflows/ci.yml"
+TEXTE_PR = ".github/workflows/modele-texte-pr.yml"
+# Les étapes du job `texte-pr`, dans leur ordre.
+ETAPES_TEXTE_PR = (
+    "Confidentialité et format du titre et du corps de la PR",
+    "Les issues que la PR ferme (API)",
+    "Les écarts à la spec et la tête relue",
+)
 
 
 def charger(rendu, chemin):
@@ -61,15 +68,20 @@ def test_ci_pousse_sur_branche_principale(rendre):
 
 
 def test_ruleset_coherent(rendre):
+    """Les contextes requis : chaque job du socle, appelé par `ci.yml`, et chaque job de
+    `modele-texte-pr.yml`, qui tourne seul, sans préfixe."""
     rendu = rendre()
     jobs = charger(rendu, SOCLE)["jobs"].values()
+    jobs_texte = charger(rendu, TEXTE_PR)["jobs"].values()
     ruleset = json.loads((rendu / ".github/modele/ruleset-main.json").read_text(encoding="utf-8"))
     regles = {r["type"]: r for r in ruleset["rules"]}
     contextes = {
         c["context"]
         for c in regles["required_status_checks"]["parameters"]["required_status_checks"]
     }
-    assert contextes == {f"socle / {job['name']}" for job in jobs}
+    assert contextes == {f"socle / {job['name']}" for job in jobs} | {
+        job["name"] for job in jobs_texte
+    }
     assert ruleset["conditions"]["ref_name"]["include"] == ["~DEFAULT_BRANCH"]
     assert {"deletion", "non_fast_forward", "pull_request"} <= set(regles)
 
@@ -127,8 +139,14 @@ def test_messages_de_commit_examines(rendre):
     assert 'confidentialite.py --exiger-prives --texte "$RUNNER_TEMP/messages.txt"' in e["run"]
 
 
+def etape_texte_pr(rendu, nom):
+    etapes = charger(rendu, TEXTE_PR)["jobs"]["texte-pr"]["steps"]
+    (trouvee,) = [e for e in etapes if e.get("name") == nom]
+    return trouvee
+
+
 def test_texte_de_pr_dans_runner_temp(rendre):
-    e = etape(rendre(), "Confidentialité et format du titre et du corps de la PR")
+    e = etape_texte_pr(rendre(), "Confidentialité et format du titre et du corps de la PR")
     assert '> "$RUNNER_TEMP/pr.txt"' in e["run"]
     assert '--texte "$RUNNER_TEMP/pr.txt"' in e["run"]
     assert "pr.txt\n" not in e["run"].replace('"$RUNNER_TEMP/pr.txt"', "")
@@ -312,19 +330,25 @@ def test_historique_hors_contextes_requis(rendre):
         c["context"]
         for c in regles["required_status_checks"]["parameters"]["required_status_checks"]
     }
-    assert contextes == {"socle / secrets", "socle / confidentialite"}
+    assert contextes == {"socle / secrets", "socle / confidentialite", "texte-pr"}
 
 
 def test_la_porte_recoit_la_visibilite_et_la_branche_par_defaut(rendre):
-    """En CI, la visibilité réelle l'emporte, et la nature se lit sur la branche par défaut."""
-    etapes = charger(rendre(), SOCLE)["jobs"]["confidentialite"]["steps"]
+    """En CI, la visibilité réelle l'emporte, et la nature se lit sur la branche par défaut : dans
+    le socle, pour le diff et les messages de commit ; dans `texte-pr`, pour le texte de la PR."""
+    rendu = rendre()
+    etapes = charger(rendu, SOCLE)["jobs"]["confidentialite"]["steps"]
     portes = [e for e in etapes if "confidentialite.py" in e.get("run", "")]
     assert [e["name"] for e in portes] == [
         "Confidentialité du diff",
         "Confidentialité des messages de commit",
-        "Confidentialité et format du titre et du corps de la PR",
     ]
-    for e in portes:
+    etapes_texte = charger(rendu, TEXTE_PR)["jobs"]["texte-pr"]["steps"]
+    portes_texte = [e for e in etapes_texte if "confidentialite.py" in e.get("run", "")]
+    assert [e["name"] for e in portes_texte] == [
+        "Confidentialité et format du titre et du corps de la PR"
+    ]
+    for e in portes + portes_texte:
         assert e["env"]["DEPOT_PRIVE"] == "${{ github.event.repository.private }}", e["name"]
         branche = e["env"]["BRANCHE_DEFAUT"]
         assert branche == "${{ github.event.repository.default_branch }}", e["name"]
@@ -345,6 +369,95 @@ def test_etape_de_la_documentation(rendre):
         "run": "python scripts/modele/documentation.py",
     }
     assert sum("setup-python" in e.get("uses", "") for e in etapes) == 1
+
+
+def test_texte_pr_yml(rendre):
+    """Le workflow du texte de la PR, seul à écouter `edited` (AM-2) : la confidentialité et le
+    format du titre et du corps, déplacés du socle, puis les écarts à la spec et la tête relue
+    (`texte_pr.py`), qui lit le corps dans son environnement, jamais dans ses arguments."""
+    gabarit = RACINE / "template" / TEXTE_PR
+    # il porte des expressions de GitHub : il n'est pas un gabarit Jinja, et il est rendu tel quel
+    assert not gabarit.name.endswith(".jinja")
+    texte_gabarit = gabarit.read_text(encoding="utf-8")
+    assert "${{" in texte_gabarit
+    assert "{%" not in texte_gabarit and "{#" not in texte_gabarit
+    rendu = rendre()
+    texte = (rendu / TEXTE_PR).read_text(encoding="utf-8")
+    assert texte == texte_gabarit
+    assert texte.splitlines()[0] == (
+        "# Géré par le modèle — ne pas modifier ici (docs/modele/methode.md)."
+    )
+    # le `ci.yml` d'un projet déjà né, semé, écoute encore `edited` jusqu'à ce qu'il le retire ;
+    # le workflow lui-même est géré : « ce fichier est semé » se lisait comme s'il parlait de lui
+    entete = " ".join(ligne[1:].strip() for ligne in texte.splitlines() if ligne.startswith("#"))
+    assert (
+        "Le `ci.yml` d'un projet est semé : à sa mise à jour, un projet déjà né en retire `edited` "
+        "lui-même"
+    ) in entete
+    assert "ce fichier est semé" not in entete.lower()
+
+    # chaque action épinglée par SHA, celui du socle
+    socle = dict(
+        re.findall(r"uses:\s*([^@\s]+)@([0-9a-f]{40})", (rendu / SOCLE).read_text("utf-8"))
+    )
+    actions = re.findall(r"^\s*(?:-\s*)?uses:\s*(\S+)", texte, re.MULTILINE)
+    assert actions
+    for uses in actions:
+        action, _, sha = uses.partition("@")
+        assert re.fullmatch(r"[0-9a-f]{40}", sha), uses
+        assert socle.get(action) == sha, uses
+
+    doc = yaml.safe_load(texte)
+    assert declencheurs(doc) == {
+        "pull_request": {"types": ["opened", "edited", "synchronize", "reopened"]}
+    }
+    assert doc["concurrency"] == {"group": "texte-pr-${{ github.ref }}", "cancel-in-progress": True}
+    assert doc["permissions"] == {"contents": "read", "pull-requests": "read", "issues": "read"}
+    assert list(doc["jobs"]) == ["texte-pr"]
+    job = doc["jobs"]["texte-pr"]
+    assert job["name"] == "texte-pr"
+    (checkout,) = [e for e in job["steps"] if e.get("uses", "").startswith("actions/checkout@")]
+    assert checkout["with"]["fetch-depth"] == 0  # la nature se lit sur la branche par défaut
+
+    # aucune échappatoire : un job sauté ou une étape tolérée compteraient « succès »
+    sans_echappatoire(job, *ETAPES_TEXTE_PR)
+    noms = [e.get("name") for e in job["steps"]]
+    assert [n for n in noms if n in ETAPES_TEXTE_PR] == list(ETAPES_TEXTE_PR)
+
+    deplacee = etape_texte_pr(rendu, "Confidentialité et format du titre et du corps de la PR")
+    assert 'python scripts/modele/commits.py --titre "$TITRE"' in deplacee["run"].splitlines()
+    api = etape_texte_pr(rendu, "Les issues que la PR ferme (API)")
+    assert api["env"] == {
+        "GH_TOKEN": "${{ github.token }}",
+        "DEPOT": "${{ github.repository }}",
+        "NUMERO": "${{ github.event.pull_request.number }}",
+    }
+    # la réponse de l'API, écrite dans le fichier que lit l'étape du script, plus bas
+    ecrits = re.findall(r'> ("\$RUNNER_TEMP/[^"]*")', api["run"])
+    assert ecrits == ['"$RUNNER_TEMP/fermetures.json"'], ecrits
+    for fragment in (
+        "closingIssuesReferences",
+        "totalCount",
+        "-f owner=",  # -F changerait en booléen ou en nombre un dépôt nommé `true` ou `null`
+        "-f name=",
+        "-F n=",
+        "|| true",  # le code de gh mis de côté : c'est texte_pr.py qui juge la réponse
+    ):
+        assert fragment in api["run"], fragment
+    script = etape_texte_pr(rendu, "Les écarts à la spec et la tête relue")
+    assert script["env"] == {
+        "CORPS": "${{ github.event.pull_request.body }}",
+        "AUTEUR": "${{ github.event.pull_request.user.login }}",
+        "TETE": "${{ github.event.pull_request.head.sha }}",
+    }
+    assert script["run"] == (
+        'python scripts/modele/texte_pr.py --fermetures "$RUNNER_TEMP/fermetures.json"'
+    )
+    assert script["run"].endswith(" --fermetures " + ecrits[0])  # le fichier que l'API a écrit
+    for e in job["steps"]:
+        for ligne in e.get("run", "").splitlines():
+            if "texte_pr.py" in ligne:
+                assert "CORPS" not in ligne, ligne
 
 
 def test_secrets_chiffres_controles(rendre):
