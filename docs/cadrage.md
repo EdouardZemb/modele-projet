@@ -220,21 +220,22 @@
 > - **§4** : un projet reçoit aussi `LICENSE` [S], le texte MIT au nom du `compte`, en nature
 >   `code` hors cible `donnees`, puis `docs/modele/documentation.md` [G] et
 >   `scripts/modele/documentation.py` [G]. `README.md` [S] se rend en deux variantes, celle du code
->   et celle des données (cible `donnees`). « Ce qui fait foi », dans `CLAUDE.md` [S], cite ses
->   fichiers par des liens, le brief et le cadrage compris. Le `.gitignore` [S] exclut
->   `CLAUDE.local.md`. Copier sème un semé absent : un projet de code déjà né reçoit son `LICENSE` à
+>   et celle des données (cible `donnees`). « Ce qui fait foi », dans `CLAUDE.md` [S] hors cible
+>   `donnees`, cite ses fichiers par des liens, le brief et le cadrage compris. Le `.gitignore` [S]
+>   exclut `CLAUDE.local.md`. Copier sème un semé absent : un projet de code déjà né reçoit son `LICENSE` à
 >   sa mise à jour, non suivi, à indexer ;
 > - **§5.5** : la CI de base, à la dernière étape du job `confidentialite`, refuse un dépôt de code
 >   sans `LICENSE` suivi, et une racine dont un `.md` n'est lié ni par le README ni par « Ce qui
 >   fait foi » ; `CLAUDE.md` se lie depuis le README. La nature s'y lit comme la porte la lit. Le
 >   hook `SessionStart` signale, sans bloquer, un gabarit resté vide que le README lie, et un README
 >   qui ne lie aucun document du dépôt ;
-> - **des écarts à la spec du lot, décidés pendant ses revues** : la licence et la carte lisent
->   l'index de git, quand la racine est un dépôt, et ne sont donc plus des fonctions pures de la
->   racine. La licence ne compte qu'un `LICENSE` suivi, comme la CI lit le commit ; un `LICENSE`
->   présent mais non suivi refuse par sa propre ligne. La carte ne compte pas ce que git ignore. Un
->   lien de référence compte par son emploi, une définition seule ne lie rien. Sous Windows, une
->   cible qui porte un deux-points n'est pas locale : elle y nommerait un lecteur.
+> - **des écarts à la spec du lot, décidés pendant ses revues** : quand la racine est un dépôt, la
+>   licence et la carte interrogent git (`git ls-files`), et ne sont donc plus des fonctions pures de
+>   la racine. La licence ne compte qu'un `LICENSE` suivi, puisque la CI lit le commit ; un
+>   `LICENSE` présent mais non suivi refuse par sa propre ligne. La carte compte ce que git suit ou
+>   suivrait : un `.md` non suivi compte en local, que la CI ne voit pas, et ce que git ignore ne
+>   compte pas. Un lien de référence compte par son emploi, une définition seule ne lie rien. Sous
+>   Windows, une cible qui porte un deux-points n'est pas locale : elle y nommerait un lecteur.
 
 Ce cadrage est la partie publique de la spec de conception du modèle, issue d'une séance de questions avec Edouard : 12 questions, puis 5 parties de design validées une à une. La partie qui nomme le serveur est privée et n'est pas reproduite ici.
 
