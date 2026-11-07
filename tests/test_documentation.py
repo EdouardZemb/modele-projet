@@ -246,6 +246,38 @@ def test_carte_section_dans_un_commentaire(tmp_path):
     assert d.carte(tmp_path) == (["carte : 2 fichiers .md à la racine, tous liés"], False)
 
 
+@pytest.mark.parametrize(
+    ("claude", "lie"),
+    [
+        # un commentaire en ligne après le titre : GitHub rend le titre, sans le commentaire
+        ("# C\n\n## Ce qui fait foi <!-- note -->\n\n- [N](NOTICE.md)\n", True),
+        # un `<!--` ouvert dans un paragraphe : le titre ATX coupe le paragraphe, et le `<!--`
+        # reste du texte ; le titre et son lien sont rendus
+        ("# C\n\nUn <!-- ouvert\n## Ce qui fait foi\n\n- [N](NOTICE.md)\n\n-->\n", True),
+        # `<!-->` et `<!--->` en tête de ligne se ferment sur leur propre ligne
+        ("# C\n\n<!-->\n## Ce qui fait foi\n\n- [N](NOTICE.md)\n", True),
+        ("# C\n\n<!--->\n## Ce qui fait foi\n\n- [N](NOTICE.md)\n", True),
+        # un accent grave isolé avant un bloc de commentaire : la structure des blocs passe avant
+        # le code en ligne, et le bloc cache le titre
+        ("# C\n\nUn accent ` seul.\n<!--\n## Ce qui fait foi\n- [N](NOTICE.md)\n-->\nEt ` x.\n", False),
+        # un bloc de commentaire qui ne se ferme jamais court jusqu'à la fin
+        ("# C\n\n<!--\n## Ce qui fait foi\n- [N](NOTICE.md)\n", False),
+    ],
+)
+def test_carte_section_et_commentaire_comme_sur_github(tmp_path, claude, lie):
+    """Seul un bloc de commentaire, ouvert en tête de ligne par `<!--`, cache un titre, jusqu'à la
+    fin de la ligne qui porte `-->` ; un commentaire en ligne est retiré du titre. Chaque cas est
+    rendu ainsi par GitHub (`gh api markdown`, le 07/11/2026)."""
+    ecrire(tmp_path, README_md=README, CLAUDE_md=claude, NOTICE_md="# N\n")
+    if lie:
+        assert d.carte(tmp_path) == (["carte : 2 fichiers .md à la racine, tous liés"], False)
+    else:
+        assert d.carte(tmp_path) == (
+            ["carte : 2 fichiers .md à la racine, 1 non lié", f"carte : NOTICE.md {NON_LIE}"],
+            True,
+        )
+
+
 def test_carte_reference_comme_sur_github(tmp_path):
     """Un lien de référence compte par son emploi ; sa définition peut être n'importe où dans le
     fichier, hors de « Ce qui fait foi » comprise. Une définition seule, ou qui coupe un paragraphe,

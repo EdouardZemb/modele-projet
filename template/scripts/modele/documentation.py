@@ -74,14 +74,13 @@ porte un `|` dans une cellule de tableau, que GitHub coupe. Les autres font refu
 titre souligné (`Ce qui fait foi` sur une ligne de `---`) n'est pas lu ; un accent grave échappé
 (`` \\` ``) ouvre quand même un code en ligne ; une entité dans la cible (`&#46;`) n'est pas
 décodée ; un fichier dont le nom porte une barre oblique inverse, que Windows refuse, n'est jamais
-lié ; un commentaire HTML ouvert dans un paragraphe court jusqu'à sa fermeture, plus loin.
+lié ; un commentaire HTML ouvert dans un paragraphe cache les liens jusqu'à sa fermeture, plus loin.
 Une définition n'est pas lue quand elle suit une ligne de commentaire (`<!-- liens -->`, puis les
 définitions), quand elle est dans un élément de liste ou dans une citation, quand elle suit une
-ligne de séparation (`***`), ou quand son titre tient sur deux lignes ; et d'autres formes rares
-des conteneurs et des commentaires (un bloc clôturé non fermé dans un élément de liste, un code en
-ligne qui franchit une ligne `>` vide, un texte de lien à plus de trois niveaux de crochets, une
-définition après un titre souligné, `<!-->` et `--->` dans un paragraphe) font aussi refuser à
-tort.
+ligne de séparation (`***`), ou quand son titre tient sur deux lignes ; et d'autres formes rares des
+conteneurs et des commentaires (un bloc clôturé non fermé dans un élément de liste, un code en ligne
+qui franchit une ligne `>` vide, un texte de lien à plus de trois niveaux de crochets, une
+définition après un titre souligné, `<!-->` et `--->` dans un paragraphe) font aussi refuser à tort.
 Un dernier ne touche que le gabarit resté vide. Sous Windows, il lit l'existence d'un chemin lié
 sans égard à la casse : un lien `docs/Cadrage.md` vers `docs/cadrage.md` y est lu, et peut
 avertir, alors que GitHub casse ce lien ; sous Linux, il est ignoré. C'est un avertissement de
@@ -164,6 +163,10 @@ _SCHEMA = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*:")
 _PONCTUATION_ECHAPPEE = re.compile(r"\\([!-/:-@\[-`{-~])")
 _TITRE = re.compile(r" {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$")
 _FERMANTE = re.compile(r"(?:^|[ \t]+)#+$")
+_COMMENTAIRE = re.compile(r"<!--.*?-->")
+# Un bloc de commentaire HTML : ouvert en tête de ligne par `<!--`, il court jusqu'à la fin de la
+# ligne qui porte `-->`, la sienne comprise (`<!-->` se ferme aussitôt), ou jusqu'à la fin.
+_BLOC_DE_COMMENTAIRE = re.compile(r"^ {0,3}<!(?=--).*?(?:-->[^\n]*|\Z)", re.MULTILINE | re.DOTALL)
 
 
 def _en_lf(texte: str) -> str:
@@ -384,21 +387,22 @@ def _lire(racine: Path, nom: str, noms: list[str]) -> str | None:
 
 def _section(texte: str, titre: str) -> str:
     """Les lignes des sections d'un titre donné (sans égard à la casse), jusqu'au titre suivant de
-    même niveau ou d'un niveau supérieur ; hors des blocs de code clôturés et des commentaires
-    HTML, où GitHub n'affiche aucun titre. Deux sections sont séparées par une ligne vide : la
-    seconde ne prolonge pas un paragraphe de la première."""
+    même niveau ou d'un niveau supérieur ; hors des blocs de code clôturés et des blocs de
+    commentaire HTML, où GitHub n'affiche aucun titre. Un commentaire en ligne est retiré du
+    titre. Deux sections sont séparées par une ligne vide : la seconde ne prolonge pas un
+    paragraphe de la première."""
     lignes = texte.split("\n")
-    # Les commentaires neutralisés, leurs fins de ligne gardées ; un code en ligne reste, et
-    # protège le `<!--` qu'il contiendrait.
-    visibles = _CODE_OU_COMMENTAIRE.sub(
-        lambda m: m.group(0) if m.group(1) else re.sub(r"[^\n]", "x", m.group(0)),
-        _hors_des_blocs(texte),
+    # Seul un bloc de commentaire cache un titre, ses fins de ligne gardées. La structure des blocs
+    # passe avant le code en ligne : un accent grave isolé plus haut n'y change rien. Un `<!--`
+    # ouvert dans un paragraphe reste du texte : le titre qui suit coupe le paragraphe.
+    visibles = _BLOC_DE_COMMENTAIRE.sub(
+        lambda m: re.sub(r"[^\n]", "x", m.group(0)), _hors_des_blocs(texte)
     )
     niveaux: list[tuple[int, int, str]] = []
     for i, ligne in enumerate(visibles.split("\n")):
         m = _TITRE.match(ligne)
         if m:
-            contenu = _FERMANTE.sub("", m.group(2) or "").strip()
+            contenu = _FERMANTE.sub("", _COMMENTAIRE.sub("", m.group(2) or "")).strip()
             niveaux.append((i, len(m.group(1)), contenu.casefold()))
     morceaux = []
     for k, (i, niveau, contenu) in enumerate(niveaux):

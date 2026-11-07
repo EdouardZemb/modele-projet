@@ -1036,6 +1036,8 @@ DOCUMENTATION_ET_DOCSTRING = (
     ),
     "dans une citation ou un élément de liste, dans un bloc ouvert par `<!--`",
     "un lien dont le texte porte un `|` dans une cellule de tableau",
+    # les liens seulement : un titre qui suit coupe le paragraphe, et reste lu, comme sur GitHub
+    "un commentaire HTML ouvert dans un paragraphe cache les liens jusqu'à sa fermeture, plus loin",
     (
         "et d'autres formes rares des conteneurs et des commentaires (un bloc clôturé non fermé "
         "dans un élément de liste, un code en ligne qui franchit une ligne `>` vide, un texte de "

@@ -332,7 +332,8 @@ D'autres font refuser à tort :
 - un accent grave échappé (`` \` ``) ouvre quand même un code en ligne ;
 - une entité dans la cible (`&#46;`) n'est pas décodée ;
 - un fichier dont le nom porte une barre oblique inverse, que Windows refuse, n'est jamais lié ;
-- un commentaire HTML ouvert dans un paragraphe court jusqu'à sa fermeture, plus loin ;
+- un commentaire HTML ouvert dans un paragraphe cache les liens jusqu'à sa fermeture, plus
+  loin ;
 - une définition n'est pas lue quand elle suit une ligne de commentaire (`<!-- liens -->`, puis les
   définitions), quand elle est dans un élément de liste ou dans une citation, quand elle suit une
   ligne de séparation (`***`), ou quand son titre tient sur deux lignes ;
