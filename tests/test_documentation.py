@@ -265,12 +265,23 @@ def test_carte_section_dans_un_commentaire(tmp_path):
         ),
         # un bloc de commentaire qui ne se ferme jamais court jusqu'à la fin
         ("# C\n\n<!--\n## Ce qui fait foi\n- [N](NOTICE.md)\n", False),
+        # un bloc ouvert après une puce, un numéro ou `>` cache aussi le titre qui suit ; dans l2,
+        # GitHub rend le lien de la puce suivante, mais pas le titre
+        ("# C\n\n- <!--\n  ## Ce qui fait foi\n  - [N](NOTICE.md)\n  -->\n", False),
+        ("# C\n\n- <!--\n  ## Ce qui fait foi\n  -->\n- [N](NOTICE.md)\n", False),
+        ("# C\n\n- <!--\n## Ce qui fait foi\n- [N](NOTICE.md)\n-->\n", False),
+        ("# C\n\n> <!--\n## Ce qui fait foi\n- [N](NOTICE.md)\n-->\n", False),
+        ("# C\n\n1. <!--\n## Ce qui fait foi\n\n- [N](NOTICE.md)\n\n-->\n", False),
+        # `<!-->` et `<!--->` après le titre sont des commentaires complets : retirés du titre
+        ("# C\n\n## Ce qui fait foi <!-->\n\n- [N](NOTICE.md)\n", True),
+        ("# C\n\n## Ce qui fait foi <!--->\n\n- [N](NOTICE.md)\n", True),
     ],
 )
 def test_carte_section_et_commentaire_comme_sur_github(tmp_path, claude, lie):
-    """Seul un bloc de commentaire, ouvert en tête de ligne par `<!--`, cache un titre, jusqu'à la
-    fin de la ligne qui porte `-->` ; un commentaire en ligne est retiré du titre. Chaque cas est
-    rendu ainsi par GitHub (`gh api markdown`, le 07/11/2026)."""
+    """Seul un bloc de commentaire cache un titre : ouvert par `<!--` en tête de ligne, ou après
+    une puce, un numéro ou `>`, il court jusqu'à la fin de la ligne qui porte `-->`. Un commentaire
+    en ligne, `<!-->` et `<!--->` compris, est retiré du titre. Chaque cas est rendu ainsi par
+    GitHub (`gh api markdown`, le 07/11/2026)."""
     ecrire(tmp_path, README_md=README, CLAUDE_md=claude, NOTICE_md="# N\n")
     if lie:
         assert d.carte(tmp_path) == (["carte : 2 fichiers .md à la racine, tous liés"], False)
@@ -419,11 +430,26 @@ def test_carte_lien_html_ne_compte_pas(tmp_path):
     assert lignes[-1] == f"carte : NOTICE.md {NON_LIE}"
 
 
+def test_liens_apres_un_commentaire_court():
+    """`<!-->` et `<!--->` sont des commentaires complets : le lien qui les suit est rendu par
+    GitHub (`gh api markdown`, le 07/11/2026), et compte, même avant un `-->` plus loin."""
+    assert d.liens("Voir <!--> [N](NOTICE.md) -->\n") == ["NOTICE.md"]
+    assert d.liens("Voir <!---> [N](NOTICE.md) -->\n") == ["NOTICE.md"]
+    assert d.liens("Voir <!-- [N](NOTICE.md) -->\n") == []
+
+
 def test_ecart_connu_un_bloc_dans_une_citation():
     """Un écart connu, dans la liste des faux passages de `docs/modele/documentation.md` (« Les
     écarts connus au rendu de GitHub ») : un bloc clôturé dans une citation n'est pas vu comme du
     code, et son lien compte, alors que GitHub n'en rend aucun."""
     assert d.liens("> ~~~\n> [n](N.md)\n> ~~~\n") == ["N.md"]
+
+
+def test_ecart_connu_un_commentaire_ferme_par_trois_tirets():
+    """Un écart connu, dans la liste des faux refus de `docs/modele/documentation.md` : un
+    commentaire fermé par `--->` dans un paragraphe n'en est pas un pour GitHub, qui rend le lien
+    qu'il contient (`gh api markdown`, le 07/11/2026) ; la carte ne le compte pas."""
+    assert d.liens("Voir <!-- a - [n](NOTICE.md) --->\n") == []
 
 
 def test_carte_lit_un_fichier_mal_encode(tmp_path):

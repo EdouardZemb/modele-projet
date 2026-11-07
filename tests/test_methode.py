@@ -1041,8 +1041,8 @@ DOCUMENTATION_ET_DOCSTRING = (
     (
         "et d'autres formes rares des conteneurs et des commentaires (un bloc clôturé non fermé "
         "dans un élément de liste, un code en ligne qui franchit une ligne `>` vide, un texte de "
-        "lien à plus de trois niveaux de crochets, une définition après un titre souligné, `<!-->` "
-        "et `--->` dans un paragraphe)"
+        "lien à plus de trois niveaux de crochets, une définition après un titre souligné, un "
+        "commentaire fermé par `--->` dans un paragraphe)"
     ),
 )
 
