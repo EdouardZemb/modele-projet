@@ -218,8 +218,46 @@ sous Windows : un clone sous Linux ou macOS les aurait ignorés. pupitre#19 les 
 exécutables ; un relevé par l'API, le 05/11, trouve les 18 exécutables du modèle en 100755 dans les
 autres dépôts nés de lui.
 
+Lot 14 fait le 07/11/2026 : le README des projets (#99), premier temps du travail sur la
+documentation, étiqueté `v0.9.0`.
+- **Le README semé a deux variantes.** Celle du code, en cibles `aucune` et `serveur` : « Pourquoi »,
+  « Démarrer », « Où lire quoi », « Contribuer », et « Licence » en nature `code`. Celle des
+  données, en cible `donnees` : une « Carte » de ses dossiers, sans lien, puisqu'ils naissent vides.
+  « Ce qui fait foi », dans le `CLAUDE.md` semé, cite ses fichiers par des liens, le brief et le
+  cadrage compris. Le `.gitignore` semé exclut `CLAUDE.local.md`.
+- **Un `LICENSE` MIT** est semé en nature `code`, hors cible `donnees`, au nom du `compte` ; le
+  modèle porte le même. Copier sème un semé absent : un projet de code déjà né le reçoit à sa mise à
+  jour, non suivi, à indexer.
+- **`docs/modele/documentation.md`**, géré, dit la forme du README, les textes d'un projet, comment
+  retirer chacun, et les trois contrôles de `scripts/modele/documentation.py`. La licence et la
+  carte de la racine refusent en CI, à la dernière étape du job `confidentialite` du socle : un
+  dépôt de code sans `LICENSE` suivi par git ; un `.md` de la racine que ni le README ni « Ce qui
+  fait foi » ne lient, `CLAUDE.md` devant l'être depuis le README. Le gabarit resté vide avertit au
+  `SessionStart`, sans bloquer : un document ou un dossier que le README lie, et qui n'a que son
+  gabarit. Un lien est un lien Markdown que GitHub rend ; les écarts connus au rendu de GitHub sont
+  écrits, et des tests les figent.
+- **Le README du modèle** nomme chaque réponse à choix de `copier.yml`, et un test l'y tient.
+- **La revue finale** a retenu 27 constats, tous confirmés par leur contre-vérification : 22
+  corrigés dans #112, 5 à la clôture. Elle a mesuré les six projets nés à `b1cc47c` : 3 refus
+  (`pupitre` et `veille-emploi` : `LICENSE` absent et `CLAUDE.md` non lié ; `pupitre-donnees` :
+  `CLAUDE.md` non lié) et 2 avertissements, tous vrais. Leurs messages de mise à jour disent
+  d'aligner le README dans sa propre PR, avant la mise à jour.
+
+Versions des projets au 07/11 : les six projets nés du modèle sont en `v0.8.1`. `veille-emploi`
+s'est scindé le 06/11, dans son propre lot : l'ancien dépôt est devenu `veille-emploi-donnees`,
+privé, en cible `donnees` avec `cible_code: serveur`, et le dépôt public `veille-emploi` est né à
+la main, en nature `code` (veille-emploi#1, veille-emploi-donnees#41). Son staging tourne à deux
+dépôts depuis le 06/11.
+
+Les messages de mise à jour vers la `v0.9.0` partent sur le oui d'Edouard, une fois l'étiquette
+publiée.
+
 Prochain, au choix d'Edouard :
-- la scission de `veille-emploi`, puis celle d'`ancrage`, chacune dans son propre lot ;
+- la scission d'`ancrage`, dans son propre lot : la piste « Les pièges d'une scission » en donne
+  cinq ;
+- le second temps du travail sur la documentation, un lot « documentation » avec sa spec : l'« État »
+  réduit du `CLAUDE.md` semé et le journal des versions du modèle, la copie refusée et l'issue
+  fermée, la ligne « Confirmation » des ADR, les blocs engendrés ;
 - le lot 3 (la cible `statique`) ;
 - la porte due par LE-37, au 3e constat du motif « écart à la spec mal pesé », dont LE-49 est le
   4e : sa forme revient à Edouard, et le registre en propose une. À peser avec la piste du workflow
@@ -232,8 +270,10 @@ Prochain, au choix d'Edouard :
   effets » : sa forme revient à Edouard, et le registre en propose une ;
 - la porte due par LE-53, au 3e constat du motif « mécanisme décrit sans relire son code », dont
   LE-54 est le 4e : sa forme revient à Edouard, et le registre en propose une ;
-- la porte due par LE-55, au 3e constat du motif « contrôle passé à vide » : sa forme revient à
-  Edouard, et le registre en propose une.
+- la porte due par LE-55, au 3e constat du motif « contrôle passé à vide », dont LE-58 est le 4e :
+  sa forme revient à Edouard, et le registre en propose une ;
+- la porte due par LE-56, au 3e constat du motif « comportement d'un outil supposé », dont LE-57 est
+  le 4e : sa forme revient à Edouard, et le registre en propose une.
 
 Le cadrage est dans `docs/cadrage.md` ; ce que les lots ont appris, dans `docs/registre.md`.
 
