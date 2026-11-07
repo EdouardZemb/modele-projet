@@ -4,10 +4,10 @@ gabarit resté vide, qui avertit au démarrage d'une session.
 La licence. En nature `code`, `LICENSE` doit être présent à la racine, sous ce nom exact, et non
 vide, et, à la racine d'un dépôt git, suivi par git, comme dans le commit que lit la CI : un
 `LICENSE` qu'un `copier update` vient de créer refuse tant qu'il n'est pas indexé. En nature
-`donnees`, il n'est pas exigé. La nature se lit comme la lit la porte de
-confidentialité, par `nature()` de `confidentialite.py` : en CI, un dépôt public est de code, et un
-dépôt privé prend la nature de sa branche par défaut, jamais celle de la PR ; hors CI, c'est le
-`reglages.py` voisin, et `code` sans lui.
+`donnees`, il n'est pas exigé. La nature se lit comme la lit la porte de confidentialité, par
+`nature()` de `confidentialite.py` : en CI, un dépôt public est de code, et un dépôt privé prend la
+nature de sa branche par défaut, jamais celle de la PR ; hors CI, c'est le `reglages.py` voisin, et
+`code` sans lui.
 
 La carte. Chaque fichier `.md` de la racine, sauf `README.md`, doit être lié par un lien Markdown :
 `CLAUDE.md` depuis `README.md`, un autre depuis `README.md` ou depuis la section « Ce qui fait foi »
@@ -71,11 +71,10 @@ ligne qui le ferme (`<!-- liens --> [n](NOTICE.md)` ne lie rien), ou jusqu'à la
 s'il ne se ferme jamais ; dans une citation ou un élément de liste, dans un bloc ouvert par
 `<!--`, de même. Dans ces blocs, GitHub ne lit pas le Markdown. S'y ajoute un lien dont le texte
 porte un `|` dans une cellule de tableau, que GitHub coupe. Les autres font refuser à tort. Un
-titre souligné (`Ce qui fait foi` sur une ligne de `---`) n'est pas lu ; un
-accent grave échappé (`` \\` ``) ouvre quand même un code en ligne ; une entité dans la cible
-(`&#46;`) n'est pas décodée ; un fichier dont le nom porte une barre oblique inverse, que Windows
-refuse, n'est jamais lié ; un commentaire HTML ouvert dans un paragraphe court jusqu'à sa
-fermeture, plus loin.
+titre souligné (`Ce qui fait foi` sur une ligne de `---`) n'est pas lu ; un accent grave échappé
+(`` \\` ``) ouvre quand même un code en ligne ; une entité dans la cible (`&#46;`) n'est pas
+décodée ; un fichier dont le nom porte une barre oblique inverse, que Windows refuse, n'est jamais
+lié ; un commentaire HTML ouvert dans un paragraphe court jusqu'à sa fermeture, plus loin.
 Une définition n'est pas lue quand elle suit une ligne de commentaire (`<!-- liens -->`, puis les
 définitions), quand elle est dans un élément de liste ou dans une citation, quand elle suit une
 ligne de séparation (`***`), ou quand son titre tient sur deux lignes ; et d'autres formes rares
