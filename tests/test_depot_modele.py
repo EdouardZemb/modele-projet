@@ -336,6 +336,20 @@ def test_readme_du_depot_modele():
     assert not casses, casses
 
 
+def test_readme_dit_qu_un_seme_absent_revient():
+    """« Mettre à jour un projet » dit, comme la méthode, qu'un semé absent revient à la mise à
+    jour, et d'indexer le `LICENSE` qu'elle crée."""
+    corps = sections(visible((RACINE / "README.md").read_text(encoding="utf-8")))
+    maj = corps["Démarrer"].split("### Mettre à jour un projet", 1)[1].split("\n### ", 1)[0]
+    plat = " ".join(maj.split())
+    assert (
+        "un semé présent n'est pas touché, mais un semé absent, retiré ou nouveau dans le modèle "
+        "comme `LICENSE`, est semé à neuf"
+    ) in plat
+    assert "(`git add LICENSE`)" in plat
+    assert "les fichiers semés ne sont pas touchés" not in plat
+
+
 def test_aides_de_copier_yml():
     """Les aides de `description` et de `cible` valent celles que pose la spec du lot 14 :
     `description` dit ce qu'attend la première phrase du README ; `cible` ne promet aucune cible à

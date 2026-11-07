@@ -208,8 +208,10 @@ serait la commande. Écrire le texte dans un fichier, puis `git commit -F <fichi
 
 - Les fichiers **gérés** sont réécrits par chaque `copier update`. On ne les modifie jamais dans le
   projet : une modification locale ressort en conflit à la mise à jour suivante, et c'est voulu.
-- Les fichiers **semés** sont créés une fois, puis appartiennent au projet. `copier update` ne les
-  touche plus.
+- Les fichiers **semés** sont créés une fois, puis appartiennent au projet : `copier update` ne
+  touche plus un semé présent, mais sème à neuf un semé absent, qu'il ait été retiré ou qu'il soit
+  nouveau dans le modèle, comme `LICENSE`. Un fichier non suivi (`??`) après la mise à jour
+  s'indexe, ou se retire.
 - Un cas mixte, `.claude/settings.json` : le modèle y pose ses hooks, le projet y ajoute ses
   réglages. Un conflit s'y résout à la main, dans la PR de mise à jour.
 - **Les chemins gérés sont exclus des formateurs et des linters du projet** (Prettier, biome,

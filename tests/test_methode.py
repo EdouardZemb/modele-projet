@@ -1162,6 +1162,21 @@ def test_docstring_suit_documentation_md():
         assert ancien not in docstring, ancien
 
 
+def test_methode_dit_qu_un_seme_absent_revient():
+    """`copier update` sème à neuf un semé absent, retiré ou nouveau dans le modèle comme
+    `LICENSE` : la méthode ne dit plus qu'il ne touche jamais un semé, et dit quoi faire du fichier
+    non suivi qu'il laisse."""
+    section = lire(METHODE).split("## Les fichiers gérés par le modèle", 1)[1].split("\n## ", 1)[0]
+    plat = " ".join(section.split())
+    assert (
+        "Les fichiers **semés** sont créés une fois, puis appartiennent au projet : `copier update` "
+        "ne touche plus un semé présent, mais sème à neuf un semé absent, qu'il ait été retiré ou "
+        "qu'il soit nouveau dans le modèle, comme `LICENSE`. Un fichier non suivi (`??`) après la "
+        "mise à jour s'indexe, ou se retire."
+    ) in plat
+    assert "`copier update` ne les touche plus" not in plat
+
+
 def test_methode_nomme_documentation_md():
     section = lire(METHODE).split("## Le cycle d'un lot", 1)[1].split("\n## ", 1)[0]
     (point,) = [b for b in blocs(section) if b[0].startswith("5. ")]
