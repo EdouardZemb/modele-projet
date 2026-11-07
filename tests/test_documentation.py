@@ -259,7 +259,10 @@ def test_carte_section_dans_un_commentaire(tmp_path):
         ("# C\n\n<!--->\n## Ce qui fait foi\n\n- [N](NOTICE.md)\n", True),
         # un accent grave isolé avant un bloc de commentaire : la structure des blocs passe avant
         # le code en ligne, et le bloc cache le titre
-        ("# C\n\nUn accent ` seul.\n<!--\n## Ce qui fait foi\n- [N](NOTICE.md)\n-->\nEt ` x.\n", False),
+        (
+            "# C\n\nUn accent ` seul.\n<!--\n## Ce qui fait foi\n- [N](NOTICE.md)\n-->\nEt ` x.\n",
+            False,
+        ),
         # un bloc de commentaire qui ne se ferme jamais court jusqu'à la fin
         ("# C\n\n<!--\n## Ce qui fait foi\n- [N](NOTICE.md)\n", False),
     ],
@@ -1034,10 +1037,14 @@ def test_racine_ne_change_pas_la_nature(tmp_path, monkeypatch, capsys):
         "documentation : carte : 1 fichier .md à la racine, lié",
         "documentation : refus",
     ]
-    phrase = "change les fichiers lus, pas la nature"
+    # La phrase entière, ses deux régimes compris, sans les accents graves que l'aide n'écrit pas.
+    entiere = (
+        "change les fichiers lus, pas la nature : hors CI, c'est celle du reglages.py voisin du "
+        "script ; en CI, celle de la branche par défaut, lue dans le dossier courant"
+    )
     assert d.main(["--help"]) == 0
-    assert phrase in " ".join(capsys.readouterr().out.split())
-    assert phrase in " ".join(d.__doc__.split())
+    assert entiere in " ".join(capsys.readouterr().out.split()).replace("`", "")
+    assert entiere in " ".join(d.__doc__.split()).replace("`", "")
 
 
 def test_lancement_sans_b_n_ecrit_aucun_cache(tmp_path, env_isole):

@@ -283,8 +283,9 @@ def sections(texte: str) -> dict[str, str]:
 
 def test_readme_nomme_chaque_reponse_a_choix():
     """Le README nomme chaque réponse à choix de `copier.yml` et chacun de ses choix, entre accents
-    graves, sous « Démarrer », dans un élément de liste de premier niveau, d'une seule ligne,
-    qu'ouvre sa question. Les choix se lisent dans `copier.yml`, la liste ou les valeurs du
+    graves, sous « Démarrer », dans un élément de liste de premier niveau, ouvert en colonne 0
+    comme l'écrit le README (une puce indentée peut être imbriquée sous une autre), d'une seule
+    ligne, qu'ouvre sa question. Les choix se lisent dans `copier.yml`, la liste ou les valeurs du
     dictionnaire (pas ses libellés). Entre accents graves et sur la ligne de la question : une
     recherche nue passerait à vide, « code » ou « serveur » paraissant partout ; une puce qui
     nommerait plusieurs questions, ou une question nommée dans la puce d'une autre, ne rattacherait
@@ -301,7 +302,8 @@ def test_readme_nomme_chaque_reponse_a_choix():
     for nom, choix in a_choix.items():
         valeurs = list(choix.values()) if isinstance(choix, dict) else list(choix)
         assert valeurs, nom
-        propres = [ligne for ligne in lignes if re.match(rf" {{0,3}}[-*+] `{re.escape(nom)}`", ligne)]
+        tete = rf"[-*+] `{re.escape(nom)}`"
+        propres = [ligne for ligne in lignes if re.match(tete, ligne)]
         assert any(all(f"`{valeur}`" in ligne for valeur in valeurs) for ligne in propres), (
             nom,
             valeurs,
@@ -557,14 +559,14 @@ def test_liste_d_alignement():
         ),
         # lot 14 : la PR d'alignement d'un dépôt privé de données est jugée en régime code en CI
         (
-            "Dans un dépôt privé de nature `donnees`, la PR d'alignement est jugée en régime `code` "
-            "en CI, puisque sa branche par défaut ne porte pas encore `NATURE` : l'étape « La "
-            "documentation de la racine » y refuse la licence, et 👤 Edouard fusionne cette PR, "
-            "comme celle qui apporte `fusion`."
+            "Dans un dépôt privé de nature `donnees`, la PR d'alignement est jugée en régime "
+            "`code` en CI, puisque sa branche par défaut ne porte pas encore `NATURE` : l'étape "
+            "« La documentation de la racine » y refuse la licence, et 👤 Edouard fusionne cette "
+            "PR, comme celle qui apporte `fusion`."
         ),
         (
-            "Dans un dépôt privé de nature `donnees`, `socle / confidentialite` y est rouge, par la "
-            "licence"
+            "Dans un dépôt privé de nature `donnees`, `socle / confidentialite` y est rouge, par "
+            "la licence"
         ),
         # une licence sous un autre nom, que Copier doublerait
         (

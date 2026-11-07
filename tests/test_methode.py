@@ -1185,10 +1185,10 @@ def test_methode_dit_qu_un_seme_absent_revient():
     section = lire(METHODE).split("## Les fichiers gérés par le modèle", 1)[1].split("\n## ", 1)[0]
     plat = " ".join(section.split())
     assert (
-        "Les fichiers **semés** sont créés une fois, puis appartiennent au projet : `copier update` "
-        "ne touche plus un semé présent, mais sème à neuf un semé absent, qu'il ait été retiré ou "
-        "qu'il soit nouveau dans le modèle, comme `LICENSE`. Un fichier non suivi (`??`) après la "
-        "mise à jour s'indexe, ou se retire."
+        "Les fichiers **semés** sont créés une fois, puis appartiennent au projet : "
+        "`copier update` ne touche plus un semé présent, mais sème à neuf un semé absent, qu'il "
+        "ait été retiré ou qu'il soit nouveau dans le modèle, comme `LICENSE`. Un fichier non "
+        "suivi (`??`) après la mise à jour s'indexe, ou se retire."
     ) in plat
     assert "`copier update` ne les touche plus" not in plat
 
