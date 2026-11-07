@@ -450,7 +450,7 @@ def test_liste_d_alignement():
         "`LICENSE`",
         "needs:",
         "edited",
-        "`.claude/settings.local.json` et `__pycache__/`",
+        "`.claude/settings.local.json`, `CLAUDE.local.md` et `__pycache__/`",
         # Le remède de la porte des masqués, ancré (#95, ronde 2).
         "le remède que donne la porte, des lignes ancrées qui n'admettent que ce qu'elle examine",
         # Un semé sous un ancêtre levé reste masqué : la porte ne l'examine pas (#95, ronde 3).
@@ -525,6 +525,25 @@ def test_liste_d_alignement():
             "La CI du code vérifie `instance/` comme le fera le déploiement : la règle des paires, "
             "puis chaque commande déclarée sur son dossier ; le déploiement revérifie"
         ),
+        # lot 14 : la PR d'alignement d'un dépôt privé de données est jugée en régime code en CI
+        (
+            "Dans un dépôt privé de nature `donnees`, la PR d'alignement est jugée en régime `code` "
+            "en CI, puisque sa branche par défaut ne porte pas encore `NATURE` : l'étape « La "
+            "documentation de la racine » y refuse la licence, et 👤 Edouard fusionne cette PR, "
+            "comme celle qui apporte `fusion`."
+        ),
+        (
+            "Dans un dépôt privé de nature `donnees`, `socle / confidentialite` y est rouge, par la "
+            "licence"
+        ),
+        # une licence sous un autre nom, que Copier doublerait
+        (
+            "Une licence déjà présente sous un autre nom (`LICENSE.md`, `COPYING`…) se renomme en "
+            "`LICENSE` avant le `copier copy`, sinon Copier en pose une seconde, MIT. La section "
+            "« Licence » du README nomme la licence du fichier."
+        ),
+        # le lancement local ne dit ce que dira la CI qu'une fois tout indexé et validé
+        "dit ce que la CI dira, LICENSE indexé, README et `CLAUDE.md` validés",
     ):
         assert regle in a_plat, regle
     assert "ne lit pas `instance/`" not in a_plat

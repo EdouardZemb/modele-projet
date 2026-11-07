@@ -69,8 +69,14 @@ Chaque case se coche dans la PR d'alignement. Une case qui ne s'applique pas au 
 - [ ] **`README.md`** à la forme de sa variante, code ou données (`docs/modele/documentation.md`,
       « Le README ») : il lie `CLAUDE.md` par un lien Markdown, et chaque autre `.md` de la racine
       est lié par le README ou par « Ce qui fait foi » de `CLAUDE.md`. En nature `code`, `LICENSE`
-      est présent à la racine et indexé : sans lui, la CI refuse. Lancé depuis la racine,
-      `python scripts/modele/documentation.py` dit ce que la CI dira.
+      est présent à la racine et indexé : sans lui, la CI refuse. Une licence déjà présente sous un
+      autre nom (`LICENSE.md`, `COPYING`…) se renomme en `LICENSE` avant le `copier copy`, sinon
+      Copier en pose une seconde, MIT. La section « Licence » du README nomme la licence du
+      fichier. Lancé depuis la racine, `python -B scripts/modele/documentation.py` dit ce que la CI
+      dira, LICENSE indexé, README et `CLAUDE.md` validés. Dans un dépôt privé de nature
+      `donnees`, la PR d'alignement est jugée en régime `code` en CI, puisque sa branche par
+      défaut ne porte pas encore `NATURE` : l'étape « La documentation de la racine » y refuse la
+      licence, et 👤 Edouard fusionne cette PR, comme celle qui apporte `fusion`.
 - [ ] **`.github/workflows/ci.yml`** :
   - ajouter le job `socle` : `uses: ./.github/workflows/modele-socle.yml`, `secrets: inherit`,
     `permissions: {contents: read, pull-requests: read}` ;
@@ -78,7 +84,8 @@ Chaque case se coche dans la PR d'alignement. Une case qui ne s'applique pas au 
     `needs:` qui le citait ;
   - `pull_request: types: [opened, synchronize, reopened, edited]`, pour qu'un titre ou un corps de
     PR modifié soit réexaminé.
-- [ ] **`.gitignore`** : `.claude/settings.local.json` et `__pycache__/`, s'ils n'y sont pas.
+- [ ] **`.gitignore`** : `.claude/settings.local.json`, `CLAUDE.local.md` et `__pycache__/`, s'ils
+      n'y sont pas.
 - [ ] **`.dockerignore`**, s'il existe : `.githooks` et `scripts/modele`, pour qu'un `COPY` ne les
       embarque pas dans l'image.
 - [ ] **Les formateurs et les linters du projet** (Prettier, biome, ruff…) excluent les chemins
@@ -133,7 +140,9 @@ Chaque case se coche dans la PR d'alignement. Une case qui ne s'applique pas au 
 
 - [ ] Envoyer la branche, ouvrir la PR avec le modèle de PR.
 - [ ] `gh pr checks` entièrement vert : `socle / secrets`, `socle / confidentialite`, et les
-      contrôles propres au projet.
+      contrôles propres au projet. Dans un dépôt privé de nature `donnees`, `socle /
+      confidentialite` y est rouge, par la licence que refuse l'étape « La documentation de la
+      racine » (§3) : 👤 Edouard fusionne cette PR.
 - [ ] Fusion en squash, puis le déploiement éventuel vérifié là où l'application sert.
 - [ ] **L'historique complet**, une fois après la fusion : lancer `modele-historique.yml` à la main
       (`gh workflow run modele-historique.yml`, ou l'onglet Actions). gitleaks n'examine sinon que
