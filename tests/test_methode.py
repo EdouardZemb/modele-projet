@@ -1284,10 +1284,15 @@ def test_documentation_md_avant_de_reecrire_un_readme():
     """Trois gestes avant de réécrire un README, relevés par les projets à leur passage à la
     `v0.9.0` : une ancre de l'ancien README citée ailleurs, un brief figé compris ; un fait que seul
     le README portait ; la section « Licence », dont le lien attend le `LICENSE` de la mise à jour.
-    Dans la section « Le README », hors des blocs de code."""
+    Sous le titre « Réécrire un README », que la piste des pièges d'une scission cite par son nom,
+    dans la section « Le README », avant le titre suivant, hors des blocs de code."""
     hors_du_code = CLOTURE.sub("", lire(DOCUMENTATION))
     section = hors_du_code.split("\n## Le README\n", 1)[1].split("\n## ", 1)[0]
-    plat = " ".join(section.split())
+    titre = "\n### Réécrire un README\n"
+    assert titre in section, titre.strip()
+    sous_titre = section.split(titre, 1)[1]
+    sous_titre = re.split(r"^#{1,6}[ \t]", sous_titre, maxsplit=1, flags=re.MULTILINE)[0]
+    plat = " ".join(sous_titre.split())
     for phrase in (
         (
             "Avant de réécrire un README, chercher dans tout le dépôt `README.md#` et tout renvoi "

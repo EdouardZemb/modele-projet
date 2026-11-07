@@ -3,17 +3,30 @@ chemin d'import, et `-E`, qui ignore `PYTHONDONTWRITEBYTECODE`, sur lequel compt
 Chaque script qui importe un voisin pose lui-même `sys.dont_write_bytecode`, puis ajoute son
 dossier en fin de chemin d'import, sans doublon."""
 
+import importlib
 import json
 import os
 import subprocess
 import sys
 
 import pre_push
+import pytest
 import verifier_secrets
-from conftest import REPONSES_DONNEES_SERVEUR, appels_de, faux_gh, git
+from conftest import REPONSES_DONNEES_SERVEUR, SCRIPTS, appels_de, faux_gh, git
 from test_texte_pr import FERME_RIEN
 
 BRANCHE = "principal"
+# Les scripts qui importent un voisin : chacun porte sa propre copie de `_voisins`, puisque
+# l'importer d'un autre serait importer un voisin.
+VOISINS = (
+    "documentation",
+    "garde_claude",
+    "pre_push",
+    "signaux",
+    "texte_pr",
+    "verifier_donnees",
+    "verifier_secrets",
+)
 
 
 def isole(rendu, env, script, *args, entree=None, **variables):
@@ -31,11 +44,15 @@ def isole(rendu, env, script, *args, entree=None, **variables):
 
 
 def test_scripts_sous_python_isole(rendre, env_isole, tmp_path):
-    """Dans un projet rendu, chaque script lit le `reglages.py` du projet sous `-I`, sans écrire de
+    """Dans un projet rendu, chaque script trouve ses voisins sous `-I`, sans écrire de
     `__pycache__`. Un code de sortie ne prouve rien ici : sans ses voisins, `signaux.py` rend 0,
     `verifier_secrets.py` rend 0 sans un mot, et `verifier_donnees.py` rend 64 dans les deux cas.
-    La preuve est un texte que seul le `reglages.py` du projet permet d'écrire : la branche, qu'aucun
-    script n'a par défaut, ou la nature et le dépôt de code d'un dépôt de données."""
+    Six lancements exigent un texte que seul le `reglages.py` du projet permet d'écrire : la
+    branche, qu'aucun script n'a par défaut, pour `garde_claude.py`, `pre_push.py` et `signaux.py`
+    sans argument ; la nature pour `documentation.py` ; le dépôt de code d'un dépôt de données pour
+    `verifier_secrets.py` et `verifier_donnees.py`. Les deux autres ne lisent pas les réglages :
+    `signaux.py --branche` et `texte_pr.py` exigent un texte que seul l'import de leur voisin
+    `documentation` permet d'écrire."""
     # Les réponses par défaut portent déjà la branche : elle se change en fusionnant les deux.
     rendu = rendre(**{**REPONSES_DONNEES_SERVEUR, "branche_principale": BRANCHE})
     env = env_isole()
@@ -124,5 +141,27 @@ def test_voisins_sans_doublon(monkeypatch):
     # `template/` n'a pas de `reglages.py`, seulement son gabarit : 64, sans lire l'entrée.
     assert pre_push.main([]) == 64
     assert pre_push.main([]) == 64
+    assert sys.path.count(dossier) == 1, sys.path
+    assert sys.path[-1] == dossier, sys.path
+
+
+def test_voisins_partout():
+    """Chaque script qui porte `_voisins` est éprouvé ci-dessous : une copie neuve s'y ajoute."""
+    porteurs = {p.stem for p in SCRIPTS.glob("*.py") if "def _voisins(" in p.read_text("utf-8")}
+    assert porteurs == set(VOISINS)
+
+
+@pytest.mark.parametrize("nom", VOISINS)
+def test_chaque_voisins_sans_doublon(nom, monkeypatch):
+    """Chaque copie, appelée deux fois, pose `sys.dont_write_bytecode` et laisse le dossier du
+    script une seule fois dans le chemin d'import, en dernier."""
+    module = importlib.import_module(nom)
+    assert module._voisins.__module__ == nom
+    dossier = os.path.dirname(os.path.abspath(module.__file__))
+    monkeypatch.setattr(sys, "path", [p for p in sys.path if p != dossier])
+    monkeypatch.setattr(sys, "dont_write_bytecode", False)
+    module._voisins()
+    module._voisins()
+    assert sys.dont_write_bytecode is True
     assert sys.path.count(dossier) == 1, sys.path
     assert sys.path[-1] == dossier, sys.path
