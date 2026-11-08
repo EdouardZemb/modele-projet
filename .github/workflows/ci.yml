@@ -220,7 +220,8 @@ jobs:
           python-version: "3.12"
       - run: pip install -r requirements-dev.txt
       # Le rendu de fausse-app, sans la fausse app ni son image : l'épreuve ne lit du rendu que
-      # deploiement/nettoyer-images.sh, et construit ses propres images.
+      # deploiement/nettoyer-images.sh et la bibliothèque qu'il source, deploiement/lib.sh. Elle
+      # pose elle-même l'état, l'env d'un clone des données factice et ses propres images.
       - name: Rendre le projet fausse-app
         run: |
           copier copy --vcs-ref HEAD --defaults --trust \
