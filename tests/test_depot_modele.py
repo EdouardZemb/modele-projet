@@ -8,6 +8,7 @@ import subprocess
 import sys
 
 import documentation
+import pytest
 import yaml
 from conftest import PERIMES, RACINE, sans_echappatoire, trouver_bash
 from test_combinaisons import CLOTURE, SCHEMA, lien_casse
@@ -48,10 +49,115 @@ def test_ruleset_du_depot_modele():
     assert contextes <= produits
 
 
-def test_le_job_des_tests_a_40_minutes():
-    """LE-29, puis LE-40 : sous Windows, la suite a dépassé 15, puis 25 min, sans test en échec."""
+def test_le_job_des_tests_a_45_minutes():
+    """LE-29, puis LE-40 : sous Windows, la suite a dépassé 15, puis 25 min, sans test en échec.
+    Puis, sur les douze exécutions de `main` du 04 au 07/11, jusqu'à 31 min 41 : trois ont passé
+    les trois quarts de 40 min. Puis 32 min 39 s sur la PR #118. À 45 min, le seuil de
+    l'avertissement de durée est à 33 min 45, à 66 s de cette mesure."""
     jobs = yaml.safe_load(CI.read_text(encoding="utf-8"))["jobs"]
-    assert jobs["tests"]["timeout-minutes"] == 40
+    assert jobs["tests"]["timeout-minutes"] == 45
+
+
+DEBUT_JOB = "Début du job"
+DUREE_JOB = "Durée du job"
+NOTE_L_HEURE = 'echo "DEBUT_JOB=$(date +%s)" >> "$GITHUB_ENV"'
+
+
+@pytest.mark.parametrize("nom", ["tests", "mecanique"])
+def test_duree_des_jobs(nom):
+    """LE-40 : chaque job visé note l'heure à sa première étape ; sa dernière, lancée même en cas
+    d'échec, écrit sa durée dans le résumé du job et avertit au-delà des trois quarts du délai.
+    Aucun contexte de GitHub Actions ne donne `timeout-minutes` : `DELAI_MIN` le recopie, et ce test
+    les tient égaux. Les deux étapes sont les mêmes dans chaque job, et `shell: bash` : sans lui,
+    elles tourneraient sous `pwsh` sous Windows. Ni l'une ni l'autre ne porte le mot `pytest`, dont
+    une seule commande du job peut porter le nom, ni `test_mecanique`."""
+    jobs = yaml.safe_load(CI.read_text(encoding="utf-8"))["jobs"]
+    job = jobs[nom]
+    assert job["env"]["DELAI_MIN"] == job["timeout-minutes"]
+    debut, duree = job["steps"][0], job["steps"][-1]
+    # Rien d'autre sur ces étapes : ni `env` qui masquerait `DELAI_MIN`, ni `continue-on-error`.
+    assert debut == {"name": DEBUT_JOB, "shell": "bash", "run": NOTE_L_HEURE}
+    assert set(duree) == {"name", "if", "shell", "run"}
+    assert duree["name"] == DUREE_JOB
+    assert duree["if"] == "always()"
+    assert duree["shell"] == "bash"
+    reference = jobs["tests"]["steps"]
+    assert debut["run"] == reference[0]["run"]
+    assert duree["run"] == reference[-1]["run"]
+    for etape in (debut, duree):
+        for mot in ("pytest", "test_mecanique"):
+            assert mot not in etape["run"], (etape["name"], mot)
+
+
+AVERTISSEMENT_DE_DUREE = (
+    "::warning::tests (Linux) : 33 min 46 s sur 45 min ; alléger la suite, ou monter le délai dans "
+    "une PR avec son test"
+)
+AVERTISSEMENT_MECANIQUE = (
+    "::warning::mecanique (Linux) : 15 min 01 s sur 20 min ; alléger la suite, ou monter le délai "
+    "dans une PR avec son test"
+)
+
+
+def test_avertissement_de_duree(tmp_path):
+    """Les deux étapes de durée, lancées comme GitHub lance une étape `shell: bash` (un fichier,
+    `bash --noprofile --norc -e -o pipefail`), l'horloge figée par une fonction `date` : au-delà
+    des trois quarts du délai, un avertissement ; aux trois quarts exactement (2 025 s sur 45 min),
+    aucun. La durée va au résumé du job dans les deux cas. Un second délai, celui de `mecanique`
+    (900 s sur 20 min), tient le seuil, le délai du résumé et le nom du job à `DELAI_MIN` et à
+    `GITHUB_JOB` : un seuil de 2 025 s ou un « sur 45 min » écrits en dur passeraient les seuls cas
+    à 45 min."""
+    jobs = yaml.safe_load(CI.read_text(encoding="utf-8"))["jobs"]
+    debut = jobs["tests"]["steps"][0]
+
+    def lancer(run, **variables):
+        script = tmp_path / "etape.sh"
+        script.write_text("date() { echo 1700002026; }\n" + run, encoding="utf-8", newline="\n")
+        return subprocess.run(
+            [trouver_bash(), "--noprofile", "--norc", "-e", "-o", "pipefail", str(script)],
+            env={**os.environ, **variables},
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+
+    environnement = tmp_path / "github-env"
+    r = lancer(debut["run"], GITHUB_ENV=str(environnement))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert environnement.read_text(encoding="utf-8") == "DEBUT_JOB=1700002026\n"
+
+    # (job, DELAI_MIN, DEBUT_JOB, ligne du résumé, avertissement attendu ou None) ; l'horloge à
+    # 1700002026. Chaque job lance sa propre étape « Durée du job ».
+    for job, delai, debut_job, ligne, avertissement in (
+        ("tests", "45", "1700000000", "tests (Linux) : 33 min 46 s sur 45 min",
+         AVERTISSEMENT_DE_DUREE),
+        ("tests", "45", "1700000001", "tests (Linux) : 33 min 45 s sur 45 min", None),
+        # les secondes sur deux chiffres
+        ("tests", "45", "1700001961", "tests (Linux) : 1 min 05 s sur 45 min", None),
+        # un autre délai : 901 s dépasse les trois quarts de 20 min, 900 s les atteint
+        ("mecanique", "20", "1700001125", "mecanique (Linux) : 15 min 01 s sur 20 min",
+         AVERTISSEMENT_MECANIQUE),
+        ("mecanique", "20", "1700001126", "mecanique (Linux) : 15 min 00 s sur 20 min", None),
+    ):
+        cas = (job, debut_job)
+        resume = tmp_path / f"resume-{job}-{debut_job}"
+        r = lancer(
+            jobs[job]["steps"][-1]["run"],
+            DELAI_MIN=delai,
+            GITHUB_JOB=job,
+            RUNNER_OS="Linux",
+            GITHUB_STEP_SUMMARY=str(resume),
+            DEBUT_JOB=debut_job,
+        )
+        assert r.returncode == 0, (cas, r.stdout + r.stderr)
+        if avertissement is None:
+            assert "::warning::" not in r.stdout, (cas, r.stdout)
+        else:
+            assert avertissement in r.stdout, (cas, r.stdout)
+            assert r.stdout.count("::warning::") == 1, (cas, r.stdout)
+        assert f"sur {delai} min" in resume.read_text(encoding="utf-8"), cas
+        assert resume.read_text(encoding="utf-8") == ligne + "\n", cas
 
 
 AUCUN_CACHE = "Aucun cache Python sous template/scripts/modele"
@@ -275,17 +381,53 @@ def test_claude_md_du_depot_modele():
     assert premiere == "@template/docs/modele/methode.md"
 
 
+def _commandes_de_claude_md():
+    """La section « Commandes » du `CLAUDE.md` du dépôt, aplatie."""
+    texte = (RACINE / "CLAUDE.md").read_text(encoding="utf-8")
+    return " ".join(texte.split("\n## Commandes\n", 1)[1].split("\n## ", 1)[0].split())
+
+
 def test_claude_md_dit_la_commande_des_plans():
     """Les plans du modèle vivent hors du dépôt, où l'étape « Les plans » de la CI ne les voit
     pas : « Commandes » donne la commande qui les vérifie, avec le clone voisin de `serveur`."""
-    texte = (RACINE / "CLAUDE.md").read_text(encoding="utf-8")
-    commandes = " ".join(texte.split("\n## Commandes\n", 1)[1].split("\n## ", 1)[0].split())
+    commandes = _commandes_de_claude_md()
     assert (
         "`python -B template/scripts/modele/plan.py --racine . "
         "--depot serveur=C:\\src\\github.com\\EdouardZemb\\serveur <plan>`"
     ) in commandes
     assert "`Documents\\00-boite-de-reception\\`" in commandes
     assert "avant de soumettre un plan à Edouard et après chaque correction" in commandes
+
+
+def test_claude_md_dit_la_relance_et_les_avertissements_de_duree():
+    """LE-40 : « Commandes » dit comment relancer le seul job coupé à son délai, et que la revue
+    finale de chaque lot relève les avertissements de durée : personne d'autre ne lit un
+    avertissement sur une exécution verte. `--failed` relancerait tous les jobs en échec de
+    l'exécution, une vraie faute comprise : la relance nomme le job, par le `databaseId` que
+    demande `gh run rerun --help`."""
+    commandes = _commandes_de_claude_md()
+    for fragment in (
+        "`gh run rerun <id> --job <databaseId>`",
+        "relancer le seul job de la CI coupé à son délai",
+        "le `databaseId` lu par `gh run view <id> --json jobs`",
+        "le numéro de l'URL du job ne convient pas",
+        "que l'étape coupée est « cancelled », et non en échec",
+        "Jamais pour `texte-pr`",
+        "la revue finale de chaque lot relève les avertissements de durée des exécutions du lot",
+        "`gh run view <id>`",
+        "annotations",
+    ):
+        assert fragment in commandes, fragment
+    assert "--failed" not in commandes
+
+
+def test_claude_md_dit_la_duree_mesuree_des_tests():
+    """LE-40 : la durée de la suite, dans « Commandes », est celle que la CI a mesurée (sur la
+    PR #118, 7 min 48 s puis 6 min 4 s sous Ubuntu, 32 min 39 s puis 20 min 2 s sous Windows),
+    et non « environ 5 minutes », qui ne l'avait jamais été."""
+    commandes = _commandes_de_claude_md()
+    assert "environ 6 à 8 minutes sous Ubuntu et 20 à 33 sous Windows" in commandes
+    assert "environ 5 minutes" not in (RACINE / "CLAUDE.md").read_text(encoding="utf-8")
 
 
 def test_hooks_du_depot_modele():
