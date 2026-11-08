@@ -149,11 +149,19 @@ def test_ecarts(lancer, section, code, attendu):
     assert (REFUS in sortie) == (code == 1), sortie
 
 
-@pytest.mark.parametrize("puce", ["-", "*", "+", "1."])
-def test_ecarts_sous_liste(lancer, puce):
-    """Une ligne indentée qui commence par une puce est une sous-liste, pas la suite de l'écart
-    d'avant : elle refuse, à son rang, au lieu d'être jointe sans être lue."""
-    code, sortie = lancer(corps_avec(ECART + f"\n  {puce} une sous-puce"))
+@pytest.mark.parametrize(
+    "sous_liste",
+    [
+        *(f"  {puce} une sous-puce" for puce in ("-", "*", "+", "1.", "1)")),
+        # une puce seule en fin de ligne : jointe, elle laisserait un texte après la date, à la
+        # ligne 2 (relecture de la revue finale du lot 15)
+        "  -",
+    ],
+)
+def test_ecarts_sous_liste(lancer, sous_liste):
+    """Une ligne indentée qui commence par une puce ou un numéro est une sous-liste, pas la suite
+    de l'écart d'avant : elle refuse, à son rang, au lieu d'être jointe sans être lue."""
+    code, sortie = lancer(corps_avec(ECART + "\n" + sous_liste))
     assert code == 1, sortie
     assert "ligne 3 de la section : ni « Aucun. » ni un écart" in sortie, sortie
 
@@ -174,6 +182,42 @@ def test_le_code_en_ligne_vient_de_documentation():
     assert not hasattr(t, "_CODE_EN_LIGNE")
     assert d._CODE_OU_COMMENTAIRE.pattern.endswith("|" + d.CODE_EN_LIGNE.pattern)
     assert d._CODE_OU_COMMENTAIRE.pattern.startswith(d.COMMENTAIRE.pattern + "|")
+
+
+def test_docstring_dit_les_refus_et_les_ecarts_du_rendu():
+    """La docstring de `texte_pr.py` dit ce que dit `methode.md` (relecture de la revue finale du
+    lot 15) : le rang n'est promis qu'aux refus d'une ligne, et la tête relue se cherche telle que
+    GitHub la montre, à deux écarts près, bornés par le SHA, qui doit égaler la tête."""
+    docstring = " ".join(t.__doc__.split())
+    for fragment in (
+        (
+            "Le contrôle refuse, sans nommer de ligne : une section absente, vide ou en double ; "
+            "« Aucun. » à côté d'un écart ; un `<!--` jamais fermé dans la section, qui cacherait "
+            "la suite."
+        ),
+        (
+            "Il refuse, en nommant la ligne par son rang dans la section, la ligne 1 étant celle "
+            "qui suit le titre : une ligne qui n'est ni « Aucun. » ni un écart, une sous-liste "
+            "comprise ; un écart vide, sans « promesse : » suivi d'un texte, sans « accord "
+            "d'Edouard : » suivi d'une vraie date, avec un texte après la date, ou hors de cet "
+            "ordre."
+        ),
+        (
+            "une ligne qu'il cache est absente. À deux écarts près : un `<!--` jamais fermé, "
+            "ouvert dans un élément de liste après quatre espaces ou plus (une puce imbriquée, ou "
+            "une ligne qui continue la puce), et un `<?`, un `<!` suivi d'une lettre "
+            "(`<!DOCTYPE`) ou un `<![CDATA[` ouvert en tête de ligne sans `>` après lui, cachent "
+            "sur GitHub tout ce qui les suit, mais le contrôle lit encore la suite, la ligne "
+            "« Tête relue » comme la section des écarts ; les deux écarts sont bornés, le SHA de "
+            "cette ligne devant toujours égaler la tête de la PR."
+        ),
+    ):
+        assert fragment in docstring, fragment
+    ancien = (
+        "Le refus nomme la ligne par son rang dans la section, la ligne 1 étant celle qui suit le "
+        "titre : une section absente"
+    )
+    assert ancien not in docstring
 
 
 def test_ecarts_titres_varies(lancer):

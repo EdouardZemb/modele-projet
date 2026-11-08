@@ -82,12 +82,16 @@ conteneurs et des commentaires (un bloc clôturé non fermé dans un élément d
 qui franchit une ligne `>` vide, un texte de lien à plus de trois niveaux de crochets, une
 définition après un titre souligné, un commentaire fermé par `--->` dans un paragraphe) font aussi
 refuser à tort.
-Un autre laisse passer à tort ce que GitHub cache, et touche aussi `texte_pr.py` et `plan.py`, qui
-s'appuient sur ce script : un `<!--` jamais fermé, ouvert dans un élément de liste après quatre
-espaces ou plus (une puce imbriquée, ou une ligne qui continue la puce), cache sur GitHub tout ce
-qui le suit, mais les contrôles lisent encore la suite : un titre, et donc la section « Ce qui fait
-foi », la section des écarts à la spec, les trois sections d'un plan et ses titres de tâche, et la
-ligne « Tête relue », qui doit toujours nommer la tête de la PR.
+Deux autres laissent passer à tort ce que GitHub cache, et touchent aussi `texte_pr.py` et
+`plan.py`, qui s'appuient sur ce script : un `<!--` jamais fermé, ouvert dans un élément de liste
+après quatre espaces ou plus (une puce imbriquée, ou une ligne qui continue la puce), cache sur
+GitHub tout ce qui le suit, mais les contrôles lisent encore la suite : un titre, et donc la
+section « Ce qui fait foi », la section des écarts à la spec, les trois sections d'un plan et ses
+titres de tâche, et la ligne « Tête relue », qui doit toujours nommer la tête de la PR ; un bloc
+ouvert en tête de ligne par `<?`, par `<!` suivi d'une lettre (`<!DOCTYPE`) ou par `<![CDATA[`,
+sans `>` après lui, cache de même sur GitHub tout ce qui le suit, mais `texte_pr.py` et `plan.py`,
+qui ne cherchent que `<!--`, lisent encore la ligne « Tête relue », la section des écarts, les
+trois sections d'un plan et ses titres de tâche.
 Un dernier ne touche que le gabarit resté vide. Sous Windows, il lit l'existence d'un chemin lié
 sans égard à la casse : un lien `docs/Cadrage.md` vers `docs/cadrage.md` y est lu, et peut
 avertir, alors que GitHub casse ce lien ; sous Linux, il est ignoré. C'est un avertissement de
@@ -192,8 +196,9 @@ _BLOC_DE_COMMENTAIRE = re.compile(
 _COMMENTAIRE_EN_TETE = re.compile(
     r"^ {0,3}(?:" + COMMENTAIRE.pattern + ")", re.MULTILINE | re.DOTALL
 )
-# Une sous-liste : une ligne indentée qui commence par une puce ou par un numéro. Elle ne continue
-# pas la puce d'avant : GitHub en fait un élément de liste à part.
+# Une sous-liste : une ligne indentée qui commence par une puce ou par un numéro. `texte_pr.py` et
+# `plan.py` la refusent toujours, plus strictement que GitHub, qui joint à la puce d'avant un
+# numéro autre que 1 et une ligne indentée de quatre colonnes ou plus au-delà du texte de la puce.
 SOUS_LISTE = re.compile(r"[ \t]+(?:[-*+]|[0-9]{1,9}[.)])(?:[ \t]|$)")
 
 

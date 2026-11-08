@@ -2,7 +2,9 @@
 annoncés » (LE-53), « Outils et cas limites » (LE-56) et « Revues » (LE-55)."""
 
 import codecs
+import re
 import sys
+from pathlib import Path
 
 import plan as p
 import pytest
@@ -167,8 +169,8 @@ def test_sous_liste_et_bloc_html(racine):
     """Une sous-liste, ou une ligne ouverte par un commentaire puis portant un texte, ne continue
     pas la puce d'avant : jointe à elle, elle passerait sans être lue, un lieu faux jamais ouvert
     (revue finale du lot 15). Chaque forme refuse, à son rang, dans les trois sections, et la puce
-    d'avant reste lue. Une ligne de continuation ordinaire, un commentaire seul sur sa ligne, ou les
-    mêmes lignes dans un bloc clôturé, ne refusent pas."""
+    d'avant reste lue : le résumé la compte. Une ligne de continuation ordinaire, un commentaire
+    seul sur sa ligne, ou les mêmes lignes dans un bloc clôturé, ne refusent pas."""
     titres = {"meca": p.MECANISMES, "outils": p.OUTILS, "revues": p.REVUES}
     premieres = {
         "meca": meca("src/a.py:2", "def f("),
@@ -182,19 +184,47 @@ def test_sous_liste_et_bloc_html(racine):
         "outils": "git — un second cas — un second test",
         "revues": "finale : Tâche 1",
     }
-    debuts = ("  - ", "   * ", "  + ", "  1. ", "\t- ", "<!-- c --> - ", "   <!-- c --> ")
+    # le résumé, la puce d'avant comptée ; « Revues » garde sa puce par défaut dans les deux autres
+    resumes = {
+        "meca": "1 mécanismes vérifiés, 0 non vérifiés, 0 outils, 1 revues",
+        "outils": "0 mécanismes vérifiés, 0 non vérifiés, 1 outils, 1 revues",
+        "revues": "0 mécanismes vérifiés, 0 non vérifiés, 0 outils, 1 revues",
+    }
+    # « 1) », et un commentaire collé à une puce, que la lecture prendrait pour une puce en
+    # colonne 0 (relecture de la revue finale du lot 15)
+    debuts = (
+        "  - ",
+        "   * ",
+        "  + ",
+        "  1. ",
+        "  1) ",
+        "\t- ",
+        "<!-- c --> - ",
+        "<!-- c -->- ",
+        "   <!-- c --> ",
+    )
     for cle, titre in titres.items():
-        for debut in debuts:
-            texte = plan(**{cle: f"{premieres[cle]}\n{debut}{suites[cle]}"})
-            lignes, refus = verifier(texte, racine)
-            assert refus, (cle, debut, lignes)
+        contenus = [f"{premieres[cle]}\n{debut}{suites[cle]}" for debut in debuts]
+        contenus.append(f"{premieres[cle]}\n  -")  # une puce seule, en fin de ligne
+        for contenu in contenus:
+            lignes, refus = verifier(plan(**{cle: contenu}), racine)
+            assert refus, (cle, contenu, lignes)
             nommees = [ligne for ligne in lignes if ligne.startswith(f"{titre}, ligne")]
-            assert nommees == [f"{titre}, ligne 3 : forme attendue"], (cle, debut, lignes)
+            assert nommees == [f"{titre}, ligne 3 : forme attendue"], (cle, contenu, lignes)
+            assert lignes[-1] == resumes[cle], (cle, contenu, lignes)
         # la ligne qui ferme un commentaire de deux lignes porte le rang
         texte = plan(**{cle: f"{premieres[cle]}\n<!-- c\nc --> {suites[cle]}"})
         lignes, refus = verifier(texte, racine)
         assert refus, (cle, lignes)
         assert f"{titre}, ligne 4 : forme attendue" in lignes, (cle, lignes)
+        assert lignes[-1] == resumes[cle], (cle, lignes)
+    # « Aucun. » derrière un commentaire : GitHub rend la ligne en bloc HTML, jamais en « Aucun. »
+    # (« Revues » refuse « Aucun. » de toute façon)
+    for cle in ("meca", "outils"):
+        lignes, refus = verifier(plan(**{cle: "<!-- c -->Aucun."}), racine)
+        assert refus, (cle, lignes)
+        nommees = [ligne for ligne in lignes if ligne.startswith(f"{titres[cle]}, ligne")]
+        assert nommees == [f"{titres[cle]}, ligne 2 : forme attendue"], (cle, lignes)
     admises = (
         "\n  suite du texte",
         "\n<!-- c -->",
@@ -208,11 +238,48 @@ def test_sous_liste_et_bloc_html(racine):
     assert lignes[-1].startswith("1 mécanismes vérifiés, 0 non vérifiés"), lignes
 
 
-def test_plan_lit_sous_liste_et_bloc_html_par_documentation():
+def test_plan_lit_sous_liste_et_bloc_html_par_documentation(racine, monkeypatch):
     """`plan.py` et `texte_pr.py` lisent une sous-liste et une ligne en bloc HTML par
-    `documentation.py`, sans leur propre copie ; la docstring de `plan.py` dit les deux refus."""
+    `documentation.py`, à l'appel, sans leur propre copie : un double posé sur `documentation`
+    change ce qu'ils refusent (relecture de la revue finale du lot 15). La docstring de `plan.py`
+    dit les deux refus, et le commentaire de `SOUS_LISTE` dit sa sévérité."""
+    import documentation
+
     for script in (p, texte_pr):
         assert not hasattr(script, "_SOUS_LISTE"), script
+
+    def corps(section):
+        return "## Ce que fait cette PR\n\nx\n\n## Écarts à la spec\n\n" + section + "\n"
+
+    continue_la_revue = plan(revues="- relecture : Tâche 1\n  suite")
+    ecart = corps("- un écart — promesse : spec § 4.1 — accord d'Edouard : 07/11/2026")
+    continue_l_ecart = corps("- un écart\n  — promesse : § 2 — accord d'Edouard : 07/11/2026")
+    # sans double
+    assert not verifier(continue_la_revue, racine)[1]
+    assert texte_pr.ecarts(ecart)[1] is False
+    assert texte_pr.ecarts(continue_l_ecart)[1] is False
+    # la ligne 2 de chaque section, lue en bloc HTML
+    with monkeypatch.context() as m:
+        m.setattr(documentation, "lignes_en_bloc_html", lambda texte: {2})
+        assert verifier(plan(revues="- relecture : Tâche 1"), racine)[1]
+        assert texte_pr.ecarts(ecart)[1] is True
+    # toute ligne indentée, lue en sous-liste
+    with monkeypatch.context() as m:
+        m.setattr(documentation, "SOUS_LISTE", re.compile(r"[ \t]+"))
+        assert verifier(continue_la_revue, racine)[1]
+        assert texte_pr.ecarts(continue_l_ecart)[1] is True
+    source = Path(documentation.__file__).read_text(encoding="utf-8").split("\n")
+    fin = next(i for i, ligne in enumerate(source) if ligne.startswith("SOUS_LISTE = "))
+    debut = fin
+    while source[debut - 1].startswith("#"):
+        debut -= 1
+    commentaire = " ".join(" ".join(ligne[1:] for ligne in source[debut:fin]).split())
+    assert (
+        "`texte_pr.py` et `plan.py` la refusent toujours, plus strictement que GitHub, qui joint à "
+        "la puce d'avant un numéro autre que 1 et une ligne indentée de quatre colonnes ou plus "
+        "au-delà du texte de la puce."
+    ) in commentaire, commentaire
+    assert "GitHub en fait un élément de liste à part" not in commentaire, commentaire
     docstring = " ".join(p.__doc__.split())
     for fragment in (
         (

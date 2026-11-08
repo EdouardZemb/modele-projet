@@ -11,16 +11,16 @@ non vide, qui peut contenir un séparateur ; « promesse : » suivi d'un texte, 
 « accord d'Edouard : » suivi d'une vraie date, à deux chiffres pour le jour et le mois, qui termine
 la ligne : rien ne la suit que des espaces. La section n'admet rien d'autre que des lignes vides,
 « Aucun. », des puces, et des lignes indentées qui continuent la puce d'avant ; une ligne indentée
-qui commence par une puce ou un numéro est une sous-liste, et ne la continue pas. Le refus nomme
-la ligne par son rang dans la section, la ligne 1 étant celle qui suit le titre : une section
-absente, vide ou en double ; une ligne qui n'est ni « Aucun. » ni un écart, une sous-liste
-comprise ; un écart vide, sans « promesse : » suivi d'un texte, sans « accord d'Edouard : » suivi
-d'une vraie date, avec un texte après la date, ou hors de cet ordre ; « Aucun. » à côté d'un
-écart ; un `<!--` jamais fermé dans la section, qui cacherait la suite. Les commentaires fermés et
-les blocs de code clôturés ne comptent pas : la forme d'une ligne, que le gabarit met en
-commentaire, n'est pas un écart. Une ligne qui commence par un commentaire, après au plus trois
-espaces, et porte un texte après sa fermeture n'est ni une puce ni la suite d'une puce : GitHub la
-rend en bloc HTML.
+qui commence par une puce ou un numéro est une sous-liste, et ne la continue pas. Le contrôle
+refuse, sans nommer de ligne : une section absente, vide ou en double ; « Aucun. » à côté d'un
+écart ; un `<!--` jamais fermé dans la section, qui cacherait la suite. Il refuse, en nommant la
+ligne par son rang dans la section, la ligne 1 étant celle qui suit le titre : une ligne qui n'est
+ni « Aucun. » ni un écart, une sous-liste comprise ; un écart vide, sans « promesse : » suivi d'un
+texte, sans « accord d'Edouard : » suivi d'une vraie date, avec un texte après la date, ou hors de
+cet ordre. Les commentaires fermés et les blocs de code clôturés ne comptent pas : la forme d'une
+ligne, que le gabarit met en commentaire, n'est pas un écart. Une ligne qui commence par un
+commentaire, après au plus trois espaces, et porte un texte après sa fermeture n'est ni une puce
+ni la suite d'une puce : GitHub la rend en bloc HTML.
 
 La tête relue. Une PR qui ferme une issue porte la ligne `Tête relue : <SHA complet>`, égale à la
 tête de la PR. Les issues qu'elle ferme ne se lisent pas dans le corps : l'étape d'avant les
@@ -29,8 +29,13 @@ le fichier de `--fermetures`. Une réponse absente, vide, en erreur, sans la PR 
 formé fait refuser : le contrôle reste fermé. La ligne se cherche dans le corps tel que GitHub le
 rend : hors des commentaires et des blocs de code, et avant tout commentaire jamais fermé ouvert
 en tête de ligne ou après une puce, qui cache tout ce qui le suit ; une ligne qu'il cache est
-absente. Un `<!--` au milieu d'un paragraphe reste du texte, et ne cache rien. Le SHA se lit aussi
-entre accents graves ou en majuscules.
+absente. À deux écarts près : un `<!--` jamais fermé, ouvert dans un élément de liste après quatre
+espaces ou plus (une puce imbriquée, ou une ligne qui continue la puce), et un `<?`, un `<!` suivi
+d'une lettre (`<!DOCTYPE`) ou un `<![CDATA[` ouvert en tête de ligne sans `>` après lui, cachent
+sur GitHub tout ce qui les suit, mais le contrôle lit encore la suite, la ligne « Tête relue »
+comme la section des écarts ; les deux écarts sont bornés, le SHA de cette ligne devant toujours
+égaler la tête de la PR. Un `<!--` au milieu d'un paragraphe reste du texte, et ne cache rien. Le
+SHA se lit aussi entre accents graves ou en majuscules.
 
 Avant toute lecture, hors du code en ligne : le texte en LF et en NFC ; l'apostrophe typographique
 et U+02BC deviennent `'`, une espace insécable devient une espace ; un séparateur est `—` ou `–`
