@@ -1,8 +1,12 @@
 """Le contrôle des plans (`scripts/modele/plan.py`) : les trois sections d'un plan, « Mécanismes
 annoncés » (LE-53), « Outils et cas limites » (LE-56) et « Revues » (LE-55)."""
 
+import codecs
+import sys
+
 import plan as p
 import pytest
+import texte_pr
 
 A_PY = "un\ndef f():\n    return 2\n"
 REFUS = "plan : refus"
@@ -68,6 +72,23 @@ def verifier(texte, racine, depots=None, lieux=True):
     return p.verifier(texte, racine, depots or {}, lieux)
 
 
+def espionner(monkeypatch):
+    """Pose des espions sur `Path.resolve`, `Path.read_bytes` et `Path.is_file` : la liste rendue
+    note chaque appel, (nom, chemin)."""
+    vus = []
+
+    def espion(nom, vraie):
+        def _espion(self, *args, **kwargs):
+            vus.append((nom, str(self)))
+            return vraie(self, *args, **kwargs)
+
+        return _espion
+
+    for nom in ("resolve", "read_bytes", "is_file"):
+        monkeypatch.setattr(p.Path, nom, espion(nom, getattr(p.Path, nom)))
+    return vus
+
+
 def test_sections(racine):
     """Chaque section absente refuse et se nomme ; un titre de niveau 3 ne la remplace pas ; une
     section vide refuse ; « Aucun. » n'est admis que seul, et jamais dans « Revues » ; une ligne
@@ -115,6 +136,67 @@ def test_sections(racine):
     lignes, refus = verifier(plan(outils=outils), racine)
     assert not refus, lignes
     assert lignes[-1] == "0 mécanismes vérifiés, 0 non vérifiés, 2 outils, 1 revues"
+    # deux sections du même titre refusent, en double, et aucune des deux n'est lue : jointes, les
+    # lignes de la seconde seraient nommées par un rang qui n'est pas le leur
+    for titre, cle, contenu, resume in (
+        (
+            "Revues",
+            "revues",
+            "- relecture : Tâche 1\n\n## Revues\n\n- une relecture",
+            "0 mécanismes vérifiés, 0 non vérifiés, 0 outils, 0 revues",
+        ),
+        (
+            "Outils et cas limites",
+            "outils",
+            "- a — b — c\n\n## Outils et cas limites\n\n- d",
+            "0 mécanismes vérifiés, 0 non vérifiés, 0 outils, 1 revues",
+        ),
+    ):
+        lignes, refus = verifier(plan(**{cle: contenu}), racine)
+        assert refus, cle
+        assert f"section « {titre} » en double" in lignes, lignes
+        assert not [ligne for ligne in lignes if ligne.startswith(f"{titre}, ligne")], lignes
+        assert lignes[-1] == resume, lignes
+
+
+def test_normalisation_hors_du_code(racine):
+    """Hors du code en ligne, un tiret demi-cadratin sépare comme un cadratin, une espace insécable
+    (U+00A0, U+202F) compte pour une espace, et les apostrophes typographiques (U+2019, U+02BC)
+    deviennent droites : un plan écrit dans un traitement de texte se lit comme un plan écrit à la
+    main. Aucune règle de `plan.py` ne lit une apostrophe hors du code : leur normalisation se voit
+    sur `_normaliser`, et le test de parité avec `texte_pr.py` la garde."""
+    demi = "\u2013"
+    cas = [
+        ("U+2013", "meca", f"- `src/a.py:2` {demi} `def f(` {demi} la fonction existe"),
+        ("U+2013", "outils", f"- git {demi} un cas {demi} un test"),
+    ]
+    for nom, espace in (("U+00A0", "\u00a0"), ("U+202F", "\u202f")):
+        cas += [
+            (nom, "meca", f"- `src/a.py:2`{espace}—{espace}`def f(`{espace}—{espace}x"),
+            (nom, "outils", f"- git{espace}—{espace}un cas{espace}—{espace}un test"),
+            (nom, "revues", f"- relecture : Tâche{espace}1"),
+        ]
+    for nom, cle, ligne in cas:
+        reponses = {"meca": meca("src/a.py:2", "def f("), "outils": "- a — b — c", cle: ligne}
+        lignes, refus = verifier(plan(**reponses), racine)
+        assert not refus, (nom, cle, lignes)
+        assert lignes[-1] == "1 mécanismes vérifiés, 0 non vérifiés, 1 outils, 1 revues", (
+            nom,
+            cle,
+            lignes,
+        )
+    doc = p._documentation()
+    brut = "l\u2019outil, l\u02bcoutil,\u00a0un\u202fcas, e\u0301 ; `l\u2019outil\u00a0`"
+    assert p._normaliser(brut, doc) == "l'outil, l'outil, un cas, é ; `l\u2019outil\u00a0`"
+
+
+def test_plan_et_texte_pr_normalisent_de_meme():
+    """La normalisation est copiée dans les deux scripts, qui lisent une section de la même façon :
+    la même table de traduction, le même séparateur et la même puce. Ce test les empêche de
+    diverger."""
+    assert p._TRADUCTION == texte_pr._TRADUCTION
+    assert p._SEPARATEUR.pattern == texte_pr._SEPARATEUR.pattern
+    assert p._PUCE.pattern == texte_pr._PUCE.pattern
 
 
 SUPERPOWERS = """# Une fonction Implementation Plan
@@ -279,25 +361,54 @@ def test_plan_chemins_refuses_avant_resolve(racine, monkeypatch):
         with pytest.raises(ValueError) as erreur:
             p.lieu(texte)
         assert str(erreur.value) == raison, texte
-    vus = []
-    resolve, read_bytes, is_file = p.Path.resolve, p.Path.read_bytes, p.Path.is_file
-
-    def espion(nom, vraie):
-        def _espion(self, *args, **kwargs):
-            vus.append((nom, str(self)))
-            return vraie(self, *args, **kwargs)
-
-        return _espion
-
-    monkeypatch.setattr(p.Path, "resolve", espion("resolve", resolve))
-    monkeypatch.setattr(p.Path, "read_bytes", espion("read_bytes", read_bytes))
-    monkeypatch.setattr(p.Path, "is_file", espion("is_file", is_file))
+    vus = espionner(monkeypatch)
     for texte in list(raisons)[:6]:
         vus.clear()
         lignes, refus = verifier(plan(meca=meca(texte, "x")), racine)
         assert refus, texte
         assert f"Mécanismes annoncés, ligne 2 : chemin refusé ({raisons[texte]})" in lignes, lignes
         assert vus == [], (texte, vus)
+
+
+def test_plan_chemin_vide_refuse_avant_resolve(racine, monkeypatch):
+    """Un lieu sans chemin (`:2`, `serveur::2`) refuse, avec ou sans les lieux, avant tout `Path` :
+    sous `--sans-lieux`, il compterait sinon comme un mécanisme, et avec les lieux le refus dirait
+    « fichier absent » sans nommer de fichier."""
+    vides = (":2", "serveur::2")
+    for texte in vides:
+        with pytest.raises(ValueError) as erreur:
+            p.lieu(texte)
+        assert str(erreur.value) == "ligne invalide", texte
+    vus = espionner(monkeypatch)
+    for texte in vides:
+        for lieux in (True, False):
+            vus.clear()
+            texte_du_plan = plan(meca=meca(texte, "def f("))
+            lignes, refus = verifier(texte_du_plan, racine, {"serveur": racine}, lieux)
+            assert refus, (texte, lieux, lignes)
+            assert "Mécanismes annoncés, ligne 2 : chemin refusé (ligne invalide)" in lignes, lignes
+            assert vus == [], (texte, lieux, vus)
+
+
+def test_plan_lien_hors_de_la_racine(racine, tmp_path):
+    """Un fichier cité qui sort de sa racine une fois résolu, par un lien symbolique, est absent,
+    même s'il porte l'extrait ; un lien qui reste sous la racine se lit. Sous Windows, créer un
+    lien demande un droit que la session peut ne pas avoir : le test saute alors, jamais
+    ailleurs."""
+    dehors = tmp_path / "dehors.py"
+    dehors.write_text("un\ndef f():\n", encoding="utf-8")
+    try:
+        (racine / "src/sortant.py").symlink_to(dehors)
+        (racine / "src/dedans.py").symlink_to(racine / "src/a.py")
+    except OSError as erreur:
+        if sys.platform != "win32":
+            raise
+        pytest.skip(f"lien symbolique impossible sans le droit de le créer ({erreur.winerror})")
+    lignes, refus = verifier(plan(meca=meca("src/dedans.py:2", "def f(")), racine)
+    assert not refus, lignes
+    lignes, refus = verifier(plan(meca=meca("src/sortant.py:2", "def f(")), racine)
+    assert refus, lignes
+    assert "Mécanismes annoncés, ligne 2 : fichier absent : src/sortant.py" in lignes, lignes
 
 
 def test_plan_chemin_a_espaces_et_gabarit(racine):
@@ -365,10 +476,16 @@ def test_plan_encodages(racine, lancer):
     """Un plan écrit sous PowerShell 5.1, en UTF-16 ou en UTF-8 avec BOM, se lit ; un fichier cité
     en CRLF, ou qui porte U+2028, se numérote comme git et GitHub le numérotent, par `\\n`."""
     texte = plan(meca=meca("src/a.py:2", "def f("))
-    for octets in (texte.encode("utf-16"), texte.encode("utf-8-sig")):
+    # le BOM précède une ligne lue, le titre de la première section : laissé en tête, il la cache
+    texte = texte[texte.index("## Mécanismes annoncés") :]
+    for nom, octets in (
+        ("UTF-16", texte.encode("utf-16")),
+        ("UTF-16 BE", codecs.BOM_UTF16_BE + texte.encode("utf-16-be")),
+        ("UTF-8 avec BOM", texte.encode("utf-8-sig")),
+    ):
         code, sortie = lancer(octets, "--racine", str(racine))
-        assert code == 0, sortie
-        assert "1 mécanismes vérifiés" in sortie, sortie
+        assert code == 0, (nom, sortie)
+        assert "1 mécanismes vérifiés" in sortie, (nom, sortie)
     (racine / "src/crlf.py").write_bytes(b"un\r\ndef f():\r\n    return 2\r\n")
     (racine / "src/sep.py").write_bytes("un\ndef f():\u2028    pass\n    return 2\n".encode())
     for ligne in (
@@ -383,9 +500,9 @@ def test_plan_encodages(racine, lancer):
 
 
 def test_main(racine, lancer):
-    """0 sans refus, 1 avec ; 64 pour un plan absent ou un `--depot` mal formé. La sortie ne cite
-    jamais une ligne du plan, seulement des chemins, chaque caractère de contrôle ou séparateur de
-    ligne remplacé par `?`."""
+    """0 sans refus, 1 avec ; 64 pour un plan absent, une racine absente ou un `--depot` mal formé.
+    La sortie ne cite jamais une ligne du plan, seulement des chemins, chaque caractère de contrôle
+    ou séparateur de ligne remplacé par `?`."""
     code, sortie = lancer(plan(), "--racine", str(racine))
     assert code == 0, sortie
     assert REFUS not in sortie
@@ -406,6 +523,7 @@ def test_main(racine, lancer):
     assert "SENTINELLE" not in sortie, sortie
     for code, sortie in (
         lancer(None, "--racine", str(racine)),
+        lancer(plan(), "--racine", str(racine.parent / "SENTINELLE")),  # une racine absente
         lancer(plan(), "--racine", str(racine), "--depot", "SENTINELLE"),
         lancer(plan(), "--racine", str(racine), "--depot", "=SENTINELLE"),
         lancer(plan(), "--inconnue", "SENTINELLE"),

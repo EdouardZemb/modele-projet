@@ -4,7 +4,8 @@ session le lance sur son plan, avant de le soumettre et après chaque correction
 
 Les sections. Chacune se lit bornée : de son titre de niveau 2 jusqu'au premier titre, quel que
 soit son niveau, ou à la première ligne de séparation (`---`). Sans titre de niveau 2, elle est
-absente : un titre de niveau 3 ne la remplace pas. Hors des blocs de code clôturés et des
+absente : un titre de niveau 3 ne la remplace pas. Deux titres de niveau 2 du même nom refusent,
+en double, et aucune des deux sections n'est lue. Hors des blocs de code clôturés et des
 commentaires fermés, elle n'admet que des lignes vides, « Aucun. », des puces `-` ou `*`, et des
 lignes indentées, qui continuent la puce d'avant et se joignent à elle. Toute autre ligne refuse,
 une ligne indentée sans puce avant elle comprise, comme un `<!--` jamais fermé, qui cacherait la
@@ -23,11 +24,11 @@ d'exactement N, et une espace en tête et en queue se retire quand les deux sont
 forme `[<dépôt>:]<chemin>:<ligne>[-<fin>]`. Trois morceaux séparés par `:` donnent un préfixe, un
 nom `[A-Za-z0-9][A-Za-z0-9._-]*`, et deux n'en donnent pas ; un autre nombre de morceaux, ou un
 préfixe qui n'est pas un nom, refuse : un chemin du dépôt n'a jamais de deux-points, que Windows
-n'admet pas. Le chemin n'est pas absolu, et ne porte ni `..` ni barre oblique inverse ; la plage a
-40 lignes au plus. Ces refus viennent avant toute lecture et tout `Path` : sous Windows, `resolve`
-ouvrirait un partage réseau ou un lecteur. Un chemin sans préfixe part de la racine ; un chemin
-préfixé, du clone que nomme `--depot <dépôt>=<clone>`, et sans lui il est « non vérifié », sans
-refus. Le fichier, une fois résolu, reste sous sa racine et est un fichier ; sinon, il est absent.
+n'admet pas. Le chemin n'est ni vide ni absolu, et ne porte ni `..` ni barre oblique inverse ; la
+plage a 40 lignes au plus. Ces refus viennent avant toute lecture et tout `Path` : sous Windows,
+`resolve` ouvrirait un partage réseau ou un lecteur. Un chemin sans préfixe part de la racine ; un
+chemin préfixé, du clone que nomme `--depot <dépôt>=<clone>`, et sans lui il est « non vérifié »,
+sans refus. Le fichier, une fois résolu, reste sous sa racine et est un fichier, sinon absent.
 Ses lignes se comptent par `\\n`, comme git et GitHub les comptent, jamais par `splitlines`, qui
 coupe aussi sur U+2028 ou `\\f`. L'extrait se cherche, en NFC des deux côtés, sur la ligne citée ou
 sur l'une des lignes de la plage. Avec `--sans-lieux`, chaque lieu se lit sans ouvrir de fichier :
@@ -79,10 +80,10 @@ REVUES = "Revues"
 AUCUN = "Aucun."
 FORME = "forme attendue"
 
-_TRADUCTION = str.maketrans({"’": "'", "ʼ": "'", " ": " ", " ": " "})
+_TRADUCTION = str.maketrans({"\u2019": "'", "\u02bc": "'", "\u00a0": " ", "\u202f": " "})
 _PUCE = re.compile(r"[-*](?:[ \t]+|$)")
 # Un séparateur : un tiret cadratin ou demi-cadratin, entouré d'espaces.
-_SEPARATEUR = re.compile(r"[ \t]+[—–][ \t]+")
+_SEPARATEUR = re.compile(r"[ \t]+[\u2014\u2013][ \t]+")
 _NOM = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 _LIGNES = re.compile(r"([1-9][0-9]{0,8})(?:-([1-9][0-9]{0,8}))?")
 _TITRE_DE_TACHE = re.compile(r" {0,3}###[ \t]+(?:tâche|task)[ \t]+([0-9]{1,9})\b", re.IGNORECASE)
@@ -106,10 +107,6 @@ def _documentation():
     return documentation
 
 
-def _en_lf(texte: str) -> str:
-    return texte.replace("\r\n", "\n").replace("\r", "\n")
-
-
 def lire_plan(octets: bytes) -> str:
     """Le texte d'un plan, en LF, sans BOM : en UTF-16 s'il commence par un BOM UTF-16, sinon en
     UTF-8, chaque octet qui n'est pas de l'UTF-8 remplacé."""
@@ -117,7 +114,7 @@ def lire_plan(octets: bytes) -> str:
         texte = octets.decode("utf-16", errors="replace")
     else:
         texte = octets.decode("utf-8", errors="replace")
-    return _en_lf(texte.removeprefix("﻿"))
+    return _documentation()._en_lf(texte.removeprefix("\ufeff"))
 
 
 def lieu(texte: str) -> tuple[str | None, str, int, int]:
@@ -132,6 +129,8 @@ def lieu(texte: str) -> tuple[str | None, str, int, int]:
         raise ValueError("ligne invalide")
     else:
         raise ValueError("deux-points dans le chemin")
+    if not chemin:
+        raise ValueError("ligne invalide")
     if chemin.startswith("/"):
         raise ValueError("chemin absolu")
     if "\\" in chemin:
@@ -257,7 +256,7 @@ def _lignes_du_fichier(base: Path, chemin: str, resolues: dict[Path, Path]) -> l
         octets = fichier.read_bytes()
     except (OSError, RuntimeError, ValueError):
         return None
-    texte = octets.decode("utf-8", errors="replace").removeprefix("﻿").replace("\r\n", "\n")
+    texte = octets.decode("utf-8", errors="replace").removeprefix("\ufeff").replace("\r\n", "\n")
     lignes = texte.split("\n")
     if lignes[-1] == "":
         lignes.pop()
@@ -310,7 +309,7 @@ def verifier(
     """Les trois sections d'un plan : (lignes, refus). La dernière ligne est le résumé. Avec
     `lieux=False`, la forme de chaque lieu se vérifie par `lieu()`, sans ouvrir de fichier."""
     doc = _documentation()
-    texte = _en_lf(texte)
+    texte = doc._en_lf(texte)
     lignes: list[str] = []
     refus = False
     resolues: dict[Path, Path] = {}
@@ -334,12 +333,16 @@ def verifier(
         return motifs
 
     for titre in (MECANISMES, OUTILS, REVUES):
-        brute = doc.section(texte, titre, niveau=2, bornee=True)
-        if brute is None:
+        morceaux = doc.sections(texte, titre, niveau=2, bornee=True)
+        if not morceaux:
             lignes.append(f"section « {titre} » absente (titre de niveau 2)")
             refus = True
             continue
-        puces, aucuns, refusees = _lire_section(brute, doc)
+        if len(morceaux) > 1:  # jointes, les lignes de la seconde auraient un rang faux
+            lignes.append(f"section « {titre} » en double")
+            refus = True
+            continue
+        puces, aucuns, refusees = _lire_section(morceaux[0], doc)
         if not (puces or aucuns or refusees):
             lignes.append(f"section « {titre} » vide")
             refus = True
