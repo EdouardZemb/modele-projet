@@ -421,15 +421,24 @@ def test_menage_cible():
 
 
 # Le double de `docker` de la vérification : il ne répond qu'aux trois questions posées au client du
-# conteneur, d'après trois variables, et refuse toute autre commande.
+# conteneur, d'après trois variables, et refuse toute autre commande. La lecture que nomme `ECHEC`
+# (`versions`, `pilote` ou `statut`) échoue sans rien rendre, comme un client qui ne joint pas son
+# moteur.
 FAUX_DOCKER = """docker() {
+  local lecture valeur
   case "$*" in
     "exec menage-cible docker version --format {{.Client.Version}} {{.Server.Version}}")
-      echo "$VERSIONS" ;;
-    "exec menage-cible docker info --format {{.Driver}}") echo "$PILOTE" ;;
-    "exec menage-cible docker info --format {{json .DriverStatus}}") echo "$STATUT" ;;
+      lecture=versions valeur=$VERSIONS ;;
+    "exec menage-cible docker info --format {{.Driver}}") lecture=pilote valeur=$PILOTE ;;
+    "exec menage-cible docker info --format {{json .DriverStatus}}")
+      lecture=statut valeur=$STATUT ;;
     *) echo "docker inattendu : $*" >&2; return 99 ;;
   esac
+  if [ "$lecture" = "${ECHEC:-}" ]; then
+    echo "Error response from daemon: $lecture" >&2
+    return 1
+  fi
+  echo "$valeur"
 }
 """
 
@@ -437,46 +446,76 @@ FAUX_DOCKER = """docker() {
 def test_verification_de_la_cible_refuse_un_autre_docker(tmp_path):
     """LE-41, LE-55 : avant l'épreuve, la vérification refuse tout autre Docker que la cible. Elle
     lit `DOCKER_CIBLE` dans `tests/modele/docker-cible.env`, puis demande au client du conteneur sa
-    version et celle du moteur, le pilote et le `DriverStatus`. Lancée comme GitHub lance une étape
-    `shell: bash`, puis sans `-e` ni `pipefail`, un double de `docker` en tête : un autre moteur,
-    un autre client, un autre pilote, le magasin containerd, une autre cible dans le fichier, ou le
-    fichier absent, chacun refuse et le dit par `::error::`. Une épreuve sur un autre Docker que la
-    cible serait un contrôle passé à vide."""
-    job = yaml.safe_load(CI.read_text(encoding="utf-8"))["jobs"]["menage-cible"]
+    version et celle du moteur, le pilote et le `DriverStatus`. Lancée comme le runner lance un
+    `run` sans `shell:` sur `ubuntu-latest` (`bash -e {0}`, sans `pipefail`), puis sans `-e`, un
+    double de `docker` en tête : un autre moteur, un autre client, un autre pilote, le magasin
+    containerd, une autre cible dans le fichier, le fichier absent ou sans `DOCKER_CIBLE`, ou une
+    lecture du Docker en échec, chacun refuse et le dit par `::error::`. Une épreuve sur un autre
+    Docker que la cible serait un contrôle passé à vide."""
+    workflow = yaml.safe_load(CI.read_text(encoding="utf-8"))
+    job = workflow["jobs"]["menage-cible"]
     (verification,) = [e for e in job["steps"] if e.get("name") == VERIFIER_CIBLE]
+    # `bash -e {0}` n'est la commande du runner que sans `shell:`, ni sur l'étape, ni dans un
+    # `defaults` du job ou du workflow : `shell: bash` y ajouterait `pipefail`.
+    assert "shell" not in verification
+    assert "defaults" not in job
+    assert "defaults" not in workflow
     script = tmp_path / "verification.sh"
     script.write_text(FAUX_DOCKER + verification["run"], encoding="utf-8", newline="\n")
     c = lire_docker_cible()["DOCKER_CIBLE"]
-    autre_cible = tmp_path / "autre-cible"
-    (autre_cible / "tests/modele").mkdir(parents=True)
-    (autre_cible / "tests/modele/docker-cible.env").write_text(
+
+    def fichier_de_cible(nom, texte):
+        dossier = tmp_path / nom
+        (dossier / "tests/modele").mkdir(parents=True)
+        (dossier / "tests/modele/docker-cible.env").write_text(
+            texte, encoding="utf-8", newline="\n"
+        )
+        return dossier
+
+    autre_cible = fichier_de_cible(
+        "autre-cible",
         "DOCKER_CIBLE=0.0.1\nDOCKER_CIBLE_MAGASIN=classique\nDOCKER_CIBLE_RELEVE=2026-11-07\n",
-        encoding="utf-8",
-        newline="\n",
+    )
+    sans_cle = fichier_de_cible(
+        "sans-cle", "DOCKER_CIBLE_MAGASIN=classique\nDOCKER_CIBLE_RELEVE=2026-11-07\n"
     )
     sans_fichier = tmp_path / "sans-fichier"
     sans_fichier.mkdir()
     reel = '[["Backing Filesystem","extfs"],["Supports d_type","true"],["userxattr","false"]]'
     containerd = '[["driver-type","io.containerd.snapshotter.v1"]]'
-    # (cas, dossier, « client moteur », pilote, DriverStatus, fragment du refus, ou None)
+    cible = f"{c} {c}"
+    # (cas, dossier, « client moteur », pilote, DriverStatus, lecture en échec, fragment du refus,
+    # ou None) ; chaque branche de refus a son cas, et son fragment ne se lit que sur elle.
     table = (
-        ("la cible", RACINE, f"{c} {c}", "overlay2", "[]", None),
-        ("la cible, DriverStatus réel", RACINE, f"{c} {c}", "overlay2", reel, None),
-        ("un autre moteur", RACINE, f"{c} 28.0.4", "overlay2", "[]", "le moteur est en 28.0.4"),
-        ("un autre client", RACINE, f"28.0.4 {c}", "overlay2", "[]", "le client est en 28.0.4"),
-        ("un autre pilote", RACINE, f"{c} {c}", "overlayfs", "[]", "le pilote est overlayfs"),
-        ("le magasin containerd", RACINE, f"{c} {c}", "overlay2", containerd, "magasin containerd"),
-        ("une autre cible", autre_cible, f"{c} {c}", "overlay2", "[]", "la cible en 0.0.1"),
-        ("sans le fichier", sans_fichier, f"{c} {c}", "overlay2", "[]", "docker-cible.env"),
+        ("la cible", RACINE, cible, "overlay2", "[]", "", None),
+        ("la cible, DriverStatus réel", RACINE, cible, "overlay2", reel, "", None),
+        ("un autre moteur", RACINE, f"{c} 28.0.4", "overlay2", "[]", "", "le moteur est en 28.0.4"),
+        ("un autre client", RACINE, f"28.0.4 {c}", "overlay2", "[]", "", "le client est en 28.0.4"),
+        ("un autre pilote", RACINE, cible, "overlayfs", "[]", "", "le pilote est overlayfs"),
+        ("le magasin containerd", RACINE, cible, "overlay2", containerd, "", "magasin containerd"),
+        ("une autre cible", autre_cible, cible, "overlay2", "[]", "", "la cible en 0.0.1"),
+        ("sans le fichier", sans_fichier, cible, "overlay2", "[]", "", "docker-cible.env illisible"),
+        ("sans DOCKER_CIBLE", sans_cle, cible, "overlay2", "[]", "", "DOCKER_CIBLE absent"),
+        ("versions illisibles", RACINE, cible, "overlay2", "[]", "versions", "versions illisibles"),
+        ("pilote illisible", RACINE, cible, "overlay2", "[]", "pilote", "pilote illisible"),
+        ("DriverStatus illisible", RACINE, cible, "overlay2", "[]", "statut",
+         "DriverStatus illisible"),
     )
     env = {k: v for k, v in os.environ.items() if not k.startswith("DOCKER_CIBLE")}
-    for options in (["-e", "-o", "pipefail"], []):
-        for nom, dossier, versions, pilote, statut, refus in table:
+    # Comme le runner, `bash -e`, sans `pipefail`, puis sans `-e` : un refus ne doit rien à `-e`.
+    for options in (["-e"], []):
+        for nom, dossier, versions, pilote, statut, echec, refus in table:
             cas = (nom, options)
             r = subprocess.run(
-                [trouver_bash(), "--noprofile", "--norc", *options, str(script)],
+                [trouver_bash(), *options, str(script)],
                 cwd=dossier,
-                env={**env, "VERSIONS": versions, "PILOTE": pilote, "STATUT": statut},
+                env={
+                    **env,
+                    "VERSIONS": versions,
+                    "PILOTE": pilote,
+                    "STATUT": statut,
+                    "ECHEC": echec,
+                },
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
