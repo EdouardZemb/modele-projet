@@ -1405,8 +1405,9 @@ def test_methode_nomme_documentation_md():
 def test_methode_dit_les_plans():
     """Le contrôle des plans (LE-53, LE-55, LE-56) : les trois sections d'un plan et la forme de
     leurs lignes, la revue du plan, les revues comme tâches du plan, le cas limite d'un outil, le
-    mutant, et ce que la CI vérifie d'un plan ajouté ou modifié. Le tableau des garde-fous nomme le
-    script ; le point 2 du cycle renvoie aux trois sections et à la revue du plan."""
+    mutant, et ce que la CI vérifie d'un plan ajouté ou modifié, à la PR et au push. Le tableau des
+    garde-fous nomme le script ; le point 2 du cycle renvoie aux trois sections et à la revue du
+    plan."""
     texte = _aplati(lire(METHODE))
     for fragment in (
         # la règle de la place est séparée du contrôle, qui ne la vérifie pas (revue finale du
@@ -1454,6 +1455,14 @@ def test_methode_dit_les_plans():
         "hors du plan",
         "est éprouvé par un mutant",
         "un plan modifié se vérifie sans ouvrir les fichiers cités",
+        # au push sur la branche principale, un plan ajouté ne rouvre pas ses lieux, vérifiés à la
+        # PR (revue finale du lot 15)
+        (
+            "Le socle tourne aussi au push sur la branche principale, sur les plans que ce push "
+            "ajoute ou modifie : un plan ajouté s'y vérifie aussi sans ouvrir les fichiers cités, "
+            "puisque ses lieux l'ont été à la PR, et qu'une autre PR, fusionnée entre-temps, a pu "
+            "décaler une ligne citée."
+        ),
     ):
         assert fragment in texte, fragment
     assert "chaque fichier cité ouvert" not in texte
@@ -1464,7 +1473,12 @@ def test_methode_dit_les_plans():
     (ligne,) = [ligne for ligne in section.splitlines() if "`scripts/modele/plan.py`" in ligne]
     assert ligne.startswith("| ") and ligne.endswith(" |"), ligne
     assert "un lieu d'un autre dépôt restant « non vérifié », sans refus" in ligne, ligne
-    cycle = lire(METHODE).split("## Le cycle d'un lot", 1)[1].split("\n## ", 1)[0]
+    au_push = (
+        "Au push sur la branche principale, un plan ajouté se vérifie aussi sans ouvrir les "
+        "fichiers cités, ses lieux vérifiés à la PR."
+    )
+    assert au_push in ligne, ligne
+    cycle =lire(METHODE).split("## Le cycle d'un lot", 1)[1].split("\n## ", 1)[0]
     (point,) = [b for b in blocs(cycle) if b[0].startswith("2. ")]
     point = _aplati(" ".join(point))
     assert "trois sections" in point, point

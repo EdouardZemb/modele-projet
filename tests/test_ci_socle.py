@@ -432,9 +432,12 @@ RESUME_CONFORME = "1 mécanismes vérifiés, 0 non vérifiés, 0 outils, 1 revue
 def test_etape_des_plans(rendre, env_isole, tmp_path):
     """Les plans d'une PR : l'étape précède la dernière, « La documentation de la racine », sans
     second `setup-python` ni échappatoire. Le runner la lance par `bash -e`, le socle ne déclarant
-    pas de shell ; le test la lance par `sh -e` (`dash` sous Ubuntu), plus strict. Elle vérifie en
-    entier chaque plan que la PR ajoute, et sans ouvrir ses lieux chaque plan qu'elle modifie,
-    dont les numéros de ligne dérivent avec le code. Une base nulle ne contrôle
+    pas de shell ; le test la lance par `sh -e` (`dash` sous Ubuntu), plus strict, avec l'`env` de
+    l'étape résolu sur un événement simulé. Elle vérifie en entier chaque plan que la PR ajoute, et
+    sans ouvrir ses lieux chaque plan qu'elle modifie, dont les numéros de ligne dérivent avec le
+    code. Au push sur la branche principale, un plan ajouté se vérifie aussi sans ouvrir ses lieux,
+    vérifiés à la PR : une autre fusion a pu les décaler. Tout autre événement, ou aucun, vérifie
+    en entier. Une base nulle ne contrôle
     rien ; une base inconnue arrête l'étape, au lieu de passer sur une liste vide. `-z` garde un
     nom non ASCII tel quel, la pathspec descend dans un sous-dossier, et chaque plan est lu, même
     après un refus, la liste des plans modifiés comprise. Un plan renommé compte pour ajouté
@@ -445,8 +448,13 @@ def test_etape_des_plans(rendre, env_isole, tmp_path):
     assert noms[-2:] == [ETAPE_DES_PLANS, "La documentation de la racine (licence, carte)"]
     assert sum("setup-python" in e.get("uses", "") for e in job["steps"]) == 1
     sans_echappatoire(job, ETAPE_DES_PLANS)
+    # L'événement arrive par l'`env`, jamais par un `if:` (LE-62) : au push, le socle appelé par
+    # `ci.yml` lit le `github` de l'appelant.
+    env_etape = etape(rendu, ETAPE_DES_PLANS)["env"]
+    assert env_etape == {"EVENEMENT": "${{ github.event_name }}"}
     run = etape(rendu, ETAPE_DES_PLANS)["run"]
     env = env_isole()
+    env.pop("EVENEMENT", None)
     git(rendu, env, "init", "-q", "-b", "main")
     git(rendu, env, "config", "core.autocrlf", "false")
     (rendu / "src").mkdir()
@@ -471,12 +479,13 @@ def test_etape_des_plans(rendre, env_isole, tmp_path):
         git(rendu, env, "commit", "-q", "--allow-empty", "-m", "feat: essai")
         return git(rendu, env, "rev-parse", "HEAD").strip()
 
-    def lancer(base):
+    def lancer(base, evenement="pull_request"):
+        resolu = {"${{ github.event_name }}": evenement}
         r = subprocess.run(
             [SH, "-e", "-c", run],
             check=False,
             cwd=rendu,
-            env={**env, "BASE": base},
+            env={**env, "BASE": base, **{nom: resolu[e] for nom, e in env_etape.items()}},
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -525,9 +534,10 @@ def test_etape_des_plans(rendre, env_isole, tmp_path):
     commit(avec_b, {".claude/plans/b.md": plan(meca=MECA_CONFORME, revues=None)})
     changes = git(rendu, env, "diff", "--name-status", "--no-renames", f"{avec_b}...HEAD")
     assert changes == "M\t.claude/plans/b.md\n", changes
-    code, sortie = lancer(avec_b)
-    assert code != 0, sortie
-    assert "plan : .claude/plans/b.md : section « Revues » absente" in sortie, sortie
+    for evenement in ("pull_request", "push"):
+        code, sortie = lancer(avec_b, evenement)
+        assert code != 0, (evenement, sortie)
+        assert "plan : .claude/plans/b.md : section « Revues » absente" in sortie, sortie
     # Une PR d'implémentation modifie son plan avec le code qu'il cite : deux lignes en tête du
     # fichier, une case cochée. Le plan modifié passe ; ajouté par ce même commit, il refuse.
     avec_le_plan = commit(base, {".claude/plans/p.md": PLAN_CONFORME})
@@ -543,6 +553,26 @@ def test_etape_des_plans(rendre, env_isole, tmp_path):
     code, sortie = lancer(base)
     assert code != 0, sortie
     assert "extrait absent de src/a.py:2" in sortie, sortie
+    # Au push sur la branche principale, `BASE` est le commit d'avant (`github.event.before`).
+    # Une autre PR, fusionnée entre la dernière CI de la PR du plan et sa fusion, a décalé la ligne
+    # citée : le plan, que le commit de fusion ajoute, se vérifie sans ouvrir ses lieux, vérifiés
+    # à la PR, et passe. Le même écart refuse à la PR, et sous tout autre événement, ou aucun.
+    autre_fusion = commit(base, {"src/a.py": "# un\n# deux\n" + A_PY})
+    commit(autre_fusion, {".claude/plans/p.md": PLAN_CONFORME})
+    code, sortie = lancer(autre_fusion, "push")
+    assert code == 0, sortie
+    assert "Push : un plan ajouté se vérifie sans ouvrir ses lieux, vérifiés à la PR." in sortie
+    assert "plan : .claude/plans/p.md : 1 mécanismes, lieux non ouverts" in sortie, sortie
+    for evenement in ("pull_request", "workflow_dispatch", ""):
+        code, sortie = lancer(autre_fusion, evenement)
+        assert code != 0, (evenement, sortie)
+        assert "extrait absent de src/a.py:2" in sortie, (evenement, sortie)
+        assert "Push :" not in sortie, (evenement, sortie)
+    # Au push, un plan ajouté sans ses sections refuse toujours.
+    commit(autre_fusion, {".claude/plans/a.md": "# Un plan sans ses sections\n"})
+    code, sortie = lancer(autre_fusion, "push")
+    assert code != 0, sortie
+    assert "plan : .claude/plans/a.md : section « Mécanismes annoncés » absente" in sortie, sortie
     # Un plan renommé, puis rendu non conforme (un lieu faux), est un plan ajouté : sans
     # `--no-renames`, git le dirait renommé, ni ajouté ni modifié, et aucune liste ne le lirait.
     git(rendu, env, "checkout", "-q", "--detach", avec_le_plan)
