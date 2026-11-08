@@ -3,6 +3,7 @@
 import ast
 import re
 
+import garde_claude
 import pytest
 import yaml
 from conftest import (
@@ -1409,11 +1410,16 @@ def test_methode_dit_les_plans():
 
 def test_methode_dit_le_budget_du_garde():
     """À court de temps, le garde ne range plus le délai parmi les cas « edouard » : il refuse en
-    disant que le mode n'a pas été lu, et qu'il faut relancer."""
+    disant que le mode, ou les contrôles de la PR (le cas de LE-52), n'ont pas été lus, et qu'il
+    faut relancer. Le budget se lit dans le garde : changé là, il fait réécrire `methode.md`."""
     texte = _aplati(lire(METHODE))
+    budget = f"budget de {garde_claude.BUDGET:g} s épuisé"
     assert (
-        "à court de temps, le garde refuse en disant "
-        "« budget de 20 s épuisé : mode non lu, relancer »"
+        f"à court de temps, le garde refuse en disant « {budget} : mode non lu, relancer »"
+    ) in texte
+    assert (
+        f", et « {budget} : contrôles non lus, relancer » quand ce sont les contrôles de la PR "
+        "qu'il n'a pas pu lire."
     ) in texte
     assert "délai dépassé, ligne absente" not in texte
 
