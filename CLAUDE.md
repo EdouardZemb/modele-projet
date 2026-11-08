@@ -291,6 +291,14 @@ Le cadrage est dans `docs/cadrage.md` ; ce que les lots ont appris, dans `docs/r
   lance les tests bats d'un projet rendu dans une image Docker : il lui faut Docker avec un serveur
   Linux, et il saute sans lui.
 - `ruff check .` : le style.
+- `gh run rerun <id> --failed` : relancer un job de la CI coupé à son délai (`timeout-minutes`),
+  après avoir vérifié (`gh run view <id> --json jobs`) que son étape est « cancelled », et non en
+  échec : un échec se lit et se corrige, il ne se relance pas. Jamais pour `texte-pr`, qui se relit
+  par une retouche du texte de la PR (`methode.md`, « Ne jamais relancer `texte-pr` »).
+- `gh run view <id>` : la revue finale de chaque lot relève les avertissements de durée des
+  exécutions du lot, dans leurs annotations : chaque job qui porte l'étape « Durée du job » avertit
+  au-delà des trois quarts de son délai, et personne d'autre ne lit un avertissement sur une
+  exécution verte (`SessionStart` n'affiche que le rouge).
 - `poste\Tester-Nouveau-Projet.ps1 -SansPoste -SourceModele <ce clone>` : le test du script de
   création, sans `gh`, sans la liste privée ni l'index réel. Il rend le modèle au `HEAD` du clone,
   changements non validés et fichiers non suivis compris : Copier les ajoute, avec un

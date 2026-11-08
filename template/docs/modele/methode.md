@@ -212,8 +212,9 @@ dans `.copier-answers.yml` :
 
 Le mode lui-même se lit sur GitHub, par l'API (`gh api`) : le `.copier-answers.yml` de la branche
 principale, et non celui de la copie locale ni `origin/<branche>`, qu'une session peut réécrire.
-Tout ce qui est illisible (`gh` absent, erreur, délai dépassé, ligne absente) vaut `edouard`. Deux
-entrées restent locales :
+Tout ce qui est illisible (`gh` absent, erreur, ligne absente) vaut `edouard` ; à court de temps, le
+garde refuse en disant « budget de 20 s épuisé : mode non lu, relancer ». Deux entrées restent
+locales :
 
 - le nom de la branche passée en `ref=` vient des réglages de la copie : `BRANCHE_PRINCIPALE`,
   dans `scripts/modele/reglages.py`, ou l'option `--branche` du garde ;

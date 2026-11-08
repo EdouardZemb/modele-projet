@@ -13,13 +13,22 @@ jobs:
   tests:
     name: tests
     runs-on: ${{ matrix.os }}
-    # 40 min : sous Windows, la suite a dépassé 15 min au lot 9 (LE-29), puis 25 au lot 12 (LE-40).
-    timeout-minutes: 40
+    # 45 min : sous Windows, la suite a dépassé 15 min au lot 9 (LE-29), 25 au lot 12 (LE-40), puis
+    # 31 au lot 14, au-delà des trois quarts de 40. DELAI_MIN le recopie : aucun contexte ne donne
+    # timeout-minutes à l'étape « Durée du job », qui avertit aux trois quarts.
+    timeout-minutes: 45
+    env:
+      DELAI_MIN: 45
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
     steps:
+      # Les deux étapes de durée sont les mêmes dans chaque job visé (LE-40). bash, aussi sous
+      # Windows : pwsh n'a pas `date +%s`.
+      - name: Début du job
+        shell: bash
+        run: echo "DEBUT_JOB=$(date +%s)" >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -85,6 +94,19 @@ jobs:
         run: |
           caches=$(find template/scripts/modele -name __pycache__) || { echo "::error::template/scripts/modele illisible"; exit 1; }
           [ -z "$caches" ] || { echo "::error::un cache Python sous template/scripts/modele"; exit 1; }
+      # Même en cas d'échec : la durée au résumé du job, et un avertissement au-delà des trois quarts
+      # du délai (DELAI_MIN * 60 * 3 / 4 s). La revue finale de chaque lot relève ces avertissements.
+      - name: Durée du job
+        if: always()
+        shell: bash
+        run: |
+          duree=$(( $(date +%s) - DEBUT_JOB ))
+          secondes=$(printf '%02d' $(( duree % 60 )))
+          ligne="$GITHUB_JOB ($RUNNER_OS) : $(( duree / 60 )) min $secondes s sur $DELAI_MIN min"
+          echo "$ligne" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$duree" -gt $(( DELAI_MIN * 45 )) ]; then
+            echo "::warning::$ligne ; alléger la suite, ou monter le délai dans une PR avec son test"
+          fi
 
   # Les tests bats de la mécanique `serveur` (tests/deploiement/ d'un projet rendu, avec et sans
   # sauvegardes), dans leur image Docker : le seul job qui lance tests/test_mecanique.py. Docker
@@ -93,7 +115,12 @@ jobs:
     name: mecanique
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      DELAI_MIN: 20
     steps:
+      - name: Début du job
+        shell: bash
+        run: echo "DEBUT_JOB=$(date +%s)" >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -105,6 +132,17 @@ jobs:
       - run: python -m pytest -q tests/test_mecanique.py
         env:
           MODELE_TESTS_SANS_SAUT: "1"
+      - name: Durée du job
+        if: always()
+        shell: bash
+        run: |
+          duree=$(( $(date +%s) - DEBUT_JOB ))
+          secondes=$(printf '%02d' $(( duree % 60 )))
+          ligne="$GITHUB_JOB ($RUNNER_OS) : $(( duree / 60 )) min $secondes s sur $DELAI_MIN min"
+          echo "$ligne" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$duree" -gt $(( DELAI_MIN * 45 )) ]; then
+            echo "::warning::$ligne ; alléger la suite, ou monter le délai dans une PR avec son test"
+          fi
 
   # La fausse app (tests/modele/fausse-app/) dans un projet `serveur` rendu, par l'action
   # modele-image-construire du rendu, en vrai Docker : construction, santé, révision, sauvegarde,

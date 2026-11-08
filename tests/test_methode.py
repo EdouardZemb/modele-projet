@@ -1407,6 +1407,17 @@ def test_methode_dit_les_plans():
     assert "la revue du plan" in point, point
 
 
+def test_methode_dit_le_budget_du_garde():
+    """À court de temps, le garde ne range plus le délai parmi les cas « edouard » : il refuse en
+    disant que le mode n'a pas été lu, et qu'il faut relancer."""
+    texte = _aplati(lire(METHODE))
+    assert (
+        "à court de temps, le garde refuse en disant "
+        "« budget de 20 s épuisé : mode non lu, relancer »"
+    ) in texte
+    assert "délai dépassé, ligne absente" not in texte
+
+
 def test_m0002_amende_par_le_lot_14():
     """La CI refuse la licence et la carte de la racine ; le `SessionStart` signale le gabarit
     resté vide. L'amendement est daté, sans numéro du plan."""

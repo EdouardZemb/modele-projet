@@ -626,15 +626,129 @@ def test_gh_api_apres_option_de_depot():
 
 
 def test_checks_verts_gh_budget_epuise(tmp_path, monkeypatch):
+    """Un `gh` qui dépasse le budget (`TimeoutExpired`) : les contrôles ne sont pas lus, ce qui
+    n'est pas « pas verts »."""
     faux_gh_lent(tmp_path)
     monkeypatch.setenv("PATH", str(tmp_path) + os.pathsep + os.environ["PATH"])
     monkeypatch.setattr(garde_claude, "BUDGET", 0.5)
-    assert garde_claude.checks_verts_gh("12", str(tmp_path)) is False
+    assert garde_claude.checks_verts_gh("12", str(tmp_path)) is None
 
 
-def test_budget_deja_epuise_ne_lance_rien(monkeypatch):
+def test_budget_deja_epuise_ne_lance_rien(tmp_path, monkeypatch):
     monkeypatch.setattr(garde_claude, "_echeance", garde_claude.time.monotonic() - 1)
     assert garde_claude.branche_courante_git(None, ".") is None
+    # Un faux gh en tête de PATH, qui répondrait « vert » et « session » : sans lui, gh absent
+    # rendrait faux ou « edouard » avant toute lecture.
+    faux_gh(tmp_path, {"pr checks": (0, '[{"bucket":"pass"}]'), "api": (0, "fusion: session\n")})
+    gh_en_tete(monkeypatch, tmp_path)
+    assert garde_claude.checks_verts_gh("12", str(tmp_path)) is None
+    assert garde_claude.fusion_du_depot("main", str(tmp_path)) == garde_claude.MODE_NON_LU
+    assert not list(tmp_path.glob("appel*"))
+
+
+def _main_dans_le_processus(monkeypatch, commande, cwd, argv):
+    """`main` dans le processus de pytest, sur l'entrée d'un hook : un sous-processus ne verrait
+    pas le `BUDGET` que le test modifie."""
+    import io
+    import types
+
+    entree = json.dumps({"tool_name": "Bash", "tool_input": {"command": commande}, "cwd": cwd})
+    monkeypatch.setattr(
+        sys, "stdin", types.SimpleNamespace(buffer=io.BytesIO(entree.encode("utf-8")))
+    )
+    return garde_claude.main(argv)
+
+
+def _faux_gh_vert(dossier):
+    """Un faux gh qui répondrait « tout vert » et « session » : s'il était lu, la fusion passerait.
+    Il note chaque appel : le budget à zéro n'en laisse passer aucun."""
+    dossier.mkdir()
+    faux_gh(dossier, {"pr checks": (0, '[{"bucket":"pass"}]'), "api": (0, "fusion: session\n")})
+    return dossier
+
+
+def test_refus_budget_controles(tmp_path, monkeypatch, capsys):
+    """Faute de temps, le refus dit que les contrôles n'ont pas été lus, et qu'il faut relancer,
+    au lieu de « pas verts » : on attend un réseau plus rapide, on ne cherche pas un contrôle rouge.
+    `--fusion session` court-circuite la lecture du mode, comme dans le dépôt modèle."""
+    faux = _faux_gh_vert(tmp_path / "bin")
+    gh_en_tete(monkeypatch, faux)
+    monkeypatch.setattr(garde_claude, "BUDGET", 0)
+    argv = ["--branche", "main", "--fusion", "session"]
+    assert _main_dans_le_processus(monkeypatch, "gh pr merge 12 --squash", str(tmp_path), argv) == 2
+    assert capsys.readouterr().err == (
+        "modele-projet : refusé — budget de 0 s épuisé : contrôles non lus, relancer. "
+        "Voir docs/modele/methode.md, « Les garde-fous ».\n"
+    )
+    assert not list(faux.glob("appel*"))
+    assert garde_claude._echeance is None
+
+
+def test_refus_budget_mode(tmp_path, monkeypatch, capsys):
+    """Sans `--fusion`, le mode se lit sur GitHub, avant les contrôles : faute de temps, le refus
+    dit que le mode n'a pas été lu, au lieu de « mode fusion : edouard ». La branche vient de
+    `--branche` : un module `reglages` qui exploserait n'est pas lu."""
+    import types
+
+    module = types.ModuleType("reglages")
+
+    def explose(nom):
+        raise RuntimeError("boum")
+
+    module.__getattr__ = explose
+    monkeypatch.setitem(sys.modules, "reglages", module)
+    faux = _faux_gh_vert(tmp_path / "bin")
+    gh_en_tete(monkeypatch, faux)
+    monkeypatch.setattr(garde_claude, "BUDGET", 0)
+    argv = ["--branche", "main"]
+    assert _main_dans_le_processus(monkeypatch, "gh pr merge 12 --squash", str(tmp_path), argv) == 2
+    assert capsys.readouterr().err == (
+        "modele-projet : refusé — budget de 0 s épuisé : mode non lu, relancer. "
+        "Voir docs/modele/methode.md, « Les garde-fous ».\n"
+    )
+    assert not list(faux.glob("appel*"))
+
+
+@pytest.mark.parametrize(
+    "commande",
+    [
+        # en mode session, refusée plus loin comme écriture par l'API ; ici, par le budget
+        "gh api -X PUT repos/o/x/pulls/1/merge",
+        # en mode session, admise : seul le mode non lu la refuse
+        "gh api graphql -F query=@q.graphql",
+    ],
+)
+def test_refus_budget_par_l_api(commande):
+    """La fusion par l'API lit le mode, jamais les contrôles : seul « mode non lu » la concerne."""
+    motif = garde_claude.motif_de_refus(
+        commande,
+        BRANCHE,
+        lambda chemin: "lot-1/x",
+        lambda pr: True,
+        fusion=lambda dossier: garde_claude.MODE_NON_LU,
+    )
+    assert motif == "budget de 20 s épuisé : mode non lu, relancer"
+
+
+def test_trois_etats_distincts():
+    """Lu, faux, non lu faute de temps : trois refus distincts, comparés au message exact. Les
+    refus d'avant contiennent aussi « contrôles » : un fragment ne verrait pas un état confondu
+    avec un autre. Une exception dans la lecture du mode, et tout mode inconnu, valent encore
+    `edouard`."""
+    commande = "gh pr merge 12 --squash"
+    assert refus(commande, verts=True) is None
+    assert refus(commande, verts=False) == "fusion avant que tous les contrôles soient verts"
+    assert refus(commande, verts=None) == "budget de 20 s épuisé : contrôles non lus, relancer"
+
+    def explose(dossier):
+        raise RuntimeError("boum")
+
+    assert refus(commande, fusion=explose) == garde_claude.REFUS_MODE
+    for mode in ("edouard", "Session", "autre", None):
+        assert refus(commande, fusion=lambda d, m=mode: m) == garde_claude.REFUS_MODE, mode
+    assert refus(commande, fusion=lambda d: garde_claude.MODE_NON_LU) == (
+        "budget de 20 s épuisé : mode non lu, relancer"
+    )
 
 
 def test_main_exception_inattendue_refuse(monkeypatch, capsys):
@@ -870,10 +984,12 @@ def test_fusion_du_depot_sans_gh(tmp_path, monkeypatch):
 
 
 def test_fusion_du_depot_budget_epuise(tmp_path, monkeypatch):
+    """Un `gh` qui dépasse le budget (`TimeoutExpired`) : le mode n'est pas lu, ce qui n'est pas
+    « edouard »."""
     faux_gh_lent(tmp_path, "fusion: session")  # sans budget, il répondrait « session »
     gh_en_tete(monkeypatch, tmp_path)
     monkeypatch.setattr(garde_claude, "BUDGET", 0.5)
-    assert garde_claude.fusion_du_depot("main", str(tmp_path)) == "edouard"
+    assert garde_claude.fusion_du_depot("main", str(tmp_path)) == garde_claude.MODE_NON_LU
 
 
 def _entree_fusion(dossier):
