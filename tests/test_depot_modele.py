@@ -393,20 +393,41 @@ def test_claude_md_dit_la_commande_des_plans():
     assert "avant de soumettre un plan à Edouard et après chaque correction" in commandes
 
 
-def test_claude_md_dit_la_relance_et_les_avertissements_de_duree():
-    """LE-40 : « Commandes » dit comment relancer un job coupé à son délai, et que la revue finale
-    de chaque lot relève les avertissements de durée : personne d'autre ne lit un avertissement
-    sur une exécution verte."""
+def _commandes_de_claude_md():
+    """La section « Commandes » du `CLAUDE.md` du dépôt, aplatie."""
     texte = (RACINE / "CLAUDE.md").read_text(encoding="utf-8")
-    commandes = " ".join(texte.split("\n## Commandes\n", 1)[1].split("\n## ", 1)[0].split())
+    return " ".join(texte.split("\n## Commandes\n", 1)[1].split("\n## ", 1)[0].split())
+
+
+def test_claude_md_dit_la_relance_et_les_avertissements_de_duree():
+    """LE-40 : « Commandes » dit comment relancer le seul job coupé à son délai, et que la revue
+    finale de chaque lot relève les avertissements de durée : personne d'autre ne lit un
+    avertissement sur une exécution verte. `--failed` relancerait tous les jobs en échec de
+    l'exécution, une vraie faute comprise : la relance nomme le job, par le `databaseId` que
+    demande `gh run rerun --help`."""
+    commandes = _commandes_de_claude_md()
     for fragment in (
-        "`gh run rerun <id> --failed`",
-        "que son étape est « cancelled », et non en échec",
+        "`gh run rerun <id> --job <databaseId>`",
+        "relancer le seul job de la CI coupé à son délai",
+        "le `databaseId` lu par `gh run view <id> --json jobs`",
+        "le numéro de l'URL du job ne convient pas",
+        "que l'étape coupée est « cancelled », et non en échec",
+        "Jamais pour `texte-pr`",
         "la revue finale de chaque lot relève les avertissements de durée des exécutions du lot",
         "`gh run view <id>`",
         "annotations",
     ):
         assert fragment in commandes, fragment
+    assert "--failed" not in commandes
+
+
+def test_claude_md_dit_la_duree_mesuree_des_tests():
+    """LE-40 : la durée de la suite, dans « Commandes », est celle que la CI a mesurée (sur la
+    PR #118, 7 min 48 s puis 6 min 4 s sous Ubuntu, 32 min 39 s puis 20 min 2 s sous Windows),
+    et non « environ 5 minutes », qui ne l'avait jamais été."""
+    commandes = _commandes_de_claude_md()
+    assert "environ 6 à 8 minutes sous Ubuntu et 20 à 33 sous Windows" in commandes
+    assert "environ 5 minutes" not in (RACINE / "CLAUDE.md").read_text(encoding="utf-8")
 
 
 def test_hooks_du_depot_modele():

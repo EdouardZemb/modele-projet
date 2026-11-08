@@ -287,14 +287,18 @@ Le cadrage est dans `docs/cadrage.md` ; ce que les lots ont appris, dans `docs/r
 
 ## Commandes
 
-- `python -m pytest -q` : les tests (environ 5 minutes sous Windows). `tests/test_mecanique.py`
-  lance les tests bats d'un projet rendu dans une image Docker : il lui faut Docker avec un serveur
-  Linux, et il saute sans lui.
+- `python -m pytest -q` : les tests, environ 6 à 8 minutes sous Ubuntu et 20 à 33 sous Windows,
+  mesurées en CI, sans `tests/test_mecanique.py`, sur la PR #118. `tests/test_mecanique.py` lance
+  les tests bats d'un projet rendu dans une image Docker : il lui faut Docker avec un serveur Linux,
+  et il saute sans lui.
 - `ruff check .` : le style.
-- `gh run rerun <id> --failed` : relancer un job de la CI coupé à son délai (`timeout-minutes`),
-  après avoir vérifié (`gh run view <id> --json jobs`) que son étape est « cancelled », et non en
-  échec : un échec se lit et se corrige, il ne se relance pas. Jamais pour `texte-pr`, qui se relit
-  par une retouche du texte de la PR (`methode.md`, « Ne jamais relancer `texte-pr` »).
+- `gh run rerun <id> --job <databaseId>` : relancer le seul job de la CI coupé à son délai
+  (`timeout-minutes`), le `databaseId` lu par `gh run view <id> --json jobs` (le numéro de l'URL du
+  job ne convient pas, dit `gh run rerun --help`), après avoir vérifié que l'étape coupée est
+  « cancelled », et non en échec : un échec se lit et se corrige, il ne se relance pas. La
+  documentation de GitHub dit seulement qu'il annule un job à son délai ; l'étape coupée était
+  « cancelled » sur le job coupé du 31/10 (LE-40). Jamais pour `texte-pr`, qui se relit par une
+  retouche du texte de la PR (`methode.md`, « Ne jamais relancer `texte-pr` »).
 - `gh run view <id>` : la revue finale de chaque lot relève les avertissements de durée des
   exécutions du lot, dans leurs annotations : chaque job qui porte l'étape « Durée du job » avertit
   au-delà des trois quarts de son délai, et personne d'autre ne lit un avertissement sur une
