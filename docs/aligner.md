@@ -85,6 +85,12 @@ Chaque case se coche dans la PR d'alignement. Une case qui ne s'applique pas au 
   - `pull_request: types: [opened, synchronize, reopened]` : retirer `edited`, que le workflow géré
     `texte-pr` (`modele-texte-pr.yml`) écoute seul ; une retouche du titre ou du corps d'une PR ne
     relance alors que lui, et pas toute la CI.
+- [ ] **Les plans de `.claude/plans/`**, s'il y en a : les relever ; retirer ceux des lots clos,
+      puisque la méthode supprime le plan à la clôture ; donner ses trois sections à chaque plan
+      en cours (`methode.md`, « Les outils »). L'étape « Les plans » du socle refuse toute PR qui
+      ajoute, renomme ou modifie un plan sans elles : un renommage y compte pour un ajout. Lancé
+      depuis la racine, `python -B scripts/modele/plan.py --racine . --sans-lieux <plan>` vérifie
+      un plan comme la CI vérifie un plan modifié.
 - [ ] **`.gitignore`** : `.claude/settings.local.json`, `CLAUDE.local.md` et `__pycache__/`, s'ils
       n'y sont pas.
 - [ ] **`.dockerignore`**, s'il existe : `.githooks` et `scripts/modele`, pour qu'un `COPY` ne les
@@ -150,15 +156,45 @@ Chaque case se coche dans la PR d'alignement. Une case qui ne s'applique pas au 
       racine » (§3) : 👤 Edouard fusionne cette PR.
 - [ ] Fusion en squash, puis le déploiement éventuel vérifié là où l'application sert.
 - [ ] 👤 **La règle de protection d'un dépôt qui l'a déjà**, après la fusion, quand la mise à jour
-      change ses contrôles requis (comme l'arrivée de `texte-pr`) : la lire par
-      `gh api repos/<dépôt>/rulesets`, puis la mettre à jour par son identifiant, depuis le clone
-      à jour de la branche principale :
-      `gh api -X PUT repos/<dépôt>/rulesets/<id> --input .github/modele/ruleset-main.json`. Un
-      `POST` crée une règle ; il ne met pas à jour celle qui existe. Aucune autre PR n'est
-      fusionnée entre la fusion et ce geste.
-- [ ] Après ce geste, relire la règle par `gh api repos/<dépôt>/rulesets/<id>` : le contrôle neuf
-      y est (`texte-pr`). Puis commenter `@dependabot rebase` sur chaque PR de Dependabot ouverte :
+      change ses contrôles requis (comme l'arrivée de `texte-pr`). Son identifiant se lit par
+      `gh api repos/<dépôt>/rulesets`. Avant le geste, lire les contrôles requis en service, dans
+      `avant.txt`. Le corps de la mise à jour part de la règle en service, à laquelle on ajoute
+      `texte-pr` : `regle.json`, construit par `gh api … --jq` avec les seuls champs que la mise à
+      jour accepte (`name`, `target`, `enforcement`, `bypass_actors`, `conditions`, `rules`), et
+      `texte-pr` ajouté une seule fois, une règle qui le requiert déjà restant telle quelle. Jamais
+      du seul fichier géré quand la règle en service requiert des contrôles qu'il n'a pas : ses
+      contrôles remplaceraient ceux de la règle, et `pupitre` perdrait ainsi `verifier`, `windows`
+      et `mutants`, la porte de la mutation. Le fichier géré ne s'emploie tel quel
+      (`--input .github/modele/ruleset-main.json`, depuis le clone à jour de la branche
+      principale) que si la règle en service ne requiert que les contrôles du socle. Un `POST`
+      crée une règle ; il ne met pas à jour celle qui existe. Aucune autre PR n'est fusionnée entre
+      la fusion et ce geste. Sous Windows, ces commandes se lancent dans Git Bash : PowerShell 5.1
+      retire les guillemets du filtre `--jq`.
+
+  ```sh
+  gh api repos/<dépôt>/rulesets/<id> --jq '.rules[] | select(.type == "required_status_checks")
+    | .parameters.required_status_checks[].context' > avant.txt
+  gh api repos/<dépôt>/rulesets/<id> --jq '{name, target, enforcement, bypass_actors, conditions,
+    rules: [.rules[] | if .type == "required_status_checks"
+      then .parameters.required_status_checks |= (if any(.[]; .context == "texte-pr") then .
+        else . + [{context: "texte-pr"}] end)
+      else . end]}' > regle.json
+  gh api -X PUT repos/<dépôt>/rulesets/<id> --input regle.json
+  ```
+
+- [ ] Après ce geste, relire la règle par `gh api repos/<dépôt>/rulesets/<id>`, dans le dossier
+      de `avant.txt` : chaque contrôle requis avant le geste l'est toujours, et `texte-pr` aussi.
+      Le seul `texte-pr` ne suffit pas : la perte d'un contrôle propre au projet passerait. La
+      première commande `grep` n'affiche rien, la seconde affiche `texte-pr`. Puis effacer les
+      trois fichiers, et commenter `@dependabot rebase` sur chaque PR de Dependabot ouverte :
       aucune n'a reçu d'exécution du contrôle neuf.
+
+  ```sh
+  gh api repos/<dépôt>/rulesets/<id> --jq '.rules[] | select(.type == "required_status_checks")
+    | .parameters.required_status_checks[].context' > apres.txt
+  grep -vxFf apres.txt avant.txt
+  grep -x texte-pr apres.txt
+  ```
 - [ ] **L'historique complet**, une fois après la fusion : lancer `modele-historique.yml` à la main
       (`gh workflow run modele-historique.yml`, ou l'onglet Actions). gitleaks n'examine sinon que
       les commits de chaque PR et de chaque envoi, et l'historique antérieur à l'alignement
@@ -312,7 +348,7 @@ qu'au §1, dans un worktree `<dépôt>.worktrees\modele-serveur`.
       code est donc public, et son image publiée et publique, avant elle. L'ordre complet est celui
       de `docs/exploitation.md`, « La mise en service ». Pour un projet déjà en service,
       `projets/<nom>.env` déclare ce qui existe, et la sonde de `serveur` n'y crée rien.
-- [ ] `gh pr checks` entièrement vert : `socle`, `verifier`, `deploiement` et `image`.
+- [ ] `gh pr checks` entièrement vert : `socle`, `texte-pr`, `verifier`, `deploiement` et `image`.
 
 ### Activer les sauvegardes sur un projet en service
 

@@ -297,12 +297,20 @@ Le cadrage est dans `docs/cadrage.md` ; ce que les lots ont appris, dans `docs/r
   job ne convient pas, dit `gh run rerun --help`), après avoir vérifié que l'étape coupée est
   « cancelled », et non en échec : un échec se lit et se corrige, il ne se relance pas. La
   documentation de GitHub dit seulement qu'il annule un job à son délai ; l'étape coupée était
-  « cancelled » sur le job coupé du 31/10 (LE-40). Jamais pour `texte-pr`, qui se relit par une
+  « cancelled » sur le job coupé du 31/10 (LE-40). Une exception à « un échec ne se relance pas »,
+  la panne d'un service tiers : l'échec est lu dans le journal, sa cause est hors du dépôt (un 504
+  ou un 503 de GitHub Releases, au lot 15), et le service répond de nouveau (la même adresse rend
+  200 depuis le poste) ; on relance alors le seul job par `--job`, ou `--failed` quand tous les
+  jobs en échec de l'exécution ont cette cause. Jamais pour `texte-pr`, qui se relit par une
   retouche du texte de la PR (`methode.md`, « Ne jamais relancer `texte-pr` »).
-- `gh run view <id>` : la revue finale de chaque lot relève les avertissements de durée des
-  exécutions du lot, dans leurs annotations : chaque job qui porte l'étape « Durée du job » avertit
-  au-delà des trois quarts de son délai, et personne d'autre ne lit un avertissement sur une
-  exécution verte (`SessionStart` n'affiche que le rouge).
+- `gh run view <id> --attempt <n>` : la revue finale de chaque lot relève les avertissements de
+  durée des exécutions du lot, dans les annotations de chaque tentative, n allant de 1 au champ
+  `attempt` de l'exécution (`gh run view <id> --json attempt`). Sans `--attempt`, `gh run view` ne
+  montre que celles de la dernière tentative : un job qu'elle n'a pas relancé n'y porte aucune
+  annotation (éprouvé le 08/11 avec gh 2.93.0, sur l'exécution 42467400054, à trois tentatives).
+  Chaque job qui porte l'étape « Durée du job » avertit au-delà des trois quarts de son délai, et
+  personne d'autre ne lit un avertissement sur une exécution verte (`SessionStart` n'affiche que
+  le rouge).
 - `poste\Tester-Nouveau-Projet.ps1 -SansPoste -SourceModele <ce clone>` : le test du script de
   création, sans `gh`, sans la liste privée ni l'index réel. Il rend le modèle au `HEAD` du clone,
   changements non validés et fichiers non suivis compris : Copier les ajoute, avec un
@@ -310,7 +318,7 @@ Le cadrage est dans `docs/cadrage.md` ; ce que les lots ont appris, dans `docs/r
   aussi le script à blanc, sur le poste d'Edouard. `tests/test_poste.py` le lance, et compare les
   bits d'exécution du premier commit à ceux du modèle : sous Windows seulement ; ailleurs, seul le
   contrôle du BOM tourne.
-- `python -B template/scripts/modele/plan.py --racine . --depot serveur=C:\src\github.com\EdouardZemb\serveur <plan>` :
+- `python -B template/scripts/modele/plan.py --racine . --depot serveur=../serveur <plan>` :
   le contrôle d'un plan, ses trois sections (`methode.md`, « Les outils »). Les plans du modèle
   vivent dans `Documents\00-boite-de-reception\`, hors du dépôt : l'étape « Les plans » de la CI
   n'en trouve aucun ici. La session lance cette commande depuis le clone principal, avant de

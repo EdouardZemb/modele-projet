@@ -228,12 +228,18 @@ def test_modele_de_pr_ferme_l_issue():
     assert rang > max(i for i, ligne in enumerate(lignes) if ligne.startswith("- [ ] "))
     a_plat = " ".join(texte.split())
     assert "le SHA complet de la tête qu'a lue la dernière relecture" in a_plat
-    # hors des lots, un correctif qui ferme une issue nomme aussi la tête relue, comme le dit la
-    # méthode
-    assert (
-        "Dans la PR de clôture, ou dans un correctif hors des lots qui ferme une issue par "
-        "`Fixes #N` : le SHA complet"
-    ) in a_plat
+    # la règle avant les cas : toute PR qui ferme une issue porte la ligne, comme l'exige
+    # `texte_pr.py`, qui compte les fermetures par l'API, quel que soit le mot-clé ; puis la PR de
+    # clôture d'un lot, et, hors des lots, un correctif ou toute autre PR qui ferme son issue
+    # (revue finale du lot 15)
+    commentaire = next(ligne for ligne in lignes[rang + 1 :] if ligne.strip())
+    assert commentaire == (
+        "<!-- Toute PR qui ferme une issue porte cette ligne, quel que soit le mot-clé : le SHA "
+        "complet de la tête qu'a lue la dernière relecture. Dans un lot, c'est la seule PR de "
+        "clôture ; hors des lots, un correctif par `Fixes #N`, ou toute autre PR qui ferme son "
+        "issue. -->"
+    ), commentaire
+    assert "Dans la PR de clôture, ou dans un correctif hors des lots" not in a_plat
 
 
 def test_modele_de_pr_renvoie_un_depot_de_donnees_au_registre_du_code():
@@ -336,6 +342,16 @@ def test_methode_dit_le_texte_de_la_pr():
         ),
         "une section absente, vide ou en double",
         "avec un texte après la date, ou hors de cet ordre",
+        # le rang n'est promis qu'aux refus d'une ligne : les refus de la section n'en portent pas
+        # (revue finale du lot 15)
+        (
+            "Le contrôle refuse, sans nommer de ligne : une section absente, vide ou en double ; "
+            "« Aucun. » à côté d'un écart ; un commentaire HTML jamais fermé, qui cacherait la "
+            "suite. Il refuse, en nommant la ligne par son rang dans la section : une ligne qui "
+            "n'est ni « Aucun. » ni un écart, une sous-liste comprise ; un écart vide, sans "
+            "« promesse : » suivi d'un texte, sans « accord d'Edouard : » suivi d'une date valide "
+            "`JJ/MM/AAAA`, avec un texte après la date, ou hors de cet ordre."
+        ),
         "Un commentaire fermé ou un bloc clôturé ne compte pas",
         (
             "Un bloc indenté de quatre espaces n'est pas écarté : après une puce, il continue l'écart ; "
@@ -391,6 +407,13 @@ def test_methode_dit_le_texte_de_la_pr():
     assert "du texte de la PR" not in ci
     (rang,) = [i for i, ligne in enumerate(lignes) if ligne.startswith("| workflow `texte-pr` |")]
     assert lignes[rang - 1] == ci
+    # le job n'est requis que par la règle d'un dépôt public ; un dépôt privé n'en a pas, et le
+    # garde le lit avant une fusion en mode `session` (revue finale du lot 15)
+    assert lignes[rang].endswith(
+        " Son job, `texte-pr`, est un contrôle requis par la règle de protection d'un dépôt "
+        "public ; dans un dépôt privé, qui n'a pas de règle, le garde le lit avant une fusion en "
+        "mode `session` |"
+    ), lignes[rang]
     assert "**Le texte de la PR.**" in texte
     # Le cycle : seule la PR de clôture ferme l'issue, et elle nomme la tête relue.
     cycle = lire(METHODE).split("## Le cycle d'un lot", 1)[1].split("\n## ", 1)[0]
@@ -571,6 +594,12 @@ def test_m0002_amende():
     # lot 15 : le texte de la PR sort du socle, vers `texte-pr`, qui fait partie du filet
     assert "la CI (le socle et `texte-pr`) le seul filet" in " ".join(texte.split())
     assert "CI du socle le seul filet" not in " ".join(texte.split())
+    # le dépôt privé n'a pas que la CI de base : `texte-pr` en fait partie (revue finale du lot 15)
+    assert (
+        "- Un dépôt **privé** reste possible. Il n'a alors que les hooks et la CI (le socle et "
+        "`texte-pr`)."
+    ) in texte
+    assert "que les hooks, et la CI de base" not in texte
     assert "avertit sur ce qui identifie" in texte
     assert "refuse toujours les secrets" in texte
     assert "gitleaks n'est pas concerné" not in texte
@@ -1361,6 +1390,12 @@ def test_methode_dit_les_plans():
     script ; le point 2 du cycle renvoie aux trois sections et à la revue du plan."""
     texte = _aplati(lire(METHODE))
     for fragment in (
+        # la règle de la place est séparée du contrôle, qui ne la vérifie pas (revue finale du
+        # lot 15)
+        (
+            "un plan porte trois sections de niveau 2, que `scripts/modele/plan.py` vérifie. On les "
+            "écrit avant ses tâches ; le script n'en vérifie pas la place."
+        ),
         # les puces que `plan.py` admet, et le refus d'une section en double
         "n'admet que des puces `-` ou `*`",
         "deux sections du même titre refusent, et aucune des deux n'est lue",
@@ -1396,6 +1431,7 @@ def test_methode_dit_les_plans():
         assert fragment in texte, fragment
     assert "chaque fichier cité ouvert" not in texte
     assert "seule la revue du plan le relit" not in texte
+    assert "avant ses tâches, trois sections de niveau 2, que" not in texte
     assert not RENVOI_AU_PLAN.search(texte)
     section = lire(METHODE).split("## Les garde-fous", 1)[1].split("\n## ", 1)[0]
     (ligne,) = [ligne for ligne in section.splitlines() if "`scripts/modele/plan.py`" in ligne]
