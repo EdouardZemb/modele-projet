@@ -92,15 +92,22 @@ AVERTISSEMENT_DE_DUREE = (
     "::warning::tests (Linux) : 33 min 46 s sur 45 min ; alléger la suite, ou monter le délai dans "
     "une PR avec son test"
 )
+AVERTISSEMENT_MECANIQUE = (
+    "::warning::mecanique (Linux) : 15 min 01 s sur 20 min ; alléger la suite, ou monter le délai "
+    "dans une PR avec son test"
+)
 
 
 def test_avertissement_de_duree(tmp_path):
     """Les deux étapes de durée, lancées comme GitHub lance une étape `shell: bash` (un fichier,
     `bash --noprofile --norc -e -o pipefail`), l'horloge figée par une fonction `date` : au-delà
     des trois quarts du délai, un avertissement ; aux trois quarts exactement (2 025 s sur 45 min),
-    aucun. La durée va au résumé du job dans les deux cas."""
-    etapes = yaml.safe_load(CI.read_text(encoding="utf-8"))["jobs"]["tests"]["steps"]
-    debut, duree = etapes[0], etapes[-1]
+    aucun. La durée va au résumé du job dans les deux cas. Un second délai, celui de `mecanique`
+    (900 s sur 20 min), tient le seuil, le délai du résumé et le nom du job à `DELAI_MIN` et à
+    `GITHUB_JOB` : un seuil de 2 025 s ou un « sur 45 min » écrits en dur passeraient les seuls cas
+    à 45 min."""
+    jobs = yaml.safe_load(CI.read_text(encoding="utf-8"))["jobs"]
+    debut = jobs["tests"]["steps"][0]
 
     def lancer(run, **variables):
         script = tmp_path / "etape.sh"
@@ -119,26 +126,37 @@ def test_avertissement_de_duree(tmp_path):
     assert r.returncode == 0, r.stdout + r.stderr
     assert environnement.read_text(encoding="utf-8") == "DEBUT_JOB=1700002026\n"
 
-    for debut_job, ligne, avertit in (
-        ("1700000000", "tests (Linux) : 33 min 46 s sur 45 min", True),
-        ("1700000001", "tests (Linux) : 33 min 45 s sur 45 min", False),
+    # (job, DELAI_MIN, DEBUT_JOB, ligne du résumé, avertissement attendu ou None) ; l'horloge à
+    # 1700002026. Chaque job lance sa propre étape « Durée du job ».
+    for job, delai, debut_job, ligne, avertissement in (
+        ("tests", "45", "1700000000", "tests (Linux) : 33 min 46 s sur 45 min",
+         AVERTISSEMENT_DE_DUREE),
+        ("tests", "45", "1700000001", "tests (Linux) : 33 min 45 s sur 45 min", None),
         # les secondes sur deux chiffres
-        ("1700001961", "tests (Linux) : 1 min 05 s sur 45 min", False),
+        ("tests", "45", "1700001961", "tests (Linux) : 1 min 05 s sur 45 min", None),
+        # un autre délai : 901 s dépasse les trois quarts de 20 min, 900 s les atteint
+        ("mecanique", "20", "1700001125", "mecanique (Linux) : 15 min 01 s sur 20 min",
+         AVERTISSEMENT_MECANIQUE),
+        ("mecanique", "20", "1700001126", "mecanique (Linux) : 15 min 00 s sur 20 min", None),
     ):
-        resume = tmp_path / f"resume-{debut_job}"
+        cas = (job, debut_job)
+        resume = tmp_path / f"resume-{job}-{debut_job}"
         r = lancer(
-            duree["run"],
-            DELAI_MIN="45",
-            GITHUB_JOB="tests",
+            jobs[job]["steps"][-1]["run"],
+            DELAI_MIN=delai,
+            GITHUB_JOB=job,
             RUNNER_OS="Linux",
             GITHUB_STEP_SUMMARY=str(resume),
             DEBUT_JOB=debut_job,
         )
-        assert r.returncode == 0, (debut_job, r.stdout + r.stderr)
-        assert (AVERTISSEMENT_DE_DUREE in r.stdout) is avertit, (debut_job, r.stdout)
-        assert ("::warning::" in r.stdout) is avertit, (debut_job, r.stdout)
-        assert "sur 45 min" in resume.read_text(encoding="utf-8")
-        assert resume.read_text(encoding="utf-8") == ligne + "\n", debut_job
+        assert r.returncode == 0, (cas, r.stdout + r.stderr)
+        if avertissement is None:
+            assert "::warning::" not in r.stdout, (cas, r.stdout)
+        else:
+            assert avertissement in r.stdout, (cas, r.stdout)
+            assert r.stdout.count("::warning::") == 1, (cas, r.stdout)
+        assert f"sur {delai} min" in resume.read_text(encoding="utf-8"), cas
+        assert resume.read_text(encoding="utf-8") == ligne + "\n", cas
 
 
 AUCUN_CACHE = "Aucun cache Python sous template/scripts/modele"
