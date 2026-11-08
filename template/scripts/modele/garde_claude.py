@@ -1280,6 +1280,15 @@ def commande_de(entree: dict, stricte: bool = True) -> str | None:
     return None
 
 
+def _voisins() -> None:
+    """Avant d'importer un voisin : aucun cache écrit, même lancé sans `-B`, et le dossier du
+    script dans le chemin d'import, en fin, sans doublon, même sous `python -I`."""
+    sys.dont_write_bytecode = True
+    dossier = os.path.dirname(os.path.abspath(__file__))
+    if dossier not in sys.path:
+        sys.path.append(dossier)
+
+
 def _executer_garde(args) -> int:
     global _echeance
     _echeance = time.monotonic() + BUDGET
@@ -1302,6 +1311,7 @@ def _executer_garde(args) -> int:
         return 0
     branche = args.branche
     if branche is None:
+        _voisins()
         try:
             from reglages import BRANCHE_PRINCIPALE as branche
         except ImportError:

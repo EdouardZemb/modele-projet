@@ -15,6 +15,11 @@ import pytest
 RACINE = Path(__file__).resolve().parent.parent
 SCRIPTS = RACINE / "template/scripts/modele"
 
+# Aucun cache Python sous `template/scripts/modele/`, que le garde protège (AM-1) : ni pour les
+# imports des tests, ni pour les scripts qu'ils lancent en sous-processus.
+sys.dont_write_bytecode = True
+os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+
 # Les scripts du modèle sont importés directement par les tests.
 sys.path.insert(0, str(SCRIPTS))
 

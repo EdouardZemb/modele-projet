@@ -606,10 +606,19 @@ def gabarits_vides(racine: Path) -> list[str]:
 # --- ligne de commande -----------------------------------------------------------------------
 
 
+def _voisins() -> None:
+    """Avant d'importer un voisin : aucun cache écrit, même lancé sans `-B`, et le dossier du
+    script dans le chemin d'import, en fin, sans doublon, même sous `python -I`."""
+    sys.dont_write_bytecode = True
+    dossier = os.path.dirname(os.path.abspath(__file__))
+    if dossier not in sys.path:
+        sys.path.append(dossier)
+
+
 def _nature() -> str:
     """La nature, lue par la porte de confidentialité : importée ici seulement, à l'appel, sans
     écrire de cache, même lancé sans `-B` : aucun `__pycache__` dans le projet."""
-    sys.dont_write_bytecode = True
+    _voisins()
     from confidentialite import nature
 
     return nature()

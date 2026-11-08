@@ -2,13 +2,14 @@
 
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
 
 import documentation
 import yaml
-from conftest import PERIMES, RACINE
+from conftest import PERIMES, RACINE, sans_echappatoire, trouver_bash
 from test_combinaisons import CLOTURE, SCHEMA, lien_casse
 
 CI = RACINE / ".github/workflows/ci.yml"
@@ -51,6 +52,80 @@ def test_le_job_des_tests_a_40_minutes():
     """LE-29, puis LE-40 : sous Windows, la suite a dépassé 15, puis 25 min, sans test en échec."""
     jobs = yaml.safe_load(CI.read_text(encoding="utf-8"))["jobs"]
     assert jobs["tests"]["timeout-minutes"] == 40
+
+
+AUCUN_CACHE = "Aucun cache Python sous template/scripts/modele"
+
+
+def test_aucun_cache_apres_les_tests(tmp_path):
+    """AM-1 : après `pytest`, sur les deux systèmes, une étape échoue sur tout `__pycache__` sous
+    `template/scripts/modele/`, que le garde protège. Elle lit le disque, pas git, qui ignore ce
+    dossier ; sans le mot `pytest`, dont une seule commande du job peut porter le nom. Un `find` en
+    échec (le dossier absent ou renommé) la fait échouer aussi, sans compter sur `-e` : sinon elle
+    passerait à vide (LE-55)."""
+    job = yaml.safe_load(CI.read_text(encoding="utf-8"))["jobs"]["tests"]
+    etapes = job["steps"]
+    (lancement,) = [e for e in etapes if "pytest" in e.get("run", "")]
+    (etape,) = [e for e in etapes if e.get("name") == AUCUN_CACHE]
+    assert etapes.index(etape) > etapes.index(lancement)
+    # Sans `shell:`, l'étape tournerait sous `pwsh` sous Windows, où `find` est un autre programme.
+    assert etape["shell"] == "bash"
+    sans_echappatoire(job, AUCUN_CACHE)
+    for mot in ("pytest", "git"):
+        assert mot not in etape["run"], mot
+
+    def lancer(dossier, options):
+        return subprocess.run(
+            [trouver_bash(), "--noprofile", "--norc", *options, "-c", etape["run"]],
+            cwd=dossier,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+
+    propre = tmp_path / "propre"
+    (propre / "template/scripts/modele").mkdir(parents=True)
+    sale = tmp_path / "sale"
+    (sale / "template/scripts/modele/__pycache__").mkdir(parents=True)
+    (sale / "template/scripts/modele/__pycache__/x.pyc").write_bytes(b"")
+    absent = tmp_path / "absent"
+    (absent / "template/scripts").mkdir(parents=True)
+    # Comme GitHub lance une étape `shell: bash`, puis sans `-e` ni `pipefail` : le refus est écrit.
+    for options in (["-e", "-o", "pipefail"], []):
+        r = lancer(propre, options)
+        assert r.returncode == 0, (options, r.stdout + r.stderr)
+        r = lancer(sale, options)
+        assert r.returncode == 1, (options, r.stdout + r.stderr)
+        assert "::error::un cache Python sous template/scripts/modele" in r.stdout, options
+        r = lancer(absent, options)
+        assert r.returncode == 1, (options, r.stdout + r.stderr)
+        assert "::error::template/scripts/modele illisible" in r.stdout, options
+
+
+def test_conftest_coupe_le_cache(tmp_path):
+    """AM-1 : `tests/conftest.py` coupe le cache des imports des tests, et celui des scripts qu'ils
+    lancent en sous-processus. Vérifié aussi dans un interprète neuf, sans `-B` ni la variable : un
+    script importé plus tôt par la suite pose lui-même `sys.dont_write_bytecode`, et la variable
+    peut venir de l'environnement du lancement."""
+    assert sys.dont_write_bytecode is True
+    assert os.environ["PYTHONDONTWRITEBYTECODE"] == "1"
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONDONTWRITEBYTECODE"}
+    # Le cache de `conftest.py` lui-même s'écrit avant que son corps ne s'exécute : hors du dépôt.
+    env["PYTHONPYCACHEPREFIX"] = str(tmp_path / "cache")
+    code = (
+        "import os, sys; sys.path.insert(0, sys.argv[1]); import conftest; "
+        "print(sys.dont_write_bytecode, os.environ.get('PYTHONDONTWRITEBYTECODE'))"
+    )
+    r = subprocess.run(
+        [sys.executable, "-c", code, str(RACINE / "tests")],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.split() == ["True", "1"], r.stdout + r.stderr
 
 
 def test_mecanique_et_fausse_app_dans_la_ci_du_depot_modele():
