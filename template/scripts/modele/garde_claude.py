@@ -127,14 +127,6 @@ REFUS_ETIQUETTE = (
     "envoi d'une étiquette ou écriture de publication : à Edouard (étiquette ou publication)"
 )
 MODES_FUSION = ("session", "edouard")
-
-
-def _refus_budget(quoi: str) -> str:
-    """Le refus d'une lecture que le budget n'a pas laissé finir (`quoi` : « mode non lu » ou
-    « contrôles non lus »). Composé au moment du refus : les tests changent BUDGET après l'import."""
-    return f"budget de {BUDGET:g} s épuisé : {quoi}, relancer"
-
-
 REPONSE_SESSION = re.compile(r"^fusion:[ \t]*session[ \t]*\r?$", re.MULTILINE)
 # Une étiquette du code (`v1.2.3`) ou de données (`donnees-2026.11.03.1`, et tout `donnees-…`).
 DESTINATION_ETIQUETTE = re.compile(r"^(?:v[0-9]|donnees-)")
@@ -312,7 +304,7 @@ class Contexte:
         par les `cd` : une fusion qui suit un changement de dossier est refusée de toute façon.
 
         Rend `session`, `edouard`, ou MODE_NON_LU quand le budget n'a pas laissé lire le mode : la
-        fusion est alors refusée, avec un message qui dit de relancer. Tout autre valeur, et toute
+        fusion est alors refusée, avec un message qui dit de relancer. Toute autre valeur, et toute
         exception, vaut `edouard`."""
         cle = ("fusion", None)
         if cle not in self._memo:
@@ -661,6 +653,12 @@ def _git(args: list[str], ctx: Contexte) -> str | None:
     if sous == "push":
         return _push(reste, chemin, ctx)
     return None
+
+
+def _refus_budget(quoi: str) -> str:
+    """Le refus d'une lecture que le budget n'a pas laissé finir (`quoi` : « mode non lu » ou
+    « contrôles non lus »). Composé au moment du refus : les tests changent BUDGET après l'import."""
+    return f"budget de {BUDGET:g} s épuisé : {quoi}, relancer"
 
 
 def _refus_du_mode(ctx: Contexte) -> str | None:
