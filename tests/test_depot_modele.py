@@ -122,6 +122,8 @@ def test_avertissement_de_duree(tmp_path):
     for debut_job, ligne, avertit in (
         ("1700000000", "tests (Linux) : 33 min 46 s sur 45 min", True),
         ("1700000001", "tests (Linux) : 33 min 45 s sur 45 min", False),
+        # les secondes sur deux chiffres
+        ("1700001961", "tests (Linux) : 1 min 05 s sur 45 min", False),
     ):
         resume = tmp_path / f"resume-{debut_job}"
         r = lancer(

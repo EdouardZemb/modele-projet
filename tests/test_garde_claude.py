@@ -636,6 +636,9 @@ def test_checks_verts_gh_budget_epuise(tmp_path, monkeypatch):
 
 def test_budget_deja_epuise_ne_lance_rien(tmp_path, monkeypatch):
     monkeypatch.setattr(garde_claude, "_echeance", garde_claude.time.monotonic() - 1)
+    assert garde_claude._executer(["git", "--version"], ".") is garde_claude.EPUISE
+    # Faux, comme une lecture qui n'a rien donné : un appelant qui l'oublierait resterait fermé.
+    assert not garde_claude.EPUISE
     assert garde_claude.branche_courante_git(None, ".") is None
     # Un faux gh en tête de PATH, qui répondrait « vert » et « session » : sans lui, gh absent
     # rendrait faux ou « edouard » avant toute lecture.
