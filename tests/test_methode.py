@@ -1478,7 +1478,7 @@ def test_methode_dit_les_plans():
         "fichiers cités, ses lieux vérifiés à la PR."
     )
     assert au_push in ligne, ligne
-    cycle =lire(METHODE).split("## Le cycle d'un lot", 1)[1].split("\n## ", 1)[0]
+    cycle = lire(METHODE).split("## Le cycle d'un lot", 1)[1].split("\n## ", 1)[0]
     (point,) = [b for b in blocs(cycle) if b[0].startswith("2. ")]
     point = _aplati(" ".join(point))
     assert "trois sections" in point, point
