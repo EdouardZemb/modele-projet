@@ -1420,10 +1420,13 @@ etiqueter_les_donnees() {
 # neuf : en prod, la plus haute vX.Y.Z avec la plus haute étiquette de données ; en staging, :main
 # avec la tête de la branche des données. La ligne de conseil du retour dit ce que chaque geste
 # ramènerait, et ce qui passe d'abord. Chaque test de la table en exige une clause, vérifie que la
-# sonde attend tant que rien ne change, joue le geste que la clause nomme, puis compare deploye au
-# couple qu'elle annonce : « <geste> redéploierait <moitié quittée> », la moitié quittée avec la
-# moitié neuve du geste ; « poser d'abord » ou « fusionner d'abord », la moitié neuve avec la moitié
-# gardée. Un seul environnement par test : les doubles de docker et de curl n'ont qu'une
+# sonde attend tant que rien ne change, joue un geste, puis compare deploye au couple attendu :
+# après « <geste> redéploierait <moitié quittée> », la moitié quittée avec la moitié neuve du
+# geste ; après « poser d'abord », « fusionner d'abord » ou « corriger d'abord », la moitié neuve
+# avec la moitié gardée. Deux tests posent une vX.Y.Z sur le commit de la version gardée, qui
+# republie son image : après un retour de l'image, le couple gardé reste en service ; après un
+# retour des données, le couple visé est le couple quitté, qui attend. Dans les deux, deploye ne
+# change pas. Un seul environnement par test : les doubles de docker et de curl n'ont qu'une
 # application en service pour les deux.
 
 # apres_un_retour <env> <moitié> : la vraie sonde déploie deux couples dans cet environnement, le
