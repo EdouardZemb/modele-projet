@@ -635,26 +635,46 @@ def test_checks_verts_gh_budget_epuise(tmp_path, monkeypatch):
 
 
 def test_budget_deja_epuise_ne_lance_rien(tmp_path, monkeypatch):
+    """Un budget déjà à zéro ne lance aucun sous-processus. Les fichiers `appel*` du faux gh ne
+    voient pas un processus lancé puis tué aussitôt : un espion sur `subprocess.run`, qu'emploie
+    `_executer`, et sur `subprocess.Popen`, qu'emploie `run`, échoue s'il est appelé."""
+    # Un faux gh en tête de PATH, qui répondrait « vert » et « session » : sans lui, gh absent
+    # rendrait faux ou « edouard » avant toute lecture.
+    faux_gh(tmp_path, {"pr checks": (0, '[{"bucket":"pass"}]'), "api": (0, "fusion: session\n")})
+    gh_en_tete(monkeypatch, tmp_path)
+    lances = []
+
+    def espion(*args, **kwargs):
+        lances.append(args)
+        raise AssertionError(f"sous-processus lancé, budget épuisé : {args!r}")
+
+    for point in ("run", "Popen"):
+        monkeypatch.setattr(garde_claude.subprocess, point, espion)
     monkeypatch.setattr(garde_claude, "_echeance", garde_claude.time.monotonic() - 1)
     assert garde_claude._executer(["git", "--version"], ".") is garde_claude.EPUISE
     # Faux, comme une lecture qui n'a rien donné : un appelant qui l'oublierait resterait fermé.
     assert not garde_claude.EPUISE
     assert garde_claude.branche_courante_git(None, ".") is None
-    # Un faux gh en tête de PATH, qui répondrait « vert » et « session » : sans lui, gh absent
-    # rendrait faux ou « edouard » avant toute lecture.
-    faux_gh(tmp_path, {"pr checks": (0, '[{"bucket":"pass"}]'), "api": (0, "fusion: session\n")})
-    gh_en_tete(monkeypatch, tmp_path)
     assert garde_claude.checks_verts_gh("12", str(tmp_path)) is None
     assert garde_claude.fusion_du_depot("main", str(tmp_path)) == garde_claude.MODE_NON_LU
+    assert not lances
     assert not list(tmp_path.glob("appel*"))
 
 
 def _main_dans_le_processus(monkeypatch, commande, cwd, argv):
     """`main` dans le processus de pytest, sur l'entrée d'un hook : un sous-processus ne verrait
-    pas le `BUDGET` que le test modifie."""
+    pas le `BUDGET` que le test modifie. Un module `reglages` factice lève à toute lecture : avec
+    `--branche`, il n'est pas lu ; sans elle, sa lecture est l'exception inattendue qui refuse."""
     import io
     import types
 
+    module = types.ModuleType("reglages")
+
+    def explose(nom):
+        raise RuntimeError("boum")
+
+    module.__getattr__ = explose
+    monkeypatch.setitem(sys.modules, "reglages", module)
     entree = json.dumps({"tool_name": "Bash", "tool_input": {"command": commande}, "cwd": cwd})
     monkeypatch.setattr(
         sys, "stdin", types.SimpleNamespace(buffer=io.BytesIO(entree.encode("utf-8")))
@@ -690,16 +710,7 @@ def test_refus_budget_controles(tmp_path, monkeypatch, capsys):
 def test_refus_budget_mode(tmp_path, monkeypatch, capsys):
     """Sans `--fusion`, le mode se lit sur GitHub, avant les contrôles : faute de temps, le refus
     dit que le mode n'a pas été lu, au lieu de « mode fusion : edouard ». La branche vient de
-    `--branche` : un module `reglages` qui exploserait n'est pas lu."""
-    import types
-
-    module = types.ModuleType("reglages")
-
-    def explose(nom):
-        raise RuntimeError("boum")
-
-    module.__getattr__ = explose
-    monkeypatch.setitem(sys.modules, "reglages", module)
+    `--branche` : le module `reglages` factice de l'aide, qui exploserait, n'est pas lu."""
     faux = _faux_gh_vert(tmp_path / "bin")
     gh_en_tete(monkeypatch, faux)
     monkeypatch.setattr(garde_claude, "BUDGET", 0)
@@ -755,21 +766,8 @@ def test_trois_etats_distincts():
 
 
 def test_main_exception_inattendue_refuse(monkeypatch, capsys):
-    import io
-    import types
-
-    module = types.ModuleType("reglages")
-
-    def explose(nom):
-        raise RuntimeError("boum")
-
-    module.__getattr__ = explose
-    monkeypatch.setitem(sys.modules, "reglages", module)
-    entree = json.dumps({"tool_name": "Bash", "tool_input": {"command": "git status"}, "cwd": "."})
-    monkeypatch.setattr(
-        sys, "stdin", types.SimpleNamespace(buffer=io.BytesIO(entree.encode("utf-8")))
-    )
-    assert garde_claude.main([]) == 2
+    """Sans `--branche`, la lecture du module `reglages` factice lève : le garde refuse."""
+    assert _main_dans_le_processus(monkeypatch, "git status", ".", []) == 2
     assert "commande impossible à analyser" in capsys.readouterr().err
     assert garde_claude._echeance is None
 
