@@ -59,6 +59,14 @@ def test_le_job_des_tests_a_45_minutes():
     assert jobs["tests"]["timeout-minutes"] == 45
 
 
+def test_le_job_menage_cible_a_2_minutes():
+    """LE-40 : le délai d'un job neuf se règle sur des durées mesurées, jamais à vide. Trois
+    exécutions de `menage-cible` sur la PR #121 ont pris 46 s, 45 s et 42 s : environ deux fois la
+    plus longue, arrondi à la minute supérieure. À 2 min, l'avertissement part au-delà de 90 s."""
+    jobs = yaml.safe_load(CI.read_text(encoding="utf-8"))["jobs"]
+    assert jobs["menage-cible"]["timeout-minutes"] == 2
+
+
 DEBUT_JOB = "Début du job"
 DUREE_JOB = "Durée du job"
 NOTE_L_HEURE = 'echo "DEBUT_JOB=$(date +%s)" >> "$GITHUB_ENV"'

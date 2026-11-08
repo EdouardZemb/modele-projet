@@ -203,10 +203,11 @@ jobs:
   menage-cible:
     name: menage-cible
     runs-on: ubuntu-latest
-    # 15 min d'abord, puis environ deux fois la plus longue de trois exécutions mesurées (LE-40).
-    timeout-minutes: 15
+    # 2 min : environ deux fois la plus longue de trois exécutions mesurées sur la PR #121, 46 s,
+    # 45 s et 42 s (37 à 40 s au résumé), arrondi à la minute supérieure (LE-40).
+    timeout-minutes: 2
     env:
-      DELAI_MIN: 15
+      DELAI_MIN: 2
     steps:
       - name: Début du job
         shell: bash
