@@ -8,10 +8,11 @@ l'agent de s'y heurter, et de la chercher.
 
 Le mode de fusion se lit sur GitHub (`.copier-answers.yml` de la branche principale), jamais dans la
 copie locale ni dans `origin/<branche>`, qu'une session peut réécrire. Tout ce qui est illisible
-vaut `edouard`, sauf faute de temps : une lecture du mode ou des contrôles que le budget de tous
-les sous-processus (BUDGET, sous le délai du hook) n'a pas laissé finir refuse aussi, en le disant
-(« budget de … s épuisé : mode non lu, relancer », ou « … : contrôles non lus, relancer »), et non
-comme un mode `edouard` ou des contrôles pas verts.
+refuse la fusion. Faute de temps, quand le budget de tous les sous-processus (BUDGET, sous le
+délai du hook) n'a pas laissé finir la lecture du mode ou des contrôles, le refus dit qu'ils n'ont
+pas été lus (« budget de … s épuisé : mode non lu, relancer », ou « budget de … s épuisé :
+contrôles non lus, relancer »), au lieu de « mode fusion : edouard » ou « fusion avant que tous
+les contrôles soient verts ».
 
 Le mode et les contrôles se lisent dans le dossier de la session (le `cwd` du hook), jamais dans
 celui d'un `cd` : une fusion qui suit, dans la même commande, un changement de dossier (`cd`,
