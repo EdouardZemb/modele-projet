@@ -1371,6 +1371,8 @@ def test_methode_dit_les_plans():
         # l'étape ne passe pas `--depot` : un lieu d'un autre dépôt n'y est pas ouvert
         "chaque fichier du dépôt qu'il cite ouvert",
         "un lieu préfixé par un autre dépôt y reste « non vérifié », sans refus",
+        # ce lieu se vérifie hors de la CI, par `--depot`, que la session passe elle-même
+        "une session vérifie ce lieu en lançant `plan.py` avec `--depot <dépôt>=<clone>`",
         "`## Mécanismes annoncés`",
         "`## Outils et cas limites`",
         "`## Revues`",
@@ -1392,6 +1394,7 @@ def test_methode_dit_les_plans():
     ):
         assert fragment in texte, fragment
     assert "chaque fichier cité ouvert" not in texte
+    assert "seule la revue du plan le relit" not in texte
     assert not RENVOI_AU_PLAN.search(texte)
     section = lire(METHODE).split("## Les garde-fous", 1)[1].split("\n## ", 1)[0]
     (ligne,) = [ligne for ligne in section.splitlines() if "`scripts/modele/plan.py`" in ligne]

@@ -80,13 +80,14 @@ Les revues et les tests, dans tout le lot :
 - un test qui garde une valeur est éprouvé par un mutant : la valeur changée fait échouer le test.
 
 **En CI**, l'étape « Les plans (.claude/plans) » du socle lance `plan.py` sur chaque plan de
-`.claude/plans/` que la PR ajoute ou modifie. Un plan ajouté se vérifie en entier, chaque fichier
-du dépôt qu'il cite ouvert, mais un lieu préfixé par un autre dépôt y reste « non vérifié », sans
-refus : l'étape ne passe pas `--depot`, et seule la revue du plan le relit ; un plan modifié se
-vérifie sans ouvrir les fichiers cités (`--sans-lieux`) : ses sections, la forme de chaque ligne et
-ses revues. Une PR d'implémentation modifie souvent son plan avec le code qu'il cite, et les
-numéros de ligne dérivent : les mécanismes se vérifient à l'entrée du plan, quand la revue du plan
-les relit, et un mécanisme ajouté plus tard se relit à la revue.
+`.claude/plans/` que la PR ajoute ou modifie. Un plan ajouté se vérifie en entier, chaque fichier du
+dépôt qu'il cite ouvert, mais un lieu préfixé par un autre dépôt y reste « non vérifié », sans
+refus : l'étape ne passe pas `--depot`, et une session vérifie ce lieu en lançant `plan.py` avec
+`--depot <dépôt>=<clone>`, puis la revue du plan le relit ; un plan modifié se vérifie sans ouvrir
+les fichiers cités (`--sans-lieux`) : ses sections, la forme de chaque ligne et ses revues. Une PR
+d'implémentation modifie souvent son plan avec le code qu'il cite, et les numéros de ligne
+dérivent : les mécanismes se vérifient à l'entrée du plan, quand la revue du plan les relit, et un
+mécanisme ajouté plus tard se relit à la revue.
 Sur une base nulle, l'étape ne contrôle rien ; une PR qui ne touche aucun plan passe, comme la PR
 de clôture, qui le supprime. La session lance aussi `python scripts/modele/plan.py <plan>` avant
 de soumettre son plan à Edouard, et après chaque correction.
