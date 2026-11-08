@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 import yaml
 from conftest import RACINE, REPONSES_SERVEUR, git, sans_echappatoire
+from test_plan import A_PY, plan
 
 SOCLE = ".github/workflows/modele-socle.yml"
 CI = ".github/workflows/ci.yml"
@@ -369,6 +370,105 @@ def test_etape_de_la_documentation(rendre):
         "run": "python scripts/modele/documentation.py",
     }
     assert sum("setup-python" in e.get("uses", "") for e in etapes) == 1
+
+
+ETAPE_DES_PLANS = "Les plans (.claude/plans)"
+# Un plan conforme : il cite la ligne 2 de `src/a.py`, et chacune de ses tâches a une case.
+PLAN_CONFORME = plan(meca="- `src/a.py:2` — `def f(` — la fonction existe déjà.")
+RESUME_CONFORME = "1 mécanismes vérifiés, 0 non vérifiés, 0 outils, 1 revues"
+
+
+@pytest.mark.skipif(SH is None, reason="aucun sh trouvé")
+def test_etape_des_plans(rendre, env_isole, tmp_path):
+    """Les plans d'une PR : l'étape précède la dernière, « La documentation de la racine », sans
+    second `setup-python` ni échappatoire. Lancée par `sh -e`, comme `dash` sur le runner Ubuntu,
+    elle vérifie en entier chaque plan que la PR ajoute, et sans ouvrir ses lieux chaque plan
+    qu'elle modifie, dont les numéros de ligne dérivent avec le code. Une base nulle ne contrôle
+    rien ; une base inconnue arrête l'étape, au lieu de passer sur une liste vide. `-z` garde un
+    nom non ASCII tel quel, la pathspec descend dans un sous-dossier, et chaque plan est lu, même
+    après un refus."""
+    rendu = rendre()
+    job = charger(rendu, SOCLE)["jobs"]["confidentialite"]
+    noms = [e.get("name") for e in job["steps"]]
+    assert noms[-2:] == [ETAPE_DES_PLANS, "La documentation de la racine (licence, carte)"]
+    assert sum("setup-python" in e.get("uses", "") for e in job["steps"]) == 1
+    sans_echappatoire(job, ETAPE_DES_PLANS)
+    run = etape(rendu, ETAPE_DES_PLANS)["run"]
+    env = env_isole()
+    git(rendu, env, "init", "-q", "-b", "main")
+    git(rendu, env, "config", "core.autocrlf", "false")
+    (rendu / "src").mkdir()
+    (rendu / "src/a.py").write_bytes(A_PY.encode("utf-8"))
+    git(rendu, env, "add", "-A")
+    git(rendu, env, "commit", "-q", "-m", "feat: base")
+    base = git(rendu, env, "rev-parse", "HEAD").strip()
+    temp = tmp_path / "runner-temp"
+    temp.mkdir()
+    env.update(
+        RUNNER_TEMP=str(temp),
+        PATH=str(Path(sys.executable).parent) + os.pathsep + env["PATH"],
+    )
+
+    def commit(depuis, fichiers):
+        """Un commit sur `depuis` qui écrit `fichiers` ({chemin : texte}) ; il rend son SHA."""
+        git(rendu, env, "checkout", "-q", "--detach", depuis)
+        for chemin, texte in fichiers.items():
+            (rendu / chemin).parent.mkdir(parents=True, exist_ok=True)
+            (rendu / chemin).write_bytes(texte.encode("utf-8"))
+        git(rendu, env, "add", "-A")
+        git(rendu, env, "commit", "-q", "--allow-empty", "-m", "feat: essai")
+        return git(rendu, env, "rev-parse", "HEAD").strip()
+
+    def lancer(base):
+        r = subprocess.run(
+            [SH, "-e", "-c", run],
+            check=False,
+            cwd=rendu,
+            env={**env, "BASE": base},
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        return r.returncode, r.stdout + r.stderr
+
+    commit(base, {".claude/plans/a.md": "# Un plan sans ses sections\n"})
+    code, sortie = lancer(base)
+    assert code != 0, sortie
+    assert "plan : .claude/plans/a.md : section « Mécanismes annoncés » absente" in sortie, sortie
+    commit(base, {"src/b.py": "x = 1\n"})
+    assert lancer(base)[0] == 0
+    code, sortie = lancer("0" * 40)
+    assert code == 0, sortie
+    assert "Base nulle : plans non contrôlés." in sortie, sortie
+    code, sortie = lancer("1234abcd" * 5)  # une base absente du dépôt
+    assert code != 0, sortie
+    commit(base, {".claude/plans/réécriture.md": PLAN_CONFORME})
+    code, sortie = lancer(base)
+    assert code == 0, sortie
+    assert f"plan : .claude/plans/réécriture.md : {RESUME_CONFORME}" in sortie, sortie
+    commit(base, {".claude/plans/x/b.md": PLAN_CONFORME})
+    code, sortie = lancer(base)
+    assert code == 0, sortie
+    assert f"plan : .claude/plans/x/b.md : {RESUME_CONFORME}" in sortie, sortie
+    commit(base, {".claude/plans/a.md": "# Un plan\n", ".claude/plans/b.md": PLAN_CONFORME})
+    code, sortie = lancer(base)
+    assert code != 0, sortie
+    assert f"plan : .claude/plans/b.md : {RESUME_CONFORME}" in sortie, sortie
+    # Une PR d'implémentation modifie son plan avec le code qu'il cite : deux lignes en tête du
+    # fichier, une case cochée. Le plan modifié passe ; ajouté par ce même commit, il refuse.
+    avec_le_plan = commit(base, {".claude/plans/p.md": PLAN_CONFORME})
+    derive = {
+        "src/a.py": "# un\n# deux\n" + A_PY,
+        ".claude/plans/p.md": PLAN_CONFORME.replace("- [ ]", "- [x]", 1),
+    }
+    commit(avec_le_plan, derive)
+    code, sortie = lancer(avec_le_plan)
+    assert code == 0, sortie
+    assert "plan : .claude/plans/p.md : 1 mécanismes, lieux non ouverts" in sortie, sortie
+    commit(base, derive)
+    code, sortie = lancer(base)
+    assert code != 0, sortie
+    assert "extrait absent de src/a.py:2" in sortie, sortie
 
 
 def test_texte_pr_yml(rendre):
