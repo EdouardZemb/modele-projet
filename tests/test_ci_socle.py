@@ -193,6 +193,55 @@ def test_etape_des_messages_refuse_un_motif(rendre, env_isole, tmp_path):
     assert lancer_etape(apres_le_constat).returncode == 0
 
 
+@pytest.mark.skipif(SH is None, reason="aucun sh trouvé")
+def test_etape_du_texte_de_pr_refuse_un_motif_du_corps(rendre, env_isole, tmp_path):
+    """La confidentialité du titre et du corps de la PR, lancée comme le runner la lance : par
+    `bash -e`, ici `sh -e`, plus strict, chaque variable prise de l'`env` de l'étape, résolu sur un
+    événement simulé, et aucune autre. Un motif de la liste privée dans le corps seul refuse, à la
+    ligne 2 de `pr.txt`, celle du corps ; sans la liste privée, le secret absent, l'étape refuse ;
+    un corps propre passe."""
+    rendu = rendre()
+    e = etape_texte_pr(rendu, "Confidentialité et format du titre et du corps de la PR")
+    temp = tmp_path / "runner-temp"
+    temp.mkdir()
+    base = env_isole()
+    for nom in ("TITRE", "CORPS", "BRANCHE_DEFAUT"):
+        base.pop(nom, None)
+    base.update(
+        RUNNER_TEMP=str(temp),
+        PATH=str(Path(sys.executable).parent) + os.pathsep + base["PATH"],
+    )
+
+    def lancer_etape(motifs, corps):
+        evenement = {
+            "${{ secrets.MOTIFS_INTERDITS }}": motifs,
+            "${{ github.event.repository.private }}": "false",
+            "${{ github.event.repository.default_branch }}": "main",
+            "${{ github.event.pull_request.title }}": "feat: un titre propre",
+            "${{ github.event.pull_request.body }}": corps,
+        }
+        r = subprocess.run(
+            [SH, "-e", "-c", e["run"]],
+            check=False,
+            cwd=rendu,
+            env={**base, **{nom: evenement[expr] for nom, expr in e["env"].items()}},
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        return r.returncode, r.stdout + r.stderr
+
+    code, sortie = lancer_etape("motif-essai", "Le corps cite motif-essai.")
+    assert code == 1, sortie
+    assert "pr.txt:2 — motif privé n°1" in sortie, sortie
+    assert "motif-essai" not in sortie, sortie
+    code, sortie = lancer_etape("", "Un corps propre.")  # le secret absent
+    assert code != 0, sortie
+    assert "liste de motifs privés exigée mais absente" in sortie, sortie
+    code, sortie = lancer_etape("motif-essai", "Un corps propre.")
+    assert code == 0, sortie
+
+
 def script_du_garde(rendu):
     run = etape(rendu, "Le garde de Claude est branché")["run"]
     assert run.startswith("python - <<'FIN'\n")
@@ -374,7 +423,8 @@ def test_etape_de_la_documentation(rendre):
 
 ETAPE_DES_PLANS = "Les plans (.claude/plans)"
 # Un plan conforme : il cite la ligne 2 de `src/a.py`, et chacune de ses tâches a une case.
-PLAN_CONFORME = plan(meca="- `src/a.py:2` — `def f(` — la fonction existe déjà.")
+MECA_CONFORME = "- `src/a.py:2` — `def f(` — la fonction existe déjà."
+PLAN_CONFORME = plan(meca=MECA_CONFORME)
 RESUME_CONFORME = "1 mécanismes vérifiés, 0 non vérifiés, 0 outils, 1 revues"
 
 
@@ -470,6 +520,14 @@ def test_etape_des_plans(rendre, env_isole, tmp_path):
     assert code != 0, sortie
     assert "plan : .claude/plans/a.md : section « Mécanismes annoncés » absente" in sortie, sortie
     assert "plan : .claude/plans/b.md : 1 mécanismes, lieux non ouverts" in sortie, sortie
+    # Un plan modifié qui perd une section refuse seul, sans aucun plan ajouté : `b.md`, conforme
+    # dans la base, perd « Revues ».
+    commit(avec_b, {".claude/plans/b.md": plan(meca=MECA_CONFORME, revues=None)})
+    changes = git(rendu, env, "diff", "--name-status", "--no-renames", f"{avec_b}...HEAD")
+    assert changes == "M\t.claude/plans/b.md\n", changes
+    code, sortie = lancer(avec_b)
+    assert code != 0, sortie
+    assert "plan : .claude/plans/b.md : section « Revues » absente" in sortie, sortie
     # Une PR d'implémentation modifie son plan avec le code qu'il cite : deux lignes en tête du
     # fichier, une case cochée. Le plan modifié passe ; ajouté par ce même commit, il refuse.
     avec_le_plan = commit(base, {".claude/plans/p.md": PLAN_CONFORME})
@@ -558,7 +616,20 @@ def test_texte_pr_yml(rendre):
     assert [n for n in noms if n in ETAPES_TEXTE_PR] == list(ETAPES_TEXTE_PR)
 
     deplacee = etape_texte_pr(rendu, "Confidentialité et format du titre et du corps de la PR")
-    assert 'python scripts/modele/commits.py --titre "$TITRE"' in deplacee["run"].splitlines()
+    # la porte lit la liste privée, comme le socle, et l'exige ; le titre et le corps ; la
+    # visibilité réelle et la branche par défaut, où se lit la nature
+    assert deplacee["env"] == {
+        "MOTIFS_INTERDITS": "${{ secrets.MOTIFS_INTERDITS }}",
+        "DEPOT_PRIVE": "${{ github.event.repository.private }}",
+        "BRANCHE_DEFAUT": "${{ github.event.repository.default_branch }}",
+        "TITRE": "${{ github.event.pull_request.title }}",
+        "CORPS": "${{ github.event.pull_request.body }}",
+    }
+    lignes = deplacee["run"].splitlines()
+    assert (
+        'python scripts/modele/confidentialite.py --exiger-prives --texte "$RUNNER_TEMP/pr.txt"'
+    ) in lignes
+    assert 'python scripts/modele/commits.py --titre "$TITRE"' in lignes
     api = etape_texte_pr(rendu, "Les issues que la PR ferme (API)")
     assert api["env"] == {
         "GH_TOKEN": "${{ github.token }}",

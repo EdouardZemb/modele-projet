@@ -123,6 +123,10 @@ def test_sections(racine):
             {"revues": "- relecture : Tâche 1\n<!-- - cachée : Tâche 1"},
             "Revues, ligne 3 : forme attendue",
         ),
+        # le même, après une puce qui serait valide sans lui : seul le refus du `<!--` jamais
+        # fermé l'arrête, à sa ligne
+        ({"revues": "- relecture : Tâche 1 <!-- note"}, "Revues, ligne 2 : forme attendue"),
+        ({"outils": "- <!-- a — b — c"}, OUTIL_REFUSE),
     ]
     for reponses, attendu in cas:
         lignes, refus = verifier(plan(**reponses), racine)

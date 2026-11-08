@@ -230,6 +230,10 @@ def test_auteurs(lancer):
         ("Tête relue : ", FERME_UNE, 1, ABSENTE),
         (f"Tête relue : {TETE[:12]}", FERME_UNE, 1, ABSENTE),
         (f"<!-- Tête relue : {TETE} -->", FERME_UNE, 1, ABSENTE),
+        # la ligne se cherche hors des blocs de code et des commentaires : dans un bloc clôturé,
+        # ou dans un commentaire fermé ouvert au milieu d'un paragraphe, elle est absente
+        (f"```\nTête relue : {TETE}\n```", FERME_UNE, 1, ABSENTE),
+        (f"texte <!--\nTête relue : {TETE}\n-->", FERME_UNE, 1, ABSENTE),
         # un commentaire jamais fermé, ouvert en tête de ligne ou après une puce, cache sur GitHub
         # tout ce qui le suit ; au milieu d'un paragraphe, il reste du texte, et la ligne se voit
         (f"<!-- note\n\nTête relue : {TETE}", FERME_UNE, 1, ABSENTE),
@@ -253,6 +257,9 @@ def test_auteurs(lancer):
         ("", FERME_FAUX, 1, ILLISIBLES),
         ("", FERME_VRAI, 1, ILLISIBLES),
         ("", "null", 1, ILLISIBLES),  # un JSON qui n'est pas un objet
+        # une réponse qui n'est pas du JSON : la page d'un 502, une sortie tronquée
+        ("", "<html>502</html>", 1, ILLISIBLES),
+        ("", FERME_UNE[:-3], 1, ILLISIBLES),
     ],
 )
 def test_tete_relue(lancer, ligne, fermetures, code, attendu):
