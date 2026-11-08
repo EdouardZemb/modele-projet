@@ -381,9 +381,10 @@ RESUME_CONFORME = "1 mécanismes vérifiés, 0 non vérifiés, 0 outils, 1 revue
 @pytest.mark.skipif(SH is None, reason="aucun sh trouvé")
 def test_etape_des_plans(rendre, env_isole, tmp_path):
     """Les plans d'une PR : l'étape précède la dernière, « La documentation de la racine », sans
-    second `setup-python` ni échappatoire. Lancée par `sh -e`, comme `dash` sur le runner Ubuntu,
-    elle vérifie en entier chaque plan que la PR ajoute, et sans ouvrir ses lieux chaque plan
-    qu'elle modifie, dont les numéros de ligne dérivent avec le code. Une base nulle ne contrôle
+    second `setup-python` ni échappatoire. Le runner la lance par `bash -e`, le socle ne déclarant
+    pas de shell ; le test la lance par `sh -e` (`dash` sous Ubuntu), plus strict. Elle vérifie en
+    entier chaque plan que la PR ajoute, et sans ouvrir ses lieux chaque plan qu'elle modifie,
+    dont les numéros de ligne dérivent avec le code. Une base nulle ne contrôle
     rien ; une base inconnue arrête l'étape, au lieu de passer sur une liste vide. `-z` garde un
     nom non ASCII tel quel, la pathspec descend dans un sous-dossier, et chaque plan est lu, même
     après un refus, la liste des plans modifiés comprise. Un plan renommé compte pour ajouté
