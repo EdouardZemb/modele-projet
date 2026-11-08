@@ -386,7 +386,8 @@ def test_etape_des_plans(rendre, env_isole, tmp_path):
     qu'elle modifie, dont les numéros de ligne dérivent avec le code. Une base nulle ne contrôle
     rien ; une base inconnue arrête l'étape, au lieu de passer sur une liste vide. `-z` garde un
     nom non ASCII tel quel, la pathspec descend dans un sous-dossier, et chaque plan est lu, même
-    après un refus."""
+    après un refus, la liste des plans modifiés comprise. Un plan renommé compte pour ajouté
+    (`--no-renames`)."""
     rendu = rendre()
     job = charger(rendu, SOCLE)["jobs"]["confidentialite"]
     noms = [e.get("name") for e in job["steps"]]
@@ -454,6 +455,20 @@ def test_etape_des_plans(rendre, env_isole, tmp_path):
     code, sortie = lancer(base)
     assert code != 0, sortie
     assert f"plan : .claude/plans/b.md : {RESUME_CONFORME}" in sortie, sortie
+    # La liste des plans modifiés passe même après le refus d'un plan ajouté : `a.md` ajouté et
+    # refusé, `b.md`, présent dans la base, modifié et conforme.
+    avec_b = commit(base, {".claude/plans/b.md": PLAN_CONFORME})
+    commit(
+        avec_b,
+        {
+            ".claude/plans/a.md": "# Un plan\n",
+            ".claude/plans/b.md": PLAN_CONFORME.replace("- [ ]", "- [x]", 1),
+        },
+    )
+    code, sortie = lancer(avec_b)
+    assert code != 0, sortie
+    assert "plan : .claude/plans/a.md : section « Mécanismes annoncés » absente" in sortie, sortie
+    assert "plan : .claude/plans/b.md : 1 mécanismes, lieux non ouverts" in sortie, sortie
     # Une PR d'implémentation modifie son plan avec le code qu'il cite : deux lignes en tête du
     # fichier, une case cochée. Le plan modifié passe ; ajouté par ce même commit, il refuse.
     avec_le_plan = commit(base, {".claude/plans/p.md": PLAN_CONFORME})
@@ -469,6 +484,23 @@ def test_etape_des_plans(rendre, env_isole, tmp_path):
     code, sortie = lancer(base)
     assert code != 0, sortie
     assert "extrait absent de src/a.py:2" in sortie, sortie
+    # Un plan renommé, puis rendu non conforme (un lieu faux), est un plan ajouté : sans
+    # `--no-renames`, git le dirait renommé, ni ajouté ni modifié, et aucune liste ne le lirait.
+    git(rendu, env, "checkout", "-q", "--detach", avec_le_plan)
+    git(rendu, env, "mv", ".claude/plans/p.md", ".claude/plans/q.md")
+    faux = PLAN_CONFORME.replace("`src/a.py:2`", "`src/a.py:3`", 1)
+    assert faux != PLAN_CONFORME
+    (rendu / ".claude/plans/q.md").write_bytes(faux.encode("utf-8"))
+    git(rendu, env, "add", ".claude/plans/q.md")
+    git(rendu, env, "commit", "-q", "-m", "feat: le plan renommé")
+    renommes = git(
+        rendu, env, "diff", "--name-status", "--diff-filter=R", f"{avec_le_plan}...HEAD"
+    )
+    assert renommes.startswith("R") and ".claude/plans/q.md" in renommes, renommes
+    code, sortie = lancer(avec_le_plan)
+    assert code != 0, sortie
+    attendu = "plan : .claude/plans/q.md : Mécanismes annoncés, ligne 2 : extrait absent de "
+    assert attendu + "src/a.py:3" in sortie, sortie
 
 
 def test_texte_pr_yml(rendre):
