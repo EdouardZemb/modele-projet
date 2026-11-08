@@ -354,6 +354,13 @@ D'autres font refuser à tort :
   trois niveaux de crochets, une définition après un titre souligné, un commentaire fermé par
   `--->` dans un paragraphe).
 
+Un autre laisse passer à tort ce que GitHub cache, et touche aussi `texte_pr.py` et `plan.py`, qui
+s'appuient sur `documentation.py` : un `<!--` jamais fermé, ouvert dans un élément de liste après
+quatre espaces ou plus (une puce imbriquée, ou une ligne qui continue la puce), cache sur GitHub
+tout ce qui le suit, mais les contrôles lisent encore la suite : un titre, et donc la section « Ce
+qui fait foi », la section des écarts à la spec, les trois sections d'un plan et ses titres de
+tâche, et la ligne « Tête relue », qui doit toujours nommer la tête de la PR.
+
 Un dernier ne touche que le gabarit resté vide. Sous Windows, l'existence d'un chemin lié s'y lit
 sans égard à la casse : un lien `docs/Cadrage.md` vers `docs/cadrage.md` y est lu, et peut avertir,
 alors que GitHub casse ce lien ; sous Linux, il est ignoré. C'est un avertissement de trop, jamais

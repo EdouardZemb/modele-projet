@@ -70,8 +70,6 @@ FERME = "ferme une issue : "
 
 _TRADUCTION = str.maketrans({"\u2019": "'", "\u02bc": "'", "\u00a0": " ", "\u202f": " "})
 _PUCE = re.compile(r"[-*](?:[ \t]+|$)")
-# Une sous-liste : une ligne indentée qui commence par une puce ou par un numéro.
-_SOUS_LISTE = re.compile(r"[ \t]+(?:[-*+]|[0-9]{1,9}[.)])(?:[ \t]|$)")
 # Un séparateur : un tiret cadratin ou demi-cadratin, entouré d'espaces.
 _SEPARATEUR = re.compile(r"[ \t]+[\u2014\u2013][ \t]+")
 _PROMESSE = re.compile(r"promesse[ \t]*:(.*)$", re.IGNORECASE)
@@ -179,8 +177,7 @@ def ecarts(corps: str) -> tuple[list[str], bool]:
     # rend en bloc HTML, son texte tel quel, jamais en puce, et le contrôle n'y lit ni une puce ni
     # la suite d'une puce. Son rang est celui de la ligne qui ferme le commentaire ; dans un bloc
     # clôturé, cette ligne est vide, et ne compte pas.
-    en_tete = re.compile(r"^ {0,3}(?:" + doc.COMMENTAIRE.pattern + ")", re.MULTILINE | re.DOTALL)
-    en_bloc_html = {brute.count("\n", 0, m.end()) + 1 for m in en_tete.finditer(brute)}
+    en_bloc_html = doc.lignes_en_bloc_html(brute)
     refus: list[tuple[int, str]] = []
     aucun = False
     lus: list[tuple[int, list[str]]] = []
@@ -191,7 +188,7 @@ def ecarts(corps: str) -> tuple[list[str], bool]:
         if rang in en_bloc_html:
             pass
         elif ligne[0] in " \t":  # une ligne indentée continue la puce d'avant, sauf une sous-liste
-            if puce_ouverte and _SOUS_LISTE.match(ligne) is None:
+            if puce_ouverte and doc.SOUS_LISTE.match(ligne) is None:
                 lus[-1][1].append(ligne.strip())
                 continue
         elif ligne.rstrip() == "Aucun.":

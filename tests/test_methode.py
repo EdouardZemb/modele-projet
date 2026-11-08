@@ -324,6 +324,15 @@ def test_methode_dit_le_texte_de_la_pr():
         "la PR de revue finale n'est pas visée",
         "hors des lots, un correctif qui ferme une issue par `Fixes #N` nomme aussi la tête relue",
         "aucun type d'événement documenté ne suit ce lien",
+        # l'écart connu du rendu, et sa portée (revue finale du lot 15)
+        (
+            "La ligne se cherche telle que GitHub la montre, à un écart près : un `<!--` jamais "
+            "fermé, ouvert dans un élément de liste après quatre espaces ou plus (une puce "
+            "imbriquée, ou une ligne qui continue la puce), cache sur GitHub tout ce qui le suit, "
+            "mais le contrôle lit encore la suite, la ligne `Tête relue` comme la section des "
+            "écarts. L'écart est borné : le SHA de cette ligne doit toujours égaler la tête de la "
+            "PR."
+        ),
         "la branche par défaut",
         "seul à écouter `edited`",
         "le garde lit tous les contrôles, `texte-pr` compris",
@@ -1200,6 +1209,16 @@ DOCUMENTATION_ET_DOCSTRING = (
         "lien à plus de trois niveaux de crochets, une définition après un titre souligné, un "
         "commentaire fermé par `--->` dans un paragraphe)"
     ),
+    # un commentaire jamais fermé dans un élément de liste, que `DEBUT_DE_BLOC` ne suit pas, et sa
+    # portée (revue finale du lot 15)
+    (
+        "un `<!--` jamais fermé, ouvert dans un élément de liste après quatre espaces ou plus (une "
+        "puce imbriquée, ou une ligne qui continue la puce), cache sur GitHub tout ce qui le suit, "
+        "mais les contrôles lisent encore la suite : un titre, et donc la section « Ce qui fait "
+        "foi », la section des écarts à la spec, les trois sections d'un plan et ses titres de "
+        "tâche, et la ligne « Tête relue », qui doit toujours nommer la tête de la PR"
+    ),
+    "Un autre laisse passer à tort ce que GitHub cache, et touche aussi `texte_pr.py` et `plan.py`",
 )
 
 
@@ -1399,6 +1418,14 @@ def test_methode_dit_les_plans():
         # les puces que `plan.py` admet, et le refus d'une section en double
         "n'admet que des puces `-` ou `*`",
         "deux sections du même titre refusent, et aucune des deux n'est lue",
+        # une sous-liste, ou une ligne ouverte par un commentaire, ne continue pas la puce : elle
+        # refuse, comme dans la section des écarts (revue finale du lot 15)
+        (
+            "Une ligne indentée qui commence par une puce ou un numéro (`-`, `*`, `+`, `1.`) est "
+            "une sous-liste, et refuse : elle ne continue pas la puce d'avant. Une ligne qui "
+            "commence par un commentaire, après au plus trois espaces, et porte un texte après lui "
+            "refuse aussi : GitHub la rend en bloc HTML, jamais en puce."
+        ),
         # la tête qui part, relue dans la PR de clôture, n'est pas un temps de « Revues »
         (
             "La relecture de la tête qui part, dans la PR de clôture, ne s'écrit pas dans "

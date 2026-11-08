@@ -39,9 +39,12 @@ l'outillage disparaît :
 trois sections de niveau 2, que `scripts/modele/plan.py` vérifie. On les écrit avant ses tâches ;
 le script n'en vérifie pas la place. Chacune s'arrête au titre suivant, quel que soit son niveau,
 ou à la première ligne de séparation (`---`), et n'admet que des puces `-` ou `*`, leurs lignes de
-continuation indentées, des lignes vides et « Aucun. ». Chacune est unique : deux sections du même
-titre refusent, et aucune des deux n'est lue. Un séparateur est un tiret cadratin (`—`) ou
-demi-cadratin (`–`), entouré d'espaces.
+continuation indentées, des lignes vides et « Aucun. ». Une ligne indentée qui commence par une
+puce ou un numéro (`-`, `*`, `+`, `1.`) est une sous-liste, et refuse : elle ne continue pas la
+puce d'avant. Une ligne qui commence par un commentaire, après au plus trois espaces, et porte un
+texte après lui refuse aussi : GitHub la rend en bloc HTML, jamais en puce. Chaque section est
+unique : deux sections du même titre refusent, et aucune des deux n'est lue. Un séparateur est un
+tiret cadratin (`—`) ou demi-cadratin (`–`), entouré d'espaces.
 
 - `## Mécanismes annoncés` : une ligne par comportement que le plan prête à un mécanisme qui
   existe, `` - `<chemin>:<ligne>` — `<extrait>` — <comportement annoncé> ``. L'extrait, un texte
@@ -194,7 +197,11 @@ environnement, jamais dans ses arguments, et contrôle deux choses.
   lit un mot-clé de fermeture que dans une PR qui vise la branche par défaut : une PR empilée sur
   une autre branche ne ferme rien, et sa tête relue n'est pas exigée. Une issue liée depuis la
   barre latérale de la PR compte aussi, mais aucun type d'événement documenté ne suit ce lien : le
-  contrôle repart au commit ou à la modification du corps suivants.
+  contrôle repart au commit ou à la modification du corps suivants. La ligne se cherche telle que
+  GitHub la montre, à un écart près : un `<!--` jamais fermé, ouvert dans un élément de liste après
+  quatre espaces ou plus (une puce imbriquée, ou une ligne qui continue la puce), cache sur GitHub
+  tout ce qui le suit, mais le contrôle lit encore la suite, la ligne `Tête relue` comme la section
+  des écarts. L'écart est borné : le SHA de cette ligne doit toujours égaler la tête de la PR.
 - **Ne jamais relancer `texte-pr`.** Une relance, par `gh run rerun` ou depuis l'interface de
   GitHub, rejoue l'événement d'origine : elle relit le titre et le corps de ce moment-là, pas ceux
   de la PR telle qu'elle est. Éprouvé dans le dépôt modèle le 07/11/2026 : après une retouche qui

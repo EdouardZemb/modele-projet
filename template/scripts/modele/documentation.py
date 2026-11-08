@@ -82,6 +82,12 @@ conteneurs et des commentaires (un bloc clôturé non fermé dans un élément d
 qui franchit une ligne `>` vide, un texte de lien à plus de trois niveaux de crochets, une
 définition après un titre souligné, un commentaire fermé par `--->` dans un paragraphe) font aussi
 refuser à tort.
+Un autre laisse passer à tort ce que GitHub cache, et touche aussi `texte_pr.py` et `plan.py`, qui
+s'appuient sur ce script : un `<!--` jamais fermé, ouvert dans un élément de liste après quatre
+espaces ou plus (une puce imbriquée, ou une ligne qui continue la puce), cache sur GitHub tout ce
+qui le suit, mais les contrôles lisent encore la suite : un titre, et donc la section « Ce qui fait
+foi », la section des écarts à la spec, les trois sections d'un plan et ses titres de tâche, et la
+ligne « Tête relue », qui doit toujours nommer la tête de la PR.
 Un dernier ne touche que le gabarit resté vide. Sous Windows, il lit l'existence d'un chemin lié
 sans égard à la casse : un lien `docs/Cadrage.md` vers `docs/cadrage.md` y est lu, et peut
 avertir, alors que GitHub casse ce lien ; sous Linux, il est ignoré. C'est un avertissement de
@@ -181,6 +187,14 @@ DEBUT_DE_BLOC = r"^ {0,3}(?:>(?:\t {0,3}| {0,4})|(?:[-*+]|\d{1,9}[.)])[ \t]+)*"
 _BLOC_DE_COMMENTAIRE = re.compile(
     DEBUT_DE_BLOC + r"<!(?=--).*?(?:-->[^\n]*|\Z)", re.MULTILINE | re.DOTALL
 )
+# Un commentaire ouvert en tête de ligne, après au plus trois espaces : GitHub rend en bloc HTML la
+# ligne qui le ferme, son texte tel quel, jamais en puce ni en suite de puce.
+_COMMENTAIRE_EN_TETE = re.compile(
+    r"^ {0,3}(?:" + COMMENTAIRE.pattern + ")", re.MULTILINE | re.DOTALL
+)
+# Une sous-liste : une ligne indentée qui commence par une puce ou par un numéro. Elle ne continue
+# pas la puce d'avant : GitHub en fait un élément de liste à part.
+SOUS_LISTE = re.compile(r"[ \t]+(?:[-*+]|[0-9]{1,9}[.)])(?:[ \t]|$)")
 
 
 def _en_lf(texte: str) -> str:
@@ -231,6 +245,15 @@ def sans_bloc_ni_commentaire(texte: str) -> str:
         lambda m: m.group(0) if m.group(1) else "\n" * m.group(0).count("\n"),
         _hors_des_blocs(_en_lf(texte)),
     )
+
+
+def lignes_en_bloc_html(texte: str) -> set[int]:
+    """Les rangs, la première ligne du texte au rang 1, des lignes qui ferment un commentaire
+    ouvert en tête de ligne, après au plus trois espaces : GitHub rend une telle ligne en bloc HTML,
+    et un texte après la fermeture n'y est ni une puce ni la suite d'une puce. Une ligne d'un bloc
+    de code clôturé peut y être : au lecteur de l'écarter."""
+    texte = _en_lf(texte)
+    return {texte.count("\n", 0, m.end()) + 1 for m in _COMMENTAIRE_EN_TETE.finditer(texte)}
 
 
 def _cle(etiquette: str) -> str | None:

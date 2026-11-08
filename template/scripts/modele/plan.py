@@ -9,9 +9,13 @@ en double, et aucune des deux sections n'est lue. Hors des blocs de code clôtur
 commentaires fermés, elle n'admet que des lignes vides, « Aucun. », des puces `-` ou `*`, et des
 lignes indentées, qui continuent la puce d'avant et se joignent à elle. Toute autre ligne refuse,
 une ligne indentée sans puce avant elle comprise, comme un `<!--` jamais fermé, qui cacherait la
-suite sur GitHub. Une section où il ne reste rien refuse, vide. « Aucun. » n'est admis que seul, et
-jamais dans « Revues ». Un refus nomme la ligne par son rang dans la section, la ligne 1 étant celle
-qui suit le titre, jamais par son texte.
+suite sur GitHub. Une ligne indentée qui commence par une puce ou un numéro (`-`, `*`, `+`, `1.`)
+est une sous-liste, et ne continue pas la puce d'avant : elle refuse. Une ligne qui commence par
+un commentaire, après au plus trois espaces, et porte un texte après sa fermeture n'est ni une
+puce ni la suite d'une puce : GitHub la rend en bloc HTML, et elle refuse aussi. Une section où il
+ne reste rien refuse, vide. « Aucun. » n'est admis que seul, et jamais dans « Revues ». Un refus
+nomme la ligne par son rang dans la section, la ligne 1 étant celle qui suit le titre, jamais par
+son texte.
 
 Avant toute lecture, hors du code en ligne : le texte en LF et en NFC ; l'apostrophe typographique
 et U+02BC deviennent `'`, une espace insécable devient une espace. Un séparateur est `—` ou `–`,
@@ -166,9 +170,11 @@ def _normaliser(texte: str, doc) -> str:
 def _lire_section(brute: str, doc) -> tuple[list[tuple[int, str]], list[int], list[int]]:
     """Les lignes d'une section : (puces, chacune avec son rang et ses lignes de continuation
     jointes ; rangs des « Aucun. » ; rangs des lignes refusées). Un `<!--` jamais fermé refuse sa
-    ligne, et cache la suite."""
+    ligne, et cache la suite. Une sous-liste, ou une ligne ouverte par un commentaire puis portant
+    un texte, que GitHub rend en bloc HTML, ne continue pas la puce d'avant : elle refuse."""
     propre = doc.sans_bloc_ni_commentaire(brute)
     masque = doc.CODE_EN_LIGNE.sub(lambda m: re.sub(r"[^\n]", "x", m.group(0)), propre)
+    en_bloc_html = doc.lignes_en_bloc_html(brute)
     puces: list[tuple[int, list[str]]] = []
     aucuns: list[int] = []
     refusees: list[int] = []
@@ -180,8 +186,10 @@ def _lire_section(brute: str, doc) -> tuple[list[tuple[int, str]], list[int], li
             break
         if not ligne.strip():
             continue
-        if ligne[0] in " \t":  # une ligne indentée continue la puce d'avant
-            if ouverte:
+        if rang in en_bloc_html:
+            pass
+        elif ligne[0] in " \t":  # une ligne indentée continue la puce d'avant, sauf une sous-liste
+            if ouverte and doc.SOUS_LISTE.match(ligne) is None:
                 puces[-1][1].append(ligne.strip())
                 continue
         elif ligne.rstrip() == AUCUN:

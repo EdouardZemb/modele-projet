@@ -163,6 +163,71 @@ def test_sections(racine):
         assert lignes[-1] == resume, lignes
 
 
+def test_sous_liste_et_bloc_html(racine):
+    """Une sous-liste, ou une ligne ouverte par un commentaire puis portant un texte, ne continue
+    pas la puce d'avant : jointe à elle, elle passerait sans être lue, un lieu faux jamais ouvert
+    (revue finale du lot 15). Chaque forme refuse, à son rang, dans les trois sections, et la puce
+    d'avant reste lue. Une ligne de continuation ordinaire, un commentaire seul sur sa ligne, ou les
+    mêmes lignes dans un bloc clôturé, ne refusent pas."""
+    titres = {"meca": p.MECANISMES, "outils": p.OUTILS, "revues": p.REVUES}
+    premieres = {
+        "meca": meca("src/a.py:2", "def f("),
+        "outils": "- git — un cas — un test",
+        "revues": "- relecture : Tâche 1",
+    }
+    # chaque suite, jointe à sa puce, passerait : son lieu ne serait pas ouvert, son outil et sa
+    # revue se fondraient dans ceux de la puce
+    suites = {
+        "meca": "`src/a.py:999` — `inexistant` — un second mécanisme",
+        "outils": "git — un second cas — un second test",
+        "revues": "finale : Tâche 1",
+    }
+    debuts = ("  - ", "   * ", "  + ", "  1. ", "\t- ", "<!-- c --> - ", "   <!-- c --> ")
+    for cle, titre in titres.items():
+        for debut in debuts:
+            texte = plan(**{cle: f"{premieres[cle]}\n{debut}{suites[cle]}"})
+            lignes, refus = verifier(texte, racine)
+            assert refus, (cle, debut, lignes)
+            nommees = [ligne for ligne in lignes if ligne.startswith(f"{titre}, ligne")]
+            assert nommees == [f"{titre}, ligne 3 : forme attendue"], (cle, debut, lignes)
+        # la ligne qui ferme un commentaire de deux lignes porte le rang
+        texte = plan(**{cle: f"{premieres[cle]}\n<!-- c\nc --> {suites[cle]}"})
+        lignes, refus = verifier(texte, racine)
+        assert refus, (cle, lignes)
+        assert f"{titre}, ligne 4 : forme attendue" in lignes, (cle, lignes)
+    admises = (
+        "\n  suite du texte",
+        "\n<!-- c -->",
+        "\n\n```\n<!-- c --> - x\n  - y\n```",
+    )
+    for cle in titres:
+        for suite in admises:
+            lignes, refus = verifier(plan(**{cle: premieres[cle] + suite}), racine)
+            assert not refus, (cle, suite, lignes)
+    lignes, refus = verifier(plan(meca=premieres["meca"] + "\n  suite du texte"), racine)
+    assert lignes[-1].startswith("1 mécanismes vérifiés, 0 non vérifiés"), lignes
+
+
+def test_plan_lit_sous_liste_et_bloc_html_par_documentation():
+    """`plan.py` et `texte_pr.py` lisent une sous-liste et une ligne en bloc HTML par
+    `documentation.py`, sans leur propre copie ; la docstring de `plan.py` dit les deux refus."""
+    for script in (p, texte_pr):
+        assert not hasattr(script, "_SOUS_LISTE"), script
+    docstring = " ".join(p.__doc__.split())
+    for fragment in (
+        (
+            "Une ligne indentée qui commence par une puce ou un numéro (`-`, `*`, `+`, `1.`) est "
+            "une sous-liste, et ne continue pas la puce d'avant : elle refuse."
+        ),
+        (
+            "Une ligne qui commence par un commentaire, après au plus trois espaces, et porte un "
+            "texte après sa fermeture n'est ni une puce ni la suite d'une puce : GitHub la rend en "
+            "bloc HTML, et elle refuse aussi."
+        ),
+    ):
+        assert fragment in docstring, fragment
+
+
 def test_normalisation_hors_du_code(racine):
     """Hors du code en ligne, un tiret demi-cadratin sépare comme un cadratin, une espace insécable
     (U+00A0, U+202F) compte pour une espace, et les apostrophes typographiques (U+2019, U+02BC)
