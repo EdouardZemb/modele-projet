@@ -7,7 +7,8 @@ modifie pas dans le projet. Un défaut se corrige dans `modele-projet`, pour tou
 
 1. Une issue, avec une mini-spec : objectif, critères d'acceptation, hors périmètre. Le formulaire
    « Lot » la pose. Une milestone par étape.
-2. Une PR de plan, qui ajoute le plan dans `.claude/plans/`.
+2. Une PR de plan, qui ajoute le plan dans `.claude/plans/`, avec ses trois sections ; la revue du
+   plan le relit avant l'exécution (voir « Les outils »).
 3. Une ou plusieurs PR d'implémentation.
 4. Une PR de revue finale.
 5. Une PR de clôture : elle **supprime le plan**, reporte dans `CLAUDE.md` ou dans un ADR ce qui
@@ -29,10 +30,67 @@ autre poste, et la déclaration doublerait l'installation du poste.
 l'outillage disparaît :
 
 - le plan s'écrit à la main dans `.claude/plans/`, avec les mêmes sections qu'un plan ordinaire :
-  objectif, tâches, vérification de chaque tâche ;
+  objectif, tâches, vérification de chaque tâche, et les trois sections dites plus bas ;
 - une seule tâche à la fois ;
 - le test d'abord : il est écrit, il échoue, puis le code le fait passer ;
 - une revue avant la fusion, par une autre session ou par Edouard.
+
+**Les trois sections d'un plan.** Qu'il soit écrit par *superpowers* ou à la main, un plan porte,
+avant ses tâches, trois sections de niveau 2, que `scripts/modele/plan.py` vérifie. Chacune
+s'arrête au titre suivant, quel que soit son niveau, ou à la première ligne de séparation (`---`),
+et n'admet que des puces `-` ou `*`, leurs lignes de continuation indentées, des lignes vides et
+« Aucun. ». Chacune est unique : deux sections du même titre refusent, et aucune des deux n'est
+lue. Un séparateur est un tiret cadratin (`—`) ou demi-cadratin (`–`), entouré d'espaces.
+
+- `## Mécanismes annoncés` : une ligne par comportement que le plan prête à un mécanisme qui
+  existe, `` - `<chemin>:<ligne>` — `<extrait>` — <comportement annoncé> ``. L'extrait, un texte
+  de la ligne citée (un nom de fonction, un message), se cherche sur elle, ou dans une plage
+  `<chemin>:<ligne>-<fin>` de 40 lignes au plus : un numéro faux ou une fonction mal nommée
+  refuse. Un chemin sans préfixe part de la racine du dépôt, et un fichier absent refuse ; `..`,
+  un chemin absolu, une barre oblique inverse ou un deux-points dans le chemin refusent, avant
+  toute lecture. Un chemin d'un autre dépôt porte son préfixe, `<dépôt>:<chemin>:<ligne>` : il se
+  vérifie quand `--depot <dépôt>=<clone>` est donné, et s'écrit sinon « non vérifié », sans refus.
+  « Aucun. » est admis ;
+- `## Outils et cas limites` : une ligne par outil qu'appelle un contrôle livré par le plan,
+  `- <outil> — <cas limite que l'outil traite autrement> — <test qui l'exerce>`, trois morceaux
+  non vides. « Aucun. » est admis ;
+- `## Revues` : une ligne par temps de revue, `- <revue> : Tâche N`, qui cite au moins une tâche du
+  plan, `Tâche N` ou `Task N`, d'après ses titres de niveau 3 (`### Tâche N : …`). Il en faut au
+  moins une, et deux titres ne portent jamais le même numéro. La clôture est la première tâche dont
+  le titre dit « clôture » ou « closure » : chaque tâche citée la précède.
+
+**La revue du plan** se fait avant l'exécution, par une autre session ou par Edouard :
+
+- elle relit dans le code chaque ligne de « Mécanismes annoncés », et juge un « Aucun. » contre ce
+  que le plan décrit ;
+- elle cherche, pour chaque outil qu'appelle un contrôle, le cas limite que cet outil traite
+  autrement ;
+- une correction cherche aussi la même croyance dans le reste du plan et dans la spec.
+
+Les revues et les tests, dans tout le lot :
+
+- chaque temps d'une revue est une tâche du plan, avant la clôture : la revue de chaque tâche, la
+  revue finale, la relecture des corrections ; une revue se juge sur la tête qui part. La
+  relecture de la tête qui part, dans la PR de clôture, ne s'écrit pas dans « Revues » : c'est la
+  ligne `Tête relue` de cette PR qui la porte ;
+- la PR de clôture nomme la tête qu'a lue sa dernière relecture, et un écart à la spec se déclare
+  dans la PR, chacun avec ses limites (voir « Le texte de la PR ») ;
+- un contrôle qui dépend du comportement d'un outil a un test sur le cas limite que cet outil
+  traite autrement ; la règle vaut aussi pour un correctif écrit hors du plan ;
+- un test qui garde une valeur est éprouvé par un mutant : la valeur changée fait échouer le test.
+
+**En CI**, l'étape « Les plans (.claude/plans) » du socle lance `plan.py` sur chaque plan de
+`.claude/plans/` que la PR ajoute ou modifie. Un plan ajouté se vérifie en entier, chaque fichier du
+dépôt qu'il cite ouvert, mais un lieu préfixé par un autre dépôt y reste « non vérifié », sans
+refus : l'étape ne passe pas `--depot`, et une session vérifie ce lieu en lançant `plan.py` avec
+`--depot <dépôt>=<clone>`, puis la revue du plan le relit ; un plan modifié se vérifie sans ouvrir
+les fichiers cités (`--sans-lieux`) : ses sections, la forme de chaque ligne et ses revues. Une PR
+d'implémentation modifie souvent son plan avec le code qu'il cite, et les numéros de ligne
+dérivent : les mécanismes se vérifient à l'entrée du plan, quand la revue du plan les relit, et un
+mécanisme ajouté plus tard se relit à la revue.
+Sur une base nulle, l'étape ne contrôle rien ; une PR qui ne touche aucun plan passe, comme la PR
+de clôture, qui le supprime. La session lance aussi `python scripts/modele/plan.py <plan>` avant
+de soumettre son plan à Edouard, et après chaque correction.
 
 ## Les worktrees
 
@@ -83,6 +141,7 @@ sessions à distance.
 | hook Claude `SessionStart` (au démarrage et à la reprise) | affiche ce qui est rouge sur GitHub : les exécutions de la branche principale, les PR ouvertes et les workflows désactivés. Il ne bloque jamais. Il signale aussi un gabarit resté vide que le README lie, et un README qui ne lie aucun document du dépôt. Ce que n'importe qui écrit depuis un fork n'entre pas dans le contexte de Claude : les exécutions de PR (`pull_request…`) sont écartées, et une PR ou un workflow venus d'ailleurs que le dépôt s'affichent sans le texte qu'ils portent. Une PR d'un fork paraît ainsi sans titre ni nom de contrôle, un workflow absent de la copie, sans son nom |
 | CI de base | gitleaks examine les commits de chaque PR et de chaque envoi, et tout l'historique chaque semaine et à la demande (`modele-historique.yml`) ; la porte relit aussi l'historique d'un dépôt de code chaque semaine (`modele-historique.yml`), à côté de gitleaks, et refuse tout constat absent de `.github/constats-acceptes.txt` ; confidentialité du diff et des messages de commit ; format des commits ; le garde de Claude **et les signaux** toujours branchés dans `.claude/settings.json` ; la licence et la carte de la racine (`scripts/modele/documentation.py`) ; actions épinglées par SHA |
 | workflow `texte-pr` | `modele-texte-pr.yml`, seul à écouter `edited` : il relit le texte de chaque PR à son ouverture, à chaque envoi et à chaque retouche de son titre ou de son corps. La confidentialité et le format du titre et du corps, puis la section des écarts à la spec et la tête relue d'une PR qui ferme une issue (`scripts/modele/texte_pr.py`, voir plus bas). Son job, `texte-pr`, est un contrôle requis |
+| CI de base, étape « Les plans (.claude/plans) » | sur chaque plan de `.claude/plans/` que la PR ajoute ou modifie, `scripts/modele/plan.py` vérifie les trois sections (voir « Les outils ») : un plan ajouté en entier, chaque fichier du dépôt cité ouvert, un lieu d'un autre dépôt restant « non vérifié », sans refus ; un plan modifié sans ouvrir les fichiers cités, ses numéros de ligne dérivant avec le code. Sur une base nulle, rien n'est contrôlé. L'étape précède la dernière, celle de la licence et de la carte de la racine |
 | Dependabot | chaque lundi, les versions des actions épinglées (`.github/dependabot.yml`), après trois jours de recul |
 | règle de protection GitHub | tout commit qui arrive sur la branche principale est la tête d'une PR dont les contrôles requis sont verts ; un envoi direct de cette tête est accepté et marque la PR fusionnée, sans squash. Côté agent, c'est le refus de pousser vers la branche principale par le garde qui ferme ce chemin. Ni force-push ni suppression de la branche principale. Posée sur les dépôts publics |
 

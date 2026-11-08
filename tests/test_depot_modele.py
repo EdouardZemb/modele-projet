@@ -275,6 +275,19 @@ def test_claude_md_du_depot_modele():
     assert premiere == "@template/docs/modele/methode.md"
 
 
+def test_claude_md_dit_la_commande_des_plans():
+    """Les plans du modèle vivent hors du dépôt, où l'étape « Les plans » de la CI ne les voit
+    pas : « Commandes » donne la commande qui les vérifie, avec le clone voisin de `serveur`."""
+    texte = (RACINE / "CLAUDE.md").read_text(encoding="utf-8")
+    commandes = " ".join(texte.split("\n## Commandes\n", 1)[1].split("\n## ", 1)[0].split())
+    assert (
+        "`python -B template/scripts/modele/plan.py --racine . "
+        "--depot serveur=C:\\src\\github.com\\EdouardZemb\\serveur <plan>`"
+    ) in commandes
+    assert "`Documents\\00-boite-de-reception\\`" in commandes
+    assert "avant de soumettre un plan à Edouard et après chaque correction" in commandes
+
+
 def test_hooks_du_depot_modele():
     hooks = sorted((RACINE / ".githooks").iterdir())
     assert {h.name for h in hooks} == {"pre-commit", "commit-msg", "pre-push"}

@@ -298,6 +298,11 @@ Le cadrage est dans `docs/cadrage.md` ; ce que les lots ont appris, dans `docs/r
   aussi le script à blanc, sur le poste d'Edouard. `tests/test_poste.py` le lance, et compare les
   bits d'exécution du premier commit à ceux du modèle : sous Windows seulement ; ailleurs, seul le
   contrôle du BOM tourne.
+- `python -B template/scripts/modele/plan.py --racine . --depot serveur=C:\src\github.com\EdouardZemb\serveur <plan>` :
+  le contrôle d'un plan, ses trois sections (`methode.md`, « Les outils »). Les plans du modèle
+  vivent dans `Documents\00-boite-de-reception\`, hors du dépôt : l'étape « Les plans » de la CI
+  n'en trouve aucun ici. La session lance cette commande depuis le clone principal, avant de
+  soumettre un plan à Edouard et après chaque correction.
 - `copier copy --vcs-ref <étiquette> gh:EdouardZemb/modele-projet <dossier>` : créer un projet.
 - `copier update` : mettre à jour un projet né du modèle (à lancer dans ce projet, pas ici).
 - `git config core.hooksPath .githooks` : à poser dans chaque clone et chaque worktree.

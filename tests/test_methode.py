@@ -1353,6 +1353,60 @@ def test_methode_nomme_documentation_md():
     assert "relit le README" in " ".join(" ".join(point).split())
 
 
+def test_methode_dit_les_plans():
+    """Le contrôle des plans (LE-53, LE-55, LE-56) : les trois sections d'un plan et la forme de
+    leurs lignes, la revue du plan, les revues comme tâches du plan, le cas limite d'un outil, le
+    mutant, et ce que la CI vérifie d'un plan ajouté ou modifié. Le tableau des garde-fous nomme le
+    script ; le point 2 du cycle renvoie aux trois sections et à la revue du plan."""
+    texte = _aplati(lire(METHODE))
+    for fragment in (
+        # les puces que `plan.py` admet, et le refus d'une section en double
+        "n'admet que des puces `-` ou `*`",
+        "deux sections du même titre refusent, et aucune des deux n'est lue",
+        # la tête qui part, relue dans la PR de clôture, n'est pas un temps de « Revues »
+        (
+            "La relecture de la tête qui part, dans la PR de clôture, ne s'écrit pas dans "
+            "« Revues » : c'est la ligne `Tête relue` de cette PR qui la porte"
+        ),
+        # l'étape ne passe pas `--depot` : un lieu d'un autre dépôt n'y est pas ouvert
+        "chaque fichier du dépôt qu'il cite ouvert",
+        "un lieu préfixé par un autre dépôt y reste « non vérifié », sans refus",
+        # ce lieu se vérifie hors de la CI, par `--depot`, que la session passe elle-même
+        "une session vérifie ce lieu en lançant `plan.py` avec `--depot <dépôt>=<clone>`",
+        "`## Mécanismes annoncés`",
+        "`## Outils et cas limites`",
+        "`## Revues`",
+        "`` - `<chemin>:<ligne>` — `<extrait>` — <comportement annoncé> ``",
+        "`<chemin>:<ligne>-<fin>`",
+        "`<dépôt>:<chemin>:<ligne>`",
+        "`--depot <dépôt>=<clone>`",
+        "`- <outil> — <cas limite que l'outil traite autrement> — <test qui l'exerce>`",
+        "`- <revue> : Tâche N`",
+        "`Tâche N` ou `Task N`",
+        "la revue du plan",
+        "chaque temps d'une revue est une tâche du plan, avant la clôture",
+        "une correction cherche aussi la même croyance dans le reste du plan et dans la spec",
+        "une revue se juge sur la tête qui part",
+        "le cas limite que cet outil traite autrement",
+        "hors du plan",
+        "est éprouvé par un mutant",
+        "un plan modifié se vérifie sans ouvrir les fichiers cités",
+    ):
+        assert fragment in texte, fragment
+    assert "chaque fichier cité ouvert" not in texte
+    assert "seule la revue du plan le relit" not in texte
+    assert not RENVOI_AU_PLAN.search(texte)
+    section = lire(METHODE).split("## Les garde-fous", 1)[1].split("\n## ", 1)[0]
+    (ligne,) = [ligne for ligne in section.splitlines() if "`scripts/modele/plan.py`" in ligne]
+    assert ligne.startswith("| ") and ligne.endswith(" |"), ligne
+    assert "un lieu d'un autre dépôt restant « non vérifié », sans refus" in ligne, ligne
+    cycle = lire(METHODE).split("## Le cycle d'un lot", 1)[1].split("\n## ", 1)[0]
+    (point,) = [b for b in blocs(cycle) if b[0].startswith("2. ")]
+    point = _aplati(" ".join(point))
+    assert "trois sections" in point, point
+    assert "la revue du plan" in point, point
+
+
 def test_m0002_amende_par_le_lot_14():
     """La CI refuse la licence et la carte de la racine ; le `SessionStart` signale le gabarit
     resté vide. L'amendement est daté, sans numéro du plan."""

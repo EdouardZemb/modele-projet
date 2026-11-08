@@ -13,6 +13,7 @@ import pre_push
 import pytest
 import verifier_secrets
 from conftest import REPONSES_DONNEES_SERVEUR, SCRIPTS, appels_de, faux_gh, git
+from test_plan import plan
 from test_texte_pr import FERME_RIEN
 
 BRANCHE = "principal"
@@ -21,6 +22,7 @@ BRANCHE = "principal"
 VOISINS = (
     "documentation",
     "garde_claude",
+    "plan",
     "pre_push",
     "signaux",
     "texte_pr",
@@ -50,10 +52,10 @@ def test_scripts_sous_python_isole(rendre, env_isole, tmp_path):
     Six lancements exigent un texte que seul le `reglages.py` du projet permet d'écrire : la
     branche, qu'aucun script n'a par défaut, pour `garde_claude.py`, `pre_push.py` et `signaux.py`
     sans argument ; la nature pour `documentation.py` ; le dépôt de code d'un dépôt de données pour
-    `verifier_secrets.py` et `verifier_donnees.py`. Les deux autres ne lisent pas les réglages, et
-    prouvent l'import de leur voisin `documentation` : `texte_pr.py` par un texte qu'il n'écrit pas
-    sans lui, `signaux.py --branche` par l'absence de « non lue (erreur) », qu'il écrit quand cet
-    import échoue."""
+    `verifier_secrets.py` et `verifier_donnees.py`. Les trois autres ne lisent pas les réglages, et
+    prouvent l'import de leur voisin `documentation` : `texte_pr.py` et `plan.py` par un texte
+    qu'ils n'écrivent pas sans lui, `signaux.py --branche` par l'absence de « non lue (erreur) »,
+    qu'il écrit quand cet import échoue."""
     # Les réponses par défaut portent déjà la branche : elle se change en fusionnant les deux.
     rendu = rendre(**{**REPONSES_DONNEES_SERVEUR, "branche_principale": BRANCHE})
     env = env_isole()
@@ -123,6 +125,15 @@ def test_scripts_sous_python_isole(rendre, env_isole, tmp_path):
         TETE="a" * 40,
     )
     exiger("texte_pr.py", r, 0, ["écarts à la spec : aucun"])
+
+    # Le plan vit sous `.claude/plans/`, hors de la racine, où la carte de `documentation.py`
+    # l'aurait compté.
+    (rendu / ".claude/plans").mkdir(parents=True)
+    (rendu / ".claude/plans/essai.md").write_bytes(
+        plan(taches=("### Tâche 1 : x",)).encode("utf-8")
+    )
+    r = isole(rendu, env, "plan.py", ".claude/plans/essai.md")
+    exiger("plan.py", r, 0, ["0 mécanismes vérifiés"], ["Traceback"])
 
     assert not echecs, "\n\n".join(echecs)
     # Avant tout lancement sans `-I` dans ce rendu : les imports ont eu lieu, puisque les textes

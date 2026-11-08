@@ -216,6 +216,8 @@ def test_combinaison(rendre, env_isole, cible, nature, fusion):
     # Le texte de la PR, son workflow et son script, gérés et rendus dans toutes les cibles.
     assert (rendu / ".github/workflows/modele-texte-pr.yml").is_file()
     assert (rendu / "scripts/modele/texte_pr.py").is_file()
+    # Le contrôle des plans, géré et rendu dans toutes les cibles.
+    assert (rendu / "scripts/modele/plan.py").is_file()
     for chemin in fichiers:
         assert not chemin.name.endswith(".jinja"), chemin
         octets = chemin.read_bytes()

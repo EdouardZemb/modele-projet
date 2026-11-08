@@ -264,6 +264,18 @@ jobs:
               )
               sys.exit(1)
           FIN
+      - name: Les plans (.claude/plans)
+        run: |
+          case "$BASE" in
+            *[!0]*) ;;
+            *) echo "Base nulle : plans non contrôlés."; exit 0 ;;
+          esac
+          git diff -z --name-only --no-renames --diff-filter=A "$BASE"...HEAD -- '.claude/plans/*.md' > "$RUNNER_TEMP/plans-ajoutes"
+          git diff -z --name-only --no-renames --diff-filter=M "$BASE"...HEAD -- '.claude/plans/*.md' > "$RUNNER_TEMP/plans-modifies"
+          code=0
+          xargs -0 -r -n 1 python template/scripts/modele/plan.py --racine . < "$RUNNER_TEMP/plans-ajoutes" || code=1
+          xargs -0 -r -n 1 python template/scripts/modele/plan.py --racine . --sans-lieux < "$RUNNER_TEMP/plans-modifies" || code=1
+          exit "$code"
       - name: La documentation de la racine (licence, carte)
         env:
           DEPOT_PRIVE: ${{ github.event.repository.private }}
