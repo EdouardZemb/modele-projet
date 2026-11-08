@@ -43,9 +43,10 @@ trois morceaux non vides : l'outil, le cas limite qu'il traite autrement, le tes
 
 Revues. Une puce par temps de revue, qui cite au moins une tâche, `Tâche N` ou `Task N`, sans égard
 à la casse, présente dans les titres de niveau 3 (`### Tâche N : …`, `### Task N: …`), lus hors des
-blocs de code clôturés et des commentaires fermés. Deux titres ne portent jamais le même numéro. La
-clôture est la première tâche dont le titre dit « clôture » ou « closure » : chaque tâche citée la
-précède. Un titre après elle ne refuse pas, mais une revue qui le cite refuse.
+blocs de code clôturés et des blocs de commentaire HTML, fermés ou non. Deux titres ne portent
+jamais le même numéro. La clôture est la première tâche dont le titre dit « clôture » ou
+« closure » : chaque tâche citée la précède. Un titre après elle ne refuse pas, mais une revue qui
+le cite refuse.
 
 Les fichiers. Un plan qui commence par un BOM UTF-16 se lit en UTF-16, ce qu'écrivent `>` et
 `Out-File` de PowerShell 5.1 ; sinon, le plan et les fichiers cités se lisent en UTF-8, BOM retiré,
@@ -301,9 +302,14 @@ def _mecanisme(
 
 def _taches(texte: str, doc) -> list[tuple[int, str]]:
     """Les tâches du plan, dans l'ordre : (numéro, titre replié), d'après les titres de niveau 3
-    lus hors des blocs de code clôturés et des commentaires fermés."""
+    lus hors des blocs de code clôturés et des blocs de commentaire HTML, fermés ou non. Comme
+    dans `sections()`, chaque bloc se retire, ses fins de ligne gardées : un `<!--` jamais fermé
+    qui ouvre un bloc cache tout ce qui le suit, comme sur GitHub."""
+    visibles = doc._BLOC_DE_COMMENTAIRE.sub(
+        lambda m: "\n" * m.group(0).count("\n"), doc._hors_des_blocs(doc._en_lf(texte))
+    )
     taches = []
-    for ligne in doc.sans_bloc_ni_commentaire(texte).split("\n"):
+    for ligne in doc.sans_bloc_ni_commentaire(visibles).split("\n"):
         ligne = unicodedata.normalize("NFC", ligne)
         m = _TITRE_DE_TACHE.match(ligne)
         if m is not None:

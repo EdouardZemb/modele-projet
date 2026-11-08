@@ -191,13 +191,19 @@ def test_sous_liste_et_bloc_html(racine):
         "revues": "0 mécanismes vérifiés, 0 non vérifiés, 0 outils, 1 revues",
     }
     # « 1) », et un commentaire collé à une puce, que la lecture prendrait pour une puce en
-    # colonne 0 (relecture de la revue finale du lot 15)
+    # colonne 0 (relecture de la revue finale du lot 15) ; « 2. », « 10. » et une sous-puce à six
+    # espaces, que GitHub joint à la puce d'avant, et une sous-puce à quatre espaces, qu'il
+    # imbrique (sa ronde 2)
     debuts = (
         "  - ",
         "   * ",
         "  + ",
         "  1. ",
         "  1) ",
+        "  2. ",
+        "  10. ",
+        "    - ",
+        "      - ",
         "\t- ",
         "<!-- c --> - ",
         "<!-- c -->- ",
@@ -606,6 +612,25 @@ def test_plan_titres_des_plans_reels(racine):
     lignes, refus = verifier(plan(revues="- relecture : Tâche 9", taches=taches), racine)
     assert refus
     assert "Revues, ligne 2 : Tâche 9 absente des titres" in lignes, lignes
+
+
+def test_titres_caches_par_un_commentaire_jamais_ferme(racine):
+    """Un `<!--` jamais fermé en colonne 0 cache sur GitHub tout ce qui le suit, les titres de
+    tâche compris : `plan.py` ne les lit pas non plus, comme `sections()` (relecture de la revue
+    finale du lot 15, ronde 2). Que les tâches suivent un titre de niveau 2 ou une ligne de
+    séparation, la revue qui cite la tâche 1 refuse."""
+    debut = (
+        "# Plan\n\n## Mécanismes annoncés\n\nAucun.\n\n## Outils et cas limites\n\nAucun.\n\n"
+        "## Revues\n\n- revue : Tâche 1\n\n"
+    )
+    taches = "<!-- jamais fermé\n\n### Tâche 1 : x\n\n### Tâche 2 : clôture\n"
+    for nom, separation in (("p4a", "## Tâches\n\n"), ("p4b", "---\n\n")):
+        lignes, refus = verifier(debut + separation + taches, racine)
+        assert refus, (nom, lignes)
+        assert "Revues, ligne 2 : Tâche 1 absente des titres" in lignes, (nom, lignes)
+    fragment = "lus hors des blocs de code clôturés et des blocs de commentaire HTML, fermés ou non"
+    for docstring in (p.__doc__, p._taches.__doc__):
+        assert fragment in " ".join(docstring.split()), docstring
 
 
 def test_plan_encodages(racine, lancer):

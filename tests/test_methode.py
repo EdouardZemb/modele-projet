@@ -325,13 +325,15 @@ def test_methode_dit_le_texte_de_la_pr():
         "hors des lots, un correctif qui ferme une issue par `Fixes #N` nomme aussi la tête relue",
         "aucun type d'événement documenté ne suit ce lien",
         # les deux écarts connus du rendu, et leur portée (revue finale du lot 15, et sa relecture :
-        # un `>` plus loin arrête l'effacement d'un `<?`)
+        # un `<?` cache tout jusqu'au premier `>`, même plus bas, et seul un `<!` suivi d'une
+        # majuscule ouvre un bloc)
         (
             "La ligne se cherche telle que GitHub la montre, à deux écarts près : un `<!--` jamais "
             "fermé, ouvert dans un élément de liste après quatre espaces ou plus (une puce "
-            "imbriquée, ou une ligne qui continue la puce), et un `<?`, un `<!` suivi d'une lettre "
-            "(`<!DOCTYPE`) ou un `<![CDATA[` ouvert en tête de ligne sans `>` après lui, cachent "
-            "sur GitHub tout ce qui les suit, mais le contrôle lit encore la suite, la ligne `Tête "
+            "imbriquée, ou une ligne qui continue la puce), cache sur GitHub tout ce qui le suit, "
+            "et un `<?`, un `<!` suivi d'une majuscule (`<!DOCTYPE`) ou un `<![CDATA[` ouvert en "
+            "tête de ligne, tout ce qui le suit jusqu'au premier `>`, même plusieurs lignes plus "
+            "bas, ou jusqu'à la fin sans lui ; le contrôle lit encore ces lignes, la ligne `Tête "
             "relue` comme la section des écarts. Les deux écarts sont bornés : le SHA de cette "
             "ligne doit toujours égaler la tête de la PR."
         ),
@@ -1220,14 +1222,15 @@ DOCUMENTATION_ET_DOCSTRING = (
         "foi », la section des écarts à la spec, les trois sections d'un plan et ses titres de "
         "tâche, et la ligne « Tête relue », qui doit toujours nommer la tête de la PR"
     ),
-    # un bloc `<?`, `<!DOCTYPE` ou `<![CDATA[` sans `>` après lui, que `texte_pr.py` et `plan.py`
-    # ne cherchent pas (relecture de la revue finale du lot 15)
+    # un bloc `<?`, `<!DOCTYPE` ou `<![CDATA[`, qui cache tout jusqu'au premier `>`, même plus bas,
+    # et que `texte_pr.py` et `plan.py` ne cherchent pas (relecture de la revue finale du lot 15)
     (
         "qui doit toujours nommer la tête de la PR ; un bloc ouvert en tête de ligne par `<?`, "
-        "par `<!` suivi d'une lettre (`<!DOCTYPE`) ou par `<![CDATA[`, sans `>` après lui, cache "
-        "de même sur GitHub tout ce qui le suit, mais `texte_pr.py` et `plan.py`, qui ne "
-        "cherchent que `<!--`, lisent encore la ligne « Tête relue », la section des écarts, les "
-        "trois sections d'un plan et ses titres de tâche."
+        "par `<!` suivi d'une majuscule (`<!DOCTYPE`) ou par `<![CDATA[` cache de même sur "
+        "GitHub tout ce qui le suit jusqu'au premier `>`, même plusieurs lignes plus bas, ou "
+        "jusqu'à la fin sans lui, mais `texte_pr.py` et `plan.py`, qui ne cherchent que `<!--`, "
+        "lisent encore la ligne « Tête relue », la section des écarts, les trois sections d'un "
+        "plan et ses titres de tâche."
     ),
     (
         "Deux autres laissent passer à tort ce que GitHub cache, et touchent aussi `texte_pr.py` "

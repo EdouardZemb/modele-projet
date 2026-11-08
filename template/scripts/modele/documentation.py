@@ -88,10 +88,11 @@ après quatre espaces ou plus (une puce imbriquée, ou une ligne qui continue la
 GitHub tout ce qui le suit, mais les contrôles lisent encore la suite : un titre, et donc la
 section « Ce qui fait foi », la section des écarts à la spec, les trois sections d'un plan et ses
 titres de tâche, et la ligne « Tête relue », qui doit toujours nommer la tête de la PR ; un bloc
-ouvert en tête de ligne par `<?`, par `<!` suivi d'une lettre (`<!DOCTYPE`) ou par `<![CDATA[`,
-sans `>` après lui, cache de même sur GitHub tout ce qui le suit, mais `texte_pr.py` et `plan.py`,
-qui ne cherchent que `<!--`, lisent encore la ligne « Tête relue », la section des écarts, les
-trois sections d'un plan et ses titres de tâche.
+ouvert en tête de ligne par `<?`, par `<!` suivi d'une majuscule (`<!DOCTYPE`) ou par `<![CDATA[`
+cache de même sur GitHub tout ce qui le suit jusqu'au premier `>`, même plusieurs lignes plus bas,
+ou jusqu'à la fin sans lui, mais `texte_pr.py` et `plan.py`, qui ne cherchent que `<!--`, lisent
+encore la ligne « Tête relue », la section des écarts, les trois sections d'un plan et ses titres
+de tâche.
 Un dernier ne touche que le gabarit resté vide. Sous Windows, il lit l'existence d'un chemin lié
 sans égard à la casse : un lien `docs/Cadrage.md` vers `docs/cadrage.md` y est lu, et peut
 avertir, alors que GitHub casse ce lien ; sous Linux, il est ignoré. C'est un avertissement de

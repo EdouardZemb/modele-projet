@@ -152,7 +152,12 @@ def test_ecarts(lancer, section, code, attendu):
 @pytest.mark.parametrize(
     "sous_liste",
     [
-        *(f"  {puce} une sous-puce" for puce in ("-", "*", "+", "1.", "1)")),
+        *(f"  {puce} une sous-puce" for puce in ("-", "*", "+", "1.", "1)", "2.")),
+        # « 2. » et une sous-puce à six espaces, que GitHub joint à la puce d'avant, et une
+        # sous-puce à quatre espaces, qu'il imbrique : tous refusés (relecture de la revue finale
+        # du lot 15, ronde 2)
+        "    - une sous-puce",
+        "      - une sous-puce",
         # une puce seule en fin de ligne : jointe, elle laisserait un texte après la date, à la
         # ligne 2 (relecture de la revue finale du lot 15)
         "  -",
@@ -205,11 +210,12 @@ def test_docstring_dit_les_refus_et_les_ecarts_du_rendu():
         (
             "une ligne qu'il cache est absente. À deux écarts près : un `<!--` jamais fermé, "
             "ouvert dans un élément de liste après quatre espaces ou plus (une puce imbriquée, ou "
-            "une ligne qui continue la puce), et un `<?`, un `<!` suivi d'une lettre "
-            "(`<!DOCTYPE`) ou un `<![CDATA[` ouvert en tête de ligne sans `>` après lui, cachent "
-            "sur GitHub tout ce qui les suit, mais le contrôle lit encore la suite, la ligne "
-            "« Tête relue » comme la section des écarts ; les deux écarts sont bornés, le SHA de "
-            "cette ligne devant toujours égaler la tête de la PR."
+            "une ligne qui continue la puce), cache sur GitHub tout ce qui le suit, et un `<?`, "
+            "un `<!` suivi d'une majuscule (`<!DOCTYPE`) ou un `<![CDATA[` ouvert en tête de "
+            "ligne, tout ce qui le suit jusqu'au premier `>`, même plusieurs lignes plus bas, ou "
+            "jusqu'à la fin sans lui ; le contrôle lit encore ces lignes, la ligne « Tête relue » "
+            "comme la section des écarts ; les deux écarts sont bornés, le SHA de cette ligne "
+            "devant toujours égaler la tête de la PR."
         ),
     ):
         assert fragment in docstring, fragment
