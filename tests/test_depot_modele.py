@@ -33,6 +33,7 @@ def test_ruleset_du_depot_modele():
         "mecanique",
         "fausse-app",
         "texte-pr",
+        "menage-cible",
     }
 
     jobs = [
@@ -63,7 +64,7 @@ DUREE_JOB = "Durée du job"
 NOTE_L_HEURE = 'echo "DEBUT_JOB=$(date +%s)" >> "$GITHUB_ENV"'
 
 
-@pytest.mark.parametrize("nom", ["tests", "mecanique"])
+@pytest.mark.parametrize("nom", ["tests", "mecanique", "menage-cible"])
 def test_duree_des_jobs(nom):
     """LE-40 : chaque job visé note l'heure à sa première étape ; sa dernière, lancée même en cas
     d'échec, écrit sa durée dans le résumé du job et avertit au-delà des trois quarts du délai.
@@ -309,6 +310,188 @@ def test_mecanique_et_fausse_app_dans_la_ci_du_depot_modele():
     assert etapes[-1]["if"] == "always()"
     assert etapes[-1]["run"] == "docker rm -f -v fausse-app"
     assert etapes.index(menage) < len(etapes) - 1
+
+
+DOCKER_CIBLE_ENV = RACINE / "tests/modele/docker-cible.env"
+LANCER_CIBLE = "Lancer le Docker de la cible"
+VERIFIER_CIBLE = "Vérifier que le Docker est la cible"
+INSTALLER_OUTILS = "Installer les outils de l'épreuve"
+EPREUVE_CIBLE = "Épreuve du ménage dans le Docker de la cible"
+RETIRER_CIBLE = "Retirer le Docker de la cible"
+
+
+def lire_docker_cible():
+    """Les réglages de `tests/modele/docker-cible.env` : une ligne `CLE=valeur` par réglage, sans
+    les commentaires ni les lignes vides."""
+    lignes = DOCKER_CIBLE_ENV.read_text(encoding="utf-8").splitlines()
+    return dict(
+        ligne.split("=", 1) for ligne in lignes if ligne.strip() and not ligne.startswith("#")
+    )
+
+
+def test_menage_cible():
+    """LE-41 : l'épreuve du ménage tourne aussi dans le Docker de la cible, que déclare
+    `tests/modele/docker-cible.env` : une image `docker:<version>-dind` épinglée par son empreinte
+    d'index, lancée privilégiée, le magasin containerd coupé par un `daemon.json` monté. L'épreuve
+    y passe par `docker exec`, avec le client du conteneur : LE-28 venait du client. L'étiquette
+    égale `DOCKER_CIBLE` : rien ne monte cette image tout seul, ni Dependabot, qui ne voit pas une
+    image lancée par `docker run` ; elle suit la cible, pas la dernière version de Docker. Le projet
+    est rendu comme dans `fausse-app`, sans la fausse app ni son image, que l'épreuve n'utilise
+    pas. La vérification précède l'épreuve, et ni l'une ni l'autre n'a d'échappatoire (LE-62).
+    `docker exec` ne transmet pas l'environnement du job : sans `-e GITHUB_ACTIONS=true`,
+    l'épreuve n'arrêterait pas sur un magasin containerd, elle avertirait."""
+    cible = lire_docker_cible()
+    assert set(cible) == {"DOCKER_CIBLE", "DOCKER_CIBLE_MAGASIN", "DOCKER_CIBLE_RELEVE"}
+    assert re.fullmatch(r"\d+\.\d+\.\d+", cible["DOCKER_CIBLE"]), cible
+    # Le job n'éprouve que le magasin classique : le `daemon.json` le pose, la vérification l'exige.
+    assert cible["DOCKER_CIBLE_MAGASIN"] == "classique"
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", cible["DOCKER_CIBLE_RELEVE"]), cible
+
+    jobs = yaml.safe_load(CI.read_text(encoding="utf-8"))["jobs"]
+    job = jobs["menage-cible"]
+    assert job["name"] == "menage-cible"
+    assert job["runs-on"] == "ubuntu-latest"
+    etapes = job["steps"]
+
+    def etape(nom):
+        (trouvee,) = [e for e in etapes if e.get("name") == nom]
+        return trouvee
+
+    # Le rendu : la seule commande `copier copy` de `fausse-app`, sans la fausse app ni son image.
+    (rendre,) = [e for e in etapes if "copier copy" in e.get("run", "")]
+    (rendre_fausse_app,) = [
+        e for e in jobs["fausse-app"]["steps"] if "copier copy" in e.get("run", "")
+    ]
+    assert rendre["run"].strip() == rendre_fausse_app["run"].split(" . rendu\n", 1)[0] + " . rendu"
+    for e in etapes:
+        assert "cp -R" not in e.get("run", ""), e.get("name")
+        assert "modele-image" not in e.get("uses", ""), e.get("uses")
+
+    # Le Docker de la cible : l'image épinglée, à la version de la cible, le magasin containerd
+    # coupé par le `daemon.json` écrit puis monté, l'espace de travail sur /w.
+    lancer = etape(LANCER_CIBLE)
+    (lancement,) = [e for e in etapes if "docker run -d --privileged" in e.get("run", "")]
+    assert lancement is lancer
+    images = re.findall(r"docker:(\S+)-dind@sha256:([0-9a-f]{64})", lancer["run"])
+    assert len(images) == 1, lancer["run"]
+    assert images[0][0] == cible["DOCKER_CIBLE"]
+    for fragment in (
+        '{"features":{"containerd-snapshotter":false}}',
+        '> "$RUNNER_TEMP/daemon.json"',
+        '-v "$RUNNER_TEMP/daemon.json:/etc/docker/daemon.json:ro"',
+        '-v "$GITHUB_WORKSPACE:/w"',
+        "--name menage-cible",
+        # l'attente du démon, jusqu'à 60 s
+        "docker exec menage-cible docker info",
+    ):
+        assert fragment in lancer["run"], fragment
+
+    assert "tests/modele/docker-cible.env" in etape(VERIFIER_CIBLE)["run"]
+    assert etape(INSTALLER_OUTILS)["run"] == (
+        "docker exec menage-cible apk add --no-cache bash util-linux coreutils grep sed findutils"
+    )
+    # `-e GITHUB_ACTIONS=true`, puis l'épreuve de `fausse-app`, sur le même rendu.
+    assert etape(EPREUVE_CIBLE)["run"] == (
+        "docker exec -e GITHUB_ACTIONS=true -w /w menage-cible "
+        "bash tests/modele/epreuve-menage.sh rendu"
+    )
+    retirer = etape(RETIRER_CIBLE)
+    assert retirer["if"] == "always()"
+    assert retirer["run"] == "docker rm -f -v menage-cible"
+
+    rangs = [
+        etapes.index(e)
+        for e in (
+            rendre,
+            lancer,
+            etape(VERIFIER_CIBLE),
+            etape(INSTALLER_OUTILS),
+            etape(EPREUVE_CIBLE),
+            retirer,
+        )
+    ]
+    assert rangs == sorted(rangs), rangs
+    sans_echappatoire(job, VERIFIER_CIBLE, EPREUVE_CIBLE)
+    # Le retrait et la durée ont `if: always()`, et c'est leur seule condition ; aucune autre étape
+    # n'en a.
+    for e in etapes:
+        if e.get("name") not in (RETIRER_CIBLE, DUREE_JOB):
+            for cle in ("if", "continue-on-error"):
+                assert cle not in e, (e.get("name"), cle)
+
+
+# Le double de `docker` de la vérification : il ne répond qu'aux trois questions posées au client du
+# conteneur, d'après trois variables, et refuse toute autre commande.
+FAUX_DOCKER = """docker() {
+  case "$*" in
+    "exec menage-cible docker version --format {{.Client.Version}} {{.Server.Version}}")
+      echo "$VERSIONS" ;;
+    "exec menage-cible docker info --format {{.Driver}}") echo "$PILOTE" ;;
+    "exec menage-cible docker info --format {{json .DriverStatus}}") echo "$STATUT" ;;
+    *) echo "docker inattendu : $*" >&2; return 99 ;;
+  esac
+}
+"""
+
+
+def test_verification_de_la_cible_refuse_un_autre_docker(tmp_path):
+    """LE-41, LE-55 : avant l'épreuve, la vérification refuse tout autre Docker que la cible. Elle
+    lit `DOCKER_CIBLE` dans `tests/modele/docker-cible.env`, puis demande au client du conteneur sa
+    version et celle du moteur, le pilote et le `DriverStatus`. Lancée comme GitHub lance une étape
+    `shell: bash`, puis sans `-e` ni `pipefail`, un double de `docker` en tête : un autre moteur,
+    un autre client, un autre pilote, le magasin containerd, une autre cible dans le fichier, ou le
+    fichier absent, chacun refuse et le dit par `::error::`. Une épreuve sur un autre Docker que la
+    cible serait un contrôle passé à vide."""
+    job = yaml.safe_load(CI.read_text(encoding="utf-8"))["jobs"]["menage-cible"]
+    (verification,) = [e for e in job["steps"] if e.get("name") == VERIFIER_CIBLE]
+    script = tmp_path / "verification.sh"
+    script.write_text(FAUX_DOCKER + verification["run"], encoding="utf-8", newline="\n")
+    c = lire_docker_cible()["DOCKER_CIBLE"]
+    autre_cible = tmp_path / "autre-cible"
+    (autre_cible / "tests/modele").mkdir(parents=True)
+    (autre_cible / "tests/modele/docker-cible.env").write_text(
+        "DOCKER_CIBLE=0.0.1\nDOCKER_CIBLE_MAGASIN=classique\nDOCKER_CIBLE_RELEVE=2026-11-07\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    sans_fichier = tmp_path / "sans-fichier"
+    sans_fichier.mkdir()
+    reel = '[["Backing Filesystem","extfs"],["Supports d_type","true"],["userxattr","false"]]'
+    containerd = '[["driver-type","io.containerd.snapshotter.v1"]]'
+    # (cas, dossier, « client moteur », pilote, DriverStatus, fragment du refus, ou None)
+    table = (
+        ("la cible", RACINE, f"{c} {c}", "overlay2", "[]", None),
+        ("la cible, DriverStatus réel", RACINE, f"{c} {c}", "overlay2", reel, None),
+        ("un autre moteur", RACINE, f"{c} 28.0.4", "overlay2", "[]", "le moteur est en 28.0.4"),
+        ("un autre client", RACINE, f"28.0.4 {c}", "overlay2", "[]", "le client est en 28.0.4"),
+        ("un autre pilote", RACINE, f"{c} {c}", "overlayfs", "[]", "le pilote est overlayfs"),
+        ("le magasin containerd", RACINE, f"{c} {c}", "overlay2", containerd, "magasin containerd"),
+        ("une autre cible", autre_cible, f"{c} {c}", "overlay2", "[]", "la cible en 0.0.1"),
+        ("sans le fichier", sans_fichier, f"{c} {c}", "overlay2", "[]", "docker-cible.env"),
+    )
+    env = {k: v for k, v in os.environ.items() if not k.startswith("DOCKER_CIBLE")}
+    for options in (["-e", "-o", "pipefail"], []):
+        for nom, dossier, versions, pilote, statut, refus in table:
+            cas = (nom, options)
+            r = subprocess.run(
+                [trouver_bash(), "--noprofile", "--norc", *options, str(script)],
+                cwd=dossier,
+                env={**env, "VERSIONS": versions, "PILOTE": pilote, "STATUT": statut},
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                check=False,
+            )
+            assert "docker inattendu" not in r.stderr, (cas, r.stderr)
+            if refus is None:
+                assert r.returncode == 0, (cas, r.stdout + r.stderr)
+                assert "::error::" not in r.stdout, (cas, r.stdout)
+                # le journal dit les deux versions, que la PR relit sur le runner
+                assert f"client {c}, moteur {c}, pilote overlay2" in r.stdout, (cas, r.stdout)
+            else:
+                assert r.returncode == 1, (cas, r.stdout + r.stderr)
+                erreurs = [ligne for ligne in r.stdout.splitlines() if "::error::" in ligne]
+                assert any(refus in ligne for ligne in erreurs), (cas, r.stdout)
 
 
 EPREUVE_DONNEES = RACINE / "tests/modele/epreuve-donnees.sh"
