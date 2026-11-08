@@ -148,6 +148,33 @@ def corps_avec(section):
             0,
             "écarts à la spec : 1 déclaré",
         ),
+        # une ligne qui commence par `-` sans être une puce, faute d'un blanc après lui, ou qui
+        # porte un marqueur au milieu : elle continue l'écart d'avant, et GitHub la montre dans la
+        # puce (relecture de la revue finale du lot 15, ronde 4)
+        (
+            (
+                "- un écart — promesse : spec § 4.1\n  -v est l'option\n"
+                "  — accord d'Edouard : 07/11/2026"
+            ),
+            0,
+            "écarts à la spec : 1 déclaré",
+        ),
+        (
+            (
+                "- un écart\n  le cas - un autre cas\n"
+                "  — promesse : § 2 — accord d'Edouard : 07/11/2026"
+            ),
+            0,
+            "écarts à la spec : 1 déclaré",
+        ),
+        (
+            (
+                "- un écart\n  voir le point 3) plus haut\n"
+                "  — promesse : § 2 — accord d'Edouard : 07/11/2026"
+            ),
+            0,
+            "écarts à la spec : 1 déclaré",
+        ),
     ],
 )
 def test_ecarts(lancer, section, code, attendu):

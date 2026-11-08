@@ -171,7 +171,9 @@ def test_sous_liste_et_bloc_html(racine):
     (revue finale du lot 15). Chaque forme refuse, à son rang, dans les trois sections, et la puce
     d'avant reste lue : le résumé la compte. Une ligne de continuation ordinaire, un commentaire
     seul sur sa ligne, un commentaire suivi d'un texte après quatre espaces, au-delà de la borne
-    des trois, ou les mêmes lignes dans un bloc clôturé, ne refusent pas."""
+    des trois, ou les mêmes lignes dans un bloc clôturé, ne refusent pas. Une ligne qui commence
+    par `-`, `*` ou un nombre sans être une puce, ou qui porte un marqueur au milieu, continue la
+    puce : elle ne refuse pas, et le résumé compte la puce."""
     titres = {"meca": p.MECANISMES, "outils": p.OUTILS, "revues": p.REVUES}
     premieres = {
         "meca": meca("src/a.py:2", "def f("),
@@ -240,11 +242,20 @@ def test_sous_liste_et_bloc_html(racine):
         # espaces, la ligne continue la puce, et GitHub la montre dans la puce (relecture de la
         # revue finale du lot 15, ronde 3)
         "\n    <!-- c --> suite du texte",
+        # une ligne qui commence par `-`, `*` ou un nombre sans être une puce, faute d'un blanc
+        # après le marqueur, ou qui porte un marqueur au milieu : elle continue la puce, et GitHub
+        # la montre dans la puce (relecture de la revue finale du lot 15, ronde 4)
+        "\n  -v est l'option qui le montre",
+        "\n  *Note* : sous Windows seulement",
+        "\n  2.5 fois plus lent",
+        "\n  le cas - un autre cas",
+        "\n  voir le point 3) plus haut",
     )
     for cle in titres:
         for suite in admises:
             lignes, refus = verifier(plan(**{cle: premieres[cle] + suite}), racine)
             assert not refus, (cle, suite, lignes)
+            assert lignes[-1] == resumes[cle], (cle, suite, lignes)
     lignes, refus = verifier(plan(meca=premieres["meca"] + "\n  suite du texte"), racine)
     assert lignes[-1].startswith("1 mécanismes vérifiés, 0 non vérifiés"), lignes
 
