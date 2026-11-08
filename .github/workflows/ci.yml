@@ -192,6 +192,120 @@ jobs:
         if: always()
         run: docker rm -f -v fausse-app
 
+  # LE-41 : l'épreuve du ménage des images, celle que fausse-app passe sur le moteur du runner,
+  # dans le Docker de la cible, celui du serveur, que déclare tests/modele/docker-cible.env : un
+  # docker:<version>-dind lancé privilégié, épinglé par son empreinte d'index, le magasin containerd
+  # coupé par un daemon.json monté. Son étiquette suit la cible, pas la dernière version de Docker,
+  # et Dependabot ne voit pas une image lancée par docker run : test_menage_cible la tient égale à
+  # DOCKER_CIBLE. L'épreuve passe par docker exec, avec le client du conteneur (LE-28 venait du
+  # client), après la vérification du Docker : une épreuve sur un autre Docker que la cible serait
+  # un contrôle passé à vide.
+  menage-cible:
+    name: menage-cible
+    runs-on: ubuntu-latest
+    # 2 min : environ deux fois la plus longue de trois exécutions mesurées sur la PR #121, 46 s,
+    # 45 s et 42 s (37 à 40 s au résumé), arrondi à la minute supérieure (LE-40).
+    timeout-minutes: 2
+    env:
+      DELAI_MIN: 2
+    steps:
+      - name: Début du job
+        shell: bash
+        run: echo "DEBUT_JOB=$(date +%s)" >> "$GITHUB_ENV"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-dev.txt
+      # Le rendu de fausse-app, sans la fausse app ni son image : l'épreuve ne lit du rendu que
+      # deploiement/nettoyer-images.sh et la bibliothèque qu'il source, deploiement/lib.sh. Elle
+      # pose elle-même l'état, l'env d'un clone des données factice et ses propres images.
+      - name: Rendre le projet fausse-app
+        run: |
+          copier copy --vcs-ref HEAD --defaults --trust \
+            --data nom=fausse-app --data "description=La fausse app du modèle" \
+            --data cible=serveur --data nature=code --data sauvegardes=true . rendu
+      # Le démon répond quand `docker info` passe dans le conteneur : jusqu'à 60 s.
+      - name: Lancer le Docker de la cible
+        run: |
+          printf '%s\n' '{"features":{"containerd-snapshotter":false}}' > "$RUNNER_TEMP/daemon.json"
+          docker run -d --privileged --name menage-cible -v "$GITHUB_WORKSPACE:/w" \
+            -v "$RUNNER_TEMP/daemon.json:/etc/docker/daemon.json:ro" \
+            docker:29.5.3-dind@sha256:7278248384185bcbb54c7a76b2f0a7d354c4aac920605cc1ab48968d961052fb
+          for _ in $(seq 1 30); do
+            if docker exec menage-cible docker info >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::le Docker de la cible ne répond pas après 60 s"
+          docker logs menage-cible
+          exit 1
+      # Le client et le moteur à la version de la cible, le pilote overlay2, sans le magasin
+      # containerd : chaque écart est dit, et le job échoue avant l'épreuve.
+      - name: Vérifier que le Docker est la cible
+        run: |
+          . tests/modele/docker-cible.env || {
+            echo "::error::tests/modele/docker-cible.env illisible"
+            exit 1
+          }
+          [ -n "${DOCKER_CIBLE:-}" ] || {
+            echo "::error::DOCKER_CIBLE absent de tests/modele/docker-cible.env"
+            exit 1
+          }
+          versions=$(docker exec menage-cible docker version --format '{{.Client.Version}} {{.Server.Version}}') \
+            || { echo "::error::versions illisibles dans le Docker de la cible"; exit 1; }
+          pilote=$(docker exec menage-cible docker info --format '{{.Driver}}') \
+            || { echo "::error::pilote illisible dans le Docker de la cible"; exit 1; }
+          statut=$(docker exec menage-cible docker info --format '{{json .DriverStatus}}') \
+            || { echo "::error::DriverStatus illisible dans le Docker de la cible"; exit 1; }
+          read -r client moteur <<< "$versions"
+          echo "Docker du conteneur : client $client, moteur $moteur, pilote $pilote, DriverStatus $statut"
+          echo "la cible : $DOCKER_CIBLE, magasin ${DOCKER_CIBLE_MAGASIN:-?} (relevé du ${DOCKER_CIBLE_RELEVE:-?})"
+          refus=0
+          if [ "$client" != "$DOCKER_CIBLE" ]; then
+            echo "::error::le client est en $client, la cible en $DOCKER_CIBLE (tests/modele/docker-cible.env)"
+            refus=1
+          fi
+          if [ "$moteur" != "$DOCKER_CIBLE" ]; then
+            echo "::error::le moteur est en $moteur, la cible en $DOCKER_CIBLE (tests/modele/docker-cible.env)"
+            refus=1
+          fi
+          if [ "$pilote" != overlay2 ]; then
+            echo "::error::le pilote est $pilote, la cible a overlay2 (magasin classique)"
+            refus=1
+          fi
+          case "$statut" in
+            *io.containerd.snapshotter*)
+              echo "::error::le magasin containerd est actif ($statut), la cible a le magasin classique"
+              refus=1
+              ;;
+          esac
+          exit "$refus"
+      - name: Installer les outils de l'épreuve
+        run: docker exec menage-cible apk add --no-cache bash util-linux coreutils grep sed findutils
+      # GITHUB_ACTIONS ne passe pas par docker exec : sans lui, l'épreuve avertirait d'un magasin
+      # containerd au lieu de s'arrêter.
+      - name: Épreuve du ménage dans le Docker de la cible
+        run: docker exec -e GITHUB_ACTIONS=true -w /w menage-cible bash tests/modele/epreuve-menage.sh rendu
+      - name: Retirer le Docker de la cible
+        if: always()
+        run: docker rm -f -v menage-cible
+      - name: Durée du job
+        if: always()
+        shell: bash
+        run: |
+          duree=$(( $(date +%s) - DEBUT_JOB ))
+          secondes=$(printf '%02d' $(( duree % 60 )))
+          ligne="$GITHUB_JOB ($RUNNER_OS) : $(( duree / 60 )) min $secondes s sur $DELAI_MIN min"
+          echo "$ligne" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$duree" -gt $(( DELAI_MIN * 45 )) ]; then
+            echo "::warning::$ligne ; alléger la suite, ou monter le délai dans une PR avec son test"
+          fi
+
   secrets:
     name: secrets
     runs-on: ubuntu-latest
