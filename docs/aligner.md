@@ -195,6 +195,7 @@ Chaque case se coche dans la PR d'alignement. Une case qui ne s'applique pas au 
   grep -vxFf apres.txt avant.txt
   grep -x texte-pr apres.txt
   ```
+
 - [ ] **L'historique complet**, une fois après la fusion : lancer `modele-historique.yml` à la main
       (`gh workflow run modele-historique.yml`, ou l'onglet Actions). gitleaks n'examine sinon que
       les commits de chaque PR et de chaque envoi, et l'historique antérieur à l'alignement
