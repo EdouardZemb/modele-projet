@@ -29,14 +29,17 @@ le fichier de `--fermetures`. Une réponse absente, vide, en erreur, sans la PR 
 formé fait refuser : le contrôle reste fermé. La ligne se cherche dans le corps tel que GitHub le
 rend : hors des commentaires et des blocs de code, et avant tout commentaire jamais fermé ouvert
 en tête de ligne ou après une puce, qui cache tout ce qui le suit ; une ligne qu'il cache est
-absente. À deux écarts près : un `<!--` jamais fermé, ouvert dans un élément de liste après quatre
-espaces ou plus (une puce imbriquée, ou une ligne qui continue la puce), cache sur GitHub tout ce
-qui le suit, et un `<?`, un `<!` suivi d'une majuscule (`<!DOCTYPE`) ou un `<![CDATA[` ouvert en
-tête de ligne, tout ce qui le suit jusqu'au premier `>`, même plusieurs lignes plus bas, ou jusqu'à
-la fin sans lui ; le contrôle lit encore ces lignes, la ligne « Tête relue » comme la section des
-écarts ; les deux écarts sont bornés, le SHA de cette ligne devant toujours égaler la tête de la
-PR. Un `<!--` au milieu d'un paragraphe reste du texte, et ne cache rien. Le SHA se lit aussi entre
-accents graves ou en majuscules.
+absente. À des écarts près, dont deux connus : un `<!--` jamais fermé, ouvert dans un élément de
+liste après quatre espaces ou plus (une puce imbriquée, ou une ligne qui continue la puce), cache
+sur GitHub tout ce qui le suit, et un `<?`, un `<!` suivi d'une majuscule (`<!DOCTYPE`) ou un
+`<![CDATA[` ouvert en tête de ligne, tout ce qui le suit jusqu'au premier `>`, même plusieurs
+lignes plus bas, ou jusqu'à la fin sans lui ; le contrôle lit encore ces lignes, la ligne « Tête
+relue » comme la section des écarts. D'autres formes HTML cachent aussi sur GitHub ce que le
+contrôle lit : un `<?` ou un `<!DOCTYPE` après une puce, ou en ligne et fermé plus bas ; un `<!--`
+jamais fermé dans une ligne de bloc HTML, comme `<div><!-- note</div>` ; un attribut ou un titre
+de lien sur plusieurs lignes. Tous sont bornés : le SHA de cette ligne doit toujours égaler la
+tête de la PR. Un `<!--` au milieu d'un paragraphe reste du texte, et ne cache rien. Le SHA se lit
+aussi entre accents graves ou en majuscules.
 
 Avant toute lecture, hors du code en ligne : le texte en LF et en NFC ; l'apostrophe typographique
 et U+02BC deviennent `'`, une espace insécable devient une espace ; un séparateur est `—` ou `–`

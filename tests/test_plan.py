@@ -170,7 +170,8 @@ def test_sous_liste_et_bloc_html(racine):
     pas la puce d'avant : jointe à elle, elle passerait sans être lue, un lieu faux jamais ouvert
     (revue finale du lot 15). Chaque forme refuse, à son rang, dans les trois sections, et la puce
     d'avant reste lue : le résumé la compte. Une ligne de continuation ordinaire, un commentaire
-    seul sur sa ligne, ou les mêmes lignes dans un bloc clôturé, ne refusent pas."""
+    seul sur sa ligne, un commentaire suivi d'un texte après quatre espaces, au-delà de la borne
+    des trois, ou les mêmes lignes dans un bloc clôturé, ne refusent pas."""
     titres = {"meca": p.MECANISMES, "outils": p.OUTILS, "revues": p.REVUES}
     premieres = {
         "meca": meca("src/a.py:2", "def f("),
@@ -235,6 +236,10 @@ def test_sous_liste_et_bloc_html(racine):
         "\n  suite du texte",
         "\n<!-- c -->",
         "\n\n```\n<!-- c --> - x\n  - y\n```",
+        # un commentaire après quatre espaces, puis un texte : au-delà de la borne des trois
+        # espaces, la ligne continue la puce, et GitHub la montre dans la puce (relecture de la
+        # revue finale du lot 15, ronde 3)
+        "\n    <!-- c --> suite du texte",
     )
     for cle in titres:
         for suite in admises:
@@ -615,19 +620,39 @@ def test_plan_titres_des_plans_reels(racine):
 
 
 def test_titres_caches_par_un_commentaire_jamais_ferme(racine):
-    """Un `<!--` jamais fermé en colonne 0 cache sur GitHub tout ce qui le suit, les titres de
-    tâche compris : `plan.py` ne les lit pas non plus, comme `sections()` (relecture de la revue
-    finale du lot 15, ronde 2). Que les tâches suivent un titre de niveau 2 ou une ligne de
-    séparation, la revue qui cite la tâche 1 refuse."""
+    """Un `<!--` jamais fermé qui ouvre un bloc, en tête de ligne, ou après une puce, un numéro ou
+    `>`, cache sur GitHub tout ce qui le suit, les titres de tâche compris : `plan.py` ne les lit
+    pas non plus, comme `sections()` (relecture de la revue finale du lot 15, rondes 2 et 3). Que
+    les tâches suivent un titre de niveau 2 ou une ligne de séparation, la revue qui cite la
+    tâche 1 refuse. Un `<!--` jamais fermé qui n'ouvre pas de bloc ne cache rien, sur GitHub comme
+    ici : dans un bloc de code clôturé, au milieu d'un paragraphe, ou en code en ligne."""
     debut = (
         "# Plan\n\n## Mécanismes annoncés\n\nAucun.\n\n## Outils et cas limites\n\nAucun.\n\n"
         "## Revues\n\n- revue : Tâche 1\n\n"
     )
-    taches = "<!-- jamais fermé\n\n### Tâche 1 : x\n\n### Tâche 2 : clôture\n"
-    for nom, separation in (("p4a", "## Tâches\n\n"), ("p4b", "---\n\n")):
-        lignes, refus = verifier(debut + separation + taches, racine)
-        assert refus, (nom, lignes)
-        assert "Revues, ligne 2 : Tâche 1 absente des titres" in lignes, (nom, lignes)
+    taches = "\n\n### Tâche 1 : x\n\n### Tâche 2 : clôture\n"
+    separations = (("p4a", "## Tâches\n\n"), ("p4b", "---\n\n"))
+    # GitHub (`gh api markdown`) ne rend aucun titre après chacune de ces ouvertures
+    for ouverture in (
+        "<!-- jamais fermé",
+        "- <!-- jamais fermé",
+        "1. <!-- jamais fermé",
+        "> <!-- jamais fermé",
+    ):
+        for nom, separation in separations:
+            lignes, refus = verifier(debut + separation + ouverture + taches, racine)
+            assert refus, (ouverture, nom, lignes)
+            attendu = "Revues, ligne 2 : Tâche 1 absente des titres"
+            assert attendu in lignes, (ouverture, nom, lignes)
+    # GitHub rend les deux titres après chacun de ces textes : les tâches se lisent, la revue passe
+    for avant in (
+        "```\n<!-- dans un bloc de code\n```",
+        "Un paragraphe <!-- jamais fermé au milieu.",
+        "Un `<!--` en code en ligne.",
+    ):
+        for nom, separation in separations:
+            lignes, refus = verifier(debut + separation + avant + taches, racine)
+            assert not refus, (avant, nom, lignes)
     fragment = "lus hors des blocs de code clôturés et des blocs de commentaire HTML, fermés ou non"
     for docstring in (p.__doc__, p._taches.__doc__):
         assert fragment in " ".join(docstring.split()), docstring

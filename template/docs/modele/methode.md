@@ -201,12 +201,15 @@ environnement, jamais dans ses arguments, et contrôle deux choses.
   une autre branche ne ferme rien, et sa tête relue n'est pas exigée. Une issue liée depuis la
   barre latérale de la PR compte aussi, mais aucun type d'événement documenté ne suit ce lien : le
   contrôle repart au commit ou à la modification du corps suivants. La ligne se cherche telle que
-  GitHub la montre, à deux écarts près : un `<!--` jamais fermé, ouvert dans un élément de liste
-  après quatre espaces ou plus (une puce imbriquée, ou une ligne qui continue la puce), cache sur
-  GitHub tout ce qui le suit, et un `<?`, un `<!` suivi d'une majuscule (`<!DOCTYPE`) ou un
-  `<![CDATA[` ouvert en tête de ligne, tout ce qui le suit jusqu'au premier `>`, même plusieurs
-  lignes plus bas, ou jusqu'à la fin sans lui ; le contrôle lit encore ces lignes, la ligne
-  `Tête relue` comme la section des écarts. Les deux écarts sont bornés : le SHA de cette ligne doit
+  GitHub la montre, à des écarts près, dont deux connus : un `<!--` jamais fermé, ouvert dans un
+  élément de liste après quatre espaces ou plus (une puce imbriquée, ou une ligne qui continue la
+  puce), cache sur GitHub tout ce qui le suit, et un `<?`, un `<!` suivi d'une majuscule
+  (`<!DOCTYPE`) ou un `<![CDATA[` ouvert en tête de ligne, tout ce qui le suit jusqu'au premier
+  `>`, même plusieurs lignes plus bas, ou jusqu'à la fin sans lui ; le contrôle lit encore ces
+  lignes, la ligne `Tête relue` comme la section des écarts. D'autres formes HTML cachent aussi sur
+  GitHub ce que le contrôle lit : un `<?` ou un `<!DOCTYPE` après une puce, ou en ligne et fermé
+  plus bas ; un `<!--` jamais fermé dans une ligne de bloc HTML, comme `<div><!-- note</div>` ; un
+  attribut ou un titre de lien sur plusieurs lignes. Tous sont bornés : le SHA de cette ligne doit
   toujours égaler la tête de la PR.
 - **Ne jamais relancer `texte-pr`.** Une relance, par `gh run rerun` ou depuis l'interface de
   GitHub, rejoue l'événement d'origine : elle relit le titre et le corps de ce moment-là, pas ceux

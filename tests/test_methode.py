@@ -324,18 +324,22 @@ def test_methode_dit_le_texte_de_la_pr():
         "la PR de revue finale n'est pas visée",
         "hors des lots, un correctif qui ferme une issue par `Fixes #N` nomme aussi la tête relue",
         "aucun type d'événement documenté ne suit ce lien",
-        # les deux écarts connus du rendu, et leur portée (revue finale du lot 15, et sa relecture :
-        # un `<?` cache tout jusqu'au premier `>`, même plus bas, et seul un `<!` suivi d'une
-        # majuscule ouvre un bloc)
+        # les écarts du rendu : deux connus, et leur portée (revue finale du lot 15, et sa
+        # relecture : un `<?` cache tout jusqu'au premier `>`, même plus bas, et seul un `<!`
+        # suivi d'une majuscule ouvre un bloc) ; une liste non close, les autres formes en une
+        # phrase, et tous bornés par le SHA (sa ronde 3)
         (
-            "La ligne se cherche telle que GitHub la montre, à deux écarts près : un `<!--` jamais "
-            "fermé, ouvert dans un élément de liste après quatre espaces ou plus (une puce "
-            "imbriquée, ou une ligne qui continue la puce), cache sur GitHub tout ce qui le suit, "
-            "et un `<?`, un `<!` suivi d'une majuscule (`<!DOCTYPE`) ou un `<![CDATA[` ouvert en "
-            "tête de ligne, tout ce qui le suit jusqu'au premier `>`, même plusieurs lignes plus "
-            "bas, ou jusqu'à la fin sans lui ; le contrôle lit encore ces lignes, la ligne `Tête "
-            "relue` comme la section des écarts. Les deux écarts sont bornés : le SHA de cette "
-            "ligne doit toujours égaler la tête de la PR."
+            "La ligne se cherche telle que GitHub la montre, à des écarts près, dont deux connus : "
+            "un `<!--` jamais fermé, ouvert dans un élément de liste après quatre espaces ou plus "
+            "(une puce imbriquée, ou une ligne qui continue la puce), cache sur GitHub tout ce qui "
+            "le suit, et un `<?`, un `<!` suivi d'une majuscule (`<!DOCTYPE`) ou un `<![CDATA[` "
+            "ouvert en tête de ligne, tout ce qui le suit jusqu'au premier `>`, même plusieurs "
+            "lignes plus bas, ou jusqu'à la fin sans lui ; le contrôle lit encore ces lignes, la "
+            "ligne `Tête relue` comme la section des écarts. D'autres formes HTML cachent aussi "
+            "sur GitHub ce que le contrôle lit : un `<?` ou un `<!DOCTYPE` après une puce, ou en "
+            "ligne et fermé plus bas ; un `<!--` jamais fermé dans une ligne de bloc HTML, comme "
+            "`<div><!-- note</div>` ; un attribut ou un titre de lien sur plusieurs lignes. Tous "
+            "sont bornés : le SHA de cette ligne doit toujours égaler la tête de la PR."
         ),
         "la branche par défaut",
         "seul à écouter `edited`",
@@ -413,6 +417,10 @@ def test_methode_dit_le_texte_de_la_pr():
         "rien ne bloque côté agent",
         "Ce fichier est semé",
         "GitHub la rend hors de toute liste",
+        # la liste des écarts du rendu n'est plus close (relecture de la revue finale du lot 15,
+        # ronde 3)
+        "à deux écarts près",
+        "Les deux écarts sont bornés",
     ):
         assert perime not in texte, perime
     lignes = section.splitlines()
@@ -1232,9 +1240,18 @@ DOCUMENTATION_ET_DOCSTRING = (
         "lisent encore la ligne « Tête relue », la section des écarts, les trois sections d'un "
         "plan et ses titres de tâche."
     ),
+    # une liste non close : deux écarts connus, puis les autres formes en une phrase (relecture de
+    # la revue finale du lot 15, ronde 3)
     (
-        "Deux autres laissent passer à tort ce que GitHub cache, et touchent aussi `texte_pr.py` "
-        "et `plan.py`"
+        "D'autres laissent passer à tort ce que GitHub cache, et touchent aussi `texte_pr.py` et "
+        "`plan.py`"
+    ),
+    "; deux sont connus : un `<!--` jamais fermé, ouvert dans un élément de liste",
+    (
+        "plan et ses titres de tâche. D'autres formes HTML cachent aussi sur GitHub ce que les "
+        "contrôles lisent : un `<?` ou un `<!DOCTYPE` après une puce, ou en ligne et fermé plus "
+        "bas ; un `<!--` jamais fermé dans une ligne de bloc HTML, comme `<div><!-- note</div>` ; "
+        "un attribut ou un titre de lien sur plusieurs lignes."
     ),
 )
 
@@ -1298,6 +1315,7 @@ def test_documentation_md(tmp_path, env_isole):
         "comme `CLAUDE.local.md`, n'est pas compté",
         "Quatre laissent passer",
         "Un autre laisse passer à tort ce que GitHub cache",
+        "Deux autres laissent passer",
     ):
         assert ancien not in plat, ancien
     # Les lignes de la licence et de la carte, telles que le script les écrit sur une racine, sont
@@ -1386,6 +1404,7 @@ def test_docstring_suit_documentation_md():
         "Quatre laissent passer",
         "comme en CI : un fichier qu'il ignore",
         "Un autre laisse passer à tort ce que GitHub cache",
+        "Deux autres laissent passer",
     ):
         assert ancien not in docstring, ancien
 

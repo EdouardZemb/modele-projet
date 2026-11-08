@@ -140,6 +140,14 @@ def corps_avec(section):
         # un bloc indenté de quatre espaces : il continue l'écart d'avant, ou il refuse
         ("- un écart long\n    — promesse : § 2 — accord d'Edouard : 07/11/2026", 0, "1 déclaré"),
         ("Aucun.\n\n    un bloc indenté", 1, "ligne 4 de la section : ni « Aucun. » ni un écart"),
+        # un commentaire après quatre espaces, puis un texte : au-delà de la borne des trois
+        # espaces, la ligne continue l'écart d'avant, et GitHub la montre dans la puce
+        # (relecture de la revue finale du lot 15, ronde 3)
+        (
+            "- un écart long — promesse : § 2\n    <!-- c --> — accord d'Edouard : 07/11/2026",
+            0,
+            "écarts à la spec : 1 déclaré",
+        ),
     ],
 )
 def test_ecarts(lancer, section, code, attendu):
@@ -192,7 +200,8 @@ def test_le_code_en_ligne_vient_de_documentation():
 def test_docstring_dit_les_refus_et_les_ecarts_du_rendu():
     """La docstring de `texte_pr.py` dit ce que dit `methode.md` (relecture de la revue finale du
     lot 15) : le rang n'est promis qu'aux refus d'une ligne, et la tête relue se cherche telle que
-    GitHub la montre, à deux écarts près, bornés par le SHA, qui doit égaler la tête."""
+    GitHub la montre, à des écarts près, dont deux connus et une phrase pour les autres formes :
+    une liste non close (sa ronde 3), tous bornés par le SHA, qui doit égaler la tête."""
     docstring = " ".join(t.__doc__.split())
     for fragment in (
         (
@@ -208,17 +217,24 @@ def test_docstring_dit_les_refus_et_les_ecarts_du_rendu():
             "ordre."
         ),
         (
-            "une ligne qu'il cache est absente. À deux écarts près : un `<!--` jamais fermé, "
-            "ouvert dans un élément de liste après quatre espaces ou plus (une puce imbriquée, ou "
-            "une ligne qui continue la puce), cache sur GitHub tout ce qui le suit, et un `<?`, "
-            "un `<!` suivi d'une majuscule (`<!DOCTYPE`) ou un `<![CDATA[` ouvert en tête de "
-            "ligne, tout ce qui le suit jusqu'au premier `>`, même plusieurs lignes plus bas, ou "
-            "jusqu'à la fin sans lui ; le contrôle lit encore ces lignes, la ligne « Tête relue » "
-            "comme la section des écarts ; les deux écarts sont bornés, le SHA de cette ligne "
-            "devant toujours égaler la tête de la PR."
+            "une ligne qu'il cache est absente. À des écarts près, dont deux connus : un `<!--` "
+            "jamais fermé, ouvert dans un élément de liste après quatre espaces ou plus (une puce "
+            "imbriquée, ou une ligne qui continue la puce), cache sur GitHub tout ce qui le suit, "
+            "et un `<?`, un `<!` suivi d'une majuscule (`<!DOCTYPE`) ou un `<![CDATA[` ouvert en "
+            "tête de ligne, tout ce qui le suit jusqu'au premier `>`, même plusieurs lignes plus "
+            "bas, ou jusqu'à la fin sans lui ; le contrôle lit encore ces lignes, la ligne « Tête "
+            "relue » comme la section des écarts. D'autres formes HTML cachent aussi sur GitHub ce "
+            "que le contrôle lit : un `<?` ou un `<!DOCTYPE` après une puce, ou en ligne et fermé "
+            "plus bas ; un `<!--` jamais fermé dans une ligne de bloc HTML, comme "
+            "`<div><!-- note</div>` ; un attribut ou un titre de lien sur plusieurs lignes. Tous "
+            "sont bornés : le SHA de cette ligne doit toujours égaler la tête de la PR."
         ),
     ):
         assert fragment in docstring, fragment
+    # la liste des écarts du rendu n'est plus close (relecture de la revue finale du lot 15,
+    # ronde 3) : ni l'ancien décompte, ni l'ancienne borne, quelle que soit la casse
+    for perime in ("à deux écarts près", "les deux écarts sont bornés"):
+        assert perime not in docstring.casefold(), perime
     ancien = (
         "Le refus nomme la ligne par son rang dans la section, la ligne 1 étant celle qui suit le "
         "titre : une section absente"
