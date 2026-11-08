@@ -381,23 +381,22 @@ def test_claude_md_du_depot_modele():
     assert premiere == "@template/docs/modele/methode.md"
 
 
+def _commandes_de_claude_md():
+    """La section « Commandes » du `CLAUDE.md` du dépôt, aplatie."""
+    texte = (RACINE / "CLAUDE.md").read_text(encoding="utf-8")
+    return " ".join(texte.split("\n## Commandes\n", 1)[1].split("\n## ", 1)[0].split())
+
+
 def test_claude_md_dit_la_commande_des_plans():
     """Les plans du modèle vivent hors du dépôt, où l'étape « Les plans » de la CI ne les voit
     pas : « Commandes » donne la commande qui les vérifie, avec le clone voisin de `serveur`."""
-    texte = (RACINE / "CLAUDE.md").read_text(encoding="utf-8")
-    commandes = " ".join(texte.split("\n## Commandes\n", 1)[1].split("\n## ", 1)[0].split())
+    commandes = _commandes_de_claude_md()
     assert (
         "`python -B template/scripts/modele/plan.py --racine . "
         "--depot serveur=C:\\src\\github.com\\EdouardZemb\\serveur <plan>`"
     ) in commandes
     assert "`Documents\\00-boite-de-reception\\`" in commandes
     assert "avant de soumettre un plan à Edouard et après chaque correction" in commandes
-
-
-def _commandes_de_claude_md():
-    """La section « Commandes » du `CLAUDE.md` du dépôt, aplatie."""
-    texte = (RACINE / "CLAUDE.md").read_text(encoding="utf-8")
-    return " ".join(texte.split("\n## Commandes\n", 1)[1].split("\n## ", 1)[0].split())
 
 
 def test_claude_md_dit_la_relance_et_les_avertissements_de_duree():
