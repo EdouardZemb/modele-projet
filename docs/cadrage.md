@@ -303,7 +303,45 @@
 >     égard à la casse, le SHA entre accents graves ou en majuscules ; dans un plan, `Tâche` et
 >     `Task` sans égard à la casse (§ 2.4, § 2.5 et § 3.1 ; #115, #118) ;
 >   - un lien d'issue posé depuis la barre latérale d'une PR s'écrit comme une limite dans
->     `methode.md`, sans épreuve : aucun type d'événement documenté ne le suit (§ 2.5 ; #115).
+>     `methode.md`, sans épreuve : aucun type d'événement documenté ne le suit (§ 2.5 ; #115) ;
+> - **seize choix des PR du lot**, qu'elles n'ont pas comptés comme écarts et ont soumis à Edouard
+>   dans leur section « À relire », acceptés par lui le 09/11 (« ok pour les défauts ») :
+>   - les refus de la section des écarts ajoutés en revue (l'ordre de la ligne, un écart vide, une
+>     section en double, une sous-liste, une ligne ouverte par un commentaire), lus comme sa forme
+>     stricte (#115) ;
+>   - dans M-0002, « la CI (le socle et `texte-pr`) le seul filet », hors des passages que la spec
+>     permettait de toucher : sans ce changement, la phrase devenait fausse (#115) ;
+>   - une relance de `texte-pr` relit le texte de l'événement d'origine : `methode.md` dit de ne
+>     jamais la relancer, et lire le titre et le corps par l'API reste une piste (#115) ;
+>   - `documentation.md` gagne la sous-section « Réécrire un README » (#117) ;
+>   - l'étape « Aucun cache Python » refuse aussi quand `find` échoue, au lieu de passer à vide
+>     (#117) ;
+>   - `plan.py` refuse deux sections du même titre, et n'en lit aucune (#118) ;
+>   - le seuil d'avertissement d'un job vaut les trois quarts exacts de son délai, 33 min 45 s pour
+>     45 min, là où la spec dit « 34 min » (#119) ;
+>   - un job coupé à son délai se relance seul, par `gh run rerun <id> --job <databaseId>` ; tous
+>     les jobs en échec, par `--failed`, seulement quand tous sont tombés sur la panne d'un service
+>     tiers (#119, #122) ;
+>   - le délai du job `tests` reste à 45 min, et une PR le monte à 50 min, seuil 37 min 30 s, au
+>     premier avertissement (LE-40) ;
+>   - dans `sonder.bats`, l'aide `sonder_sans_geste` s'ajoute à `apres_un_retour`, et la piste
+>     « `echec` ne garde qu'un couple » reste ouverte (#120) ;
+>   - `menage-cible` refuse tout magasin `io.containerd.snapshotter`, et sa table compte huit cas
+>     de plus que le plan (#121) ;
+>   - `menage-cible` dépend du réseau à chaque exécution, sous un délai de 2 min : Docker Hub,
+>     `registry:2.8.3` et un `apk add` sans versions épinglées ; une panne de l'un d'eux le rend
+>     rouge sans faute du code (#121) ;
+>   - la ligne « Tête relue » et les sections se cherchent telles que GitHub les montre, à des
+>     écarts près dont la liste n'est pas close, tous bornés par la tête de la PR ; la piste
+>     `POST /markdown` les couvrirait (#122) ;
+>   - `plan.py` est plus strict que GitHub : il refuse un numéro autre que 1, une sous-puce
+>     indentée de quatre colonnes ou plus, un commentaire après deux ou trois espaces sous une
+>     puce, et deux espaces puis un tiret sous une ligne, que GitHub rend en titre souligné (#122) ;
+>   - au push, un plan ajouté se vérifie sans rouvrir ses lieux : un numéro de ligne qui a dérivé
+>     entre la CI de la PR et sa fusion n'est plus revu (#122) ;
+>   - le geste de la règle d'un projet, dans `docs/aligner.md` § 7, reprend tels quels des
+>     paramètres lus que l'écriture n'a pas encore éprouvés : le premier geste réel le dira
+>     (#122).
 
 Ce cadrage est la partie publique de la spec de conception du modèle, issue d'une séance de questions avec Edouard : 12 questions, puis 5 parties de design validées une à une. La partie qui nomme le serveur est privée et n'est pas reproduite ici.
 

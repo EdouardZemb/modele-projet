@@ -357,8 +357,9 @@ Prochain, au choix d'Edouard :
   que `CLAUDE.md` prescrit à une session), LE-58 (un contrôle local qui diffère de celui de la CI) ;
   LE-63 et LE-64, nés de la revue finale, chacun avec la porte que propose le registre ; et LE-69
   (une épreuve renvoyée après le lot, qui n'exerce pas le cas), né de la relecture de la clôture ;
-- le délai du job `tests`, 45 min (LE-40) : le monter revient à Edouard, devant un avertissement ;
-  LE-40 se clôt à la fin du lot qui suit le lot 15, sans coupure d'ici là.
+- au premier avertissement de durée du job `tests`, une PR monte son délai de 45 à 50 min, comme
+  Edouard l'a décidé le 09/11 (LE-40) ; LE-40 se clôt à la fin du lot qui suit le lot 15, sans
+  coupure d'ici là.
 
 Le cadrage est dans `docs/cadrage.md` ; ce que les lots ont appris, dans `docs/registre.md`.
 
