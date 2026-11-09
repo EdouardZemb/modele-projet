@@ -355,7 +355,8 @@ Prochain, au choix d'Edouard :
   LE-54 et LE-61 (des textes que la section du plan ne couvre pas : une piste, un texte de clôture,
   une docstring, `documentation.md`), LE-57 (un cas limite inconnu), LE-65 et LE-66 (une commande
   que `CLAUDE.md` prescrit à une session), LE-58 (un contrôle local qui diffère de celui de la CI) ;
-  et LE-63 et LE-64, nés de la revue finale, chacun avec la porte que propose le registre ;
+  LE-63 et LE-64, nés de la revue finale, chacun avec la porte que propose le registre ; et LE-69
+  (une épreuve renvoyée après le lot, qui n'exerce pas le cas), né de la relecture de la clôture ;
 - le délai du job `tests`, 45 min (LE-40) : le monter revient à Edouard, devant un avertissement ;
   LE-40 se clôt à la fin du lot qui suit le lot 15, sans coupure d'ici là.
 

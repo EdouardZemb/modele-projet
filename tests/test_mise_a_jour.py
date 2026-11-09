@@ -434,8 +434,8 @@ def test_mise_a_jour_d_un_projet_a_un_depot_garde_ses_cles(tmp_path, env_isole):
 
 
 # La scission d'un projet à un dépôt (#94) : un projet comme `veille-emploi`, en cible `serveur` et
-# de nature `donnees`, devient son dépôt de données par `copier update`, comme le fera `ancrage`.
-# Valeurs inventées, sur `exemple.test`, et clés `age` de test.
+# de nature `donnees`, devient son dépôt de données par `copier update`, comme l'a fait `ancrage`
+# le 07/11 (ancrage-donnees#207). Valeurs inventées, sur `exemple.test`, et clés `age` de test.
 METHODE = RACINE / "template/docs/modele/methode.md"
 REPONSES_A_UN_DEPOT = {
     **REPONSES_SERVEUR,
