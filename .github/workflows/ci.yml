@@ -13,13 +13,15 @@ jobs:
   tests:
     name: tests
     runs-on: ${{ matrix.os }}
-    # 45 min : sous Windows, la suite a dépassé 15 min au lot 9 (LE-29), 25 au lot 12 (LE-40), puis
-    # 31 du 04 au 07/11, au-delà des trois quarts de 40, et 32 min 39 s sur la PR #118, à 66 s du
-    # seuil de 33 min 45. DELAI_MIN le recopie : aucun contexte ne donne timeout-minutes à l'étape
-    # « Durée du job », qui avertit aux trois quarts.
-    timeout-minutes: 45
+    # 50 min : sous Windows, la suite a dépassé 15 min au lot 9 (LE-29), 25 au lot 12 (LE-40), puis
+    # 31 du 04 au 07/11, au-delà des trois quarts de 40, et 32 min 39 s sur la PR #118. À 45 min,
+    # elle a pris 34 min 36 s sur la PR #123, au-delà du seuil de 33 min 45 : ce premier
+    # avertissement la fait monter à 50 min (seuil 37 min 30), comme Edouard l'a décidé le 09/11.
+    # DELAI_MIN le recopie : aucun contexte ne donne timeout-minutes à l'étape « Durée du job », qui
+    # avertit aux trois quarts.
+    timeout-minutes: 50
     env:
-      DELAI_MIN: 45
+      DELAI_MIN: 50
     strategy:
       fail-fast: false
       matrix:

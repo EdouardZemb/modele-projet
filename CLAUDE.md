@@ -339,6 +339,11 @@ des fermetures par `texte-pr` y aboutit, sans erreur (la preuve complète attend
 dépôt privé qui ferme une issue : `docs/pistes.md`), puis les six autres, après le vert de
 `texte-pr` sur cette PR.
 
+Correctif du 09/11 : le délai du job `tests` de ce dépôt passe de 45 à 50 min, seuil 37 min 30 s
+(LE-40). La porte du lot 15 a donné son premier avertissement de durée sur la PR de clôture,
+#123 : 34 min 36 s sous Windows, 51 s au-delà du seuil de 33 min 45 s. Edouard avait décidé le
+même jour qu'une PR monterait alors le délai à 50 min. Rien ne change sous `template/`.
+
 Prochain, au choix d'Edouard :
 - le second temps du travail sur la documentation, un lot « documentation » avec sa spec : l'« État »
   réduit du `CLAUDE.md` semé et le journal des versions du modèle ; dans le README, le refus d'une
@@ -357,9 +362,7 @@ Prochain, au choix d'Edouard :
   que `CLAUDE.md` prescrit à une session), LE-58 (un contrôle local qui diffère de celui de la CI) ;
   LE-63 et LE-64, nés de la revue finale, chacun avec la porte que propose le registre ; et LE-69
   (une épreuve renvoyée après le lot, qui n'exerce pas le cas), né de la relecture de la clôture ;
-- au premier avertissement de durée du job `tests`, une PR monte son délai de 45 à 50 min, comme
-  Edouard l'a décidé le 09/11 (LE-40) ; LE-40 se clôt à la fin du lot qui suit le lot 15, sans
-  coupure d'ici là.
+- LE-40 se clôt à la fin du lot qui suit le lot 15, sans coupure du job `tests` d'ici là.
 
 Le cadrage est dans `docs/cadrage.md` ; ce que les lots ont appris, dans `docs/registre.md`.
 
