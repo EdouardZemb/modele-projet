@@ -254,34 +254,112 @@ privé, en cible `donnees` avec `cible_code: serveur`, et le dépôt public `vei
 la main, en nature `code` (veille-emploi#1, veille-emploi-donnees#41). Son staging tourne à deux
 dépôts depuis le 06/11.
 
-Les messages de mise à jour vers la `v0.9.0` partent sur le oui d'Edouard, une fois l'étiquette
-publiée.
+Lot 15 fait le 09/11/2026 : les portes dues (#114), étiqueté `v0.10.0`. Il écrit les portes dues
+par LE-37, LE-40, LE-41, LE-46, LE-53, LE-55 et LE-56, sous les formes que propose le registre et
+avec les écarts que déclarent la spec et le plan, acceptés par Edouard le 07/11, puis fait le
+ménage des notes du lot 14 (PR #115 et #117 à #122).
+- **Le texte de la PR, dans son propre workflow** (AM-2, LE-37, LE-55 ; #115). Le workflow
+  `texte-pr` (`modele-texte-pr.yml`, géré, dans les trois cibles ; `texte-pr.yml` ici) est seul à
+  écouter `edited` : une retouche du titre ou du corps ne relance que lui. Il porte la
+  confidentialité et le format du titre et du corps, retirés du socle et de `ci.yml`, puis lance
+  `scripts/modele/texte_pr.py`, géré. Le corps de toute PR, sauf celles de `dependabot[bot]`, porte
+  une section « Écarts à la spec » : « Aucun. », ou une ligne par écart, avec la promesse qu'il
+  touche et la date de l'accord d'Edouard. Une PR qui ferme une issue, d'après l'API
+  (`closingIssuesReferences`), porte `Tête relue : <SHA>`, égal à sa tête. Le gabarit de PR, géré,
+  porte la section et la ligne, et ne met « Closes #N » que dans la PR de clôture. La règle de ce
+  dépôt et celle du gabarit requièrent `texte-pr` ; un projet déjà né retire `edited` de son
+  `ci.yml`, semé, à la main. Une relance de `texte-pr` relit le texte d'origine, éprouvé le 07/11 :
+  on retouche le texte.
+- **Le contrôle des plans** (LE-53, LE-55, LE-56 ; #118, #122). `scripts/modele/plan.py`, géré,
+  vérifie les trois sections d'un plan : « Mécanismes annoncés », dont chaque extrait se cherche
+  sur la ligne citée, un lieu d'un autre dépôt restant « non vérifié » sans `--depot` ; « Outils et
+  cas limites » ; « Revues », qui citent des tâches d'avant la clôture. L'étape « Les plans
+  (.claude/plans) » du socle, juste avant la dernière, le lance sur chaque plan qu'une PR ajoute,
+  en entier, ou modifie, par `--sans-lieux` ; au push, un plan ajouté se lit aussi par
+  `--sans-lieux` (#122). `methode.md` dit la revue du plan, chaque temps de revue en tâche du plan,
+  le test au cas limite d'un outil, et le mutant qui éprouve un test qui garde une valeur (LE-62).
+  Les plans du modèle restent hors du dépôt : la session les vérifie par la commande de
+  « Commandes ».
+- **La durée des jobs** (LE-40 ; #119, #121). Les jobs `tests` (les deux systèmes), `mecanique` et
+  `menage-cible` de ce dépôt finissent par l'étape « Durée du job », lancée même après un échec :
+  elle écrit leur durée au résumé du job, et avertit au-delà des trois quarts de leur délai,
+  `DELAI_MIN`, qu'un test tient égal à `timeout-minutes`. Le job `tests` passe de 40 à 45 min, son
+  seuil à 33 min 45 s ; sous Windows, il est resté à 22 s sous ce seuil, au plus près, sur #121. La
+  revue finale de chaque lot relève ces avertissements, tentative par tentative (« Commandes »).
+  LE-40 reste ouverte jusqu'à la fin du lot qui suit.
+- **Le budget du garde** (LE-52 ; #119). À court de temps, le garde refuse une fusion en disant
+  « budget de 20 s épuisé : mode non lu, relancer », ou « … : contrôles non lus, relancer », au
+  lieu de « mode fusion : edouard » ou de « fusion avant que tous les contrôles soient verts ». Il
+  reste fermé.
+- **Le ménage dans le Docker de la cible** (LE-41 ; #121). Le job `menage-cible` lance l'épreuve du
+  ménage des images dans un `docker:29.5.3-dind`, épinglé par empreinte, magasin containerd coupé.
+  Avant l'épreuve, il vérifie que son client et son moteur sont à la version de
+  `tests/modele/docker-cible.env`, 29.5.3, celle du serveur relevée par `serveur` le 07/11, au
+  pilote `overlay2` et sans le magasin containerd. Son délai, 2 min, vaut environ deux fois la plus
+  longue de trois exécutions mesurées. La règle de ce dépôt le requiert depuis sa mise à jour du
+  08/11, relue par l'API le 09/11 : huit contextes requis.
+- **La table des retours** (LE-46 ; #120). Dans `tests/deploiement/sonder.bats`, géré, en cible
+  `serveur` et nature `code`, 14 tests font jouer la vraie sonde après le vrai
+  `deployer.sh --retour`, pour chacun des trois retours (l'image, le commit de données, les deux),
+  en prod et en staging. Chacun lit le conseil du retour, vérifie que la sonde attend tant que rien
+  ne change, joue un geste, puis compare le couple déployé à celui qu'annonce le conseil. Le gabarit
+  passe de 49 à 63 tests.
+- **Les scripts sous `python -I`, et les tests sans cache** (AM-1, AM-3 ; #117, #118). Les huit
+  scripts gérés qui importent un voisin posent eux-mêmes `sys.dont_write_bytecode`, puis ajoutent
+  leur dossier en fin de chemin d'import : sous `python -I`, ils trouvent leurs voisins et les
+  réglages du projet, sans écrire de cache, ce que `tests/test_scripts_isoles.py` éprouve dans un
+  projet rendu. `tests/conftest.py` coupe le cache des tests, et le job `tests` échoue sur tout
+  `__pycache__` sous `template/scripts/modele/`. `documentation.md` dit trois gestes avant de
+  réécrire un README.
+- **La revue finale** a lu `7ccab76..d9b5f0c` en cinq lentilles (la spec, les textes, les contrôles
+  à vide, les rendus, les mesures), chaque constat contre-vérifié, puis par une lecture de
+  complétude. Sur ses 27 constats, 25 sont confirmés par leur contre-vérification ; la lecture de
+  complétude en ajoute 4. 21 sont corrigés dans #122, dont le seul critique : le geste de la règle
+  de `docs/aligner.md` aurait retiré à `pupitre` trois de ses contrôles requis, et il part désormais
+  de la règle en service. 8 reviennent à la clôture. La relecture des corrections a demandé cinq
+  rondes, puis une relecture ciblée sans constat, à `abb8b6d` : trois rondes de suite trouvaient
+  chacune une forme HTML de plus que GitHub cache, et la liste des écarts au rendu de GitHub est
+  désormais dite non close (LE-57). La revue a mesuré aussi : aucun avertissement de durée dans les
+  29 exécutions de `ci.yml` des 07 et 08/11, toutes tentatives lues ; sept projets nés du modèle,
+  et non six ; leurs sept `ci.yml` écoutent encore `edited`, et leurs quatre plans en cours sont
+  refusés par `plan.py`.
+
+Versions des projets au 09/11/2026, relevées par l'API : sept projets sont nés du modèle.
+`serveur`, `pupitre`, `pupitre-donnees`, `veille-emploi` et `veille-emploi-donnees` sont en
+`v0.9.0` depuis le 07/11 (serveur#53, pupitre#21, pupitre-donnees#20, veille-emploi#7,
+veille-emploi-donnees#45). `ancrage` s'est scindé le 07/11 : l'ancien dépôt est devenu
+`ancrage-donnees`, privé, en cible `donnees` avec `cible_code: serveur` (ancrage-donnees#207), et
+le dépôt public `ancrage` est né d'un seul commit, en cible `serveur` et nature `code`. Tous deux
+sont en `v0.8.1`. Trois dépôts sont publics, chacun avec sa règle de protection : `ancrage`,
+`pupitre` et `veille-emploi`.
+
+Les messages de mise à jour vers la `v0.10.0` partent sur le oui d'Edouard, une fois l'étiquette
+publiée : d'abord celui de `serveur`, dépôt privé, dont la PR de mise à jour éprouve que la lecture
+des fermetures par `texte-pr` y aboutit, sans erreur (la preuve complète attend la première PR d'un
+dépôt privé qui ferme une issue : `docs/pistes.md`), puis les six autres, après le vert de
+`texte-pr` sur cette PR.
 
 Prochain, au choix d'Edouard :
-- la scission d'`ancrage`, dans son propre lot : la piste « Les pièges d'une scission » en donne
-  cinq ;
 - le second temps du travail sur la documentation, un lot « documentation » avec sa spec : l'« État »
   réduit du `CLAUDE.md` semé et le journal des versions du modèle ; dans le README, le refus d'une
   copie qui se périme (un arbre de fichiers, une heure, une version) et le signal d'une issue citée
-  au futur mais fermée ; la ligne « Confirmation » et le régime des ADR ; les blocs engendrés ;
+  au futur mais fermée ; la ligne « Confirmation » et le régime des ADR ; les blocs engendrés. La
+  piste « Le second temps de la documentation » y ajoute trois relevés des projets ;
 - le lot 3 (la cible `statique`) ;
 - le lot 5 (`partition` aligné en cible `aucune`) ;
 - le lot 7 (`creche-planner` aligné en cible `aucune`) ;
-- la porte due par LE-37, au 3e constat du motif « écart à la spec mal pesé », dont LE-49 est le
-  4e : sa forme revient à Edouard, et le registre en propose une. À peser avec la piste du workflow
-  `publier`, qui ferait publier Edouard depuis son téléphone ;
-- la porte due par LE-40, au 3e constat du motif « délai mesuré à vide », dont LE-52 est le 4e : sa
-  forme revient à Edouard, et le registre en propose une ;
-- la porte due par LE-41, au 3e constat du motif « version d'outil du poste différente de la
-  cible », dont LE-50 est le 4e : sa forme revient à Edouard, et le registre en propose une ;
-- la porte due par LE-46, au 3e constat du motif « décision appliquée sans en chercher les
-  effets » : sa forme revient à Edouard, et le registre en propose une ;
-- la porte due par LE-53, au 3e constat du motif « mécanisme décrit sans relire son code », dont
-  LE-54 et LE-61 sont les 4e et 5e : sa forme revient à Edouard, et le registre en propose une ;
-- la porte due par LE-55, au 3e constat du motif « contrôle passé à vide », dont LE-58 et LE-62
-  sont les 4e et 5e : sa forme revient à Edouard, et le registre en propose une ;
-- la porte due par LE-56, au 3e constat du motif « comportement d'un outil supposé », dont LE-57 est
-  le 4e : sa forme revient à Edouard, et le registre en propose une.
+- le workflow `publier`, qui ferait publier Edouard depuis son téléphone : sa piste a pour
+  déclencheur le lot qui suit le lot 15 ;
+- les constats que les portes du lot 15 laissent ouverts, dont un lot suivant pèse les motifs :
+  LE-49 (un écart que son auteur ne reconnaît pas), LE-50 (le retrait des images, dans `serveur`),
+  LE-54 et LE-61 (des textes que la section du plan ne couvre pas : une piste, un texte de clôture,
+  une docstring, `documentation.md`), LE-57 (un cas limite inconnu), LE-65 et LE-66 (une commande
+  que `CLAUDE.md` prescrit à une session), LE-58 (un contrôle local qui diffère de celui de la CI) ;
+  LE-63 et LE-64, nés de la revue finale, chacun avec la porte que propose le registre ; et LE-69
+  (une épreuve renvoyée après le lot, qui n'exerce pas le cas), né de la relecture de la clôture ;
+- au premier avertissement de durée du job `tests`, une PR monte son délai de 45 à 50 min, comme
+  Edouard l'a décidé le 09/11 (LE-40) ; LE-40 se clôt à la fin du lot qui suit le lot 15, sans
+  coupure d'ici là.
 
 Le cadrage est dans `docs/cadrage.md` ; ce que les lots ont appris, dans `docs/registre.md`.
 

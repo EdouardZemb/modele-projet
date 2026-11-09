@@ -236,6 +236,115 @@
 >   suivrait : un `.md` non suivi compte en local, que la CI ne voit pas, et ce que git ignore ne
 >   compte pas. Un lien de référence compte par son emploi, une définition seule ne lie rien. Sous
 >   Windows, une cible qui porte un deux-points n'est pas locale : elle y nommerait un lecteur.
+>
+> **Amendé le 2026-11-09, à la clôture du lot 15, de la même façon.** Le lot 15 n'était pas au §11 :
+> il écrit les sept portes dues par le registre, chacune au 3e constat de son motif : LE-37, LE-40,
+> LE-41, LE-46, LE-53, LE-55 et LE-56 (#114, PR #115 et #117 à #122). `methode.md`,
+> `documentation.md`, M-0002 et `docs/aligner.md` sont amendés. `methode.md` dit les trois sections
+> d'un plan et sa revue, les écarts à la spec, la tête relue d'une PR qui ferme une issue, et le
+> mutant qui éprouve un test.
+>
+> - **§4** : un projet reçoit aussi `.github/workflows/modele-texte-pr.yml` [G], dans les trois
+>   cibles, puis `scripts/modele/texte_pr.py` [G] et `scripts/modele/plan.py` [G]. Le gabarit de PR
+>   [G] gagne la section « Écarts à la spec », « Aucun. » par défaut, et la ligne « Tête relue ».
+>   `.github/workflows/ci.yml` [S] n'écoute plus `edited` : semé, celui d'un projet déjà né ne
+>   change pas à sa mise à jour, et le projet en retire `edited` à la main ;
+> - **§5.5** : la ligne de `modele-socle.yml` perd « du texte de la PR ». Le socle garde la
+>   confidentialité du diff et des messages de commit, et le format des commits. Le texte de la PR
+>   passe au workflow `texte-pr`, seul à écouter `edited` : une retouche du titre ou du corps ne
+>   relance plus que lui, dès que le `ci.yml` du projet n'écoute plus `edited`. Son job, `texte-pr`,
+>   contrôle la confidentialité et le format du titre et du corps, puis, par `texte_pr.py`, la
+>   section « Écarts à la spec » de toute PR, sauf celles de `dependabot[bot]`, et la ligne
+>   `Tête relue : <SHA>` d'une PR qui ferme une issue, les issues fermées étant lues par l'API
+>   (`closingIssuesReferences`). La règle d'un dépôt public, `ruleset-main.json`, le requiert à côté
+>   des deux contrôles du socle ; dans un dépôt privé, sans règle, le garde le lit avec les autres
+>   contrôles avant une fusion en mode `session` (`gh pr checks`). Le job `confidentialite` du socle
+>   gagne l'étape « Les plans (.claude/plans) », juste avant « La documentation de la racine », qui
+>   reste la dernière : `plan.py` y vérifie les trois sections de chaque plan que la PR ajoute ou
+>   modifie (« Mécanismes annoncés », « Outils et cas limites », « Revues ») ; sur une base nulle,
+>   rien. Le garde à court de budget refuse toujours une fusion, mais le dit : quand ses 20 s de
+>   sous-processus n'ont pas laissé finir la lecture du mode ou des contrôles, il répond « budget de
+>   20 s épuisé : mode non lu, relancer », ou « … : contrôles non lus, relancer », au lieu du refus
+>   du mode `edouard` ou de celui des contrôles. Dans le dépôt modèle, la règle, mise à jour le
+>   08/11 et relue par l'API, requiert huit contrôles, `texte-pr` et `menage-cible` compris ;
+> - **douze écarts à la spec du lot**, décidés par son plan, qu'Edouard a accepté le 07/11
+>   (« ok pour les défauts »), et déclarés chacun dans la section « Écarts à la spec » de sa PR :
+>   - le corps d'une PR et un plan se lisent par `sans_bloc_ni_commentaire`, extraite dans
+>     `documentation.py` : elle retire les blocs clôturés et les commentaires fermés, et garde le
+>     code en ligne. `_sans_code_ni_commentaire`, que nommait la spec, masquerait un SHA entre
+>     accents graves et les lieux d'un plan, et garderait les blocs clôturés (§ 2.3 ; #115) ;
+>   - `plan.py` refuse un deux-points dans le chemin d'un lieu sur tous les systèmes, et non sous
+>     Windows seul : un chemin du dépôt n'en porte jamais (§ 3.1 ; #118) ;
+>   - `docs/aligner.md` et le levier du déclencheur `edited`, dans `docs/pistes.md`, changent dans
+>     la PR du workflow `texte-pr`, et non dans celle du ménage (§ 7 et § 12 ; #115) ;
+>   - le gabarit de PR garde la chaîne « Closes #n », au `n` minuscule qu'exige son test (§ 2.6 ;
+>     #115) ;
+>   - des refus de plus : la forme stricte d'une section, qui n'admet que des lignes vides,
+>     « Aucun. », des puces `-` ou `*` et les lignes indentées qui les continuent, et un commentaire
+>     HTML jamais fermé, dans `texte_pr.py` puis dans `plan.py` ; dans `plan.py`, une plage de plus
+>     de 40 lignes et un numéro de tâche en double (§ 2.4 et § 3.1 ; #115, #118) ;
+>   - `texte-pr` déclare d'emblée la permission `issues: read`. Sa preuve dans un dépôt privé est
+>     reportée à la mise à jour de `serveur`, dont le message part le premier ; ceux des autres
+>     projets partent après le vert de `texte-pr` sur sa PR (§ 2.5 ; #115). Cette PR ne ferme
+>     aucune issue : elle ne prouve que l'absence d'erreur, et la preuve complète viendra de la
+>     première PR d'un dépôt privé qui ferme une issue (`docs/pistes.md`, « La lecture des
+>     fermetures dans un dépôt privé ») ;
+>   - l'étape du texte de la PR, déplacée dans `texte-pr`, perd son
+>     `if: github.event_name == 'pull_request'`, toujours vrai là (§ 2.2 ; #115) ;
+>   - la ligne de durée et l'avertissement des jobs du dépôt modèle nomment le job et son système,
+>     les deux jobs `tests` ayant le même identifiant (§ 4.1 ; #119) ;
+>   - le plan du lot 15, qui vit hors du dépôt, se revérifie après la fusion de #118 sur les
+>     fichiers de `7ccab76`, le commit que décrivent ses mécanismes, puisque le lot a déplacé
+>     depuis des lignes qu'ils citent : 74 mécanismes vérifiés (§ 3.2 ; #118) ;
+>   - d'un plan que la PR modifie, l'étape « Les plans » vérifie les sections, la forme des lignes
+>     et les revues sans ouvrir les fichiers cités, dont les numéros dérivent avec le code ; à la
+>     PR, seul un plan ajouté se vérifie en entier (§ 3.2 ; #118) ;
+>   - la forme d'une ligne s'élargit : le tiret demi-cadratin comme séparateur, les étiquettes sans
+>     égard à la casse, le SHA entre accents graves ou en majuscules ; dans un plan, `Tâche` et
+>     `Task` sans égard à la casse (§ 2.4, § 2.5 et § 3.1 ; #115, #118) ;
+>   - un lien d'issue posé depuis la barre latérale d'une PR s'écrit comme une limite dans
+>     `methode.md`, sans épreuve : aucun type d'événement documenté ne le suit (§ 2.5 ; #115) ;
+> - **seize choix des PR du lot**, qu'elles n'ont pas comptés comme écarts et ont soumis à Edouard
+>   dans leur section « À relire », acceptés par lui le 09/11 (« ok pour les défauts ») :
+>   - les refus de la section des écarts ajoutés en revue (l'ordre de la ligne, un écart vide, une
+>     section en double, une sous-liste, une ligne ouverte par un commentaire), lus comme sa forme
+>     stricte (#115) ;
+>   - dans M-0002, hors des passages que la spec permettait de toucher, deux phrases qui sans ce
+>     changement devenaient fausses : « la CI (le socle et `texte-pr`) le seul filet » (#115), et
+>     « les hooks et la CI (le socle et `texte-pr`) » (#122), que la relecture de la clôture a
+>     relevée et qu'Edouard a acceptée à part, le même jour ;
+>   - une relance de `texte-pr` relit le texte de l'événement d'origine : `methode.md` dit de ne
+>     jamais la relancer, et lire le titre et le corps par l'API reste une piste (#115) ;
+>   - `documentation.md` gagne la sous-section « Réécrire un README » (#117) ;
+>   - l'étape « Aucun cache Python » refuse aussi quand `find` échoue, au lieu de passer à vide
+>     (#117) ;
+>   - `plan.py` refuse deux sections du même titre, et n'en lit aucune (#118) ;
+>   - le seuil d'avertissement d'un job vaut les trois quarts exacts de son délai, 33 min 45 s pour
+>     45 min, là où la spec dit « 34 min » (#119) ;
+>   - un job coupé à son délai se relance seul, par `gh run rerun <id> --job <databaseId>` ; tous
+>     les jobs en échec, par `--failed`, seulement quand tous sont tombés sur la panne d'un service
+>     tiers (#119, #122) ;
+>   - le délai du job `tests` reste à 45 min, et une PR le monte à 50 min, seuil 37 min 30 s, au
+>     premier avertissement (LE-40) ;
+>   - dans `sonder.bats`, l'aide `sonder_sans_geste` s'ajoute à `apres_un_retour`, et la piste
+>     « `echec` ne garde qu'un couple » reste ouverte (#120) ;
+>   - `menage-cible` refuse tout magasin `io.containerd.snapshotter`, et sa table compte huit cas
+>     de plus que le plan (#121) ;
+>   - `menage-cible` dépend du réseau à chaque exécution, sous un délai de 2 min : Docker Hub,
+>     `registry:2.8.3` et un `apk add` sans versions épinglées ; une panne de l'un d'eux le rend
+>     rouge sans faute du code (#121) ;
+>   - la ligne « Tête relue » et les sections se cherchent telles que GitHub les montre, à des
+>     écarts près dont la liste n'est pas close, tous bornés par la tête de la PR ; la piste
+>     `POST /markdown` les couvrirait (#122) ;
+>   - `plan.py` est plus strict que GitHub : il refuse un numéro autre que 1, une sous-puce
+>     indentée de quatre colonnes ou plus au-delà du texte de la puce, un commentaire après deux
+>     ou trois espaces sous une puce, et deux espaces puis un tiret sous une ligne, que GitHub
+>     rend en titre souligné (#122) ;
+>   - au push, un plan ajouté se vérifie sans rouvrir ses lieux : un numéro de ligne qui a dérivé
+>     entre la CI de la PR et sa fusion n'est plus revu (#122) ;
+>   - le geste de la règle d'un projet, dans `docs/aligner.md` § 7, reprend tels quels des
+>     paramètres lus que l'écriture n'a pas encore éprouvés : le premier geste réel le dira
+>     (#122).
 
 Ce cadrage est la partie publique de la spec de conception du modèle, issue d'une séance de questions avec Edouard : 12 questions, puis 5 parties de design validées une à une. La partie qui nomme le serveur est privée et n'est pas reproduite ici.
 
