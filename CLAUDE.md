@@ -334,8 +334,10 @@ sont en `v0.8.1`. Trois dépôts sont publics, chacun avec sa règle de protecti
 `pupitre` et `veille-emploi`.
 
 Les messages de mise à jour vers la `v0.10.0` partent sur le oui d'Edouard, une fois l'étiquette
-publiée : d'abord celui de `serveur`, dépôt privé, dont la PR de mise à jour montre si `texte-pr`
-y lit les fermetures, puis les six autres, après le vert de `texte-pr` sur cette PR.
+publiée : d'abord celui de `serveur`, dépôt privé, dont la PR de mise à jour éprouve que la lecture
+des fermetures par `texte-pr` y aboutit, sans erreur (la preuve complète attend la première PR d'un
+dépôt privé qui ferme une issue : `docs/pistes.md`), puis les six autres, après le vert de
+`texte-pr` sur cette PR.
 
 Prochain, au choix d'Edouard :
 - le second temps du travail sur la documentation, un lot « documentation » avec sa spec : l'« État »
@@ -351,9 +353,9 @@ Prochain, au choix d'Edouard :
 - les constats que les portes du lot 15 laissent ouverts, dont un lot suivant pèse les motifs :
   LE-49 (un écart que son auteur ne reconnaît pas), LE-50 (le retrait des images, dans `serveur`),
   LE-54 et LE-61 (des textes que la section du plan ne couvre pas : une piste, un texte de clôture,
-  une docstring, `documentation.md`), LE-57 (un cas limite inconnu), LE-58 (un contrôle local qui
-  diffère de celui de la CI) ; et LE-63 et LE-64, nés de la revue finale, chacun avec la porte que
-  propose le registre ;
+  une docstring, `documentation.md`), LE-57 (un cas limite inconnu), LE-65 et LE-66 (une commande
+  que `CLAUDE.md` prescrit à une session), LE-58 (un contrôle local qui diffère de celui de la CI) ;
+  et LE-63 et LE-64, nés de la revue finale, chacun avec la porte que propose le registre ;
 - le délai du job `tests`, 45 min (LE-40) : le monter revient à Edouard, devant un avertissement ;
   LE-40 se clôt à la fin du lot qui suit le lot 15, sans coupure d'ici là.
 

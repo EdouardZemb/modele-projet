@@ -285,7 +285,10 @@
 >     de 40 lignes et un numéro de tâche en double (§ 2.4 et § 3.1 ; #115, #118) ;
 >   - `texte-pr` déclare d'emblée la permission `issues: read`. Sa preuve dans un dépôt privé est
 >     reportée à la mise à jour de `serveur`, dont le message part le premier ; ceux des autres
->     projets partent après le vert de `texte-pr` sur sa PR (§ 2.5 ; #115) ;
+>     projets partent après le vert de `texte-pr` sur sa PR (§ 2.5 ; #115). Cette PR ne ferme
+>     aucune issue : elle ne prouve que l'absence d'erreur, et la preuve complète viendra de la
+>     première PR d'un dépôt privé qui ferme une issue (`docs/pistes.md`, « La lecture des
+>     fermetures dans un dépôt privé ») ;
 >   - l'étape du texte de la PR, déplacée dans `texte-pr`, perd son
 >     `if: github.event_name == 'pull_request'`, toujours vrai là (§ 2.2 ; #115) ;
 >   - la ligne de durée et l'avertissement des jobs du dépôt modèle nomment le job et son système,
