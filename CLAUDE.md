@@ -304,11 +304,11 @@ ménage des notes du lot 14 (PR #115 et #117 à #122).
   en prod et en staging. Chacun lit le conseil du retour, vérifie que la sonde attend tant que rien
   ne change, joue un geste, puis compare le couple déployé à celui qu'annonce le conseil. Le gabarit
   passe de 49 à 63 tests.
-- **Les scripts sous `python -I`, et les tests sans cache** (AM-1, AM-3 ; #117). Les huit scripts
-  gérés qui importent un voisin posent eux-mêmes `sys.dont_write_bytecode`, puis ajoutent leur
-  dossier en fin de chemin d'import : sous `python -I`, ils trouvent leurs voisins et les réglages
-  du projet, sans écrire de cache, ce que `tests/test_scripts_isoles.py` éprouve dans un projet
-  rendu. `tests/conftest.py` coupe le cache des tests, et le job `tests` échoue sur tout
+- **Les scripts sous `python -I`, et les tests sans cache** (AM-1, AM-3 ; #117, #118). Les huit
+  scripts gérés qui importent un voisin posent eux-mêmes `sys.dont_write_bytecode`, puis ajoutent
+  leur dossier en fin de chemin d'import : sous `python -I`, ils trouvent leurs voisins et les
+  réglages du projet, sans écrire de cache, ce que `tests/test_scripts_isoles.py` éprouve dans un
+  projet rendu. `tests/conftest.py` coupe le cache des tests, et le job `tests` échoue sur tout
   `__pycache__` sous `template/scripts/modele/`. `documentation.md` dit trois gestes avant de
   réécrire un README.
 - **La revue finale** a lu `7ccab76..d9b5f0c` en cinq lentilles (la spec, les textes, les contrôles
