@@ -622,10 +622,13 @@ def test_claude_md_dit_la_commande_des_plans():
     """Les plans du modèle vivent hors du dépôt, où l'étape « Les plans » de la CI ne les voit
     pas : « Commandes » donne la commande qui les vérifie, avec le clone voisin de `serveur`."""
     commandes = _commandes_de_claude_md()
+    # un chemin relatif, sans barre oblique inverse, que Git Bash ne coupe pas, lancé depuis le
+    # clone principal, voisin de celui de `serveur` (revue finale du lot 15)
     assert (
-        "`python -B template/scripts/modele/plan.py --racine . "
-        "--depot serveur=C:\\src\\github.com\\EdouardZemb\\serveur <plan>`"
+        "`python -B template/scripts/modele/plan.py --racine . --depot serveur=../serveur <plan>`"
     ) in commandes
+    assert "La session lance cette commande depuis le clone principal" in commandes
+    assert "serveur=C:" not in commandes
     assert "`Documents\\00-boite-de-reception\\`" in commandes
     assert "avant de soumettre un plan à Edouard et après chaque correction" in commandes
 
@@ -635,7 +638,10 @@ def test_claude_md_dit_la_relance_et_les_avertissements_de_duree():
     finale de chaque lot relève les avertissements de durée : personne d'autre ne lit un
     avertissement sur une exécution verte. `--failed` relancerait tous les jobs en échec de
     l'exécution, une vraie faute comprise : la relance nomme le job, par le `databaseId` que
-    demande `gh run rerun --help`."""
+    demande `gh run rerun --help`, sauf quand tous les jobs en échec le sont par la panne d'un
+    service tiers, l'exception que la revue finale du lot 15 a fait écrire. Elle a fait écrire
+    aussi la lecture de chaque tentative : sans `--attempt`, `gh run view` ne montre que les
+    annotations de la dernière."""
     commandes = _commandes_de_claude_md()
     for fragment in (
         "`gh run rerun <id> --job <databaseId>`",
@@ -645,11 +651,27 @@ def test_claude_md_dit_la_relance_et_les_avertissements_de_duree():
         "que l'étape coupée est « cancelled », et non en échec",
         "Jamais pour `texte-pr`",
         "la revue finale de chaque lot relève les avertissements de durée des exécutions du lot",
-        "`gh run view <id>`",
         "annotations",
+        # la panne d'un service tiers : l'échec lu, sa cause hors du dépôt, le service revenu
+        (
+            "Une exception à « un échec ne se relance pas », la panne d'un service tiers : l'échec "
+            "est lu dans le journal, sa cause est hors du dépôt (un 504 ou un 503 de GitHub "
+            "Releases, au lot 15), et le service répond de nouveau (la même adresse rend 200 "
+            "depuis le poste) ; on relance alors le seul job par `--job`, ou `--failed` quand tous "
+            "les jobs en échec de l'exécution ont cette cause. Jamais pour `texte-pr`"
+        ),
+        # chaque tentative, et non la seule dernière
+        "`gh run view <id> --attempt <n>`",
+        (
+            "dans les annotations de chaque tentative, n allant de 1 au champ `attempt` de "
+            "l'exécution (`gh run view <id> --json attempt`). Sans `--attempt`, `gh run view` ne "
+            "montre que celles de la dernière tentative"
+        ),
     ):
         assert fragment in commandes, fragment
-    assert "--failed" not in commandes
+    # `--failed` n'est admis que dans l'exception de la panne
+    assert commandes.count("--failed") == 1
+    assert "`gh run view <id>` :" not in commandes
 
 
 def test_claude_md_dit_la_duree_mesuree_des_tests():
@@ -974,6 +996,15 @@ def test_ci_du_depot_modele_suit_le_socle():
     assert racine["jobs"]["confidentialite"]["steps"] == attendues
 
 
+def _blocs_sh(case):
+    """Les blocs ```sh d'une case de `docs/aligner.md`, chacun en ses lignes, sans le retrait de
+    deux espaces qui les range dans la case."""
+    return [
+        [ligne.removeprefix("  ") for ligne in bloc.split("\n")]
+        for bloc in re.findall(r"^  ```sh\n(.*?)\n  ```$", case, re.MULTILINE | re.DOTALL)
+    ]
+
+
 def test_liste_d_alignement():
     texte = (RACINE / "docs/aligner.md").read_text(encoding="utf-8")
     assert texte.splitlines()[0] == "# Aligner un projet existant sur le modèle"
@@ -1098,6 +1129,21 @@ def test_liste_d_alignement():
     for tout_indexer in ("git add -A", "git add ."):
         assert tout_indexer not in texte, tout_indexer
     assert "git add -- <chemins>" in texte
+    # revue finale du lot 15 : les plans existants, que l'étape « Les plans » du socle refuserait
+    # sans leurs trois sections, se relèvent dans les reports à la main (§ 3)
+    trois = " ".join(texte.split("\n## 3. ", 1)[1].split("\n## ", 1)[0].split())
+    assert (
+        "**Les plans de `.claude/plans/`**, s'il y en a : les relever ; retirer ceux des lots clos, "
+        "puisque la méthode supprime le plan à la clôture ; donner ses trois sections à chaque plan "
+        "en cours (`methode.md`, « Les outils »)."
+    ) in trois
+    assert "un renommage y compte pour un ajout" in trois
+    assert "`python -B scripts/modele/plan.py --racine . --sans-lieux <plan>`" in trois
+    # `texte-pr` est requis en cible `serveur` comme ailleurs
+    assert (
+        "- [ ] `gh pr checks` entièrement vert : `socle`, `texte-pr`, `verifier`, `deploiement` et "
+        "`image`."
+    ) in texte.split("\n## Passer en cible `serveur`", 1)[1].split("\n## ", 1)[0]
     # lot 15 : une règle qui existe déjà se met à jour après la fusion (§ 7), jamais avant la PR
     # (§ 6), puis les PR de Dependabot ouvertes se relancent
     six = texte.split("\n## 6. ", 1)[1].split("\n## ", 1)[0]
@@ -1115,6 +1161,56 @@ def test_liste_d_alignement():
     assert "👤" not in suivante
     for fragment in ("gh api repos/<dépôt>/rulesets/<id>", "`texte-pr`", "@dependabot rebase"):
         assert fragment in suivante, fragment
+    # revue finale du lot 15 : le corps de la mise à jour part de la règle en service, lue avant le
+    # geste, à laquelle `texte-pr` s'ajoute une fois ; le fichier géré seul retirerait à `pupitre`
+    # ses contrôles propres, dont `mutants`. La relecture vérifie chaque contrôle d'avant.
+    lecture = (
+        (
+            "gh api repos/<dépôt>/rulesets/<id> --jq '.rules[] | select(.type == "
+            '"required_status_checks")'
+        ),
+        "  | .parameters.required_status_checks[].context' > {}",
+    )
+    assert _blocs_sh(mise_a_jour) == [
+        [
+            *(ligne.format("avant.txt") for ligne in lecture),
+            (
+                "gh api repos/<dépôt>/rulesets/<id> --jq '{name, target, enforcement, "
+                "bypass_actors, conditions,"
+            ),
+            '  rules: [.rules[] | if .type == "required_status_checks"',
+            (
+                "    then .parameters.required_status_checks |= (if any(.[]; .context == "
+                '"texte-pr") then .'
+            ),
+            '      else . + [{context: "texte-pr"}] end)',
+            "    else . end]}' > regle.json",
+            "gh api -X PUT repos/<dépôt>/rulesets/<id> --input regle.json",
+        ]
+    ]
+    assert _blocs_sh(suivante) == [
+        [
+            *(ligne.format("apres.txt") for ligne in lecture),
+            "grep -vxFf apres.txt avant.txt",
+            "grep -x texte-pr apres.txt",
+        ]
+    ]
+    mise_a_jour = " ".join(mise_a_jour.split())
+    for fragment in (
+        "Avant le geste, lire les contrôles requis en service, dans `avant.txt`.",
+        "Le corps de la mise à jour part de la règle en service, à laquelle on ajoute `texte-pr`",
+        "Jamais du seul fichier géré quand la règle en service requiert des contrôles qu'il n'a pas",
+        (
+            "Le fichier géré ne s'emploie tel quel (`--input .github/modele/ruleset-main.json`, "
+            "depuis le clone à jour de la branche principale) que si la règle en service ne requiert "
+            "que les contrôles du socle."
+        ),
+        "Sous Windows, ces commandes se lancent dans Git Bash",
+    ):
+        assert fragment in mise_a_jour, fragment
+    suivante = " ".join(suivante.split())
+    assert "chaque contrôle requis avant le geste l'est toujours, et `texte-pr` aussi" in suivante
+    assert "y est (`texte-pr`)" not in texte
     sept = " ".join(sept.split())
     assert "Un `POST` crée une règle ; il ne met pas à jour celle qui existe." in sept
     assert "en créerait une seconde" not in texte

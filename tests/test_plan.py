@@ -2,7 +2,9 @@
 annoncés » (LE-53), « Outils et cas limites » (LE-56) et « Revues » (LE-55)."""
 
 import codecs
+import re
 import sys
+from pathlib import Path
 
 import plan as p
 import pytest
@@ -123,6 +125,10 @@ def test_sections(racine):
             {"revues": "- relecture : Tâche 1\n<!-- - cachée : Tâche 1"},
             "Revues, ligne 3 : forme attendue",
         ),
+        # le même, après une puce qui serait valide sans lui : seul le refus du `<!--` jamais
+        # fermé l'arrête, à sa ligne
+        ({"revues": "- relecture : Tâche 1 <!-- note"}, "Revues, ligne 2 : forme attendue"),
+        ({"outils": "- <!-- a — b — c"}, OUTIL_REFUSE),
     ]
     for reponses, attendu in cas:
         lignes, refus = verifier(plan(**reponses), racine)
@@ -157,6 +163,162 @@ def test_sections(racine):
         assert f"section « {titre} » en double" in lignes, lignes
         assert not [ligne for ligne in lignes if ligne.startswith(f"{titre}, ligne")], lignes
         assert lignes[-1] == resume, lignes
+
+
+def test_sous_liste_et_bloc_html(racine):
+    """Une sous-liste, ou une ligne ouverte par un commentaire puis portant un texte, ne continue
+    pas la puce d'avant : jointe à elle, elle passerait sans être lue, un lieu faux jamais ouvert
+    (revue finale du lot 15). Chaque forme refuse, à son rang, dans les trois sections, et la puce
+    d'avant reste lue : le résumé la compte. Une ligne de continuation ordinaire, un commentaire
+    seul sur sa ligne, un commentaire suivi d'un texte après quatre espaces, au-delà de la borne
+    des trois, ou les mêmes lignes dans un bloc clôturé, ne refusent pas. Une ligne qui commence
+    par `-`, `*`, `+` ou un nombre sans être une puce, ou qui porte un marqueur au milieu, continue
+    la puce : elle ne refuse pas, et le résumé compte la puce."""
+    titres = {"meca": p.MECANISMES, "outils": p.OUTILS, "revues": p.REVUES}
+    premieres = {
+        "meca": meca("src/a.py:2", "def f("),
+        "outils": "- git — un cas — un test",
+        "revues": "- relecture : Tâche 1",
+    }
+    # chaque suite, jointe à sa puce, passerait : son lieu ne serait pas ouvert, son outil et sa
+    # revue se fondraient dans ceux de la puce
+    suites = {
+        "meca": "`src/a.py:999` — `inexistant` — un second mécanisme",
+        "outils": "git — un second cas — un second test",
+        "revues": "finale : Tâche 1",
+    }
+    # le résumé, la puce d'avant comptée ; « Revues » garde sa puce par défaut dans les deux autres
+    resumes = {
+        "meca": "1 mécanismes vérifiés, 0 non vérifiés, 0 outils, 1 revues",
+        "outils": "0 mécanismes vérifiés, 0 non vérifiés, 1 outils, 1 revues",
+        "revues": "0 mécanismes vérifiés, 0 non vérifiés, 0 outils, 1 revues",
+    }
+    # « 1) », et un commentaire collé à une puce, que la lecture prendrait pour une puce en
+    # colonne 0 (relecture de la revue finale du lot 15) ; « 2. », « 10. » et une sous-puce à six
+    # espaces, que GitHub joint à la puce d'avant, et une sous-puce à quatre espaces, qu'il
+    # imbrique (sa ronde 2) ; une tabulation après le marqueur, qu'il imbrique aussi (sa ronde 5)
+    debuts = (
+        "  - ",
+        "   * ",
+        "  + ",
+        "  1. ",
+        "  1) ",
+        "  2. ",
+        "  10. ",
+        "    - ",
+        "      - ",
+        "\t- ",
+        "  -\t",
+        "  1.\t",
+        "<!-- c --> - ",
+        "<!-- c -->- ",
+        "   <!-- c --> ",
+    )
+    for cle, titre in titres.items():
+        contenus = [f"{premieres[cle]}\n{debut}{suites[cle]}" for debut in debuts]
+        contenus.append(f"{premieres[cle]}\n  -")  # une puce seule, en fin de ligne
+        for contenu in contenus:
+            lignes, refus = verifier(plan(**{cle: contenu}), racine)
+            assert refus, (cle, contenu, lignes)
+            nommees = [ligne for ligne in lignes if ligne.startswith(f"{titre}, ligne")]
+            assert nommees == [f"{titre}, ligne 3 : forme attendue"], (cle, contenu, lignes)
+            assert lignes[-1] == resumes[cle], (cle, contenu, lignes)
+        # la ligne qui ferme un commentaire de deux lignes porte le rang
+        texte = plan(**{cle: f"{premieres[cle]}\n<!-- c\nc --> {suites[cle]}"})
+        lignes, refus = verifier(texte, racine)
+        assert refus, (cle, lignes)
+        assert f"{titre}, ligne 4 : forme attendue" in lignes, (cle, lignes)
+        assert lignes[-1] == resumes[cle], (cle, lignes)
+    # « Aucun. » derrière un commentaire : GitHub rend la ligne en bloc HTML, jamais en « Aucun. »
+    # (« Revues » refuse « Aucun. » de toute façon)
+    for cle in ("meca", "outils"):
+        lignes, refus = verifier(plan(**{cle: "<!-- c -->Aucun."}), racine)
+        assert refus, (cle, lignes)
+        nommees = [ligne for ligne in lignes if ligne.startswith(f"{titres[cle]}, ligne")]
+        assert nommees == [f"{titres[cle]}, ligne 2 : forme attendue"], (cle, lignes)
+    admises = (
+        "\n  suite du texte",
+        "\n<!-- c -->",
+        "\n\n```\n<!-- c --> - x\n  - y\n```",
+        # un commentaire après quatre espaces, puis un texte : au-delà de la borne des trois
+        # espaces, la ligne continue la puce, et GitHub la montre dans la puce (relecture de la
+        # revue finale du lot 15, ronde 3)
+        "\n    <!-- c --> suite du texte",
+        # une ligne qui commence par `-`, `*`, `+` ou un nombre sans être une puce, faute d'un
+        # blanc après le marqueur, ou qui porte un marqueur au milieu : elle continue la puce, et
+        # GitHub la montre dans la puce (relecture de la revue finale du lot 15, rondes 4 et 5)
+        "\n  -v est l'option qui le montre",
+        "\n  *Note* : sous Windows seulement",
+        "\n  2.5 fois plus lent",
+        "\n  le cas - un autre cas",
+        "\n  voir le point 3) plus haut",
+        "\n  +3 s sous Windows",
+        "\n  3)suite du texte",
+    )
+    for cle in titres:
+        for suite in admises:
+            lignes, refus = verifier(plan(**{cle: premieres[cle] + suite}), racine)
+            assert not refus, (cle, suite, lignes)
+            assert lignes[-1] == resumes[cle], (cle, suite, lignes)
+    lignes, refus = verifier(plan(meca=premieres["meca"] + "\n  suite du texte"), racine)
+    assert lignes[-1].startswith("1 mécanismes vérifiés, 0 non vérifiés"), lignes
+
+
+def test_plan_lit_sous_liste_et_bloc_html_par_documentation(racine, monkeypatch):
+    """`plan.py` et `texte_pr.py` lisent une sous-liste et une ligne en bloc HTML par
+    `documentation.py`, à l'appel, sans leur propre copie : un double posé sur `documentation`
+    change ce qu'ils refusent (relecture de la revue finale du lot 15). La docstring de `plan.py`
+    dit les deux refus, et le commentaire de `SOUS_LISTE` dit sa sévérité."""
+    import documentation
+
+    for script in (p, texte_pr):
+        assert not hasattr(script, "_SOUS_LISTE"), script
+
+    def corps(section):
+        return "## Ce que fait cette PR\n\nx\n\n## Écarts à la spec\n\n" + section + "\n"
+
+    continue_la_revue = plan(revues="- relecture : Tâche 1\n  suite")
+    ecart = corps("- un écart — promesse : spec § 4.1 — accord d'Edouard : 07/11/2026")
+    continue_l_ecart = corps("- un écart\n  — promesse : § 2 — accord d'Edouard : 07/11/2026")
+    # sans double
+    assert not verifier(continue_la_revue, racine)[1]
+    assert texte_pr.ecarts(ecart)[1] is False
+    assert texte_pr.ecarts(continue_l_ecart)[1] is False
+    # la ligne 2 de chaque section, lue en bloc HTML
+    with monkeypatch.context() as m:
+        m.setattr(documentation, "lignes_en_bloc_html", lambda texte: {2})
+        assert verifier(plan(revues="- relecture : Tâche 1"), racine)[1]
+        assert texte_pr.ecarts(ecart)[1] is True
+    # toute ligne indentée, lue en sous-liste
+    with monkeypatch.context() as m:
+        m.setattr(documentation, "SOUS_LISTE", re.compile(r"[ \t]+"))
+        assert verifier(continue_la_revue, racine)[1]
+        assert texte_pr.ecarts(continue_l_ecart)[1] is True
+    source = Path(documentation.__file__).read_text(encoding="utf-8").split("\n")
+    fin = next(i for i, ligne in enumerate(source) if ligne.startswith("SOUS_LISTE = "))
+    debut = fin
+    while source[debut - 1].startswith("#"):
+        debut -= 1
+    commentaire = " ".join(" ".join(ligne[1:] for ligne in source[debut:fin]).split())
+    assert (
+        "`texte_pr.py` et `plan.py` la refusent toujours, plus strictement que GitHub, qui joint à "
+        "la puce d'avant un numéro autre que 1 et une ligne indentée de quatre colonnes ou plus "
+        "au-delà du texte de la puce."
+    ) in commentaire, commentaire
+    assert "GitHub en fait un élément de liste à part" not in commentaire, commentaire
+    docstring = " ".join(p.__doc__.split())
+    for fragment in (
+        (
+            "Une ligne indentée qui commence par une puce ou un numéro (`-`, `*`, `+`, `1.`) est "
+            "une sous-liste, et ne continue pas la puce d'avant : elle refuse."
+        ),
+        (
+            "Une ligne qui commence par un commentaire, après au plus trois espaces, et porte un "
+            "texte après sa fermeture n'est ni une puce ni la suite d'une puce : GitHub la rend en "
+            "bloc HTML, et elle refuse aussi."
+        ),
+    ):
+        assert fragment in docstring, fragment
 
 
 def test_normalisation_hors_du_code(racine):
@@ -470,6 +632,45 @@ def test_plan_titres_des_plans_reels(racine):
     lignes, refus = verifier(plan(revues="- relecture : Tâche 9", taches=taches), racine)
     assert refus
     assert "Revues, ligne 2 : Tâche 9 absente des titres" in lignes, lignes
+
+
+def test_titres_caches_par_un_commentaire_jamais_ferme(racine):
+    """Un `<!--` jamais fermé qui ouvre un bloc, en tête de ligne, ou après une puce, un numéro ou
+    `>`, cache sur GitHub tout ce qui le suit, les titres de tâche compris : `plan.py` ne les lit
+    pas non plus, comme `sections()` (relecture de la revue finale du lot 15, rondes 2 et 3). Que
+    les tâches suivent un titre de niveau 2 ou une ligne de séparation, la revue qui cite la
+    tâche 1 refuse. Un `<!--` jamais fermé qui n'ouvre pas de bloc ne cache rien, sur GitHub comme
+    ici : dans un bloc de code clôturé, au milieu d'un paragraphe, ou en code en ligne."""
+    debut = (
+        "# Plan\n\n## Mécanismes annoncés\n\nAucun.\n\n## Outils et cas limites\n\nAucun.\n\n"
+        "## Revues\n\n- revue : Tâche 1\n\n"
+    )
+    taches = "\n\n### Tâche 1 : x\n\n### Tâche 2 : clôture\n"
+    separations = (("p4a", "## Tâches\n\n"), ("p4b", "---\n\n"))
+    # GitHub (`gh api markdown`) ne rend aucun titre après chacune de ces ouvertures
+    for ouverture in (
+        "<!-- jamais fermé",
+        "- <!-- jamais fermé",
+        "1. <!-- jamais fermé",
+        "> <!-- jamais fermé",
+    ):
+        for nom, separation in separations:
+            lignes, refus = verifier(debut + separation + ouverture + taches, racine)
+            assert refus, (ouverture, nom, lignes)
+            attendu = "Revues, ligne 2 : Tâche 1 absente des titres"
+            assert attendu in lignes, (ouverture, nom, lignes)
+    # GitHub rend les deux titres après chacun de ces textes : les tâches se lisent, la revue passe
+    for avant in (
+        "```\n<!-- dans un bloc de code\n```",
+        "Un paragraphe <!-- jamais fermé au milieu.",
+        "Un `<!--` en code en ligne.",
+    ):
+        for nom, separation in separations:
+            lignes, refus = verifier(debut + separation + avant + taches, racine)
+            assert not refus, (avant, nom, lignes)
+    fragment = "lus hors des blocs de code clôturés et des blocs de commentaire HTML, fermés ou non"
+    for docstring in (p.__doc__, p._taches.__doc__):
+        assert fragment in " ".join(docstring.split()), docstring
 
 
 def test_plan_encodages(racine, lancer):

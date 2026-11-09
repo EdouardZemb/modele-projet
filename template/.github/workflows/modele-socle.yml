@@ -123,6 +123,8 @@ jobs:
               sys.exit(1)
           FIN
       - name: Les plans (.claude/plans)
+        env:
+          EVENEMENT: ${{ github.event_name }}
         run: |
           case "$BASE" in
             *[!0]*) ;;
@@ -131,7 +133,12 @@ jobs:
           git diff -z --name-only --no-renames --diff-filter=A "$BASE"...HEAD -- '.claude/plans/*.md' > "$RUNNER_TEMP/plans-ajoutes"
           git diff -z --name-only --no-renames --diff-filter=M "$BASE"...HEAD -- '.claude/plans/*.md' > "$RUNNER_TEMP/plans-modifies"
           code=0
-          xargs -0 -r -n 1 python scripts/modele/plan.py --racine . < "$RUNNER_TEMP/plans-ajoutes" || code=1
+          if [ "$EVENEMENT" = push ]; then
+            echo "Push : un plan ajouté se vérifie sans ouvrir ses lieux, vérifiés à la PR."
+            xargs -0 -r -n 1 python scripts/modele/plan.py --racine . --sans-lieux < "$RUNNER_TEMP/plans-ajoutes" || code=1
+          else
+            xargs -0 -r -n 1 python scripts/modele/plan.py --racine . < "$RUNNER_TEMP/plans-ajoutes" || code=1
+          fi
           xargs -0 -r -n 1 python scripts/modele/plan.py --racine . --sans-lieux < "$RUNNER_TEMP/plans-modifies" || code=1
           exit "$code"
       - name: La documentation de la racine (licence, carte)

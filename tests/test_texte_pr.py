@@ -140,6 +140,45 @@ def corps_avec(section):
         # un bloc indenté de quatre espaces : il continue l'écart d'avant, ou il refuse
         ("- un écart long\n    — promesse : § 2 — accord d'Edouard : 07/11/2026", 0, "1 déclaré"),
         ("Aucun.\n\n    un bloc indenté", 1, "ligne 4 de la section : ni « Aucun. » ni un écart"),
+        # un commentaire après quatre espaces, puis un texte : au-delà de la borne des trois
+        # espaces, la ligne continue l'écart d'avant, et GitHub la montre dans la puce
+        # (relecture de la revue finale du lot 15, ronde 3)
+        (
+            "- un écart long — promesse : § 2\n    <!-- c --> — accord d'Edouard : 07/11/2026",
+            0,
+            "écarts à la spec : 1 déclaré",
+        ),
+        # une ligne qui commence par `-` sans être une puce, faute d'un blanc après lui, ou qui
+        # porte un marqueur au milieu : elle continue l'écart d'avant, et GitHub la montre dans la
+        # puce (relecture de la revue finale du lot 15, ronde 4)
+        (
+            (
+                "- un écart — promesse : spec § 4.1\n  -v est l'option\n"
+                "  — accord d'Edouard : 07/11/2026"
+            ),
+            0,
+            "écarts à la spec : 1 déclaré",
+        ),
+        (
+            (
+                "- un écart\n  le cas - un autre cas\n"
+                "  — promesse : § 2 — accord d'Edouard : 07/11/2026"
+            ),
+            0,
+            "écarts à la spec : 1 déclaré",
+        ),
+        (
+            (
+                "- un écart\n  voir le point 3) plus haut\n"
+                "  — promesse : § 2 — accord d'Edouard : 07/11/2026"
+            ),
+            0,
+            "écarts à la spec : 1 déclaré",
+        ),
+        # `+` et `N)` sans blanc après eux : la ligne continue l'écart (relecture de la revue
+        # finale du lot 15, ronde 5)
+        ("- un écart — promesse : § 2\n  +3 s — accord d'Edouard : 07/11/2026", 0, "1 déclaré"),
+        ("- un écart — promesse : § 2\n  3)suite — accord d'Edouard : 07/11/2026", 0, "1 déclaré"),
     ],
 )
 def test_ecarts(lancer, section, code, attendu):
@@ -149,11 +188,26 @@ def test_ecarts(lancer, section, code, attendu):
     assert (REFUS in sortie) == (code == 1), sortie
 
 
-@pytest.mark.parametrize("puce", ["-", "*", "+", "1."])
-def test_ecarts_sous_liste(lancer, puce):
-    """Une ligne indentée qui commence par une puce est une sous-liste, pas la suite de l'écart
-    d'avant : elle refuse, à son rang, au lieu d'être jointe sans être lue."""
-    code, sortie = lancer(corps_avec(ECART + f"\n  {puce} une sous-puce"))
+@pytest.mark.parametrize(
+    "sous_liste",
+    [
+        *(f"  {puce} une sous-puce" for puce in ("-", "*", "+", "1.", "1)", "2.")),
+        # « 2. » et une sous-puce à six espaces, que GitHub joint à la puce d'avant, et une
+        # sous-puce à quatre espaces, qu'il imbrique : tous refusés (relecture de la revue finale
+        # du lot 15, ronde 2)
+        "    - une sous-puce",
+        "      - une sous-puce",
+        # une puce seule en fin de ligne : jointe, elle laisserait un texte après la date, à la
+        # ligne 2 (relecture de la revue finale du lot 15)
+        "  -",
+        # une tabulation après le marqueur : GitHub imbrique la sous-puce (sa ronde 5)
+        "  -\tune sous-puce",
+    ],
+)
+def test_ecarts_sous_liste(lancer, sous_liste):
+    """Une ligne indentée qui commence par une puce ou un numéro est une sous-liste, pas la suite
+    de l'écart d'avant : elle refuse, à son rang, au lieu d'être jointe sans être lue."""
+    code, sortie = lancer(corps_avec(ECART + "\n" + sous_liste))
     assert code == 1, sortie
     assert "ligne 3 de la section : ni « Aucun. » ni un écart" in sortie, sortie
 
@@ -174,6 +228,51 @@ def test_le_code_en_ligne_vient_de_documentation():
     assert not hasattr(t, "_CODE_EN_LIGNE")
     assert d._CODE_OU_COMMENTAIRE.pattern.endswith("|" + d.CODE_EN_LIGNE.pattern)
     assert d._CODE_OU_COMMENTAIRE.pattern.startswith(d.COMMENTAIRE.pattern + "|")
+
+
+def test_docstring_dit_les_refus_et_les_ecarts_du_rendu():
+    """La docstring de `texte_pr.py` dit ce que dit `methode.md` (relecture de la revue finale du
+    lot 15) : le rang n'est promis qu'aux refus d'une ligne, et la tête relue se cherche telle que
+    GitHub la montre, à des écarts près, dont deux connus et une phrase pour les autres formes :
+    une liste non close (sa ronde 3), tous bornés par le SHA, qui doit égaler la tête."""
+    docstring = " ".join(t.__doc__.split())
+    for fragment in (
+        (
+            "Le contrôle refuse, sans nommer de ligne : une section absente, vide ou en double ; "
+            "« Aucun. » à côté d'un écart ; un `<!--` jamais fermé dans la section, qui cacherait "
+            "la suite."
+        ),
+        (
+            "Il refuse, en nommant la ligne par son rang dans la section, la ligne 1 étant celle "
+            "qui suit le titre : une ligne qui n'est ni « Aucun. » ni un écart, une sous-liste "
+            "comprise ; un écart vide, sans « promesse : » suivi d'un texte, sans « accord "
+            "d'Edouard : » suivi d'une vraie date, avec un texte après la date, ou hors de cet "
+            "ordre."
+        ),
+        (
+            "une ligne qu'il cache est absente. À des écarts près, dont deux connus : un `<!--` "
+            "jamais fermé, ouvert dans un élément de liste après quatre espaces ou plus (une puce "
+            "imbriquée, ou une ligne qui continue la puce), cache sur GitHub tout ce qui le suit, "
+            "et un `<?`, un `<!` suivi d'une majuscule (`<!DOCTYPE`) ou un `<![CDATA[` ouvert en "
+            "tête de ligne, tout ce qui le suit jusqu'au premier `>`, même plusieurs lignes plus "
+            "bas, ou jusqu'à la fin sans lui ; le contrôle lit encore ces lignes, la ligne « Tête "
+            "relue » comme la section des écarts. D'autres formes HTML cachent aussi sur GitHub ce "
+            "que le contrôle lit : un `<?` ou un `<!DOCTYPE` après une puce, ou en ligne et fermé "
+            "plus bas ; un `<!--` jamais fermé dans une ligne de bloc HTML, comme "
+            "`<div><!-- note</div>` ; un attribut ou un titre de lien sur plusieurs lignes. Tous "
+            "sont bornés : le SHA de cette ligne doit toujours égaler la tête de la PR."
+        ),
+    ):
+        assert fragment in docstring, fragment
+    # la liste des écarts du rendu n'est plus close (relecture de la revue finale du lot 15,
+    # ronde 3) : ni l'ancien décompte, ni l'ancienne borne, quelle que soit la casse
+    for perime in ("à deux écarts près", "les deux écarts sont bornés"):
+        assert perime not in docstring.casefold(), perime
+    ancien = (
+        "Le refus nomme la ligne par son rang dans la section, la ligne 1 étant celle qui suit le "
+        "titre : une section absente"
+    )
+    assert ancien not in docstring
 
 
 def test_ecarts_titres_varies(lancer):
@@ -230,6 +329,10 @@ def test_auteurs(lancer):
         ("Tête relue : ", FERME_UNE, 1, ABSENTE),
         (f"Tête relue : {TETE[:12]}", FERME_UNE, 1, ABSENTE),
         (f"<!-- Tête relue : {TETE} -->", FERME_UNE, 1, ABSENTE),
+        # la ligne se cherche hors des blocs de code et des commentaires : dans un bloc clôturé,
+        # ou dans un commentaire fermé ouvert au milieu d'un paragraphe, elle est absente
+        (f"```\nTête relue : {TETE}\n```", FERME_UNE, 1, ABSENTE),
+        (f"texte <!--\nTête relue : {TETE}\n-->", FERME_UNE, 1, ABSENTE),
         # un commentaire jamais fermé, ouvert en tête de ligne ou après une puce, cache sur GitHub
         # tout ce qui le suit ; au milieu d'un paragraphe, il reste du texte, et la ligne se voit
         (f"<!-- note\n\nTête relue : {TETE}", FERME_UNE, 1, ABSENTE),
@@ -253,6 +356,9 @@ def test_auteurs(lancer):
         ("", FERME_FAUX, 1, ILLISIBLES),
         ("", FERME_VRAI, 1, ILLISIBLES),
         ("", "null", 1, ILLISIBLES),  # un JSON qui n'est pas un objet
+        # une réponse qui n'est pas du JSON : la page d'un 502, une sortie tronquée
+        ("", "<html>502</html>", 1, ILLISIBLES),
+        ("", FERME_UNE[:-3], 1, ILLISIBLES),
     ],
 )
 def test_tete_relue(lancer, ligne, fermetures, code, attendu):

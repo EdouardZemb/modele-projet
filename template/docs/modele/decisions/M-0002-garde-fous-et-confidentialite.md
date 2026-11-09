@@ -48,7 +48,7 @@ pas de la discipline de celui qui travaille ?
   Claude `PreToolUse` sur les outils `Bash`, `PowerShell` et `Monitor`, et sur tout outil MCP qui
   porte une commande. Le garde refuse toute modification de `core.hooksPath`, sauf la réparation
   `git config core.hooksPath .githooks`.
-- Un dépôt **privé** reste possible. Il n'a alors que les hooks, et la CI de base.
+- Un dépôt **privé** reste possible. Il n'a alors que les hooks et la CI (le socle et `texte-pr`).
 - **La porte de confidentialité est obligatoire**, dans tous les projets. Ses motifs génériques sont
   versionnés ; ses motifs privés (noms de machines, d'utilisateurs, chemins) sont gardés hors dépôt,
   sur le poste et dans un secret de la CI. Une session à distance n'a pas la liste privée : la CI

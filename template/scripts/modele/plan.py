@@ -9,9 +9,13 @@ en double, et aucune des deux sections n'est lue. Hors des blocs de code clôtur
 commentaires fermés, elle n'admet que des lignes vides, « Aucun. », des puces `-` ou `*`, et des
 lignes indentées, qui continuent la puce d'avant et se joignent à elle. Toute autre ligne refuse,
 une ligne indentée sans puce avant elle comprise, comme un `<!--` jamais fermé, qui cacherait la
-suite sur GitHub. Une section où il ne reste rien refuse, vide. « Aucun. » n'est admis que seul, et
-jamais dans « Revues ». Un refus nomme la ligne par son rang dans la section, la ligne 1 étant celle
-qui suit le titre, jamais par son texte.
+suite sur GitHub. Une ligne indentée qui commence par une puce ou un numéro (`-`, `*`, `+`, `1.`)
+est une sous-liste, et ne continue pas la puce d'avant : elle refuse. Une ligne qui commence par
+un commentaire, après au plus trois espaces, et porte un texte après sa fermeture n'est ni une
+puce ni la suite d'une puce : GitHub la rend en bloc HTML, et elle refuse aussi. Une section où il
+ne reste rien refuse, vide. « Aucun. » n'est admis que seul, et jamais dans « Revues ». Un refus
+nomme la ligne par son rang dans la section, la ligne 1 étant celle qui suit le titre, jamais par
+son texte.
 
 Avant toute lecture, hors du code en ligne : le texte en LF et en NFC ; l'apostrophe typographique
 et U+02BC deviennent `'`, une espace insécable devient une espace. Un séparateur est `—` ou `–`,
@@ -39,9 +43,10 @@ trois morceaux non vides : l'outil, le cas limite qu'il traite autrement, le tes
 
 Revues. Une puce par temps de revue, qui cite au moins une tâche, `Tâche N` ou `Task N`, sans égard
 à la casse, présente dans les titres de niveau 3 (`### Tâche N : …`, `### Task N: …`), lus hors des
-blocs de code clôturés et des commentaires fermés. Deux titres ne portent jamais le même numéro. La
-clôture est la première tâche dont le titre dit « clôture » ou « closure » : chaque tâche citée la
-précède. Un titre après elle ne refuse pas, mais une revue qui le cite refuse.
+blocs de code clôturés et des blocs de commentaire HTML, fermés ou non. Deux titres ne portent
+jamais le même numéro. La clôture est la première tâche dont le titre dit « clôture » ou
+« closure » : chaque tâche citée la précède. Un titre après elle ne refuse pas, mais une revue qui
+le cite refuse.
 
 Les fichiers. Un plan qui commence par un BOM UTF-16 se lit en UTF-16, ce qu'écrivent `>` et
 `Out-File` de PowerShell 5.1 ; sinon, le plan et les fichiers cités se lisent en UTF-8, BOM retiré,
@@ -166,9 +171,11 @@ def _normaliser(texte: str, doc) -> str:
 def _lire_section(brute: str, doc) -> tuple[list[tuple[int, str]], list[int], list[int]]:
     """Les lignes d'une section : (puces, chacune avec son rang et ses lignes de continuation
     jointes ; rangs des « Aucun. » ; rangs des lignes refusées). Un `<!--` jamais fermé refuse sa
-    ligne, et cache la suite."""
+    ligne, et cache la suite. Une sous-liste, ou une ligne ouverte par un commentaire puis portant
+    un texte, que GitHub rend en bloc HTML, ne continue pas la puce d'avant : elle refuse."""
     propre = doc.sans_bloc_ni_commentaire(brute)
     masque = doc.CODE_EN_LIGNE.sub(lambda m: re.sub(r"[^\n]", "x", m.group(0)), propre)
+    en_bloc_html = doc.lignes_en_bloc_html(brute)
     puces: list[tuple[int, list[str]]] = []
     aucuns: list[int] = []
     refusees: list[int] = []
@@ -180,8 +187,10 @@ def _lire_section(brute: str, doc) -> tuple[list[tuple[int, str]], list[int], li
             break
         if not ligne.strip():
             continue
-        if ligne[0] in " \t":  # une ligne indentée continue la puce d'avant
-            if ouverte:
+        if rang in en_bloc_html:
+            pass
+        elif ligne[0] in " \t":  # une ligne indentée continue la puce d'avant, sauf une sous-liste
+            if ouverte and doc.SOUS_LISTE.match(ligne) is None:
                 puces[-1][1].append(ligne.strip())
                 continue
         elif ligne.rstrip() == AUCUN:
@@ -293,9 +302,14 @@ def _mecanisme(
 
 def _taches(texte: str, doc) -> list[tuple[int, str]]:
     """Les tâches du plan, dans l'ordre : (numéro, titre replié), d'après les titres de niveau 3
-    lus hors des blocs de code clôturés et des commentaires fermés."""
+    lus hors des blocs de code clôturés et des blocs de commentaire HTML, fermés ou non. Comme
+    dans `sections()`, chaque bloc se retire, ses fins de ligne gardées : un `<!--` jamais fermé
+    qui ouvre un bloc cache tout ce qui le suit, comme sur GitHub."""
+    visibles = doc._BLOC_DE_COMMENTAIRE.sub(
+        lambda m: "\n" * m.group(0).count("\n"), doc._hors_des_blocs(doc._en_lf(texte))
+    )
     taches = []
-    for ligne in doc.sans_bloc_ni_commentaire(texte).split("\n"):
+    for ligne in doc.sans_bloc_ni_commentaire(visibles).split("\n"):
         ligne = unicodedata.normalize("NFC", ligne)
         m = _TITRE_DE_TACHE.match(ligne)
         if m is not None:

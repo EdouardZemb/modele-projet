@@ -228,12 +228,18 @@ def test_modele_de_pr_ferme_l_issue():
     assert rang > max(i for i, ligne in enumerate(lignes) if ligne.startswith("- [ ] "))
     a_plat = " ".join(texte.split())
     assert "le SHA complet de la tête qu'a lue la dernière relecture" in a_plat
-    # hors des lots, un correctif qui ferme une issue nomme aussi la tête relue, comme le dit la
-    # méthode
-    assert (
-        "Dans la PR de clôture, ou dans un correctif hors des lots qui ferme une issue par "
-        "`Fixes #N` : le SHA complet"
-    ) in a_plat
+    # la règle avant les cas : toute PR qui ferme une issue porte la ligne, comme l'exige
+    # `texte_pr.py`, qui compte les fermetures par l'API, quel que soit le mot-clé ; puis la PR de
+    # clôture d'un lot, et, hors des lots, un correctif ou toute autre PR qui ferme son issue
+    # (revue finale du lot 15)
+    commentaire = next(ligne for ligne in lignes[rang + 1 :] if ligne.strip())
+    assert commentaire == (
+        "<!-- Toute PR qui ferme une issue porte cette ligne, quel que soit le mot-clé : le SHA "
+        "complet de la tête qu'a lue la dernière relecture. Dans un lot, c'est la seule PR de "
+        "clôture ; hors des lots, un correctif par `Fixes #N`, ou toute autre PR qui ferme son "
+        "issue. -->"
+    ), commentaire
+    assert "Dans la PR de clôture, ou dans un correctif hors des lots" not in a_plat
 
 
 def test_modele_de_pr_renvoie_un_depot_de_donnees_au_registre_du_code():
@@ -318,6 +324,23 @@ def test_methode_dit_le_texte_de_la_pr():
         "la PR de revue finale n'est pas visée",
         "hors des lots, un correctif qui ferme une issue par `Fixes #N` nomme aussi la tête relue",
         "aucun type d'événement documenté ne suit ce lien",
+        # les écarts du rendu : deux connus, et leur portée (revue finale du lot 15, et sa
+        # relecture : un `<?` cache tout jusqu'au premier `>`, même plus bas, et seul un `<!`
+        # suivi d'une majuscule ouvre un bloc) ; une liste non close, les autres formes en une
+        # phrase, et tous bornés par le SHA (sa ronde 3)
+        (
+            "La ligne se cherche telle que GitHub la montre, à des écarts près, dont deux connus : "
+            "un `<!--` jamais fermé, ouvert dans un élément de liste après quatre espaces ou plus "
+            "(une puce imbriquée, ou une ligne qui continue la puce), cache sur GitHub tout ce qui "
+            "le suit, et un `<?`, un `<!` suivi d'une majuscule (`<!DOCTYPE`) ou un `<![CDATA[` "
+            "ouvert en tête de ligne, tout ce qui le suit jusqu'au premier `>`, même plusieurs "
+            "lignes plus bas, ou jusqu'à la fin sans lui ; le contrôle lit encore ces lignes, la "
+            "ligne `Tête relue` comme la section des écarts. D'autres formes HTML cachent aussi "
+            "sur GitHub ce que le contrôle lit : un `<?` ou un `<!DOCTYPE` après une puce, ou en "
+            "ligne et fermé plus bas ; un `<!--` jamais fermé dans une ligne de bloc HTML, comme "
+            "`<div><!-- note</div>` ; un attribut ou un titre de lien sur plusieurs lignes. Tous "
+            "sont bornés : le SHA de cette ligne doit toujours égaler la tête de la PR."
+        ),
         "la branche par défaut",
         "seul à écouter `edited`",
         "le garde lit tous les contrôles, `texte-pr` compris",
@@ -336,6 +359,16 @@ def test_methode_dit_le_texte_de_la_pr():
         ),
         "une section absente, vide ou en double",
         "avec un texte après la date, ou hors de cet ordre",
+        # le rang n'est promis qu'aux refus d'une ligne : les refus de la section n'en portent pas
+        # (revue finale du lot 15)
+        (
+            "Le contrôle refuse, sans nommer de ligne : une section absente, vide ou en double ; "
+            "« Aucun. » à côté d'un écart ; un commentaire HTML jamais fermé, qui cacherait la "
+            "suite. Il refuse, en nommant la ligne par son rang dans la section : une ligne qui "
+            "n'est ni « Aucun. » ni un écart, une sous-liste comprise ; un écart vide, sans "
+            "« promesse : » suivi d'un texte, sans « accord d'Edouard : » suivi d'une date valide "
+            "`JJ/MM/AAAA`, avec un texte après la date, ou hors de cet ordre."
+        ),
         "Un commentaire fermé ou un bloc clôturé ne compte pas",
         (
             "Un bloc indenté de quatre espaces n'est pas écarté : après une puce, il continue l'écart ; "
@@ -384,6 +417,10 @@ def test_methode_dit_le_texte_de_la_pr():
         "rien ne bloque côté agent",
         "Ce fichier est semé",
         "GitHub la rend hors de toute liste",
+        # la liste des écarts du rendu n'est plus close (relecture de la revue finale du lot 15,
+        # ronde 3)
+        "à deux écarts près",
+        "Les deux écarts sont bornés",
     ):
         assert perime not in texte, perime
     lignes = section.splitlines()
@@ -391,6 +428,13 @@ def test_methode_dit_le_texte_de_la_pr():
     assert "du texte de la PR" not in ci
     (rang,) = [i for i, ligne in enumerate(lignes) if ligne.startswith("| workflow `texte-pr` |")]
     assert lignes[rang - 1] == ci
+    # le job n'est requis que par la règle d'un dépôt public ; un dépôt privé n'en a pas, et le
+    # garde le lit avant une fusion en mode `session` (revue finale du lot 15)
+    assert lignes[rang].endswith(
+        " Son job, `texte-pr`, est un contrôle requis par la règle de protection d'un dépôt "
+        "public ; dans un dépôt privé, qui n'a pas de règle, le garde le lit avant une fusion en "
+        "mode `session` |"
+    ), lignes[rang]
     assert "**Le texte de la PR.**" in texte
     # Le cycle : seule la PR de clôture ferme l'issue, et elle nomme la tête relue.
     cycle = lire(METHODE).split("## Le cycle d'un lot", 1)[1].split("\n## ", 1)[0]
@@ -571,6 +615,12 @@ def test_m0002_amende():
     # lot 15 : le texte de la PR sort du socle, vers `texte-pr`, qui fait partie du filet
     assert "la CI (le socle et `texte-pr`) le seul filet" in " ".join(texte.split())
     assert "CI du socle le seul filet" not in " ".join(texte.split())
+    # le dépôt privé n'a pas que la CI de base : `texte-pr` en fait partie (revue finale du lot 15)
+    assert (
+        "- Un dépôt **privé** reste possible. Il n'a alors que les hooks et la CI (le socle et "
+        "`texte-pr`)."
+    ) in texte
+    assert "que les hooks, et la CI de base" not in texte
     assert "avertit sur ce qui identifie" in texte
     assert "refuse toujours les secrets" in texte
     assert "gitleaks n'est pas concerné" not in texte
@@ -1171,6 +1221,38 @@ DOCUMENTATION_ET_DOCSTRING = (
         "lien à plus de trois niveaux de crochets, une définition après un titre souligné, un "
         "commentaire fermé par `--->` dans un paragraphe)"
     ),
+    # un commentaire jamais fermé dans un élément de liste, que `DEBUT_DE_BLOC` ne suit pas, et sa
+    # portée (revue finale du lot 15)
+    (
+        "un `<!--` jamais fermé, ouvert dans un élément de liste après quatre espaces ou plus (une "
+        "puce imbriquée, ou une ligne qui continue la puce), cache sur GitHub tout ce qui le suit, "
+        "mais les contrôles lisent encore la suite : un titre, et donc la section « Ce qui fait "
+        "foi », la section des écarts à la spec, les trois sections d'un plan et ses titres de "
+        "tâche, et la ligne « Tête relue », qui doit toujours nommer la tête de la PR"
+    ),
+    # un bloc `<?`, `<!DOCTYPE` ou `<![CDATA[`, qui cache tout jusqu'au premier `>`, même plus bas,
+    # et que `texte_pr.py` et `plan.py` ne cherchent pas (relecture de la revue finale du lot 15)
+    (
+        "qui doit toujours nommer la tête de la PR ; un bloc ouvert en tête de ligne par `<?`, "
+        "par `<!` suivi d'une majuscule (`<!DOCTYPE`) ou par `<![CDATA[` cache de même sur "
+        "GitHub tout ce qui le suit jusqu'au premier `>`, même plusieurs lignes plus bas, ou "
+        "jusqu'à la fin sans lui, mais `texte_pr.py` et `plan.py`, qui ne cherchent que `<!--`, "
+        "lisent encore la ligne « Tête relue », la section des écarts, les trois sections d'un "
+        "plan et ses titres de tâche."
+    ),
+    # une liste non close : deux écarts connus, puis les autres formes en une phrase (relecture de
+    # la revue finale du lot 15, ronde 3)
+    (
+        "D'autres laissent passer à tort ce que GitHub cache, et touchent aussi `texte_pr.py` et "
+        "`plan.py`"
+    ),
+    "; deux sont connus : un `<!--` jamais fermé, ouvert dans un élément de liste",
+    (
+        "plan et ses titres de tâche. D'autres formes HTML cachent aussi sur GitHub ce que les "
+        "contrôles lisent : un `<?` ou un `<!DOCTYPE` après une puce, ou en ligne et fermé plus "
+        "bas ; un `<!--` jamais fermé dans une ligne de bloc HTML, comme `<div><!-- note</div>` ; "
+        "un attribut ou un titre de lien sur plusieurs lignes."
+    ),
 )
 
 
@@ -1232,6 +1314,8 @@ def test_documentation_md(tmp_path, env_isole):
         "donne les mêmes lignes que la CI",
         "comme `CLAUDE.local.md`, n'est pas compté",
         "Quatre laissent passer",
+        "Un autre laisse passer à tort ce que GitHub cache",
+        "Deux autres laissent passer",
     ):
         assert ancien not in plat, ancien
     # Les lignes de la licence et de la carte, telles que le script les écrit sur une racine, sont
@@ -1316,7 +1400,12 @@ def test_docstring_suit_documentation_md():
     docstring = " ".join(documentation.__doc__.split())
     for fragment in DOCUMENTATION_ET_DOCSTRING:
         assert fragment in docstring, fragment
-    for ancien in ("Quatre laissent passer", "comme en CI : un fichier qu'il ignore"):
+    for ancien in (
+        "Quatre laissent passer",
+        "comme en CI : un fichier qu'il ignore",
+        "Un autre laisse passer à tort ce que GitHub cache",
+        "Deux autres laissent passer",
+    ):
         assert ancien not in docstring, ancien
 
 
@@ -1357,13 +1446,28 @@ def test_methode_nomme_documentation_md():
 def test_methode_dit_les_plans():
     """Le contrôle des plans (LE-53, LE-55, LE-56) : les trois sections d'un plan et la forme de
     leurs lignes, la revue du plan, les revues comme tâches du plan, le cas limite d'un outil, le
-    mutant, et ce que la CI vérifie d'un plan ajouté ou modifié. Le tableau des garde-fous nomme le
-    script ; le point 2 du cycle renvoie aux trois sections et à la revue du plan."""
+    mutant, et ce que la CI vérifie d'un plan ajouté ou modifié, à la PR et au push. Le tableau des
+    garde-fous nomme le script ; le point 2 du cycle renvoie aux trois sections et à la revue du
+    plan."""
     texte = _aplati(lire(METHODE))
     for fragment in (
+        # la règle de la place est séparée du contrôle, qui ne la vérifie pas (revue finale du
+        # lot 15)
+        (
+            "un plan porte trois sections de niveau 2, que `scripts/modele/plan.py` vérifie. On les "
+            "écrit avant ses tâches ; le script n'en vérifie pas la place."
+        ),
         # les puces que `plan.py` admet, et le refus d'une section en double
         "n'admet que des puces `-` ou `*`",
         "deux sections du même titre refusent, et aucune des deux n'est lue",
+        # une sous-liste, ou une ligne ouverte par un commentaire, ne continue pas la puce : elle
+        # refuse, comme dans la section des écarts (revue finale du lot 15)
+        (
+            "Une ligne indentée qui commence par une puce ou un numéro (`-`, `*`, `+`, `1.`) est "
+            "une sous-liste, et refuse : elle ne continue pas la puce d'avant. Une ligne qui "
+            "commence par un commentaire, après au plus trois espaces, et porte un texte après lui "
+            "refuse aussi : GitHub la rend en bloc HTML, jamais en puce."
+        ),
         # la tête qui part, relue dans la PR de clôture, n'est pas un temps de « Revues »
         (
             "La relecture de la tête qui part, dans la PR de clôture, ne s'écrit pas dans "
@@ -1392,15 +1496,29 @@ def test_methode_dit_les_plans():
         "hors du plan",
         "est éprouvé par un mutant",
         "un plan modifié se vérifie sans ouvrir les fichiers cités",
+        # au push sur la branche principale, un plan ajouté ne rouvre pas ses lieux, vérifiés à la
+        # PR (revue finale du lot 15)
+        (
+            "Le socle tourne aussi au push sur la branche principale, sur les plans que ce push "
+            "ajoute ou modifie : un plan ajouté s'y vérifie aussi sans ouvrir les fichiers cités, "
+            "puisque ses lieux l'ont été à la PR, et qu'une autre PR, fusionnée entre-temps, a pu "
+            "décaler une ligne citée."
+        ),
     ):
         assert fragment in texte, fragment
     assert "chaque fichier cité ouvert" not in texte
     assert "seule la revue du plan le relit" not in texte
+    assert "avant ses tâches, trois sections de niveau 2, que" not in texte
     assert not RENVOI_AU_PLAN.search(texte)
     section = lire(METHODE).split("## Les garde-fous", 1)[1].split("\n## ", 1)[0]
     (ligne,) = [ligne for ligne in section.splitlines() if "`scripts/modele/plan.py`" in ligne]
     assert ligne.startswith("| ") and ligne.endswith(" |"), ligne
     assert "un lieu d'un autre dépôt restant « non vérifié », sans refus" in ligne, ligne
+    au_push = (
+        "Au push sur la branche principale, un plan ajouté se vérifie aussi sans ouvrir les "
+        "fichiers cités, ses lieux vérifiés à la PR."
+    )
+    assert au_push in ligne, ligne
     cycle = lire(METHODE).split("## Le cycle d'un lot", 1)[1].split("\n## ", 1)[0]
     (point,) = [b for b in blocs(cycle) if b[0].startswith("2. ")]
     point = _aplati(" ".join(point))
