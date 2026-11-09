@@ -309,8 +309,10 @@
 >   - les refus de la section des écarts ajoutés en revue (l'ordre de la ligne, un écart vide, une
 >     section en double, une sous-liste, une ligne ouverte par un commentaire), lus comme sa forme
 >     stricte (#115) ;
->   - dans M-0002, « la CI (le socle et `texte-pr`) le seul filet », hors des passages que la spec
->     permettait de toucher : sans ce changement, la phrase devenait fausse (#115) ;
+>   - dans M-0002, hors des passages que la spec permettait de toucher, deux phrases qui sans ce
+>     changement devenaient fausses : « la CI (le socle et `texte-pr`) le seul filet » (#115), et
+>     « les hooks et la CI (le socle et `texte-pr`) » (#122), que la relecture de la clôture a
+>     relevée et qu'Edouard a acceptée à part, le même jour ;
 >   - une relance de `texte-pr` relit le texte de l'événement d'origine : `methode.md` dit de ne
 >     jamais la relancer, et lire le titre et le corps par l'API reste une piste (#115) ;
 >   - `documentation.md` gagne la sous-section « Réécrire un README » (#117) ;
@@ -335,8 +337,9 @@
 >     écarts près dont la liste n'est pas close, tous bornés par la tête de la PR ; la piste
 >     `POST /markdown` les couvrirait (#122) ;
 >   - `plan.py` est plus strict que GitHub : il refuse un numéro autre que 1, une sous-puce
->     indentée de quatre colonnes ou plus, un commentaire après deux ou trois espaces sous une
->     puce, et deux espaces puis un tiret sous une ligne, que GitHub rend en titre souligné (#122) ;
+>     indentée de quatre colonnes ou plus au-delà du texte de la puce, un commentaire après deux
+>     ou trois espaces sous une puce, et deux espaces puis un tiret sous une ligne, que GitHub
+>     rend en titre souligné (#122) ;
 >   - au push, un plan ajouté se vérifie sans rouvrir ses lieux : un numéro de ligne qui a dérivé
 >     entre la CI de la PR et sa fusion n'est plus revu (#122) ;
 >   - le geste de la règle d'un projet, dans `docs/aligner.md` § 7, reprend tels quels des
