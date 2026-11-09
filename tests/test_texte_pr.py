@@ -175,6 +175,10 @@ def corps_avec(section):
             0,
             "écarts à la spec : 1 déclaré",
         ),
+        # `+` et `N)` sans blanc après eux : la ligne continue l'écart (relecture de la revue
+        # finale du lot 15, ronde 5)
+        ("- un écart — promesse : § 2\n  +3 s — accord d'Edouard : 07/11/2026", 0, "1 déclaré"),
+        ("- un écart — promesse : § 2\n  3)suite — accord d'Edouard : 07/11/2026", 0, "1 déclaré"),
     ],
 )
 def test_ecarts(lancer, section, code, attendu):
@@ -196,6 +200,8 @@ def test_ecarts(lancer, section, code, attendu):
         # une puce seule en fin de ligne : jointe, elle laisserait un texte après la date, à la
         # ligne 2 (relecture de la revue finale du lot 15)
         "  -",
+        # une tabulation après le marqueur : GitHub imbrique la sous-puce (sa ronde 5)
+        "  -\tune sous-puce",
     ],
 )
 def test_ecarts_sous_liste(lancer, sous_liste):

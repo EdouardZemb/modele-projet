@@ -172,8 +172,8 @@ def test_sous_liste_et_bloc_html(racine):
     d'avant reste lue : le résumé la compte. Une ligne de continuation ordinaire, un commentaire
     seul sur sa ligne, un commentaire suivi d'un texte après quatre espaces, au-delà de la borne
     des trois, ou les mêmes lignes dans un bloc clôturé, ne refusent pas. Une ligne qui commence
-    par `-`, `*` ou un nombre sans être une puce, ou qui porte un marqueur au milieu, continue la
-    puce : elle ne refuse pas, et le résumé compte la puce."""
+    par `-`, `*`, `+` ou un nombre sans être une puce, ou qui porte un marqueur au milieu, continue
+    la puce : elle ne refuse pas, et le résumé compte la puce."""
     titres = {"meca": p.MECANISMES, "outils": p.OUTILS, "revues": p.REVUES}
     premieres = {
         "meca": meca("src/a.py:2", "def f("),
@@ -196,7 +196,7 @@ def test_sous_liste_et_bloc_html(racine):
     # « 1) », et un commentaire collé à une puce, que la lecture prendrait pour une puce en
     # colonne 0 (relecture de la revue finale du lot 15) ; « 2. », « 10. » et une sous-puce à six
     # espaces, que GitHub joint à la puce d'avant, et une sous-puce à quatre espaces, qu'il
-    # imbrique (sa ronde 2)
+    # imbrique (sa ronde 2) ; une tabulation après le marqueur, qu'il imbrique aussi (sa ronde 5)
     debuts = (
         "  - ",
         "   * ",
@@ -208,6 +208,8 @@ def test_sous_liste_et_bloc_html(racine):
         "    - ",
         "      - ",
         "\t- ",
+        "  -\t",
+        "  1.\t",
         "<!-- c --> - ",
         "<!-- c -->- ",
         "   <!-- c --> ",
@@ -242,14 +244,16 @@ def test_sous_liste_et_bloc_html(racine):
         # espaces, la ligne continue la puce, et GitHub la montre dans la puce (relecture de la
         # revue finale du lot 15, ronde 3)
         "\n    <!-- c --> suite du texte",
-        # une ligne qui commence par `-`, `*` ou un nombre sans être une puce, faute d'un blanc
-        # après le marqueur, ou qui porte un marqueur au milieu : elle continue la puce, et GitHub
-        # la montre dans la puce (relecture de la revue finale du lot 15, ronde 4)
+        # une ligne qui commence par `-`, `*`, `+` ou un nombre sans être une puce, faute d'un
+        # blanc après le marqueur, ou qui porte un marqueur au milieu : elle continue la puce, et
+        # GitHub la montre dans la puce (relecture de la revue finale du lot 15, rondes 4 et 5)
         "\n  -v est l'option qui le montre",
         "\n  *Note* : sous Windows seulement",
         "\n  2.5 fois plus lent",
         "\n  le cas - un autre cas",
         "\n  voir le point 3) plus haut",
+        "\n  +3 s sous Windows",
+        "\n  3)suite du texte",
     )
     for cle in titres:
         for suite in admises:
