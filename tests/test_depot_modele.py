@@ -1333,6 +1333,13 @@ def test_liste_d_alignement():
     six = texte.split("\n## 6. ", 1)[1].split("\n## ", 1)[0]
     sept = texte.split("\n## 7. ", 1)[1].split("\n## ", 1)[0]
     assert "PUT" not in six
+    # lot 16 : chaque ligne d'un bloc 👤 se lance par `!`, seule dans son message ; le `POST` de
+    # la règle est un geste d'Edouard
+    avant_cases = " ".join(six.split("\n- [ ] ", 1)[0].split())
+    assert "Chaque ligne d'un bloc 👤 se lance par `!`, seule dans son message" in avant_cases
+    (creation,) = [c for c in six.split("\n- [ ] ")[1:] if "gh api -X POST" in c]
+    assert creation.startswith("👤 ")
+    assert "`!`" in creation
     put = sept.index("gh api -X PUT repos/<dépôt>/rulesets/<id>")
     assert sept.index("Fusion en squash") < put < sept.index("@dependabot rebase")
     # la mise à jour est à Edouard (👤) ; la relecture de la règle et la relance des PR de
@@ -1341,6 +1348,10 @@ def test_liste_d_alignement():
     (mise_a_jour,) = [case for case in cases if "gh api -X PUT" in case]
     assert mise_a_jour.startswith("👤 ")
     assert "@dependabot rebase" not in mise_a_jour
+    # lot 16 : la session prépare `avant.txt` et `regle.json` dans son dossier (sans 👤) ; Edouard
+    # ne lance que la ligne du PUT, par `!`
+    preparation = cases[cases.index(mise_a_jour) - 1]
+    assert "👤" not in preparation
     suivante = cases[cases.index(mise_a_jour) + 1]
     assert "👤" not in suivante
     for fragment in ("gh api repos/<dépôt>/rulesets/<id>", "`texte-pr`", "@dependabot rebase"):
@@ -1355,7 +1366,7 @@ def test_liste_d_alignement():
         ),
         "  | .parameters.required_status_checks[].context' > {}",
     )
-    assert _blocs_sh(mise_a_jour) == [
+    assert _blocs_sh(preparation) == [
         [
             *(ligne.format("avant.txt") for ligne in lecture),
             (
@@ -1369,8 +1380,10 @@ def test_liste_d_alignement():
             ),
             '      else . + [{context: "texte-pr"}] end)',
             "    else . end]}' > regle.json",
-            "gh api -X PUT repos/<dépôt>/rulesets/<id> --input regle.json",
         ]
+    ]
+    assert _blocs_sh(mise_a_jour) == [
+        ["gh api -X PUT repos/<dépôt>/rulesets/<id> --input regle.json"]
     ]
     assert _blocs_sh(suivante) == [
         [
@@ -1379,7 +1392,7 @@ def test_liste_d_alignement():
             "grep -x texte-pr apres.txt",
         ]
     ]
-    mise_a_jour = " ".join(mise_a_jour.split())
+    preparation = " ".join(preparation.split())
     for fragment in (
         "Avant le geste, lire les contrôles requis en service, dans `avant.txt`.",
         "Le corps de la mise à jour part de la règle en service, à laquelle on ajoute `texte-pr`",
@@ -1390,6 +1403,15 @@ def test_liste_d_alignement():
             "que les contrôles du socle."
         ),
         "Sous Windows, ces commandes se lancent dans Git Bash",
+    ):
+        assert fragment in preparation, fragment
+    mise_a_jour = " ".join(mise_a_jour.split())
+    for fragment in (
+        "`!`",
+        "seule dans son message",
+        "le dépôt et l'identifiant remplacés",
+        "--input .github/modele/ruleset-main.json",
+        "le 12/11/2026",
     ):
         assert fragment in mise_a_jour, fragment
     suivante = " ".join(suivante.split())
