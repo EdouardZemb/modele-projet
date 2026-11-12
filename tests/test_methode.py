@@ -1,7 +1,12 @@
 """Les fichiers gérés de la méthode : méthode, ADR hérités, /consigner, modèles."""
 
 import ast
+import os
 import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
 
 import garde_claude
 import pytest
@@ -17,6 +22,11 @@ from conftest import (
 
 TEMPLATE = RACINE / "template"
 METHODE = TEMPLATE / "docs/modele/methode.md"
+SH = shutil.which("sh") or (
+    r"C:\Program Files\Git\bin\sh.exe"
+    if Path(r"C:\Program Files\Git\bin\sh.exe").exists()
+    else None
+)
 DECISIONS = TEMPLATE / "docs/modele/decisions"
 
 SECTIONS = [
@@ -237,7 +247,8 @@ def test_modele_de_pr_ferme_l_issue():
         "<!-- Toute PR qui ferme une issue porte cette ligne, quel que soit le mot-clé : le SHA "
         "complet de la tête qu'a lue la dernière relecture. Dans un lot, c'est la seule PR de "
         "clôture ; hors des lots, un correctif par `Fixes #N`, ou toute autre PR qui ferme son "
-        "issue. -->"
+        "issue. Une PR qui ne ferme aucune issue laisse la ligne vide, ou la retire : elle n'est "
+        "lue qu'avec une fermeture. -->"
     ), commentaire
     assert "Dans la PR de clôture, ou dans un correctif hors des lots" not in a_plat
 
@@ -366,9 +377,13 @@ def test_methode_dit_le_texte_de_la_pr():
             "« Aucun. » à côté d'un écart ; un commentaire HTML jamais fermé, qui cacherait la "
             "suite. Il refuse, en nommant la ligne par son rang dans la section : une ligne qui "
             "n'est ni « Aucun. » ni un écart, une sous-liste comprise ; un écart vide, sans "
-            "« promesse : » suivi d'un texte, sans « accord d'Edouard : » suivi d'une date valide "
-            "`JJ/MM/AAAA`, avec un texte après la date, ou hors de cet ordre."
+            "« promesse : » suivi d'un texte, sans « accord : » ni « accord d'Edouard : » suivi "
+            "d'une date valide `JJ/MM/AAAA`, avec un texte après la date, ou hors de cet ordre."
         ),
+        "`- <écart> — promesse : <§ de la spec, ou de l'issue> — accord : JJ/MM/AAAA`",
+        "l'ancienne forme, `— accord d'Edouard : JJ/MM/AAAA`, reste admise",
+        "**Éprouver le texte avant d'ouvrir la PR.**",
+        "n'éprouve ni le format du titre ni la confidentialité",
         "Un commentaire fermé ou un bloc clôturé ne compte pas",
         (
             "Un bloc indenté de quatre espaces n'est pas écarté : après une puce, il continue l'écart ; "
@@ -1016,6 +1031,27 @@ def test_methode_dit_les_deux_modes_et_les_etiquettes_de_donnees():
 
     garde = ligne_de_la_table("| hook Claude `PreToolUse`", "| hook Claude `SessionStart`")
     assert "un refspec `refs/tags/…`, `v1.2.3` ou `donnees-…`" in garde
+    # chaque famille d'écriture par l'API que le garde refuse est nommée, avec son motif
+    familles = (
+        ("les fusions (`…/merge`)", ("/merge",)),
+        ("les références de git (`git/refs`)", ("git/refs",)),
+        ("les contenus (`…/contents/`)", ("/contents/",)),
+        (
+            "les règles et protections de branche (`…/rulesets`, `…/protection`)",
+            ("/rulesets", "/protection"),
+        ),
+        (
+            "les objets de git (`git/commits`, `git/trees`, `git/tags`)",
+            ("git/(commits|trees|tags)",),
+        ),
+        ("la mise à jour d'une branche (`…/update-branch`)", ("/update-branch",)),
+        ("les publications (`…/releases`)", ("/releases",)),
+    )
+    for nom, motifs in familles:
+        assert nom in garde, nom
+        for motif in motifs:
+            assert motif in garde_claude.API_ECRITURE.pattern, motif
+    assert "les lectures passent" in garde
     pre_commit = ligne_de_la_table("| hook git `pre-commit` |", "| hook git `commit-msg`")
     instance = "les fichiers de l'instance, lus sur leur chemin, et toute clé publique `age`"
     assert instance in pre_commit
@@ -1597,3 +1633,83 @@ def test_m0002_amende_par_le_lot_14():
     ]
     longues = [ligne for ligne in amendement if len(ligne) > 100]
     assert not longues, longues
+
+
+@pytest.mark.skipif(SH is None, reason="aucun sh trouvé")
+def test_methode_eprouve_le_texte_en_local(rendre, env_isole, tmp_path):
+    """La commande de `methode.md` lance `texte_pr.py` sur un corps, depuis un projet rendu, sans
+    `TMPDIR` : elle passe sur un corps conforme, refuse un corps sans la section, refuse sans
+    tête relue dans sa variante qui ferme une issue, et sort en 64 quand `gh` ne rend pas
+    d'auteur."""
+    apres = lire(METHODE).split("**Éprouver le texte avant d'ouvrir la PR.**", 1)[1]
+    brut = apres.split("```sh\n", 1)[1].split("```", 1)[0]
+    lignes = [ligne.removeprefix("  ") for ligne in brut.split("\n")]
+    bloc = "\n".join(lignes)
+    assert lignes[0] == "corps='<fichier du corps>'", lignes[0]
+    assert 'fermetures="$(mktemp)"' in lignes
+    assert '"totalCount":0' in lignes[2]
+
+    projet = rendre()
+    env = env_isole()
+    git(projet, env, "init", "-q", "-b", "main")
+    git(projet, env, "config", "core.autocrlf", "false")
+    git(projet, env, "add", "-A")
+    git(projet, env, "commit", "-q", "-m", "feat: base")
+
+    def faux_gh(nom, corps):
+        """Un script `sh` sans extension, rendu exécutable : sans ce droit, `sh` le passerait sous
+        Linux et lancerait le vrai `gh` du runner."""
+        dossier = tmp_path / nom
+        dossier.mkdir()
+        faux = dossier / "gh"
+        faux.write_text("#!/bin/sh\n" + corps + "\n", encoding="utf-8", newline="\n")
+        faux.chmod(0o755)
+        return dossier
+
+    bon = faux_gh("gh-bon", "echo exemple-auteur")
+    mauvais = faux_gh("gh-mauvais", "exit 1")
+
+    def lancer(section, dossier_gh=bon, variante=False, **autre):
+        corps = "## Ce que fait cette PR\n\nx\n"
+        if section is not None:
+            corps += "\n## Écarts à la spec\n\n" + section + "\n"
+        corps += "\n## Vérifications\n"
+        fichier = tmp_path / "corps.md"
+        fichier.write_bytes(corps.replace("\n", "\r\n").encode("utf-8"))
+        script = bloc.replace("<fichier du corps>", fichier.as_posix())
+        if variante:
+            script = script.replace('"totalCount":0', '"totalCount":1')
+        env_sh = dict(env)
+        env_sh.pop("TMPDIR", None)
+        env_sh.pop("MSYS_NO_PATHCONV", None)
+        env_sh.update(autre)
+        env_sh["PATH"] = os.pathsep.join(
+            [str(dossier_gh), str(Path(sys.executable).parent), env["PATH"]]
+        )
+        r = subprocess.run(
+            [SH, "-c", script],
+            check=False,
+            cwd=projet,
+            env=env_sh,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        return r.returncode, r.stdout + r.stderr
+
+    code, sortie = lancer("Aucun.")
+    assert code == 0, sortie
+    assert "écarts à la spec : aucun" in sortie, sortie
+    code, sortie = lancer(None)
+    assert code == 1, sortie
+    assert "texte de la PR : refus" in sortie, sortie
+    code, sortie = lancer("Aucun.", variante=True)
+    assert code == 1, sortie
+    assert "ferme une issue : ligne « Tête relue : <SHA complet> » absente" in sortie, sortie
+    code, sortie = lancer("Aucun.", dossier_gh=mauvais)
+    assert code == 64, sortie
+    if sys.platform == "win32":
+        code, sortie = lancer("Aucun.", MSYS_NO_PATHCONV="1")
+        assert code == 1, sortie
+        illisibles = "fermetures illisibles (réponse de l'API absente, en erreur ou mal formée)"
+        assert illisibles in sortie, sortie
