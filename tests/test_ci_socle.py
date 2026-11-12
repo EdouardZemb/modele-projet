@@ -3,14 +3,13 @@
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 import yaml
-from conftest import RACINE, REPONSES_SERVEUR, git, sans_echappatoire
+from conftest import RACINE, REPONSES_SERVEUR, SH, git, sans_echappatoire
 from test_plan import A_PY, plan
 
 SOCLE = ".github/workflows/modele-socle.yml"
@@ -115,11 +114,6 @@ def test_dependabot(rendre, cible):
 # historique complet (I7) ---
 
 HISTORIQUE = ".github/workflows/modele-historique.yml"
-SH = shutil.which("sh") or (
-    r"C:\Program Files\Git\bin\sh.exe"
-    if Path(r"C:\Program Files\Git\bin\sh.exe").exists()
-    else None
-)
 
 
 def etape(rendu, nom):

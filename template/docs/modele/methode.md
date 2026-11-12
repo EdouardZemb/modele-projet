@@ -243,11 +243,12 @@ environnement, jamais dans ses arguments, et contrôle deux choses.
   refusait. Pour relire le texte, on retouche le titre ou le corps : la retouche relance
   `texte-pr` sur le texte en cours.
 - **Éprouver le texte avant d'ouvrir la PR.** Une fois la branche envoyée, on lance le contrôle en
-  local, depuis la racine du projet, sous Git Bash ou un shell POSIX, sans `MSYS_NO_PATHCONV` : sous
-  Git Bash, Python ne lit le `/tmp/…` de `mktemp` que par la conversion des chemins de MSYS. Le
-  corps est dans un fichier UTF-8, hors du dépôt, comme pour `--body-file` : `$(cat …)` retirerait
-  les octets nuls d'un fichier UTF-16 écrit par PowerShell 5.1, et le refus dirait « section
-  absente ». Un chemin Windows s'écrit entre les apostrophes de la première ligne, ou avec des `/`.
+  local, depuis la racine du projet, sous Git Bash ou un shell POSIX, sans `MSYS_NO_PATHCONV` ni
+  `MSYS2_ARG_CONV_EXCL` : sous Git Bash, Python ne lit le `/tmp/…` de `mktemp` que par la conversion
+  des chemins de MSYS. Le corps est dans un fichier UTF-8, hors du dépôt, comme pour `--body-file` :
+  sur un fichier UTF-16, comme ceux qu'écrit PowerShell 5.1, `$(cat …)` retire les octets nuls, et
+  le contrôle ne lit pas le corps que GitHub recevra : il peut passer comme refuser. Un chemin
+  Windows s'écrit entre les apostrophes de la première ligne, ou avec des `/`.
 
   ```sh
   corps='<fichier du corps>'

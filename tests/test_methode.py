@@ -3,7 +3,6 @@
 import ast
 import os
 import re
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -12,21 +11,19 @@ import garde_claude
 import pytest
 import yaml
 from conftest import (
+    ABSENTE,
+    ILLISIBLES,
     RACINE,
     REGISTRE_ENTETE,
     RENVOI_AU_PLAN,
     REPONSES_SERVEUR,
     REPONSES_SERVEUR_CODE,
+    SH,
     git,
 )
 
 TEMPLATE = RACINE / "template"
 METHODE = TEMPLATE / "docs/modele/methode.md"
-SH = shutil.which("sh") or (
-    r"C:\Program Files\Git\bin\sh.exe"
-    if Path(r"C:\Program Files\Git\bin\sh.exe").exists()
-    else None
-)
 DECISIONS = TEMPLATE / "docs/modele/decisions"
 
 SECTIONS = [
@@ -384,6 +381,12 @@ def test_methode_dit_le_texte_de_la_pr():
         "l'ancienne forme, `— accord d'Edouard : JJ/MM/AAAA`, reste admise",
         "**Éprouver le texte avant d'ouvrir la PR.**",
         "n'éprouve ni le format du titre ni la confidentialité",
+        "sans `MSYS_NO_PATHCONV` ni `MSYS2_ARG_CONV_EXCL`",
+        (
+            "sur un fichier UTF-16, comme ceux qu'écrit PowerShell 5.1, `$(cat …)` retire les "
+            "octets nuls, et le contrôle ne lit pas le corps que GitHub recevra : il peut passer "
+            "comme refuser"
+        ),
         "Un commentaire fermé ou un bloc clôturé ne compte pas",
         (
             "Un bloc indenté de quatre espaces n'est pas écarté : après une puce, il continue l'écart ; "
@@ -1051,6 +1054,13 @@ def test_methode_dit_les_deux_modes_et_les_etiquettes_de_donnees():
         assert nom in garde, nom
         for motif in motifs:
             assert motif in garde_claude.API_ECRITURE.pattern, motif
+    # et dans l'autre sens : le motif du garde n'a pas d'alternative que la ligne du tableau ne
+    # nomme pas (la liste exacte, le motif ayant un groupe)
+    alternatives = "|".join(motif for _, motifs in familles for motif in motifs)
+    assert garde_claude.API_ECRITURE.pattern == alternatives, (
+        "une écriture par l'API a changé dans `API_ECRITURE` : aligner la ligne du garde dans "
+        "`methode.md` et cette table"
+    )
     assert "les lectures passent" in garde
     pre_commit = ligne_de_la_table("| hook git `pre-commit` |", "| hook git `commit-msg`")
     instance = "les fichiers de l'instance, lus sur leur chemin, et toute clé publique `age`"
@@ -1649,6 +1659,9 @@ def test_methode_eprouve_le_texte_en_local(rendre, env_isole, tmp_path):
     assert 'fermetures="$(mktemp)"' in lignes
     assert '"totalCount":0' in lignes[2]
 
+    dossier_python = Path(sys.executable).parent
+    if not any((dossier_python / nom).exists() for nom in ("python", "python.exe")):
+        pytest.skip(f"aucun `python` dans {dossier_python}, que la commande lance par son nom")
     projet = rendre()
     env = env_isole()
     git(projet, env, "init", "-q", "-b", "main")
@@ -1682,9 +1695,10 @@ def test_methode_eprouve_le_texte_en_local(rendre, env_isole, tmp_path):
         env_sh = dict(env)
         env_sh.pop("TMPDIR", None)
         env_sh.pop("MSYS_NO_PATHCONV", None)
+        env_sh.pop("MSYS2_ARG_CONV_EXCL", None)
         env_sh.update(autre)
         env_sh["PATH"] = os.pathsep.join(
-            [str(dossier_gh), str(Path(sys.executable).parent), env["PATH"]]
+            [str(dossier_gh), str(dossier_python), env["PATH"]]
         )
         r = subprocess.run(
             [SH, "-c", script],
@@ -1705,11 +1719,10 @@ def test_methode_eprouve_le_texte_en_local(rendre, env_isole, tmp_path):
     assert "texte de la PR : refus" in sortie, sortie
     code, sortie = lancer("Aucun.", variante=True)
     assert code == 1, sortie
-    assert "ferme une issue : ligne « Tête relue : <SHA complet> » absente" in sortie, sortie
+    assert ABSENTE in sortie, sortie
     code, sortie = lancer("Aucun.", dossier_gh=mauvais)
     assert code == 64, sortie
     if sys.platform == "win32":
         code, sortie = lancer("Aucun.", MSYS_NO_PATHCONV="1")
         assert code == 1, sortie
-        illisibles = "fermetures illisibles (réponse de l'API absente, en erreur ou mal formée)"
-        assert illisibles in sortie, sortie
+        assert ILLISIBLES in sortie, sortie
