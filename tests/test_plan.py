@@ -12,7 +12,10 @@ import texte_pr
 
 A_PY = "un\ndef f():\n    return 2\n"
 REFUS = "plan : refus"
-OUTIL_REFUSE = "Outils et cas limites, ligne 2 : forme attendue"
+OUTIL_REFUSE = f"Outils et cas limites, ligne 2 : {p.FORMES[p.OUTILS]}"
+REVUES_REFUSE = f"Revues, ligne 2 : {p.FORMES[p.REVUES]}"
+MECA_REFUSE = f"Mécanismes annoncés, ligne 2 : {p.FORMES[p.MECANISMES]}"
+OUVERT = p.COMMENTAIRE_OUVERT
 # un titre de tâche après la clôture, comme dans les plans qui mettent à jour leur en-tête
 APRES_LA_CLOTURE = ("### Tâche 1 : x", "### Tâche 2 : la clôture", "### Tâche 3 : l'en-tête")
 
@@ -114,21 +117,21 @@ def test_sections(racine):
     cas = [
         ({"outils": ""}, "section « Outils et cas limites » vide"),
         ({"meca": "<!-- rien encore -->"}, "section « Mécanismes annoncés » vide"),
-        ({"revues": "Aucun."}, "Revues, ligne 2 : forme attendue"),
+        ({"revues": "Aucun."}, REVUES_REFUSE),
         ({"outils": "Aucun.\n- git — un cas — un test"}, OUTIL_REFUSE),
-        ({"meca": "Une phrase sans puce."}, "Mécanismes annoncés, ligne 2 : forme attendue"),
+        ({"meca": "Une phrase sans puce."}, MECA_REFUSE),
         ({"outils": "  git — un cas — un test"}, OUTIL_REFUSE),
         ({"outils": "- git — un cas"}, OUTIL_REFUSE),
         ({"outils": "- — un cas — un test"}, OUTIL_REFUSE),
         # un commentaire jamais fermé cache sur GitHub tout ce qui le suit
         (
             {"revues": "- relecture : Tâche 1\n<!-- - cachée : Tâche 1"},
-            "Revues, ligne 3 : forme attendue",
+            f"Revues, ligne 3 : {OUVERT}",
         ),
         # le même, après une puce qui serait valide sans lui : seul le refus du `<!--` jamais
         # fermé l'arrête, à sa ligne
-        ({"revues": "- relecture : Tâche 1 <!-- note"}, "Revues, ligne 2 : forme attendue"),
-        ({"outils": "- <!-- a — b — c"}, OUTIL_REFUSE),
+        ({"revues": "- relecture : Tâche 1 <!-- note"}, f"Revues, ligne 2 : {OUVERT}"),
+        ({"outils": "- <!-- a — b — c"}, f"Outils et cas limites, ligne 2 : {OUVERT}"),
     ]
     for reponses, attendu in cas:
         lignes, refus = verifier(plan(**reponses), racine)
@@ -221,13 +224,13 @@ def test_sous_liste_et_bloc_html(racine):
             lignes, refus = verifier(plan(**{cle: contenu}), racine)
             assert refus, (cle, contenu, lignes)
             nommees = [ligne for ligne in lignes if ligne.startswith(f"{titre}, ligne")]
-            assert nommees == [f"{titre}, ligne 3 : forme attendue"], (cle, contenu, lignes)
+            assert nommees == [f"{titre}, ligne 3 : {p.FORMES[titre]}"], (cle, contenu, lignes)
             assert lignes[-1] == resumes[cle], (cle, contenu, lignes)
         # la ligne qui ferme un commentaire de deux lignes porte le rang
         texte = plan(**{cle: f"{premieres[cle]}\n<!-- c\nc --> {suites[cle]}"})
         lignes, refus = verifier(texte, racine)
         assert refus, (cle, lignes)
-        assert f"{titre}, ligne 4 : forme attendue" in lignes, (cle, lignes)
+        assert f"{titre}, ligne 4 : {p.FORMES[titre]}" in lignes, (cle, lignes)
         assert lignes[-1] == resumes[cle], (cle, lignes)
     # « Aucun. » derrière un commentaire : GitHub rend la ligne en bloc HTML, jamais en « Aucun. »
     # (« Revues » refuse « Aucun. » de toute façon)
@@ -235,7 +238,7 @@ def test_sous_liste_et_bloc_html(racine):
         lignes, refus = verifier(plan(**{cle: "<!-- c -->Aucun."}), racine)
         assert refus, (cle, lignes)
         nommees = [ligne for ligne in lignes if ligne.startswith(f"{titres[cle]}, ligne")]
-        assert nommees == [f"{titres[cle]}, ligne 2 : forme attendue"], (cle, lignes)
+        assert nommees == [f"{titres[cle]}, ligne 2 : {p.FORMES[titres[cle]]}"], (cle, lignes)
     admises = (
         "\n  suite du texte",
         "\n<!-- c -->",
@@ -448,10 +451,10 @@ def test_mecanismes(racine):
         (meca("src/a.py:4", "def f("), "ligne 4 hors du fichier (3 lignes)"),
         (meca("src/b.py:1", "def f("), "fichier absent : src/b.py"),
         (meca("src/long.py:1-41", "ligne 41"), "chemin refusé (plage de plus de 40 lignes)"),
-        ("- `src/a.py:2` — `def f(`", "forme attendue"),
-        ("- `src/a.py:2` — `def f(` —", "forme attendue"),
-        ("- `src/a.py:2` — ` ` — x", "forme attendue"),
-        ("- src/a.py:2 — `def f(` — x", "forme attendue"),
+        ("- `src/a.py:2` — `def f(`", p.FORMES[p.MECANISMES]),
+        ("- `src/a.py:2` — `def f(` —", p.FORMES[p.MECANISMES]),
+        ("- `src/a.py:2` — ` ` — x", p.FORMES[p.MECANISMES]),
+        ("- src/a.py:2 — `def f(` — x", p.FORMES[p.MECANISMES]),
     ]
     for ligne, attendu in refuses:
         lignes, refus = verifier(plan(meca=ligne), racine)
@@ -617,6 +620,138 @@ def test_revues(racine):
         assert not refus, (reponses, lignes)
 
 
+MAITRE = ("### Tranche 1 · x", "### Tranche 2 · y", "### Tranche 3 · la clôture")
+
+
+def test_plan_tranches_unites(racine):
+    """`### Tranche N` est une unité, sans égard à la casse ; `### Tranche 2.1` est la tranche 2 ;
+    `### Tranches` et `### Ce que ce plan tranche` n'en sont pas, ni un titre dans un bloc de code
+    ou un commentaire. Un plan sans unité reste un plan à tâches."""
+    maitre = ("### Tranche 1 · x", "### tranche 2 : y", "### Tranche 3 · la clôture")
+    revues = "- relecture : Tranche 1, Tranche 2"
+    lignes, refus = verifier(plan(revues=revues, taches=maitre), racine)
+    assert not refus, lignes
+    assert lignes == ["0 mécanismes vérifiés, 0 non vérifiés, 0 outils, 1 revues"]
+    doubles = ("### Tranche 2.1 · a", "### Tranche 2.2 · b", "### Tranche 3 · la clôture")
+    lignes, refus = verifier(plan(revues="- relecture : Tranche 2", taches=doubles), racine)
+    assert refus and "Tranche 2 en double" in lignes, lignes
+    autres = (
+        "### Tranches\n\n### Ce que ce plan tranche",
+        "```\n### Tranche 4 · code\n```",
+        "<!--\n### Tranche 5 · cachée\n-->",
+        *APRES_LA_CLOTURE,
+    )
+    lignes, refus = verifier(plan(taches=autres), racine)
+    assert not refus, lignes  # un plan à tâches, non mêlé
+    lignes, refus = verifier(plan(taches=()), racine)
+    assert "Revues, ligne 2 : Tâche 1 absente des titres" in lignes, lignes
+
+
+def test_plan_citations_selon_la_sorte(racine):
+    """Un plan à tâches cite des tâches, un plan maître des tranches ; l'autre mot n'est que du
+    texte. « qui tranche 2 questions » cite la tranche 2 ; les pluriels, « trancher 2 » et
+    « retranche 2 » ne citent rien."""
+    aucune = "Revues, ligne 2 : aucune tranche citée"
+    cas = [
+        # (titres, revue, refus attendu ou None)
+        (None, "- la revue de la tranche 1 : Tâche 1", None),
+        (None, "- la revue de la tranche 1", "Revues, ligne 2 : aucune tâche citée"),
+        (MAITRE, "- la revue de la tâche 3 du plan de la tranche 2 : Tranche 2", None),
+        (MAITRE, "- relecture : Tâche 1", aucune),
+        (MAITRE, "- une revue qui tranche 2 questions", None),
+        (MAITRE, "- relecture : TRANCHE 1", None),
+        (MAITRE, "- Tranches 1 à 2", aucune),
+        (MAITRE, "- trancher 2 points", aucune),
+        (MAITRE, "- on retranche 2 lignes", aucune),
+        (MAITRE, "- relecture : Tranche 4", "Revues, ligne 2 : Tranche 4 absente des titres"),
+        (
+            MAITRE,
+            "- finale : Tranche 3",
+            "Revues, ligne 2 : Tranche 3 ne précède pas la clôture (Tranche 3)",
+        ),
+    ]
+    for titres, revue, attendu in cas:
+        reponses = {"revues": revue} | ({} if titres is None else {"taches": titres})
+        lignes, refus = verifier(plan(**reponses), racine)
+        if attendu is None:
+            assert not refus, (revue, lignes)
+        else:
+            assert refus and attendu in lignes, (revue, lignes)
+
+
+def test_plan_mele(racine):
+    """Un plan qui mêle tâches et tranches refuse, juste avant le résumé ; ses citations se lisent
+    dans les deux sortes, chacune contre ses titres, sa clôture dans l'une ou l'autre."""
+    taches = ("### Tâche 1 : x", "### Tranche 2 · y", "### Tâche 3 : la clôture")
+    revues = "- relecture : Tâche 1, Tranche 2\n- finale : Tranche 5\n- une relecture"
+    lignes, refus = verifier(plan(revues=revues, taches=taches), racine)
+    assert refus
+    assert lignes[-2] == p.MELE == "le plan mêle des tâches et des tranches", lignes
+    assert "Revues, ligne 3 : Tranche 5 absente des titres" in lignes, lignes
+    assert "Revues, ligne 4 : aucune tâche ni tranche citée" in lignes, lignes
+    assert not [ligne for ligne in lignes if ligne.startswith("Revues, ligne 2")], lignes
+
+
+def test_plan_titres_d_un_plan_maitre_reel(racine):
+    """Les titres du plan maître du lot 1 de `pupitre` (Review Focus 1) : deux titres de niveau 3
+    qui ne sont pas des unités, puis huit tranches, la dernière portant la clôture."""
+    taches = (
+        "### Les choix de la maîtrise d'ouvrage (2026-11-09)",
+        "### Ce que ce plan tranche",
+        *(f"### Tranche {n} · x" for n in range(1, 8)),
+        "### Tranche 8 · la revue finale et la clôture",
+    )
+    sept = ", ".join(f"Tranche {n}" for n in range(1, 8))
+    revues = f"- la revue de chaque plan de tranche : {sept}"
+    lignes, refus = verifier(plan(revues=revues, taches=taches), racine)
+    assert not refus, lignes
+    lignes, refus = verifier(plan(revues="- la revue finale : Tranche 8", taches=taches), racine)
+    attendu = "Revues, ligne 2 : Tranche 8 ne précède pas la clôture (Tranche 8)"
+    assert refus and attendu in lignes, lignes
+
+
+def test_plan_a_taches_qui_nomme_sa_tranche(racine):
+    """Un plan de tranche, à tâches, qui écrit « Tranche N » dans ses titres et ses revues passe
+    (Review Focus 2)."""
+    taches = (
+        "### Tâche 1 : le stockage de la tranche 1",
+        "### Tâche 2 : la clôture de la Tranche 1",
+    )
+    revues = "- la revue de la Tranche 1 : Tâche 1"
+    lignes, refus = verifier(plan(revues=revues, taches=taches), racine)
+    assert not refus, lignes
+
+
+def test_formes_dites(racine):
+    """Chaque refus de forme dit la forme de sa section ; le `<!--` jamais fermé a son message."""
+    assert p.FORMES == {
+        "Mécanismes annoncés": "forme attendue : - `<chemin>:<ligne>` — `<extrait>` — "
+        "<comportement annoncé>, ou « Aucun. » seul",
+        "Outils et cas limites": "forme attendue : - <outil> — <cas limite> — <test>, "
+        "ou « Aucun. » seul",
+        "Revues": "forme attendue : - <revue> : Tâche N, ou Tranche N dans un plan maître ; "
+        "jamais « Aucun. »",
+    }
+    assert p.COMMENTAIRE_OUVERT == "commentaire HTML jamais fermé, qui cache la suite"
+    mal_formees = {"meca": "Une phrase.", "outils": "- a — b", "revues": "Aucun."}
+    titres = {"meca": p.MECANISMES, "outils": p.OUTILS, "revues": p.REVUES}
+    for cle, ligne in mal_formees.items():
+        lignes, refus = verifier(plan(**{cle: ligne}), racine)
+        assert refus, cle
+        assert f"{titres[cle]}, ligne 2 : {p.FORMES[titres[cle]]}" in lignes, (cle, lignes)
+    ouverts = (
+        ({"revues": "- relecture : Tâche 1 <!-- note"}, "Revues", 2),
+        ({"revues": "- relecture : Tâche 1\n<!-- - cachée : Tâche 1"}, "Revues", 3),
+        ({"outils": "- <!-- a — b — c"}, "Outils et cas limites", 2),
+        ({"meca": "- <!-- a — b — c"}, "Mécanismes annoncés", 2),
+    )
+    for reponses, titre, rang in ouverts:
+        lignes, refus = verifier(plan(**reponses), racine)
+        assert refus, reponses
+        assert f"{titre}, ligne {rang} : {p.COMMENTAIRE_OUVERT}" in lignes, (reponses, lignes)
+        assert not [ligne for ligne in lignes if "vide" in ligne], (reponses, lignes)
+
+
 def test_plan_titres_des_plans_reels(racine):
     """Les titres des plans réels : `### Task N:` de *superpowers*, une parenthèse avant le
     deux-points, un titre de niveau 2 qui nomme une tâche sans en être une, et un titre dans un
@@ -669,8 +804,20 @@ def test_titres_caches_par_un_commentaire_jamais_ferme(racine):
             lignes, refus = verifier(debut + separation + avant + taches, racine)
             assert not refus, (avant, nom, lignes)
     fragment = "lus hors des blocs de code clôturés et des blocs de commentaire HTML, fermés ou non"
-    for docstring in (p.__doc__, p._taches.__doc__):
+    for docstring in (p.__doc__, p._unites.__doc__):
         assert fragment in " ".join(docstring.split()), docstring
+
+
+def test_docstring_dit_les_tranches():
+    """Le module dit les tranches, le plan maître, le plan mêlé et la forme de la sortie."""
+    doc = " ".join(p.__doc__.split())
+    for fragment in (
+        "`### Tranche N`",
+        "des numéros de tâche ou de tranche",
+        "les formes fixes",
+        "MELE",
+    ):
+        assert fragment in doc, fragment
 
 
 def test_plan_encodages(racine, lancer):

@@ -8,11 +8,13 @@ modifie pas dans le projet. Un défaut se corrige dans `modele-projet`, pour tou
 1. Une issue, avec une mini-spec : objectif, critères d'acceptation, hors périmètre. Le formulaire
    « Lot » la pose. Une milestone par étape.
 2. Une PR de plan, qui ajoute le plan dans `.claude/plans/`, avec ses trois sections ; la revue du
-   plan le relit avant l'exécution (voir « Les outils »).
+   plan le relit avant l'exécution (voir « Les outils »). Un lot peut se découper en tranches,
+   chacune avec son plan (voir « Un lot en tranches »).
 3. Une ou plusieurs PR d'implémentation.
 4. Une PR de revue finale.
-5. Une PR de clôture : elle **supprime le plan**, reporte dans `CLAUDE.md` ou dans un ADR ce qui
-   doit survivre, et relit le README d'après `docs/modele/documentation.md`. Elle seule porte
+5. Une PR de clôture : elle **supprime le plan** (dans un lot en tranches, le plan maître et les
+   plans de tranche), reporte dans `CLAUDE.md` ou dans un ADR ce qui doit survivre, et relit le
+   README d'après `docs/modele/documentation.md`. Elle seule porte
    « Closes #N », les autres PR du lot disant « Partie de #N », et elle nomme la tête relue
    (voir « Le texte de la PR »).
 6. L'étiquette `vX.Y.Z`, **avec l'accord d'Edouard**.
@@ -58,10 +60,30 @@ tiret cadratin (`—`) ou demi-cadratin (`–`), entouré d'espaces.
 - `## Outils et cas limites` : une ligne par outil qu'appelle un contrôle livré par le plan,
   `- <outil> — <cas limite que l'outil traite autrement> — <test qui l'exerce>`, trois morceaux
   non vides. « Aucun. » est admis ;
-- `## Revues` : une ligne par temps de revue, `- <revue> : Tâche N`, qui cite au moins une tâche du
-  plan, `Tâche N` ou `Task N`, d'après ses titres de niveau 3 (`### Tâche N : …`). Il en faut au
-  moins une, et deux titres ne portent jamais le même numéro. La clôture est la première tâche dont
-  le titre dit « clôture » ou « closure » : chaque tâche citée la précède.
+- `## Revues` : une ligne par temps de revue, `- <revue> : Tâche N`, ou `Tranche N` dans un plan
+  maître, qui cite au moins une unité du plan : `Tâche N` ou `Task N` dans un plan à tâches,
+  `Tranche N` dans un plan maître, d'après ses titres de niveau 3 (`### Tâche N : …`, ou
+  `### Tranche N`). Il en faut au moins une, et deux titres de la même sorte ne portent jamais le
+  même numéro. La clôture est la première unité dont le titre dit « clôture » ou « closure » :
+  chaque unité citée la précède.
+
+**Un lot en tranches.** Un lot peut se découper en tranches. Son plan, le plan maître, n'a pour
+unités que des titres `### Tranche N` ; chaque tranche qui le demande a son propre plan, à
+`### Tâche N`, ajouté par sa propre PR de plan.
+
+- Les trois sections valent pour chacun, plan maître compris, « Aucun. » admis dans les deux
+  premières quand il est vrai de ce que le plan décrit.
+- Dans le plan maître, « Revues » cite des tranches : la revue de chaque plan de tranche, puis
+  la revue finale du lot et la relecture de ses corrections, dans une tranche à elles, avant celle
+  de la clôture. Le plan d'une tranche cite ses tâches.
+- Dans un plan à tâches, `Tranche N` n'est que du texte ; dans un plan maître, `Tâche N` de même ;
+  un plan qui mêle des tâches et des tranches refuse, sans nommer de ligne.
+- Seule la PR de clôture du lot clôt le lot : la clôture d'une tranche, dans son plan, ne supprime
+  pas ce plan et ne ferme pas l'issue ; la PR de clôture du lot supprime le plan maître et les
+  plans de tranche, porte « Closes #N » et nomme sa tête relue.
+- Trois cas limites des expressions, sans égard à la casse : « trancher » suivi d'un nombre cite
+  une tranche dans un plan maître ; « Tranches » et « Tâches » ne citent rien ; `### Tranche 2.1`
+  est la tranche 2.
 
 **La revue du plan** se fait avant l'exécution, par une autre session ou par Edouard :
 
@@ -73,8 +95,9 @@ tiret cadratin (`—`) ou demi-cadratin (`–`), entouré d'espaces.
 
 Les revues et les tests, dans tout le lot :
 
-- chaque temps d'une revue est une tâche du plan, avant la clôture : la revue de chaque tâche, la
-  revue finale, la relecture des corrections ; une revue se juge sur la tête qui part. La
+- chaque temps d'une revue est une tâche du plan, ou une tranche d'un plan maître, avant la
+  clôture : la revue de chaque tâche, la revue finale, la relecture des corrections ; une revue se
+  juge sur la tête qui part. La
   relecture de la tête qui part, dans la PR de clôture, ne s'écrit pas dans « Revues » : c'est la
   ligne `Tête relue` de cette PR qui la porte ;
 - la PR de clôture nomme la tête qu'a lue sa dernière relecture, et un écart à la spec se déclare
@@ -95,8 +118,10 @@ mécanisme ajouté plus tard se relit à la revue. Le socle tourne aussi au push
 principale, sur les plans que ce push ajoute ou modifie : un plan ajouté s'y vérifie aussi sans
 ouvrir les fichiers cités, puisque ses lieux l'ont été à la PR, et qu'une autre PR, fusionnée
 entre-temps, a pu décaler une ligne citée.
-Sur une base nulle, l'étape ne contrôle rien ; une PR qui ne touche aucun plan passe, comme la PR
-de clôture, qui le supprime. La session lance aussi `python scripts/modele/plan.py <plan>` avant
+Sur une base nulle, l'étape ne contrôle rien. Hors d'une base nulle, elle dit toujours combien de
+plans la PR ajoute, modifie et supprime, zéro compris : « Plans ajoutés : N, modifiés : M,
+supprimés : S. » ; un plan supprimé n'est pas contrôlé. Une PR qui ne touche aucun plan passe,
+comme la PR de clôture, qui supprime les plans du lot. La session lance aussi `python scripts/modele/plan.py <plan>` avant
 de soumettre son plan à Edouard, et après chaque correction.
 
 ## Les worktrees

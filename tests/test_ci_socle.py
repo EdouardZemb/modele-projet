@@ -470,9 +470,13 @@ def test_etape_des_plans(rendre, env_isole, tmp_path):
     )
 
     def commit(depuis, fichiers):
-        """Un commit sur `depuis` qui écrit `fichiers` ({chemin : texte}) ; il rend son SHA."""
+        """Un commit sur `depuis` qui écrit `fichiers` ({chemin : texte}) ; il rend son SHA. Un
+        texte à `None` retire le fichier."""
         git(rendu, env, "checkout", "-q", "--detach", depuis)
         for chemin, texte in fichiers.items():
+            if texte is None:
+                (rendu / chemin).unlink()
+                continue
             (rendu / chemin).parent.mkdir(parents=True, exist_ok=True)
             (rendu / chemin).write_bytes(texte.encode("utf-8"))
         git(rendu, env, "add", "-A")
@@ -590,6 +594,66 @@ def test_etape_des_plans(rendre, env_isole, tmp_path):
     assert code != 0, sortie
     attendu = "plan : .claude/plans/q.md : Mécanismes annoncés, ligne 2 : extrait absent de "
     assert attendu + "src/a.py:3" in sortie, sortie
+
+    # La ligne de comptes : combien de plans la PR ajoute, modifie et supprime, hors d'une
+    # base nulle.
+    def comptes(ajoutes, modifies, supprimes):
+        return f"Plans ajoutés : {ajoutes}, modifiés : {modifies}, supprimés : {supprimes}."
+
+    commit(base, {".claude/plans/a.md": PLAN_CONFORME})
+    code, sortie = lancer(base)
+    assert code == 0, sortie
+    assert comptes(1, 0, 0) in sortie, sortie
+    commit(base, {"src/b.py": "x = 1\n"})
+    code, sortie = lancer(base)
+    assert code == 0, sortie
+    assert comptes(0, 0, 0) in sortie, sortie
+    commit(base, {".claude/plans/a.md": PLAN_CONFORME, ".claude/plans/b.md": PLAN_CONFORME})
+    code, sortie = lancer(base)
+    assert code == 0, sortie
+    assert comptes(2, 0, 0) in sortie, sortie
+    code, sortie = lancer("0" * 40)
+    assert code == 0, sortie
+    assert "Plans ajoutés" not in sortie, sortie
+    # `a.md` ajouté et `b.md`, présent dans la base, modifié ; puis `b.md` retiré ; puis `b.md`
+    # renommé en `c.md`, contenu égal : un renommage est un ajout et une suppression.
+    avec_b = commit(base, {".claude/plans/b.md": PLAN_CONFORME})
+    modifie = PLAN_CONFORME.replace("- [ ]", "- [x]", 1)
+    commit(avec_b, {".claude/plans/a.md": PLAN_CONFORME, ".claude/plans/b.md": modifie})
+    code, sortie = lancer(avec_b)
+    assert code == 0, sortie
+    assert comptes(1, 1, 0) in sortie, sortie
+    commit(avec_b, {".claude/plans/b.md": None})
+    code, sortie = lancer(avec_b)
+    assert code == 0, sortie
+    assert comptes(0, 0, 1) in sortie, sortie
+    git(rendu, env, "checkout", "-q", "--detach", avec_b)
+    git(rendu, env, "mv", ".claude/plans/b.md", ".claude/plans/c.md")
+    git(rendu, env, "commit", "-q", "-m", "feat: le plan renommé sans changement")
+    code, sortie = lancer(avec_b)
+    assert code == 0, sortie
+    assert comptes(1, 0, 1) in sortie, sortie
+    # Au push, la ligne de comptes précède celle du push.
+    code, sortie = lancer(avec_b, "push")
+    assert code == 0, sortie
+    assert comptes(1, 0, 1) in sortie, sortie
+    assert sortie.index(comptes(1, 0, 1)) < sortie.index("Push : un plan ajouté"), sortie
+    # Un `wc` BSD fait précéder son compte d'espaces : la ligne de comptes n'en garde aucun.
+    faux = tmp_path / "faux-wc"
+    faux.mkdir()
+    wc = faux / "wc"
+    wc.write_text(
+        "#!/bin/sh\nprintf '      %s\\n' \"$(/usr/bin/wc -c)\"\n", encoding="utf-8", newline=""
+    )
+    wc.chmod(0o755)
+    chemin = env["PATH"]
+    env["PATH"] = str(faux) + os.pathsep + chemin
+    try:
+        code, sortie = lancer(avec_b)
+    finally:
+        env["PATH"] = chemin
+    assert code == 0, sortie
+    assert comptes(1, 0, 1) in sortie, sortie
 
 
 def test_texte_pr_yml(rendre):
