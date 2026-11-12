@@ -574,6 +574,7 @@ try {
     $codeInv  = @($flux | Where-Object { $_ -is [int] })
     $texteInv = (@($flux | Where-Object { $_ -isnot [int] } | ForEach-Object { "$_" }) -join "`n")
     Verifier 'Invoke-Etapes : un échec affiche les commandes restantes' ($texteInv.Contains('Reste à faire') -and $texteInv.Contains('commande-trois') -and $texteInv.Contains('Fait :') -and $texteInv.Contains('fausse un')) $texteInv
+    Verifier 'Invoke-Etapes : l''échec dit que ses commandes sont pour PowerShell, jamais pour !' ($texteInv.Contains('écrites pour PowerShell') -and $texteInv.Contains("jamais par '!'")) $texteInv
     Verifier 'Invoke-Etapes : l''échec rend 1 et arrête tout' ($codeInv.Count -eq 1 -and $codeInv[0] -eq 1 -and -not $script:troisJouee) "code $($codeInv -join ',') ; trois jouée : $script:troisJouee"
     $locales = @(
         [pscustomobject]@{ Description = 'locale'; Commande = 'commande-locale'; Action = { throw 'boum' }; Ctx = @{}; GitHub = $false },
