@@ -640,26 +640,30 @@ def test_etape_des_plans(rendre, env_isole, tmp_path):
     assert comptes(1, 0, 1) in sortie, sortie
     assert sortie.index(comptes(1, 0, 1)) < sortie.index("Push : un plan ajouté"), sortie
     # Un `wc` BSD fait précéder son compte d'espaces : la ligne de comptes n'en garde aucun.
-    faux = tmp_path / "faux-wc"
-    faux.mkdir()
-    wc = faux / "wc"
-    wc.write_text(
-        "#!/bin/sh\n"
-        ': > "$(dirname "$0")/temoin"\n'
-        "printf '      %s\\n' \"$(/usr/bin/wc -c)\"\n",
-        encoding="utf-8",
-        newline="",
-    )
-    wc.chmod(0o755)
-    chemin = env["PATH"]
-    env["PATH"] = str(faux) + os.pathsep + chemin
-    try:
-        code, sortie = lancer(avec_b)
-    finally:
-        env["PATH"] = chemin
-    assert (faux / "temoin").exists(), "le faux wc n'a pas été appelé"
-    assert code == 0, sortie
-    assert comptes(1, 0, 1) in sortie, sortie
+    # Le cas ne tourne pas sous Windows : l'étape ne tourne que sur le runner Ubuntu, où il passe.
+    # Sous Windows, le chemin dépend du `sh` trouvé, et le lanceur de Git (`bin/sh.exe`) met
+    # `/usr/bin` devant le faux `wc`, qui n'est alors pas appelé.
+    if sys.platform != "win32":
+        faux = tmp_path / "faux-wc"
+        faux.mkdir()
+        wc = faux / "wc"
+        wc.write_text(
+            "#!/bin/sh\n"
+            ': > "$(dirname "$0")/temoin"\n'
+            "printf '      %s\\n' \"$(/usr/bin/wc -c)\"\n",
+            encoding="utf-8",
+            newline="",
+        )
+        wc.chmod(0o755)
+        chemin = env["PATH"]
+        env["PATH"] = str(faux) + os.pathsep + chemin
+        try:
+            code, sortie = lancer(avec_b)
+        finally:
+            env["PATH"] = chemin
+        assert (faux / "temoin").exists(), "le faux wc n'a pas été appelé"
+        assert code == 0, sortie
+        assert comptes(1, 0, 1) in sortie, sortie
 
 
 def test_texte_pr_yml(rendre):
