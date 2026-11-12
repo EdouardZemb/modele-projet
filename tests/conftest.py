@@ -23,6 +23,17 @@ os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 # Les scripts du modèle sont importés directement par les tests.
 sys.path.insert(0, str(SCRIPTS))
 
+# Le `sh` des tests qui lancent un bloc de shell ; `None` quand il n'y en a pas.
+SH = shutil.which("sh") or (
+    r"C:\Program Files\Git\bin\sh.exe"
+    if Path(r"C:\Program Files\Git\bin\sh.exe").exists()
+    else None
+)
+
+# Deux refus de `texte_pr.py`, que `test_texte_pr.py` et `test_methode.py` attendent.
+ABSENTE = "ferme une issue : ligne « Tête relue : <SHA complet> » absente"
+ILLISIBLES = "fermetures illisibles (réponse de l'API absente, en erreur ou mal formée)"
+
 REGISTRE_ENTETE = "| N° | Famille | Date | Constat | Motif | Prévention | Critère de sortie | État |"
 
 # Les numéros du plan d'un lot (ses décisions, ses tâches, les points de ses revues) ne vivent que

@@ -168,7 +168,7 @@ sessions à distance.
 | hook git `pre-commit` | confidentialité du contenu indexé, fichiers UTF-16 compris ; un autre binaire est signalé « non examiné ». La porte suit la nature du dépôt : elle refuse tout constat dans un dépôt de code ; dans un dépôt de données, elle avertit sur ce qui identifie et refuse toujours les secrets (voir plus bas), au hook comme en CI. Dans un dépôt de code, elle refuse aussi les fichiers de l'instance, lus sur leur chemin, et toute clé publique `age` (voir plus bas). Au commit d'un alignement ou d'une mise à jour (celui qui modifie `.copier-answers.yml`), refus d'un fichier du modèle, ou d'un secret chiffré que la chaîne lit (en cible `donnees`, sauf `cible_code: aucune`, `secrets/*.env.enc` ; en cible `serveur` à un dépôt, de nature `donnees`, `deploiement/secrets/*.env.enc`), que le `.gitignore` du projet masque. Le remède n'admet que ce que la porte examine, toujours par des lignes ancrées : un dossier du modèle exclu se lève par `!/<dossier>/` ; un dossier mixte, où un fichier local peut vivre à côté d'un fichier examiné, se lève, en exclut le contenu, puis n'admet que ce qu'elle y examine (`!/cles/`, `/cles/*` puis `!/cles/*.pub`), et un ancêtre exclu, de même, suivi des lignes de ses dossiers ; sous un `.gitignore` imbriqué, ces lignes partent de son dossier. Ce que la porte n'examine pas reste masqué, sans refus : dans un dossier mixte, un secret en clair, une clé privée ou un fichier local ; sous un ancêtre levé, un semé du projet (`docs/cadrage.md` sous `docs/`). Sous un dossier du modèle, tout fichier est du modèle, sauf un dossier de secrets ou de clés imbriqué, ou un cache Python : un autre fichier local posé là, même un `.env`, est refusé comme fichier du modèle |
 | hook git `commit-msg` | format Conventional Commits, confidentialité du message |
 | hook git `pre-push` | refus d'envoyer sur la branche principale |
-| hook Claude `PreToolUse` (outils `Bash`, `PowerShell`, `Monitor`, et tout outil MCP qui porte une commande) | bloque `git push` vers la branche principale, tout force-push vers elle, `--no-verify`, toute modification de `core.hooksPath` sauf la réparation `git config core.hooksPath .githooks` (variables `GIT_CONFIG_*` comprises), `gh pr merge` tant que les contrôles ne sont pas tous verts (et toute fusion en mode `edouard`), `gh pr merge --admin`, l'envoi d'une étiquette (`git push --tags`, `--follow-tags`, un refspec `refs/tags/…`, `v1.2.3` ou `donnees-…`) et toute écriture de publication (`gh release` hors `view`, `list`, `download` ; l'API `…/releases`), les alias et extensions de `gh`, ce qui affiche le jeton de `gh` ou les identifiants de git (`gh auth token`, `gh auth status --show-token`, `gh auth git-credential`, `git credential fill`, `git credential-manager get`), et l'effacement, le déplacement ou le renommage de `.githooks` et de `scripts/modele` (`rm`, `mv`, `Remove-Item`, `git rm`…). Il lit aussi les substitutions `$(…)`, même entre guillemets, les blocs PowerShell (`try { … }`, `& { … }`, `% { … }`) et ses affectations (`$x = …`), le texte d'une here-string (`bash <<< '…'`) passée à un interprète, et les enveloppes (`timeout`, `nice -n`, `env -C`, `env -S`, `exec -a`, `Start-Process`, `Start-Process -WorkingDirectory`, `Invoke-Expression`…). Après un retour de dossier qu'il ne suit pas (`cd -`, `cd ~`, `popd`, `Pop-Location`), la branche courante est illisible : un `git push` doit alors nommer sa branche |
+| hook Claude `PreToolUse` (outils `Bash`, `PowerShell`, `Monitor`, et tout outil MCP qui porte une commande) | bloque `git push` vers la branche principale, tout force-push vers elle, `--no-verify`, toute modification de `core.hooksPath` sauf la réparation `git config core.hooksPath .githooks` (variables `GIT_CONFIG_*` comprises), `gh pr merge` tant que les contrôles ne sont pas tous verts (et toute fusion en mode `edouard`), `gh pr merge --admin`, l'envoi d'une étiquette (`git push --tags`, `--follow-tags`, un refspec `refs/tags/…`, `v1.2.3` ou `donnees-…`) et toute écriture de publication (`gh release` hors `view`, `list`, `download` ; l'API `…/releases`), les alias et extensions de `gh`, ce qui affiche le jeton de `gh` ou les identifiants de git (`gh auth token`, `gh auth status --show-token`, `gh auth git-credential`, `git credential fill`, `git credential-manager get`), et l'effacement, le déplacement ou le renommage de `.githooks` et de `scripts/modele` (`rm`, `mv`, `Remove-Item`, `git rm`…). Il refuse aussi les écritures par l'API : les fusions (`…/merge`), les références de git (`git/refs`), les contenus (`…/contents/`), les règles et protections de branche (`…/rulesets`, `…/protection`), les objets de git (`git/commits`, `git/trees`, `git/tags`), la mise à jour d'une branche (`…/update-branch`) et les publications (`…/releases`) ; les lectures passent. Il lit aussi les substitutions `$(…)`, même entre guillemets, les blocs PowerShell (`try { … }`, `& { … }`, `% { … }`) et ses affectations (`$x = …`), le texte d'une here-string (`bash <<< '…'`) passée à un interprète, et les enveloppes (`timeout`, `nice -n`, `env -C`, `env -S`, `exec -a`, `Start-Process`, `Start-Process -WorkingDirectory`, `Invoke-Expression`…). Après un retour de dossier qu'il ne suit pas (`cd -`, `cd ~`, `popd`, `Pop-Location`), la branche courante est illisible : un `git push` doit alors nommer sa branche |
 | hook Claude `SessionStart` (au démarrage et à la reprise) | affiche ce qui est rouge sur GitHub : les exécutions de la branche principale, les PR ouvertes et les workflows désactivés. Il ne bloque jamais. Il signale aussi un gabarit resté vide que le README lie, et un README qui ne lie aucun document du dépôt. Ce que n'importe qui écrit depuis un fork n'entre pas dans le contexte de Claude : les exécutions de PR (`pull_request…`) sont écartées, et une PR ou un workflow venus d'ailleurs que le dépôt s'affichent sans le texte qu'ils portent. Une PR d'un fork paraît ainsi sans titre ni nom de contrôle, un workflow absent de la copie, sans son nom |
 | CI de base | gitleaks examine les commits de chaque PR et de chaque envoi, et tout l'historique chaque semaine et à la demande (`modele-historique.yml`) ; la porte relit aussi l'historique d'un dépôt de code chaque semaine (`modele-historique.yml`), à côté de gitleaks, et refuse tout constat absent de `.github/constats-acceptes.txt` ; confidentialité du diff et des messages de commit ; format des commits ; le garde de Claude **et les signaux** toujours branchés dans `.claude/settings.json` ; la licence et la carte de la racine (`scripts/modele/documentation.py`) ; actions épinglées par SHA |
 | workflow `texte-pr` | `modele-texte-pr.yml`, seul à écouter `edited` : il relit le texte de chaque PR à son ouverture, à chaque envoi et à chaque retouche de son titre ou de son corps. La confidentialité et le format du titre et du corps, puis la section des écarts à la spec et la tête relue d'une PR qui ferme une issue (`scripts/modele/texte_pr.py`, voir plus bas). Son job, `texte-pr`, est un contrôle requis par la règle de protection d'un dépôt public ; dans un dépôt privé, qui n'a pas de règle, le garde le lit avant une fusion en mode `session` |
@@ -183,31 +183,31 @@ jour, un projet déjà né en retire `edited` lui-même. Le workflow porte la co
 format du titre et du corps, puis lance `scripts/modele/texte_pr.py`, qui lit le corps dans son
 environnement, jamais dans ses arguments, et contrôle deux choses.
 
-- **Les écarts à la spec.** Le corps de toute PR porte une section `## Écarts à la spec`, une
-  seule, sauf quand l'auteur de la PR est `dependabot[bot]` : cette liste est fermée, et toute
-  autre application y est soumise. La section s'arrête au premier titre, quel que soit son niveau,
-  ou à la première ligne de séparation (`---`) : un écart écrit après n'est pas lu. Elle contient
-  « Aucun. » seul, ou une ligne par écart,
-  `- <écart> — promesse : <§ de la spec, ou de l'issue> — accord d'Edouard : JJ/MM/AAAA`, au
-  besoin continuée par des lignes indentées, dans cet ordre : l'écart, qui peut contenir un
-  séparateur, puis la promesse, qui n'en contient pas, puis l'accord, dont la date termine la
-  ligne. Une ligne indentée qui commence par une puce ou un numéro (`-`, `*`, `+`, `1.`) est une
-  sous-liste, et ne continue pas l'écart. Le contrôle refuse, sans nommer de ligne : une section
-  absente, vide ou en double ; « Aucun. » à côté d'un écart ; un commentaire HTML jamais fermé,
-  qui cacherait la suite. Il refuse, en nommant la ligne par son rang dans la section : une ligne
-  qui n'est ni « Aucun. » ni un écart, une sous-liste comprise ; un écart vide, sans « promesse : »
-  suivi d'un texte, sans « accord d'Edouard : » suivi d'une date valide `JJ/MM/AAAA`, avec un
-  texte après la date, ou hors de cet ordre. Un commentaire fermé ou un bloc clôturé ne compte
-  pas : la forme d'une ligne, que le gabarit de PR met en commentaire, n'est pas un écart. Une
-  ligne qui commence par un commentaire, après au plus trois espaces, et porte un texte après lui
-  refuse, comme une ligne qui n'est ni « Aucun. » ni un écart : GitHub la rend en bloc HTML, son
-  texte tel quel, sans Markdown, jamais en puce ; sous une puce, il ne la montre dans la puce que
-  si elle est indentée au moins autant que le texte de la puce. Un bloc indenté de quatre espaces
-  n'est pas écarté : après une puce, il continue l'écart ; sans puce avant lui, il refuse. Le
-  contrôle ne vérifie ni que l'accord est réel, ni qu'un écart n'a pas été tu : il force à écrire
-  l'écart, la promesse qu'il touche et la date de l'accord. Un écart se pèse contre la promesse de
-  la spec, jamais contre l'ancien comportement, ni contre le seul mécanisme principal : l'accord
-  d'Edouard porte sur cette promesse, citée.
+- **Les écarts à la spec.** Le corps de toute PR porte une section `## Écarts à la spec`, une seule,
+  sauf quand l'auteur de la PR est `dependabot[bot]` : cette liste est fermée, et toute autre
+  application y est soumise. La section s'arrête au premier titre, quel que soit son niveau, ou à la
+  première ligne de séparation (`---`) : un écart écrit après n'est pas lu. Elle contient « Aucun. »
+  seul, ou une ligne par écart,
+  `- <écart> — promesse : <§ de la spec, ou de l'issue> — accord : JJ/MM/AAAA` (l'ancienne forme,
+  `— accord d'Edouard : JJ/MM/AAAA`, reste admise), au besoin continuée par des lignes indentées,
+  dans cet ordre : l'écart, qui peut contenir un séparateur, puis la promesse, qui n'en contient
+  pas, puis l'accord, dont la date termine la ligne. Une ligne indentée qui commence par une puce ou
+  un numéro (`-`, `*`, `+`, `1.`) est une sous-liste, et ne continue pas l'écart. Le contrôle
+  refuse, sans nommer de ligne : une section absente, vide ou en double ; « Aucun. » à côté d'un
+  écart ; un commentaire HTML jamais fermé, qui cacherait la suite. Il refuse, en nommant la ligne
+  par son rang dans la section : une ligne qui n'est ni « Aucun. » ni un écart, une sous-liste
+  comprise ; un écart vide, sans « promesse : » suivi d'un texte, sans « accord : » ni « accord
+  d'Edouard : » suivi d'une date valide `JJ/MM/AAAA`, avec un texte après la date, ou hors de cet
+  ordre. Un commentaire fermé ou un bloc clôturé ne compte pas : la forme d'une ligne, que le
+  gabarit de PR met en commentaire, n'est pas un écart. Une ligne qui commence par un commentaire,
+  après au plus trois espaces, et porte un texte après lui refuse, comme une ligne qui n'est ni
+  « Aucun. » ni un écart : GitHub la rend en bloc HTML, son texte tel quel, sans Markdown, jamais en
+  puce ; sous une puce, il ne la montre dans la puce que si elle est indentée au moins autant que le
+  texte de la puce. Un bloc indenté de quatre espaces n'est pas écarté : après une puce, il continue
+  l'écart ; sans puce avant lui, il refuse. Le contrôle ne vérifie ni que l'accord est réel, ni
+  qu'un écart n'a pas été tu : il force à écrire l'écart, la promesse qu'il touche et la date de
+  l'accord. Un écart se pèse contre la promesse de la spec, jamais contre l'ancien comportement, ni
+  contre le seul mécanisme principal : l'accord d'Edouard porte sur cette promesse, citée.
 - **La tête relue.** Une PR qui ferme une issue porte la ligne `Tête relue : <SHA>`, le SHA
   complet de la tête qu'a lue la dernière relecture. Dans un lot, c'est la PR de clôture, et elle
   seule ; hors des lots, un correctif qui ferme une issue par `Fixes #N` nomme aussi la tête
@@ -242,6 +242,26 @@ environnement, jamais dans ses arguments, et contrôle deux choses.
   le corps d'avant et est passée, et `gh pr checks` a montré `texte-pr` vert sur un corps qui
   refusait. Pour relire le texte, on retouche le titre ou le corps : la retouche relance
   `texte-pr` sur le texte en cours.
+- **Éprouver le texte avant d'ouvrir la PR.** Une fois la branche envoyée, on lance le contrôle en
+  local, depuis la racine du projet, sous Git Bash ou un shell POSIX, sans `MSYS_NO_PATHCONV` ni
+  `MSYS2_ARG_CONV_EXCL` : sous Git Bash, Python ne lit le `/tmp/…` de `mktemp` que par la conversion
+  des chemins de MSYS. Le corps est dans un fichier UTF-8, hors du dépôt, comme pour `--body-file` :
+  sur un fichier UTF-16, comme ceux qu'écrit PowerShell 5.1, `$(cat …)` retire les octets nuls, et
+  le contrôle ne lit pas le corps que GitHub recevra : il peut passer comme refuser. Un chemin
+  Windows s'écrit entre les apostrophes de la première ligne, ou avec des `/`.
+
+  ```sh
+  corps='<fichier du corps>'
+  fermetures="$(mktemp)"
+  printf '%s' '{"data":{"repository":{"pullRequest":{"closingIssuesReferences":{"totalCount":0,"nodes":[]}}}}}' > "$fermetures"
+  CORPS="$(cat "$corps")" AUTEUR="$(gh api user --jq .login)" TETE="$(git rev-parse HEAD)" \
+    python -B scripts/modele/texte_pr.py --fermetures "$fermetures"
+  ```
+
+  Avec `"totalCount":1` à la troisième ligne, la même commande éprouve la tête relue d'une PR de
+  clôture. Elle n'éprouve ni le format du titre ni la confidentialité, que `texte-pr` contrôle
+  aussi. `python` est le nom qu'emploie le reste de la méthode : un système qui n'a que `python3`
+  l'emploie à sa place.
 
 **Qui fusionne : la réponse `fusion`.** Deux modes, choisis à la création du projet et enregistrés
 dans `.copier-answers.yml` :

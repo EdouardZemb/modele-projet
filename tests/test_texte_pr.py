@@ -9,10 +9,11 @@ import unicodedata
 
 import pytest
 import texte_pr as t
-from conftest import RACINE, SCRIPTS
+from conftest import ABSENTE, ILLISIBLES, RACINE, SCRIPTS
 
 TETE = "a" * 40
 ECART = "- le seuil passe à 45 min — promesse : spec § 4.1 — accord d'Edouard : 07/11/2026"
+ECART_SANS_PRENOM = "- le seuil passe à 45 min — promesse : spec § 4.1 — accord : 07/11/2026"
 FERME_RIEN = (
     '{"data":{"repository":{"pullRequest":'
     '{"closingIssuesReferences":{"totalCount":0,"nodes":[]}}}}}'
@@ -26,8 +27,6 @@ FERME_NEGATIF = FERME_RIEN.replace('"totalCount":0', '"totalCount":-1')
 FERME_FAUX = FERME_RIEN.replace('"totalCount":0', '"totalCount":false')
 FERME_VRAI = FERME_RIEN.replace('"totalCount":0', '"totalCount":true')
 REFUS = "texte de la PR : refus"
-ABSENTE = "ferme une issue : ligne « Tête relue : <SHA complet> » absente"
-ILLISIBLES = "fermetures illisibles (réponse de l'API absente, en erreur ou mal formée)"
 
 
 @pytest.fixture
@@ -81,7 +80,7 @@ def corps_avec(section):
         (
             "- x — promesse : § 2",
             1,
-            "ligne 2 de la section : accord d'Edouard absent ou date invalide",
+            "ligne 2 de la section : accord absent ou date invalide (JJ/MM/AAAA)",
         ),
         (ECART.replace("07/11/2026", "7/11/2026"), 1, "date invalide"),  # une date à un chiffre
         (ECART.replace("07/11/2026", "31/02/2026"), 1, "date invalide"),
@@ -112,8 +111,33 @@ def corps_avec(section):
             "- x — accord d'Edouard : 07/11/2026 — promesse : § 2",
             1,
             (
-                "ligne 2 de la section : l'écart, puis « promesse : », puis « accord d'Edouard :"
-                " JJ/MM/AAAA » en fin de ligne"
+                "ligne 2 de la section : l'écart, puis « promesse : », puis « accord : JJ/MM/AAAA »"
+                " en fin de ligne"
+            ),
+        ),
+        # l'accord sans prénom, et ses variantes de forme
+        (ECART_SANS_PRENOM, 0, "écarts à la spec : 1 déclaré"),
+        ("- x — promesse : § 2 — Accord : 07/11/2026", 0, "1 déclaré"),
+        ("- x — promesse : § 2 — accord: 07/11/2026", 0, "1 déclaré"),
+        ("- x — promesse : § 2 — accord d’Edouard : 07/11/2026", 0, "1 déclaré"),
+        (
+            "- Accord : le délai passe à 3 jours — promesse : § 2 — accord : 07/11/2026",
+            0,
+            "1 déclaré",
+        ),
+        (
+            "- x — promesse : § 2 — accord :",
+            1,
+            "ligne 2 de la section : accord absent ou date invalide (JJ/MM/AAAA)",
+        ),
+        # « accordé : » n'est pas un accord : il manque, et la promesse n'est plus l'avant-dernière
+        # partie, d'où aussi le refus d'ordre
+        (
+            "- x — promesse : § 2 — accordé : 07/11/2026",
+            1,
+            (
+                "ligne 2 de la section : accord absent ou date invalide (JJ/MM/AAAA)",
+                f"ligne 2 de la section : {t.ORDRE}",
             ),
         ),
         (
@@ -184,7 +208,8 @@ def corps_avec(section):
 def test_ecarts(lancer, section, code, attendu):
     rendu, sortie = lancer(corps_avec(section))
     assert rendu == code, sortie
-    assert attendu in sortie, sortie
+    for morceau in (attendu,) if isinstance(attendu, str) else attendu:
+        assert morceau in sortie, sortie
     assert (REFUS in sortie) == (code == 1), sortie
 
 
@@ -245,10 +270,11 @@ def test_docstring_dit_les_refus_et_les_ecarts_du_rendu():
         (
             "Il refuse, en nommant la ligne par son rang dans la section, la ligne 1 étant celle "
             "qui suit le titre : une ligne qui n'est ni « Aucun. » ni un écart, une sous-liste "
-            "comprise ; un écart vide, sans « promesse : » suivi d'un texte, sans « accord "
-            "d'Edouard : » suivi d'une vraie date, avec un texte après la date, ou hors de cet "
-            "ordre."
+            "comprise ; un écart vide, sans « promesse : » suivi d'un texte, sans « accord : » "
+            "ni « accord d'Edouard : » suivi d'une vraie date, avec un texte après la date, ou "
+            "hors de cet ordre."
         ),
+        "`- <écart> — promesse : <§ de la spec, ou de l'issue> — accord : JJ/MM/AAAA`",
         (
             "une ligne qu'il cache est absente. À des écarts près, dont deux connus : un `<!--` "
             "jamais fermé, ouvert dans un élément de liste après quatre espaces ou plus (une puce "
@@ -287,13 +313,16 @@ def test_ecarts_titres_varies(lancer):
     assert (code, "écarts à la spec : aucun" in sortie) == (0, True), sortie
 
 
-def test_texte_pr_corps_de_l_interface_web(lancer):
+@pytest.mark.parametrize(
+    "accord",
+    ["accord d’Edouard : 07/11/2026", "accord : 07/11/2026"],
+    ids=["ancienne forme", "forme sans prénom"],
+)
+def test_texte_pr_corps_de_l_interface_web(lancer, accord):
     """Un corps édité dans l'interface web de GitHub arrive en CRLF ; une session écrit selon son
-    outil une apostrophe typographique, des espaces insécables, un tiret demi-cadratin."""
-    ligne = (
-        "- le seuil passe à 45 min \u2013 promesse\u00a0: spec § 4.1 \u2013 accord d\u2019Edouard"
-        "\u00a0: 07/11/2026"
-    )
+    outil une apostrophe typographique, des espaces insécables, un tiret demi-cadratin. Les deux
+    formes de l'accord se lisent."""
+    ligne = f"- le seuil passe à 45 min – promesse : spec § 4.1 – {accord}"
     corps = (
         "## Ce que fait cette PR\r\n\r\nx\r\n\r\n## Écarts à la spec\r\n\r\n"
         + ligne
@@ -303,6 +332,20 @@ def test_texte_pr_corps_de_l_interface_web(lancer):
     code, sortie = lancer(corps)
     assert code == 0, sortie
     assert "écarts à la spec : 1 déclaré" in sortie, sortie
+
+
+def test_ecart_qui_commence_par_accord(lancer):
+    """Un écart qui commence par « Accord : », sans accord final, reçoit le refus d'ordre, et
+    non « accord absent » : une de ses parties a la forme d'un accord."""
+    code, sortie = lancer(corps_avec("- Accord : le délai passe à 3 jours — promesse : § 2"))
+    assert code == 1, sortie
+    assert f"ligne 2 de la section : {t.ORDRE}" in sortie, sortie
+    assert t.ACCORD_INVALIDE not in sortie, sortie
+
+
+def test_messages_ne_nomment_personne():
+    assert t.ACCORD_INVALIDE == "accord absent ou date invalide (JJ/MM/AAAA)"
+    assert t.ORDRE == "l'écart, puis « promesse : », puis « accord : JJ/MM/AAAA » en fin de ligne"
 
 
 def test_auteurs(lancer):
@@ -387,11 +430,17 @@ def test_reponses_refusees_par_leur_seule_valeur(fermetures, total):
 
 def test_le_gabarit_de_pr_passe_tel_quel(lancer):
     """Le gabarit de PR, pris tel quel pour corps : il passe quand la PR ne ferme rien, et refuse
-    quand elle ferme une issue, faute de tête relue."""
+    quand elle ferme une issue, faute de tête relue. Son commentaire des écarts donne la forme sans
+    prénom, à l'identique, et ne nomme personne."""
     gabarit = (RACINE / "template/.github/pull_request_template.md").read_text(encoding="utf-8")
     code, sortie = lancer(gabarit, fermetures=FERME_RIEN)
     assert code == 0, sortie
     assert "écarts à la spec : aucun" in sortie, sortie
+    assert "edouard" not in gabarit.casefold()
+    assert (
+        "<!-- « Aucun. », ou une ligne par écart à la spec ou à l'issue, avec la date de l'accord :"
+        " - <écart> — promesse : <§ de la spec, ou de l'issue> — accord : JJ/MM/AAAA -->"
+    ) in gabarit.splitlines()
     code, sortie = lancer(gabarit, fermetures=FERME_UNE)
     assert code == 1, sortie
     assert ABSENTE in sortie, sortie
