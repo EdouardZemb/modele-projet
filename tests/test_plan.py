@@ -636,7 +636,7 @@ def test_plan_tranches_unites(racine):
     lignes, refus = verifier(plan(revues="- relecture : Tranche 2", taches=doubles), racine)
     assert refus and "Tranche 2 en double" in lignes, lignes
     autres = (
-        "### Tranches\n\n### Ce que ce plan tranche",
+        "### Tranches 3 · x\n\n### Ce que ce plan tranche",
         "```\n### Tranche 4 · code\n```",
         "<!--\n### Tranche 5 · cachée\n-->",
         *APRES_LA_CLOTURE,

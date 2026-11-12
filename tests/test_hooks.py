@@ -2,19 +2,14 @@
 
 import json
 import os
-import shutil
 import subprocess
 import sys
-from pathlib import Path
 
 import pre_push
 import pytest
 import yaml
-from conftest import RACINE, git
+from conftest import RACINE, SH, git
 
-SH = shutil.which("sh") or (
-    r"C:\Program Files\Git\bin\sh.exe" if Path(r"C:\Program Files\Git\bin\sh.exe").exists() else None
-)
 MOTIF = "motif-interdit-essai"
 HOOKS = ("pre-commit", "commit-msg", "pre-push")
 

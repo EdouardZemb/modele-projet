@@ -8,16 +8,10 @@ test saute, sauf si MODELE_TESTS_SANS_SAUT nomme docker (LE-16).
 """
 
 import re
-import shutil
 import subprocess
-from pathlib import Path
 
 import pytest
-from conftest import REPONSES_SERVEUR, REPONSES_SERVEUR_CODE, exiger, manque
-
-SH = shutil.which("sh") or (
-    r"C:\Program Files\Git\bin\sh.exe" if Path(r"C:\Program Files\Git\bin\sh.exe").exists() else None
-)
+from conftest import REPONSES_SERVEUR, REPONSES_SERVEUR_CODE, SH, exiger, manque
 
 
 def exiger_docker_linux():

@@ -4,7 +4,6 @@ import hashlib
 import re
 import shutil
 import subprocess
-from pathlib import Path
 
 import copier
 import masques
@@ -16,13 +15,10 @@ from conftest import (
     RACINE,
     REPONSES_PAR_DEFAUT,
     REPONSES_SERVEUR,
+    SH,
     git,
 )
 from copier.errors import UserMessageError
-
-SH = shutil.which("sh") or (
-    r"C:\Program Files\Git\bin\sh.exe" if Path(r"C:\Program Files\Git\bin\sh.exe").exists() else None
-)
 
 IGNORES = shutil.ignore_patterns(
     ".git", ".superpowers", "__pycache__", ".pytest_cache", ".ruff_cache", ".venv"
