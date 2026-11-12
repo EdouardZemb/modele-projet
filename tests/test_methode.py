@@ -472,9 +472,9 @@ def test_methode_dit_l_ordre_du_passage_en_public():
     assert "Le changement de visibilité est ensuite à Edouard" not in texte
     aligner = " ".join(lire(RACINE / "docs/aligner.md").split())
     assert (
-        "d'abord, 👤, le changement de visibilité ; ensuite seulement, la règle de protection"
-        in aligner
-    )
+        "d'abord, 👤, le changement de visibilité ; ensuite seulement, 👤, la règle de protection, "
+        "par la ligne du § 6"
+    ) in aligner
     assert "une ligne par couple (commit, chemin)" in texte
     assert "une ligne par constat, `<commit> <chemin>`" not in texte
 

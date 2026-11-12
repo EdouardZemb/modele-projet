@@ -123,8 +123,14 @@ Chaque case se coche dans la PR d'alignement. Une case qui ne s'applique pas au 
 
 ## 6. Les réglages du dépôt (👤)
 
-- [ ] 👤 **Le secret, posé deux fois**, pour Actions et pour Dependabot (sous Windows, par
-      `cmd /c`, dont la redirection transmet les octets tels quels) :
+Chaque ligne d'un bloc 👤 se lance par `!`, seule dans son message, le `!` en tout premier
+caractère : deux commandes dans un même message, ou un `!` qui n'est pas en tête, partent comme du
+texte.
+
+- [ ] 👤 **Le secret, posé deux fois**, pour Actions et pour Dependabot (par `!`, la commande
+      passe par Git Bash, dont la redirection transmet les octets tels quels ; jamais par
+      `cmd /c`, que Git Bash réécrit : `cmd` lirait alors chaque ligne de la liste comme une
+      commande, et l'afficherait) :
 
   ```sh
   gh secret set MOTIFS_INTERDITS --repo <dépôt> < <liste privée>
@@ -139,10 +145,15 @@ Chaque case se coche dans la PR d'alignement. Une case qui ne s'applique pas au 
   gh api -X PATCH repos/<dépôt> -f squash_merge_commit_title=PR_TITLE -f squash_merge_commit_message=PR_BODY
   ```
 
-- [ ] 👤 **La règle de protection**, si le dépôt est public, après le premier envoi :
-      `gh api -X POST repos/<dépôt>/rulesets --input .github/modele/ruleset-main.json`. Un dépôt
-      qui a déjà sa règle la met à jour après la fusion (§7). Un dépôt privé n'en a pas : le garde
-      de Claude y est la seule serrure côté agent.
+- [ ] 👤 **La règle de protection**, si le dépôt est public, après le premier envoi, par `!`, seule
+      dans son message : le garde refuse cette écriture à une session.
+
+  ```sh
+  gh api -X POST repos/<dépôt>/rulesets --input .github/modele/ruleset-main.json
+  ```
+
+  Un dépôt qui a déjà sa règle la met à jour après la fusion (§7). Un dépôt privé n'en a pas : le
+  garde de Claude y est la seule serrure côté agent.
 
 ## 7. PR et CI
 
@@ -155,20 +166,21 @@ Chaque case se coche dans la PR d'alignement. Une case qui ne s'applique pas au 
       confidentialite` y est rouge, par la licence que refuse l'étape « La documentation de la
       racine » (§3) : 👤 Edouard fusionne cette PR.
 - [ ] Fusion en squash, puis le déploiement éventuel vérifié là où l'application sert.
-- [ ] 👤 **La règle de protection d'un dépôt qui l'a déjà**, après la fusion, quand la mise à jour
-      change ses contrôles requis (comme l'arrivée de `texte-pr`). Son identifiant se lit par
-      `gh api repos/<dépôt>/rulesets`. Avant le geste, lire les contrôles requis en service, dans
-      `avant.txt`. Le corps de la mise à jour part de la règle en service, à laquelle on ajoute
-      `texte-pr` : `regle.json`, construit par `gh api … --jq` avec les seuls champs que la mise à
-      jour accepte (`name`, `target`, `enforcement`, `bypass_actors`, `conditions`, `rules`), et
-      `texte-pr` ajouté une seule fois, une règle qui le requiert déjà restant telle quelle. Jamais
-      du seul fichier géré quand la règle en service requiert des contrôles qu'il n'a pas : ses
-      contrôles remplaceraient ceux de la règle, et `pupitre` perdrait ainsi `verifier`, `windows`
-      et `mutants`, la porte de la mutation. Le fichier géré ne s'emploie tel quel
-      (`--input .github/modele/ruleset-main.json`, depuis le clone à jour de la branche
-      principale) que si la règle en service ne requiert que les contrôles du socle. Un `POST`
-      crée une règle ; il ne met pas à jour celle qui existe. Aucune autre PR n'est fusionnée entre
-      la fusion et ce geste. Sous Windows, ces commandes se lancent dans Git Bash : PowerShell 5.1
+- [ ] **La préparation de la mise à jour de la règle d'un dépôt qui l'a déjà**, après la fusion,
+      quand la mise à jour change ses contrôles requis (comme l'arrivée de `texte-pr`). La session
+      la fait dans son propre dossier, où elle écrit `avant.txt` et `regle.json`. Son identifiant
+      se lit par `gh api repos/<dépôt>/rulesets`. Avant le geste, lire les contrôles requis en
+      service, dans `avant.txt`. Le corps de la mise à jour part de la règle en service, à laquelle
+      on ajoute `texte-pr` : `regle.json`, construit par `gh api … --jq` avec les seuls champs que
+      la mise à jour accepte (`name`, `target`, `enforcement`, `bypass_actors`, `conditions`,
+      `rules`), et `texte-pr` ajouté une seule fois, une règle qui le requiert déjà restant telle
+      quelle. Jamais du seul fichier géré quand la règle en service requiert des contrôles qu'il
+      n'a pas : ses contrôles remplaceraient ceux de la règle, et `pupitre` perdrait ainsi
+      `verifier`, `windows` et `mutants`, la porte de la mutation. Le fichier géré ne s'emploie tel
+      quel (`--input .github/modele/ruleset-main.json`, depuis une session ouverte dans le clone
+      à jour de la branche principale du dépôt, par le geste qui suit) que si la règle en service
+      ne requiert que les contrôles du socle. Un `POST` crée une règle ; il ne met pas à jour
+      celle qui existe. Sous Windows, ces commandes se lancent dans Git Bash : PowerShell 5.1
       retire les guillemets du filtre `--jq`.
 
   ```sh
@@ -179,6 +191,19 @@ Chaque case se coche dans la PR d'alignement. Une case qui ne s'applique pas au 
       then .parameters.required_status_checks |= (if any(.[]; .context == "texte-pr") then .
         else . + [{context: "texte-pr"}] end)
       else . end]}' > regle.json
+  ```
+
+- [ ] 👤 **Le geste de la règle**, après la préparation : Edouard lance la seule ligne du PUT par
+      `!`, le `!` en tout premier caractère, seule dans son message, depuis la session qui a
+      préparé `regle.json` dans son dossier. La session lui donne la ligne exacte, le dépôt et
+      l'identifiant remplacés. Quand la règle en service ne requiert que les contrôles du socle,
+      la ligne prend `--input .github/modele/ruleset-main.json`, lancée depuis une session ouverte
+      dans le clone à jour de la branche principale du dépôt. Le garde refuse cette écriture à
+      une session. Aucune autre PR n'est fusionnée entre la fusion et ce geste. Le PUT a réussi du
+      premier coup le 12/11/2026 sur `veille-emploi`, `pupitre` et `ancrage`, le corps construit
+      depuis la règle en service.
+
+  ```sh
   gh api -X PUT repos/<dépôt>/rulesets/<id> --input regle.json
   ```
 
@@ -395,8 +420,9 @@ Deux cas, selon la nature du dépôt (M-0006).
 - [ ] **Un dépôt de code né après M-0006** n'a pas de travail préalable : la porte a refusé tout
       constat dès son premier commit, et relit son historique chaque semaine
       (`modele-historique.yml`). Il ne lui faut que sa règle de protection (`ruleset-main.json`),
-      mais dans cet ordre : d'abord, 👤, le changement de visibilité ; ensuite seulement, la règle de
-      protection, que GitHub refuse sur un dépôt privé d'un compte gratuit (M-0002).
+      mais dans cet ordre : d'abord, 👤, le changement de visibilité ; ensuite seulement, 👤, la
+      règle de protection, par la ligne du § 6, que GitHub refuse sur un dépôt privé d'un compte
+      gratuit (M-0002).
 - [ ] **Un dépôt d'avant M-0006 ne passe pas en public** : son historique a pu recevoir des
       constats que la porte ne faisait qu'avertir. Il se scinde : la scission (M-0006, § 7) fait de
       lui le dépôt de données, et un nouveau dépôt de code naît d'un seul commit propre. Jusque-là,
