@@ -342,8 +342,8 @@ protection par le geste de `docs/aligner.md` (§ 7), lancé par `!` : le PUT, do
 règle en service, a été accepté du premier coup les trois fois ; `pupitre` a ensuite aligné son
 `CONVENTIONS.md` sur la règle (pupitre#33). La lecture des fermetures par `texte-pr` dans un dépôt
 privé est prouvée : sur veille-emploi-donnees#51, qui porte « Closes #12 », `texte-pr` a refusé
-trois fois un corps sans la ligne `Tête relue`, puis a dit « ferme une issue : tête relue égale à la
-tête » (LE-69).
+trois fois un corps sans la section des écarts ni la ligne `Tête relue`, puis a dit « ferme une
+issue : tête relue égale à la tête » (LE-69).
 
 Correctif du 09/11 : le délai du job `tests` de ce dépôt passe de 45 à 50 min, seuil 37 min 30 s
 (LE-40). La porte du lot 15 a donné son premier avertissement de durée sur la PR de clôture,
