@@ -160,6 +160,41 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      # LE-41 : depuis le passage d'ubuntu-latest à Ubuntu 26.04 (novembre 2026), le Docker du
+      # runner est un 29 en magasin containerd ; la cible garde le magasin classique, et l'épreuve
+      # du ménage s'arrête sur l'autre. Le magasin se coupe dans le daemon.json du runner, sans en
+      # perdre les réglages, avant tout usage de Docker : une image construite avant serait dans
+      # l'autre magasin. Le démon répond quand `docker info` passe : jusqu'à 60 s. Chaque échec est
+      # dit, sans rien devoir à `bash -e` (test_fausse_app_coupe_le_magasin_containerd_du_runner).
+      - name: Le Docker du runner en magasin classique
+        run: |
+          sudo python3 -I tests/modele/daemon_classique.py /etc/docker/daemon.json \
+            || { echo "::error::daemon.json non réécrit"; exit 1; }
+          sudo systemctl restart docker \
+            || { echo "::error::le Docker du runner ne redémarre pas"; exit 1; }
+          for _ in $(seq 1 30); do
+            if docker info >/dev/null 2>&1; then
+              break
+            fi
+            sleep 2
+          done
+          moteur=$(docker version --format '{{.Server.Version}}') \
+            || { echo "::error::le Docker du runner ne répond pas après 60 s"; exit 1; }
+          pilote=$(docker info --format '{{.Driver}}') \
+            || { echo "::error::pilote illisible dans le Docker du runner"; exit 1; }
+          statut=$(docker info --format '{{json .DriverStatus}}') \
+            || { echo "::error::DriverStatus illisible dans le Docker du runner"; exit 1; }
+          echo "Docker du runner : moteur $moteur, pilote $pilote, DriverStatus $statut"
+          if [ "$pilote" != overlay2 ]; then
+            echo "::error::le pilote est $pilote, la cible a overlay2 (magasin classique)"
+            exit 1
+          fi
+          case "$statut" in
+            *io.containerd.snapshotter*)
+              echo "::error::le magasin containerd est encore actif ($statut)"
+              exit 1
+              ;;
+          esac
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
