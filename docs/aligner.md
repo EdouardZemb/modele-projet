@@ -177,10 +177,11 @@ texte.
       quelle. Jamais du seul fichier géré quand la règle en service requiert des contrôles qu'il
       n'a pas : ses contrôles remplaceraient ceux de la règle, et `pupitre` perdrait ainsi
       `verifier`, `windows` et `mutants`, la porte de la mutation. Le fichier géré ne s'emploie tel
-      quel (`--input .github/modele/ruleset-main.json`, depuis le clone à jour de la branche
-      principale) que si la règle en service ne requiert que les contrôles du socle. Un `POST`
-      crée une règle ; il ne met pas à jour celle qui existe. Sous Windows, ces commandes se
-      lancent dans Git Bash : PowerShell 5.1 retire les guillemets du filtre `--jq`.
+      quel (`--input .github/modele/ruleset-main.json`, depuis une session ouverte dans le clone
+      à jour de la branche principale du dépôt, par le geste qui suit) que si la règle en service
+      ne requiert que les contrôles du socle. Un `POST` crée une règle ; il ne met pas à jour
+      celle qui existe. Sous Windows, ces commandes se lancent dans Git Bash : PowerShell 5.1
+      retire les guillemets du filtre `--jq`.
 
   ```sh
   gh api repos/<dépôt>/rulesets/<id> --jq '.rules[] | select(.type == "required_status_checks")
@@ -197,9 +198,10 @@ texte.
       préparé `regle.json` dans son dossier. La session lui donne la ligne exacte, le dépôt et
       l'identifiant remplacés. Quand la règle en service ne requiert que les contrôles du socle,
       la ligne prend `--input .github/modele/ruleset-main.json`, lancée depuis une session ouverte
-      dans le clone à jour de la branche principale du dépôt. Le garde refuse cette écriture à une session. Aucune autre PR n'est
-      fusionnée entre la fusion et ce geste. Le PUT a réussi du premier coup le 12/11/2026 sur
-      `veille-emploi`, `pupitre` et `ancrage`, le corps construit depuis la règle en service.
+      dans le clone à jour de la branche principale du dépôt. Le garde refuse cette écriture à
+      une session. Aucune autre PR n'est fusionnée entre la fusion et ce geste. Le PUT a réussi du
+      premier coup le 12/11/2026 sur `veille-emploi`, `pupitre` et `ancrage`, le corps construit
+      depuis la règle en service.
 
   ```sh
   gh api -X PUT repos/<dépôt>/rulesets/<id> --input regle.json
@@ -418,8 +420,9 @@ Deux cas, selon la nature du dépôt (M-0006).
 - [ ] **Un dépôt de code né après M-0006** n'a pas de travail préalable : la porte a refusé tout
       constat dès son premier commit, et relit son historique chaque semaine
       (`modele-historique.yml`). Il ne lui faut que sa règle de protection (`ruleset-main.json`),
-      mais dans cet ordre : d'abord, 👤, le changement de visibilité ; ensuite seulement, 👤, la règle de
-      protection, par la ligne du § 6, que GitHub refuse sur un dépôt privé d'un compte gratuit (M-0002).
+      mais dans cet ordre : d'abord, 👤, le changement de visibilité ; ensuite seulement, 👤, la
+      règle de protection, par la ligne du § 6, que GitHub refuse sur un dépôt privé d'un compte
+      gratuit (M-0002).
 - [ ] **Un dépôt d'avant M-0006 ne passe pas en public** : son historique a pu recevoir des
       constats que la porte ne faisait qu'avertir. Il se scinde : la scission (M-0006, § 7) fait de
       lui le dépôt de données, et un nouveau dépôt de code naît d'un seul commit propre. Jusque-là,

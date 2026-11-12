@@ -1405,8 +1405,9 @@ def test_liste_d_alignement():
         "Jamais du seul fichier géré quand la règle en service requiert des contrôles qu'il n'a pas",
         (
             "Le fichier géré ne s'emploie tel quel (`--input .github/modele/ruleset-main.json`, "
-            "depuis le clone à jour de la branche principale) que si la règle en service ne requiert "
-            "que les contrôles du socle."
+            "depuis une session ouverte dans le clone à jour de la branche principale du dépôt, "
+            "par le geste qui suit) que si la règle en service ne requiert que les contrôles du "
+            "socle."
         ),
         "Sous Windows, ces commandes se lancent dans Git Bash",
     ):
