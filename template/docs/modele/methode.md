@@ -220,22 +220,22 @@ environnement, jamais dans ses arguments, et contrôle deux choses.
   La ligne se cherche telle que GitHub la montre : un commentaire jamais fermé, ouvert en tête de
   ligne ou après une puce, cache tout ce qui le suit, et une ligne cachée est absente.
 - **Les limites de la tête relue.** Le contrôle force à nommer une tête, pas à la relire : la
-  relecture reste une tâche du plan. Dans un lot, la PR de revue finale n'est pas visée : sa
-  relecture est une tâche du plan, ou une tranche d'un plan maître, et la PR de clôture relit
-  ensuite la tête qui part. GitHub ne lit un mot-clé de fermeture que dans une PR qui vise la
-  branche par défaut : une PR empilée sur une autre branche ne ferme rien, et sa tête relue n'est
-  pas exigée. Une issue liée depuis la barre latérale de la PR compte aussi, mais aucun type
-  d'événement documenté ne suit ce lien : le contrôle repart au commit ou à la modification du corps
-  suivants. La ligne se cherche telle que GitHub la montre, à des écarts près, dont deux connus : un
-  `<!--` jamais fermé, ouvert dans un élément de liste après quatre espaces ou plus (une puce
-  imbriquée, ou une ligne qui continue la puce), cache sur GitHub tout ce qui le suit, et un `<?`,
-  un `<!` suivi d'une majuscule (`<!DOCTYPE`) ou un `<![CDATA[` ouvert en tête de ligne, tout ce qui
-  le suit jusqu'au premier `>`, même plusieurs lignes plus bas, ou jusqu'à la fin sans lui ; le
-  contrôle lit encore ces lignes, la ligne `Tête relue` comme la section des écarts. D'autres formes
-  HTML cachent aussi sur GitHub ce que le contrôle lit : un `<?` ou un `<!DOCTYPE` après une puce,
-  ou en ligne et fermé plus bas ; un `<!--` jamais fermé dans une ligne de bloc HTML, comme
-  `<div><!-- note</div>` ; un attribut ou un titre de lien sur plusieurs lignes. Tous sont bornés :
-  le SHA de cette ligne doit toujours égaler la tête de la PR.
+  relecture reste une tâche du plan, ou une tranche d'un plan maître. Dans un lot, la PR de revue
+  finale n'est pas visée : sa relecture est une tâche du plan, ou une tranche d'un plan maître, et
+  la PR de clôture relit ensuite la tête qui part. GitHub ne lit un mot-clé de fermeture que dans
+  une PR qui vise la branche par défaut : une PR empilée sur une autre branche ne ferme rien, et sa
+  tête relue n'est pas exigée. Une issue liée depuis la barre latérale de la PR compte aussi, mais
+  aucun type d'événement documenté ne suit ce lien : le contrôle repart au commit ou à la
+  modification du corps suivants. La ligne se cherche telle que GitHub la montre, à des écarts près,
+  dont deux connus : un `<!--` jamais fermé, ouvert dans un élément de liste après quatre espaces ou
+  plus (une puce imbriquée, ou une ligne qui continue la puce), cache sur GitHub tout ce qui le
+  suit, et un `<?`, un `<!` suivi d'une majuscule (`<!DOCTYPE`) ou un `<![CDATA[` ouvert en tête de
+  ligne, tout ce qui le suit jusqu'au premier `>`, même plusieurs lignes plus bas, ou jusqu'à la fin
+  sans lui ; le contrôle lit encore ces lignes, la ligne `Tête relue` comme la section des écarts.
+  D'autres formes HTML cachent aussi sur GitHub ce que le contrôle lit : un `<?` ou un `<!DOCTYPE`
+  après une puce, ou en ligne et fermé plus bas ; un `<!--` jamais fermé dans une ligne de bloc
+  HTML, comme `<div><!-- note</div>` ; un attribut ou un titre de lien sur plusieurs lignes. Tous
+  sont bornés : le SHA de cette ligne doit toujours égaler la tête de la PR.
 - **Ne jamais relancer `texte-pr`.** Une relance, par `gh run rerun` ou depuis l'interface de
   GitHub, rejoue l'événement d'origine : elle relit le titre et le corps de ce moment-là, pas ceux
   de la PR telle qu'elle est. Éprouvé dans le dépôt modèle le 07/11/2026 : après une retouche qui

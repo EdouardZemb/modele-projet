@@ -815,7 +815,7 @@ function Invoke-Etapes {
                 Write-Host 'Fait :' -ForegroundColor Yellow
                 $faites | ForEach-Object { Write-Host "  - $_" }
                 Write-Host 'Reste à faire :' -ForegroundColor Yellow
-                Write-Host "  (Ces commandes sont écrites pour PowerShell, à coller dans cette fenêtre : jamais par '!' dans une session Claude, où Git Bash réécrit /c et afficherait la liste privée.)" -ForegroundColor Yellow
+                Write-Host "  (Ces commandes sont écrites pour PowerShell, à coller dans cette fenêtre : jamais par '!' dans une session Claude : Git Bash y réécrit /c, et cmd lirait alors chaque ligne de la liste privée comme une commande, et l'afficherait.)" -ForegroundColor Yellow
                 for ($j = $i; $j -lt $total; $j++) {
                     Write-Host "  - $($Etapes[$j].Description)"
                     Write-Host "        > $($Etapes[$j].Commande)" -ForegroundColor DarkGray
