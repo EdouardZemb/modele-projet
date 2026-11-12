@@ -382,6 +382,7 @@ def test_methode_dit_le_texte_de_la_pr():
         "**Éprouver le texte avant d'ouvrir la PR.**",
         "n'éprouve ni le format du titre ni la confidentialité",
         "sans `MSYS_NO_PATHCONV` ni `MSYS2_ARG_CONV_EXCL`",
+        "Le corps est dans un fichier UTF-8 sans BOM, hors du dépôt",
         (
             "sur un fichier UTF-16, comme ceux qu'écrit PowerShell 5.1, `$(cat …)` retire les "
             "octets nuls, et le contrôle ne lit pas le corps que GitHub recevra : il peut passer "
@@ -467,7 +468,7 @@ def test_methode_dit_l_ordre_du_passage_en_public():
     visibilité d'abord, la règle ensuite (M-0002)."""
     texte = " ".join(lire(METHODE).split())
     assert (
-        "d'abord, 👤, Edouard change la visibilité ; ensuite seulement, la règle de protection"
+        "d'abord, 👤, Edouard change la visibilité ; ensuite seulement, 👤, la règle de protection"
     ) in texte
     assert "Le changement de visibilité est ensuite à Edouard" not in texte
     aligner = " ".join(lire(RACINE / "docs/aligner.md").split())
@@ -1546,10 +1547,10 @@ def test_methode_dit_les_plans():
             "la clôture d'une tranche, dans son plan, ne supprime pas ce plan et ne ferme pas "
             "l'issue"
         ),
-        "« trancher » suivi d'un nombre cite une tranche dans un plan maître",
+        "le mot « tranche » suivi d'un nombre cite une tranche dans un plan maître",
         (
-            "sous sa forme « tranche » (« qui tranche 2 questions ») ; « trancher 2 » ne cite "
-            "rien"
+            "même quand c'est le verbe (« qui tranche 2 questions ») ; « trancher 2 », "
+            "« Tranches » et « Tâches » ne citent rien"
         ),
         "(dans un lot en tranches, le plan maître et les plans de tranche)",
         (
@@ -1569,6 +1570,10 @@ def test_methode_dit_les_plans():
         (
             "chaque temps d'une revue est une tâche du plan, ou une tranche d'un plan maître, "
             "avant la clôture"
+        ),
+        (
+            "sa relecture est une tâche du plan, ou une tranche d'un plan maître, et la PR de "
+            "clôture relit ensuite la tête qui part"
         ),
         "une correction cherche aussi la même croyance dans le reste du plan et dans la spec",
         "une revue se juge sur la tête qui part",
@@ -1682,11 +1687,13 @@ def test_methode_eprouve_le_texte_en_local(rendre, env_isole, tmp_path):
     bon = faux_gh("gh-bon", "echo exemple-auteur")
     mauvais = faux_gh("gh-mauvais", "exit 1")
 
-    def lancer(section, dossier_gh=bon, variante=False, **autre):
+    def lancer(section, dossier_gh=bon, variante=False, relue=None, **autre):
         corps = "## Ce que fait cette PR\n\nx\n"
         if section is not None:
             corps += "\n## Écarts à la spec\n\n" + section + "\n"
         corps += "\n## Vérifications\n"
+        if relue is not None:
+            corps += "\nTête relue : " + relue + "\n"
         fichier = tmp_path / "corps.md"
         fichier.write_bytes(corps.replace("\n", "\r\n").encode("utf-8"))
         script = bloc.replace("<fichier du corps>", fichier.as_posix())
@@ -1720,6 +1727,10 @@ def test_methode_eprouve_le_texte_en_local(rendre, env_isole, tmp_path):
     code, sortie = lancer("Aucun.", variante=True)
     assert code == 1, sortie
     assert ABSENTE in sortie, sortie
+    tete = git(projet, env, "rev-parse", "HEAD").strip()
+    code, sortie = lancer("Aucun.", variante=True, relue=tete)
+    assert code == 0, sortie
+    assert "tête relue égale à la tête" in sortie, sortie
     code, sortie = lancer("Aucun.", dossier_gh=mauvais)
     assert code == 64, sortie
     if sys.platform == "win32":

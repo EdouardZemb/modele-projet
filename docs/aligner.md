@@ -146,7 +146,8 @@ texte.
   ```
 
 - [ ] 👤 **La règle de protection**, si le dépôt est public, après le premier envoi, par `!`, seule
-      dans son message : le garde refuse cette écriture à une session.
+      dans son message, depuis une session ouverte dans le worktree d'alignement, où le fichier est
+      rendu : le garde refuse cette écriture à une session.
 
   ```sh
   gh api -X POST repos/<dépôt>/rulesets --input .github/modele/ruleset-main.json
