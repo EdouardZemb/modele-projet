@@ -333,11 +333,17 @@ le dépôt public `ancrage` est né d'un seul commit, en cible `serveur` et natu
 sont en `v0.8.1`. Trois dépôts sont publics, chacun avec sa règle de protection : `ancrage`,
 `pupitre` et `veille-emploi`.
 
-Les messages de mise à jour vers la `v0.10.0` partent sur le oui d'Edouard, une fois l'étiquette
-publiée : d'abord celui de `serveur`, dépôt privé, dont la PR de mise à jour éprouve que la lecture
-des fermetures par `texte-pr` y aboutit, sans erreur (la preuve complète attend la première PR d'un
-dépôt privé qui ferme une issue : `docs/pistes.md`), puis les six autres, après le vert de
-`texte-pr` sur cette PR.
+Versions des projets au 12/11/2026, relevées par l'API : les sept projets nés du modèle sont en
+`v0.10.0` (serveur#68, pupitre-donnees#21, veille-emploi-donnees#52, veille-emploi#20, pupitre#31,
+ancrage#13, ancrage-donnees#213). Le message de `serveur`, dépôt privé, est parti le premier, et les
+six autres après le vert de `texte-pr` sur sa PR. Dans chacun des trois dépôts publics, après la
+fusion de la mise à jour et avant toute autre fusion, Edouard a ajouté `texte-pr` à la règle de
+protection par le geste de `docs/aligner.md` (§ 7), lancé par `!` : le PUT, dont le corps reprend la
+règle en service, a été accepté du premier coup les trois fois ; `pupitre` a ensuite aligné son
+`CONVENTIONS.md` sur la règle (pupitre#33). La lecture des fermetures par `texte-pr` dans un dépôt
+privé est prouvée : sur veille-emploi-donnees#51, qui porte « Closes #12 », `texte-pr` a refusé
+trois fois un corps sans la ligne `Tête relue`, puis a dit « ferme une issue : tête relue égale à la
+tête » (LE-69).
 
 Correctif du 09/11 : le délai du job `tests` de ce dépôt passe de 45 à 50 min, seuil 37 min 30 s
 (LE-40). La porte du lot 15 a donné son premier avertissement de durée sur la PR de clôture,
