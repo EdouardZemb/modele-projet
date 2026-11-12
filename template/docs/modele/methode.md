@@ -9,14 +9,13 @@ modifie pas dans le projet. Un défaut se corrige dans `modele-projet`, pour tou
    « Lot » la pose. Une milestone par étape.
 2. Une PR de plan, qui ajoute le plan dans `.claude/plans/`, avec ses trois sections ; la revue du
    plan le relit avant l'exécution (voir « Les outils »). Un lot peut se découper en tranches,
-   chacune avec son plan (voir « Un lot en tranches »).
+   chaque tranche qui le demande ayant son propre plan (voir « Un lot en tranches »).
 3. Une ou plusieurs PR d'implémentation.
 4. Une PR de revue finale.
 5. Une PR de clôture : elle **supprime le plan** (dans un lot en tranches, le plan maître et les
    plans de tranche), reporte dans `CLAUDE.md` ou dans un ADR ce qui doit survivre, et relit le
-   README d'après `docs/modele/documentation.md`. Elle seule porte
-   « Closes #N », les autres PR du lot disant « Partie de #N », et elle nomme la tête relue
-   (voir « Le texte de la PR »).
+   README d'après `docs/modele/documentation.md`. Elle seule porte « Closes #N », les autres PR du
+   lot disant « Partie de #N », et elle nomme la tête relue (voir « Le texte de la PR »).
 6. L'étiquette `vX.Y.Z`, **avec l'accord d'Edouard**.
 
 ## Les outils
@@ -81,9 +80,9 @@ unités que des titres `### Tranche N` ; chaque tranche qui le demande a son pro
 - Seule la PR de clôture du lot clôt le lot : la clôture d'une tranche, dans son plan, ne supprime
   pas ce plan et ne ferme pas l'issue ; la PR de clôture du lot supprime le plan maître et les
   plans de tranche, porte « Closes #N » et nomme sa tête relue.
-- Trois cas limites des expressions, sans égard à la casse : « trancher » suivi d'un nombre cite
-  une tranche dans un plan maître ; « Tranches » et « Tâches » ne citent rien ; `### Tranche 2.1`
-  est la tranche 2.
+- Trois cas limites des expressions, sans égard à la casse : « trancher » suivi d'un nombre cite une
+  tranche dans un plan maître, sous sa forme « tranche » (« qui tranche 2 questions ») ; « trancher
+  2 » ne cite rien ; « Tranches » et « Tâches » ne citent rien ; `### Tranche 2.1` est la tranche 2.
 
 **La revue du plan** se fait avant l'exécution, par une autre session ou par Edouard :
 
@@ -97,9 +96,8 @@ Les revues et les tests, dans tout le lot :
 
 - chaque temps d'une revue est une tâche du plan, ou une tranche d'un plan maître, avant la
   clôture : la revue de chaque tâche, la revue finale, la relecture des corrections ; une revue se
-  juge sur la tête qui part. La
-  relecture de la tête qui part, dans la PR de clôture, ne s'écrit pas dans « Revues » : c'est la
-  ligne `Tête relue` de cette PR qui la porte ;
+  juge sur la tête qui part. La relecture de la tête qui part, dans la PR de clôture, ne s'écrit pas
+  dans « Revues » : c'est la ligne `Tête relue` de cette PR qui la porte ;
 - la PR de clôture nomme la tête qu'a lue sa dernière relecture, et un écart à la spec se déclare
   dans la PR, chacun avec ses limites (voir « Le texte de la PR ») ;
 - un contrôle qui dépend du comportement d'un outil a un test sur le cas limite que cet outil
@@ -120,9 +118,10 @@ ouvrir les fichiers cités, puisque ses lieux l'ont été à la PR, et qu'une au
 entre-temps, a pu décaler une ligne citée.
 Sur une base nulle, l'étape ne contrôle rien. Hors d'une base nulle, elle dit toujours combien de
 plans la PR ajoute, modifie et supprime, zéro compris : « Plans ajoutés : N, modifiés : M,
-supprimés : S. » ; un plan supprimé n'est pas contrôlé. Une PR qui ne touche aucun plan passe,
-comme la PR de clôture, qui supprime les plans du lot. La session lance aussi `python scripts/modele/plan.py <plan>` avant
-de soumettre son plan à Edouard, et après chaque correction.
+supprimés : S. » ; un plan supprimé n'est pas contrôlé. Une PR qui ne touche aucun plan passe, comme
+la PR de clôture, qui supprime les plans du lot. La session lance aussi
+`python scripts/modele/plan.py <plan>` avant de soumettre son plan à Edouard, et après chaque
+correction.
 
 ## Les worktrees
 

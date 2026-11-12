@@ -437,11 +437,12 @@ def test_etape_des_plans(rendre, env_isole, tmp_path):
     sans ouvrir ses lieux chaque plan qu'elle modifie, dont les numéros de ligne dérivent avec le
     code. Au push sur la branche principale, un plan ajouté se vérifie aussi sans ouvrir ses lieux,
     vérifiés à la PR : une autre fusion a pu les décaler. Tout autre événement, ou aucun, vérifie
-    en entier. Une base nulle ne contrôle
-    rien ; une base inconnue arrête l'étape, au lieu de passer sur une liste vide. `-z` garde un
-    nom non ASCII tel quel, la pathspec descend dans un sous-dossier, et chaque plan est lu, même
-    après un refus, la liste des plans modifiés comprise. Un plan renommé compte pour ajouté
-    (`--no-renames`)."""
+    en entier. Une base nulle ne contrôle rien ; une base inconnue arrête l'étape, au lieu de
+    passer sur une liste vide. `-z` garde un nom non ASCII tel quel, la pathspec descend dans un
+    sous-dossier, et chaque plan est lu, même après un refus, la liste des plans modifiés comprise.
+    Un plan renommé compte pour ajouté et pour supprimé (`--no-renames`). Hors d'une base nulle,
+    l'étape écrit « Plans ajoutés : N, modifiés : M, supprimés : S. » avant la ligne du push, les
+    comptes lus par `wc -c` sur les octets nuls de `git diff -z`, un `wc` BSD compris."""
     rendu = rendre()
     job = charger(rendu, SOCLE)["jobs"]["confidentialite"]
     noms = [e.get("name") for e in job["steps"]]
@@ -643,7 +644,11 @@ def test_etape_des_plans(rendre, env_isole, tmp_path):
     faux.mkdir()
     wc = faux / "wc"
     wc.write_text(
-        "#!/bin/sh\nprintf '      %s\\n' \"$(/usr/bin/wc -c)\"\n", encoding="utf-8", newline=""
+        "#!/bin/sh\n"
+        ': > "$(dirname "$0")/temoin"\n'
+        "printf '      %s\\n' \"$(/usr/bin/wc -c)\"\n",
+        encoding="utf-8",
+        newline="",
     )
     wc.chmod(0o755)
     chemin = env["PATH"]
@@ -652,6 +657,7 @@ def test_etape_des_plans(rendre, env_isole, tmp_path):
         code, sortie = lancer(avec_b)
     finally:
         env["PATH"] = chemin
+    assert (faux / "temoin").exists(), "le faux wc n'a pas été appelé"
     assert code == 0, sortie
     assert comptes(1, 0, 1) in sortie, sortie
 

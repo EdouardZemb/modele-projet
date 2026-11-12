@@ -692,6 +692,21 @@ def test_plan_mele(racine):
     assert not [ligne for ligne in lignes if ligne.startswith("Revues, ligne 2")], lignes
 
 
+def test_plan_mele_cloture_croisee(racine):
+    """Dans un plan mêlé, la clôture est la première unité de l'une ou l'autre sorte : une
+    tâche citée après une clôture qui est une tranche refuse ; le même numéro dans les deux sortes
+    n'est jamais « en double », seul le refus du plan mêlé paraît."""
+    taches = ("### Tâche 1 : x", "### Tranche 2 · la clôture", "### Tâche 3 : y")
+    lignes, refus = verifier(plan(revues="- relecture : Tâche 3", taches=taches), racine)
+    attendu = "Revues, ligne 2 : Tâche 3 ne précède pas la clôture (Tranche 2)"
+    assert refus and attendu in lignes, lignes
+    memes = ("### Tâche 1 : x", "### Tranche 1 · y", "### Tâche 2 : la clôture")
+    lignes, refus = verifier(plan(revues="- relecture : Tâche 1, Tranche 1", taches=memes), racine)
+    assert refus
+    assert lignes[-2] == p.MELE, lignes
+    assert not [ligne for ligne in lignes if "en double" in ligne or "Revues" in ligne], lignes
+
+
 def test_plan_titres_d_un_plan_maitre_reel(racine):
     """Les titres du plan maître du lot 1 de `pupitre` (Review Focus 1) : deux titres de niveau 3
     qui ne sont pas des unités, puis huit tranches, la dernière portant la clôture."""

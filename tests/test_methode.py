@@ -1249,10 +1249,9 @@ DOCUMENTATION_ET_DOCSTRING = (
     "; deux sont connus : un `<!--` jamais fermé, ouvert dans un élément de liste",
     (
         "plan et ses titres de tâche ou de tranche. D'autres formes HTML cachent aussi sur GitHub "
-        "ce que les "
-        "contrôles lisent : un `<?` ou un `<!DOCTYPE` après une puce, ou en ligne et fermé plus "
-        "bas ; un `<!--` jamais fermé dans une ligne de bloc HTML, comme `<div><!-- note</div>` ; "
-        "un attribut ou un titre de lien sur plusieurs lignes."
+        "ce que les contrôles lisent : un `<?` ou un `<!DOCTYPE` après une puce, ou en ligne et "
+        "fermé plus bas ; un `<!--` jamais fermé dans une ligne de bloc HTML, comme "
+        "`<div><!-- note</div>` ; un attribut ou un titre de lien sur plusieurs lignes."
     ),
 )
 
@@ -1502,6 +1501,15 @@ def test_methode_dit_les_plans():
             "l'issue"
         ),
         "« trancher » suivi d'un nombre cite une tranche dans un plan maître",
+        (
+            "sous sa forme « tranche » (« qui tranche 2 questions ») ; « trancher 2 » ne cite "
+            "rien"
+        ),
+        "(dans un lot en tranches, le plan maître et les plans de tranche)",
+        (
+            "la PR de clôture du lot supprime le plan maître et les plans de tranche, porte "
+            "« Closes #N »"
+        ),
         "« Tranches » et « Tâches » ne citent rien",
         "`### Tranche 2.1` est la tranche 2",
         "qui cite au moins une unité du plan",

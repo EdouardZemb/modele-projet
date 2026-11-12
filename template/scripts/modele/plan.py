@@ -93,6 +93,12 @@ TACHE = "Tâche"
 TRANCHE = "Tranche"
 MELE = "le plan mêle des tâches et des tranches"
 COMMENTAIRE_OUVERT = "commentaire HTML jamais fermé, qui cache la suite"
+# Une revue sans citation : un texte fixe par sorte citée.
+AUCUNE_CITATION = {
+    (TACHE,): "aucune tâche citée",
+    (TRANCHE,): "aucune tranche citée",
+    (TACHE, TRANCHE): "aucune tâche ni tranche citée",
+}
 # Chaque refus de forme dit la forme de sa section.
 FORMES = {
     MECANISMES: "forme attendue : - `<chemin>:<ligne>` — `<extrait>` — <comportement annoncé>, "
@@ -371,7 +377,7 @@ def verifier(
             cites += [(sorte, int(m.group(1))) for m in motif.finditer(ligne)]
         cites = list(dict.fromkeys(cites))
         if not cites:
-            return ["aucune " + " ni ".join(sorte.lower() for sorte in citees) + " citée"]
+            return [AUCUNE_CITATION[citees]]
         motifs = []
         for sorte, n in cites:
             rang = next((i for i, (s, num, _) in enumerate(unites) if (s, num) == (sorte, n)), None)
