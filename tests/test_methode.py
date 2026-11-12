@@ -1228,7 +1228,7 @@ DOCUMENTATION_ET_DOCSTRING = (
         "puce imbriquée, ou une ligne qui continue la puce), cache sur GitHub tout ce qui le suit, "
         "mais les contrôles lisent encore la suite : un titre, et donc la section « Ce qui fait "
         "foi », la section des écarts à la spec, les trois sections d'un plan et ses titres de "
-        "tâche, et la ligne « Tête relue », qui doit toujours nommer la tête de la PR"
+        "tâche ou de tranche, et la ligne « Tête relue », qui doit toujours nommer la tête de la PR"
     ),
     # un bloc `<?`, `<!DOCTYPE` ou `<![CDATA[`, qui cache tout jusqu'au premier `>`, même plus bas,
     # et que `texte_pr.py` et `plan.py` ne cherchent pas (relecture de la revue finale du lot 15)
@@ -1238,7 +1238,7 @@ DOCUMENTATION_ET_DOCSTRING = (
         "GitHub tout ce qui le suit jusqu'au premier `>`, même plusieurs lignes plus bas, ou "
         "jusqu'à la fin sans lui, mais `texte_pr.py` et `plan.py`, qui ne cherchent que `<!--`, "
         "lisent encore la ligne « Tête relue », la section des écarts, les trois sections d'un "
-        "plan et ses titres de tâche."
+        "plan et ses titres de tâche ou de tranche."
     ),
     # une liste non close : deux écarts connus, puis les autres formes en une phrase (relecture de
     # la revue finale du lot 15, ronde 3)
@@ -1248,10 +1248,10 @@ DOCUMENTATION_ET_DOCSTRING = (
     ),
     "; deux sont connus : un `<!--` jamais fermé, ouvert dans un élément de liste",
     (
-        "plan et ses titres de tâche. D'autres formes HTML cachent aussi sur GitHub ce que les "
-        "contrôles lisent : un `<?` ou un `<!DOCTYPE` après une puce, ou en ligne et fermé plus "
-        "bas ; un `<!--` jamais fermé dans une ligne de bloc HTML, comme `<div><!-- note</div>` ; "
-        "un attribut ou un titre de lien sur plusieurs lignes."
+        "plan et ses titres de tâche ou de tranche. D'autres formes HTML cachent aussi sur GitHub "
+        "ce que les contrôles lisent : un `<?` ou un `<!DOCTYPE` après une puce, ou en ligne et "
+        "fermé plus bas ; un `<!--` jamais fermé dans une ligne de bloc HTML, comme "
+        "`<div><!-- note</div>` ; un attribut ou un titre de lien sur plusieurs lignes."
     ),
 )
 
@@ -1487,9 +1487,43 @@ def test_methode_dit_les_plans():
         "`--depot <dépôt>=<clone>`",
         "`- <outil> — <cas limite que l'outil traite autrement> — <test qui l'exerce>`",
         "`- <revue> : Tâche N`",
+        "`- <revue> : Tâche N`, ou `Tranche N` dans un plan maître",
         "`Tâche N` ou `Task N`",
+        "`### Tranche N`",
+        "le plan maître",
+        "un plan qui mêle des tâches et des tranches refuse",
+        (
+            "la revue finale du lot et la relecture de ses corrections, dans une tranche à "
+            "elles, avant celle de la clôture"
+        ),
+        (
+            "la clôture d'une tranche, dans son plan, ne supprime pas ce plan et ne ferme pas "
+            "l'issue"
+        ),
+        "« trancher » suivi d'un nombre cite une tranche dans un plan maître",
+        (
+            "sous sa forme « tranche » (« qui tranche 2 questions ») ; « trancher 2 » ne cite "
+            "rien"
+        ),
+        "(dans un lot en tranches, le plan maître et les plans de tranche)",
+        (
+            "la PR de clôture du lot supprime le plan maître et les plans de tranche, porte "
+            "« Closes #N »"
+        ),
+        "« Tranches » et « Tâches » ne citent rien",
+        "`### Tranche 2.1` est la tranche 2",
+        "qui cite au moins une unité du plan",
+        (
+            "La clôture est la première unité dont le titre dit « clôture » ou « closure » : "
+            "chaque unité citée la précède"
+        ),
+        "comme la PR de clôture, qui supprime les plans du lot",
+        "Plans ajoutés : N, modifiés : M, supprimés : S.",
         "la revue du plan",
-        "chaque temps d'une revue est une tâche du plan, avant la clôture",
+        (
+            "chaque temps d'une revue est une tâche du plan, ou une tranche d'un plan maître, "
+            "avant la clôture"
+        ),
         "une correction cherche aussi la même croyance dans le reste du plan et dans la spec",
         "une revue se juge sur la tête qui part",
         "le cas limite que cet outil traite autrement",
