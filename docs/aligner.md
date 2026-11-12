@@ -127,8 +127,10 @@ Chaque ligne d'un bloc 👤 se lance par `!`, seule dans son message, le `!` en 
 caractère : deux commandes dans un même message, ou un `!` qui n'est pas en tête, partent comme du
 texte.
 
-- [ ] 👤 **Le secret, posé deux fois**, pour Actions et pour Dependabot (sous Windows, par
-      `cmd /c`, dont la redirection transmet les octets tels quels) :
+- [ ] 👤 **Le secret, posé deux fois**, pour Actions et pour Dependabot (par `!`, la commande
+      passe par Git Bash, dont la redirection transmet les octets tels quels ; jamais par
+      `cmd /c`, que Git Bash réécrit : `cmd` lirait alors chaque ligne de la liste comme une
+      commande, et l'afficherait) :
 
   ```sh
   gh secret set MOTIFS_INTERDITS --repo <dépôt> < <liste privée>
@@ -194,8 +196,8 @@ texte.
       `!`, le `!` en tout premier caractère, seule dans son message, depuis la session qui a
       préparé `regle.json` dans son dossier. La session lui donne la ligne exacte, le dépôt et
       l'identifiant remplacés. Quand la règle en service ne requiert que les contrôles du socle,
-      la ligne prend `--input .github/modele/ruleset-main.json`, lancée depuis le clone à jour de
-      la branche principale. Le garde refuse cette écriture à une session. Aucune autre PR n'est
+      la ligne prend `--input .github/modele/ruleset-main.json`, lancée depuis une session ouverte
+      dans le clone à jour de la branche principale du dépôt. Le garde refuse cette écriture à une session. Aucune autre PR n'est
       fusionnée entre la fusion et ce geste. Le PUT a réussi du premier coup le 12/11/2026 sur
       `veille-emploi`, `pupitre` et `ancrage`, le corps construit depuis la règle en service.
 
@@ -416,8 +418,8 @@ Deux cas, selon la nature du dépôt (M-0006).
 - [ ] **Un dépôt de code né après M-0006** n'a pas de travail préalable : la porte a refusé tout
       constat dès son premier commit, et relit son historique chaque semaine
       (`modele-historique.yml`). Il ne lui faut que sa règle de protection (`ruleset-main.json`),
-      mais dans cet ordre : d'abord, 👤, le changement de visibilité ; ensuite seulement, la règle de
-      protection, que GitHub refuse sur un dépôt privé d'un compte gratuit (M-0002).
+      mais dans cet ordre : d'abord, 👤, le changement de visibilité ; ensuite seulement, 👤, la règle de
+      protection, par la ligne du § 6, que GitHub refuse sur un dépôt privé d'un compte gratuit (M-0002).
 - [ ] **Un dépôt d'avant M-0006 ne passe pas en public** : son historique a pu recevoir des
       constats que la porte ne faisait qu'avertir. Il se scinde : la scission (M-0006, § 7) fait de
       lui le dépôt de données, et un nouveau dépôt de code naît d'un seul commit propre. Jusque-là,

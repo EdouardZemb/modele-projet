@@ -1340,6 +1340,12 @@ def test_liste_d_alignement():
     (creation,) = [c for c in six.split("\n- [ ] ")[1:] if "gh api -X POST" in c]
     assert creation.startswith("👤 ")
     assert "`!`" in creation
+    assert "le `!` en tout premier caractère" in avant_cases
+    secret = six.split("\n- [ ] ")[1]
+    secret = " ".join(secret.split())
+    assert "dont la redirection transmet les octets tels quels" in secret
+    assert "jamais par `cmd /c`" in secret
+    assert "`cmd /c`, dont la redirection" not in secret
     put = sept.index("gh api -X PUT repos/<dépôt>/rulesets/<id>")
     assert sept.index("Fusion en squash") < put < sept.index("@dependabot rebase")
     # la mise à jour est à Edouard (👤) ; la relecture de la règle et la relance des PR de
@@ -1412,6 +1418,10 @@ def test_liste_d_alignement():
         "le dépôt et l'identifiant remplacés",
         "--input .github/modele/ruleset-main.json",
         "le 12/11/2026",
+        "le `!` en tout premier caractère",
+        "Le garde refuse cette écriture à une session",
+        "Aucune autre PR n'est fusionnée",
+        "lancée depuis une session ouverte dans le clone à jour de la branche principale du dépôt",
     ):
         assert fragment in mise_a_jour, fragment
     suivante = " ".join(suivante.split())
