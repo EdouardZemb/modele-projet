@@ -344,6 +344,15 @@ Correctif du 09/11 : le délai du job `tests` de ce dépôt passe de 45 à 50 mi
 #123 : 34 min 36 s sous Windows, 51 s au-delà du seuil de 33 min 45 s. Edouard avait décidé le
 même jour qu'une PR monterait alors le délai à 50 min. Rien ne change sous `template/`.
 
+Correctif du 12/11 : le Docker du runner de `fausse-app` en magasin classique (LE-41).
+`ubuntu-latest` est passé d'Ubuntu 24.04 (Docker 28.0.4, magasin classique) à Ubuntu 26.04 (Docker
+29.4.2, magasin containerd) : sur #125, l'épreuve du ménage s'y est arrêtée, comme elle le doit sur
+un autre magasin que celui de la cible, et `fausse-app`, requis, a bloqué toute fusion. Avant tout
+usage de Docker, le job coupe désormais le magasin containerd dans le `daemon.json` du runner, sans
+en perdre les réglages (`tests/modele/daemon_classique.py`), redémarre Docker, puis vérifie le
+pilote `overlay2` et l'absence du magasin containerd : ses deux épreuves tournent sur un Docker 29
+en magasin classique, comme la cible. Rien ne change sous `template/`.
+
 Prochain, au choix d'Edouard :
 - le second temps du travail sur la documentation, un lot « documentation » avec sa spec : l'« État »
   réduit du `CLAUDE.md` semé et le journal des versions du modèle ; dans le README, le refus d'une

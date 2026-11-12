@@ -299,6 +299,13 @@ def test_mecanique_et_fausse_app_dans_la_ci_du_depot_modele():
         "with": {"dossier": "rendu"},
     }
     assert etapes.index(rendre) < etapes.index(construire)
+    # LE-41 : le magasin containerd du Docker du runner est coupé avant tout usage de Docker, juste
+    # après le checkout qui apporte le script : une image construite avant serait dans l'autre
+    # magasin.
+    (magasin,) = [e for e in etapes if e.get("name") == MAGASIN_RUNNER]
+    assert etapes.index(magasin) == 1
+    assert etapes[0]["uses"].startswith("actions/checkout@")
+    assert etapes.index(magasin) < etapes.index(rendre)
     # L'épreuve du ménage des images (#19), sur le vrai Docker du job, après la construction.
     (epreuve,) = [e for e in etapes if "epreuve-menage" in e.get("run", "")]
     assert epreuve["run"] == "bash tests/modele/epreuve-menage.sh rendu"
@@ -541,6 +548,182 @@ def test_verification_de_la_cible_refuse_un_autre_docker(tmp_path):
                 assert r.returncode == 1, (cas, r.stdout + r.stderr)
                 erreurs = [ligne for ligne in r.stdout.splitlines() if "::error::" in ligne]
                 assert any(refus in ligne for ligne in erreurs), (cas, r.stdout)
+
+
+MAGASIN_RUNNER = "Le Docker du runner en magasin classique"
+DAEMON_CLASSIQUE = RACINE / "tests/modele/daemon_classique.py"
+
+# Les doubles de `sudo`, de `docker` et de `sleep` pour l'étape du magasin du runner : `sudo` note
+# sa commande sans rien lancer, et échoue sur celle que nomme ECHEC_SUDO ; `docker` répond par
+# MOTEUR, PILOTE et STATUT, et échoue sur la lecture que nomme ECHEC (`repond` : le démon ne
+# répond jamais).
+FAUX_RUNNER = """sudo() {
+  echo "$*" >> "$JOURNAL_SUDO"
+  case "$*" in
+    "python3 -I tests/modele/daemon_classique.py /etc/docker/daemon.json")
+      [ "${ECHEC_SUDO:-}" != daemon ] ;;
+    "systemctl restart docker") [ "${ECHEC_SUDO:-}" != restart ] ;;
+    *) echo "sudo inattendu : $*" >&2; return 99 ;;
+  esac
+}
+sleep() { :; }
+docker() {
+  local lecture valeur
+  case "$*" in
+    info) lecture=repond valeur= ;;
+    "version --format {{.Server.Version}}") lecture=repond valeur=$MOTEUR ;;
+    "info --format {{.Driver}}") lecture=pilote valeur=$PILOTE ;;
+    "info --format {{json .DriverStatus}}") lecture=statut valeur=$STATUT ;;
+    *) echo "docker inattendu : $*" >&2; return 99 ;;
+  esac
+  if [ "$lecture" = "${ECHEC:-}" ]; then
+    echo "Cannot connect to the Docker daemon" >&2
+    return 1
+  fi
+  echo "$valeur"
+}
+"""
+
+
+def test_fausse_app_coupe_le_magasin_containerd_du_runner(tmp_path):
+    """LE-41 : depuis le passage d'`ubuntu-latest` à Ubuntu 26.04, le Docker du runner est un 29 en
+    magasin containerd, et l'épreuve du ménage s'y arrête. L'étape réécrit le `daemon.json` du
+    runner par `tests/modele/daemon_classique.py`, sous `sudo`, redémarre le démon, attend qu'il
+    réponde, puis vérifie le pilote `overlay2` et l'absence du magasin containerd. Lancée comme le
+    runner (`bash -e {0}`), puis sans `-e`, les doubles en tête : chaque échec refuse et le dit par
+    `::error::`, sans rien devoir à `-e`."""
+    workflow = yaml.safe_load(CI.read_text(encoding="utf-8"))
+    job = workflow["jobs"]["fausse-app"]
+    (etape,) = [e for e in job["steps"] if e.get("name") == MAGASIN_RUNNER]
+    assert "shell" not in etape
+    assert "defaults" not in job
+    assert "defaults" not in workflow
+    script = tmp_path / "magasin.sh"
+    script.write_text(FAUX_RUNNER + etape["run"], encoding="utf-8", newline="\n")
+    containerd = '[["driver-type","io.containerd.snapshotter.v1"]]'
+    reel = '[["Backing Filesystem","extfs"],["Supports d_type","true"],["userxattr","false"]]'
+    # (cas, pilote, DriverStatus, lecture en échec, commande de sudo en échec, fragment du refus,
+    # ou None) ; chaque branche de refus a son cas.
+    table = (
+        ("le magasin classique", "overlay2", reel, "", "", None),
+        ("DriverStatus vide", "overlay2", "[]", "", "", None),
+        ("containerd encore actif", "overlay2", containerd, "", "", "magasin containerd"),
+        ("un autre pilote", "overlayfs", "[]", "", "", "le pilote est overlayfs"),
+        ("daemon.json non réécrit", "overlay2", "[]", "", "daemon", "daemon.json non réécrit"),
+        ("redémarrage en échec", "overlay2", "[]", "", "restart", "ne redémarre pas"),
+        ("le démon ne répond pas", "overlay2", "[]", "repond", "", "ne répond pas"),
+        ("pilote illisible", "overlay2", "[]", "pilote", "", "pilote illisible"),
+        ("DriverStatus illisible", "overlay2", "[]", "statut", "", "DriverStatus illisible"),
+    )
+    for options in (["-e"], []):
+        for numero, (nom, pilote, statut, echec, echec_sudo, refus) in enumerate(table):
+            cas = (nom, options)
+            journal = tmp_path / f"sudo-{len(options)}-{numero}.log"
+            r = subprocess.run(
+                [trouver_bash(), *options, str(script)],
+                cwd=RACINE,
+                env={
+                    **os.environ,
+                    "JOURNAL_SUDO": str(journal),
+                    "MOTEUR": "29.4.2",
+                    "PILOTE": pilote,
+                    "STATUT": statut,
+                    "ECHEC": echec,
+                    "ECHEC_SUDO": echec_sudo,
+                },
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                check=False,
+            )
+            assert "inattendu" not in r.stderr, (cas, r.stderr)
+            if refus is None:
+                assert r.returncode == 0, (cas, r.stdout + r.stderr)
+                assert "::error::" not in r.stdout, (cas, r.stdout)
+                assert "moteur 29.4.2, pilote overlay2" in r.stdout, (cas, r.stdout)
+                # le daemon.json réécrit, puis le démon redémarré, dans cet ordre
+                assert journal.read_text(encoding="utf-8").splitlines() == [
+                    "python3 -I tests/modele/daemon_classique.py /etc/docker/daemon.json",
+                    "systemctl restart docker",
+                ], cas
+            else:
+                assert r.returncode == 1, (cas, r.stdout + r.stderr)
+                erreurs = [ligne for ligne in r.stdout.splitlines() if "::error::" in ligne]
+                assert any(refus in ligne for ligne in erreurs), (cas, r.stdout)
+
+
+RUNNER_DAEMON = {"exec-opts": ["native.cgroupdriver=cgroupfs"], "cgroup-parent": "/actions_job"}
+
+
+def lancer_daemon_classique(*arguments):
+    """Comme le job le lance, sous `-I` ; `-X utf8` pour Windows, où `-I` écrirait en cp1252."""
+    return subprocess.run(
+        [sys.executable, "-X", "utf8", "-I", str(DAEMON_CLASSIQUE), *arguments],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+
+
+@pytest.mark.parametrize(
+    ("cas", "avant", "apres"),
+    [
+        ("absent", None, {"features": {"containerd-snapshotter": False}}),
+        ("vide", "", {"features": {"containerd-snapshotter": False}}),
+        ("blanc", " \n", {"features": {"containerd-snapshotter": False}}),
+        (
+            "les réglages d'un runner gardés",
+            json.dumps(RUNNER_DAEMON),
+            {**RUNNER_DAEMON, "features": {"containerd-snapshotter": False}},
+        ),
+        (
+            "les autres features gardées",
+            '{"features": {"buildkit": true}}',
+            {"features": {"buildkit": True, "containerd-snapshotter": False}},
+        ),
+        (
+            "containerd demandé",
+            '{"features": {"containerd-snapshotter": true}}',
+            {"features": {"containerd-snapshotter": False}},
+        ),
+    ],
+)
+def test_daemon_classique_coupe_containerd_sans_perdre_les_reglages(tmp_path, cas, avant, apres):
+    """LE-41 : le script coupe le magasin containerd dans un `daemon.json`, qu'il soit absent, vide,
+    ou qu'il porte déjà les réglages du runner ou d'autres `features`, sans rien en perdre."""
+    daemon = tmp_path / "docker" / "daemon.json"
+    if avant is not None:
+        daemon.parent.mkdir()
+        daemon.write_text(avant, encoding="utf-8")
+    r = lancer_daemon_classique(str(daemon))
+    assert r.returncode == 0, (cas, r.stdout + r.stderr)
+    assert json.loads(daemon.read_text(encoding="utf-8")) == apres, cas
+
+
+@pytest.mark.parametrize(
+    ("cas", "avant", "fragment"),
+    [
+        ("JSON illisible", "{", "daemon.json illisible"),
+        ("pas un objet", "[]", "n'est pas un objet"),
+        ("features pas un objet", '{"features": "oui"}', "« features » n'est pas un objet"),
+    ],
+)
+def test_daemon_classique_refuse_sans_toucher_au_fichier(tmp_path, cas, avant, fragment):
+    """Un `daemon.json` que le script ne sait pas lire ne se réécrit pas : le refus le dit, le
+    fichier reste tel quel, et l'étape du job échoue avant de redémarrer Docker."""
+    daemon = tmp_path / "daemon.json"
+    daemon.write_text(avant, encoding="utf-8")
+    r = lancer_daemon_classique(str(daemon))
+    assert r.returncode == 1, (cas, r.stdout + r.stderr)
+    assert fragment in r.stderr, (cas, r.stderr)
+    assert daemon.read_text(encoding="utf-8") == avant, cas
+
+
+def test_daemon_classique_sans_chemin():
+    r = lancer_daemon_classique()
+    assert r.returncode == 64, r.stdout + r.stderr
+    assert "usage" in r.stderr
 
 
 EPREUVE_DONNEES = RACINE / "tests/modele/epreuve-donnees.sh"
