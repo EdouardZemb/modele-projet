@@ -371,8 +371,8 @@
 >   lance par `!`, seule dans son message (`docs/aligner.md` § 6) ; le secret `MOTIFS_INTERDITS`
 >   s'y pose deux fois, pour Actions et pour Dependabot, par Git Bash, jamais par `cmd /c`, que
 >   Git Bash réécrit. Une règle déjà en service se met à jour après la fusion d'une mise à jour
->   qui change ses contrôles requis (§ 7) : la session lit la règle et prépare le corps, et
->   Edouard ne lance que la ligne du `PUT`, que le garde refuse à une session.
+>   qui change ses contrôles requis (`docs/aligner.md` § 7) : la session lit la règle et prépare
+>   le corps, et Edouard ne lance que la ligne du `PUT`, que le garde refuse à une session.
 >   `Nouveau-Projet.ps1`, après un échec, dit que les commandes qu'il affiche sont pour
 >   PowerShell, jamais pour `!` ;
 > - **le premier geste réel de la règle**, que l'amendement du lot 15 attendait, a eu lieu le
