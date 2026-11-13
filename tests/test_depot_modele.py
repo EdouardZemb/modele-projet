@@ -1340,6 +1340,10 @@ def test_liste_d_alignement():
     (creation,) = [c for c in six.split("\n- [ ] ")[1:] if "gh api -X POST" in c]
     assert creation.startswith("👤 ")
     assert "`!`" in creation
+    assert (
+        "depuis une session ouverte dans le worktree d'alignement, où le fichier est rendu"
+        in " ".join(creation.split())
+    )
     assert "le `!` en tout premier caractère" in avant_cases
     secret = six.split("\n- [ ] ")[1]
     secret = " ".join(secret.split())

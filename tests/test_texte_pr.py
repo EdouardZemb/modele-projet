@@ -315,14 +315,14 @@ def test_ecarts_titres_varies(lancer):
 
 @pytest.mark.parametrize(
     "accord",
-    ["accord d’Edouard : 07/11/2026", "accord : 07/11/2026"],
+    ["accord d\u2019Edouard\u00a0: 07/11/2026", "accord\u00a0: 07/11/2026"],
     ids=["ancienne forme", "forme sans prénom"],
 )
 def test_texte_pr_corps_de_l_interface_web(lancer, accord):
     """Un corps édité dans l'interface web de GitHub arrive en CRLF ; une session écrit selon son
     outil une apostrophe typographique, des espaces insécables, un tiret demi-cadratin. Les deux
     formes de l'accord se lisent."""
-    ligne = f"- le seuil passe à 45 min – promesse : spec § 4.1 – {accord}"
+    ligne = f"- le seuil passe à 45 min \u2013 promesse\u00a0: spec § 4.1 \u2013 {accord}"
     corps = (
         "## Ce que fait cette PR\r\n\r\nx\r\n\r\n## Écarts à la spec\r\n\r\n"
         + ligne

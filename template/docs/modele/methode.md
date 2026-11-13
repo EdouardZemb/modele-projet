@@ -80,9 +80,10 @@ unités que des titres `### Tranche N` ; chaque tranche qui le demande a son pro
 - Seule la PR de clôture du lot clôt le lot : la clôture d'une tranche, dans son plan, ne supprime
   pas ce plan et ne ferme pas l'issue ; la PR de clôture du lot supprime le plan maître et les
   plans de tranche, porte « Closes #N » et nomme sa tête relue.
-- Trois cas limites des expressions, sans égard à la casse : « trancher » suivi d'un nombre cite une
-  tranche dans un plan maître, sous sa forme « tranche » (« qui tranche 2 questions ») ; « trancher
-  2 » ne cite rien ; « Tranches » et « Tâches » ne citent rien ; `### Tranche 2.1` est la tranche 2.
+- Les cas limites des expressions, sans égard à la casse : le mot « tranche » suivi d'un nombre
+  cite une tranche dans un plan maître, même quand c'est le verbe
+  (« qui tranche 2 questions ») ; « trancher 2 », « Tranches » et « Tâches » ne citent rien ;
+  `### Tranche 2.1` est la tranche 2.
 
 **La revue du plan** se fait avant l'exécution, par une autre session ou par Edouard :
 
@@ -219,22 +220,22 @@ environnement, jamais dans ses arguments, et contrôle deux choses.
   La ligne se cherche telle que GitHub la montre : un commentaire jamais fermé, ouvert en tête de
   ligne ou après une puce, cache tout ce qui le suit, et une ligne cachée est absente.
 - **Les limites de la tête relue.** Le contrôle force à nommer une tête, pas à la relire : la
-  relecture reste une tâche du plan. Dans un lot, la PR de revue finale n'est pas visée : sa
-  relecture est une tâche du plan, et la PR de clôture relit ensuite la tête qui part. GitHub ne
-  lit un mot-clé de fermeture que dans une PR qui vise la branche par défaut : une PR empilée sur
-  une autre branche ne ferme rien, et sa tête relue n'est pas exigée. Une issue liée depuis la
-  barre latérale de la PR compte aussi, mais aucun type d'événement documenté ne suit ce lien : le
-  contrôle repart au commit ou à la modification du corps suivants. La ligne se cherche telle que
-  GitHub la montre, à des écarts près, dont deux connus : un `<!--` jamais fermé, ouvert dans un
-  élément de liste après quatre espaces ou plus (une puce imbriquée, ou une ligne qui continue la
-  puce), cache sur GitHub tout ce qui le suit, et un `<?`, un `<!` suivi d'une majuscule
-  (`<!DOCTYPE`) ou un `<![CDATA[` ouvert en tête de ligne, tout ce qui le suit jusqu'au premier
-  `>`, même plusieurs lignes plus bas, ou jusqu'à la fin sans lui ; le contrôle lit encore ces
-  lignes, la ligne `Tête relue` comme la section des écarts. D'autres formes HTML cachent aussi sur
-  GitHub ce que le contrôle lit : un `<?` ou un `<!DOCTYPE` après une puce, ou en ligne et fermé
-  plus bas ; un `<!--` jamais fermé dans une ligne de bloc HTML, comme `<div><!-- note</div>` ; un
-  attribut ou un titre de lien sur plusieurs lignes. Tous sont bornés : le SHA de cette ligne doit
-  toujours égaler la tête de la PR.
+  relecture reste une tâche du plan, ou une tranche d'un plan maître. Dans un lot, la PR de revue
+  finale n'est pas visée : sa relecture est une tâche du plan, ou une tranche d'un plan maître, et
+  la PR de clôture relit ensuite la tête qui part. GitHub ne lit un mot-clé de fermeture que dans
+  une PR qui vise la branche par défaut : une PR empilée sur une autre branche ne ferme rien, et sa
+  tête relue n'est pas exigée. Une issue liée depuis la barre latérale de la PR compte aussi, mais
+  aucun type d'événement documenté ne suit ce lien : le contrôle repart au commit ou à la
+  modification du corps suivants. La ligne se cherche telle que GitHub la montre, à des écarts près,
+  dont deux connus : un `<!--` jamais fermé, ouvert dans un élément de liste après quatre espaces ou
+  plus (une puce imbriquée, ou une ligne qui continue la puce), cache sur GitHub tout ce qui le
+  suit, et un `<?`, un `<!` suivi d'une majuscule (`<!DOCTYPE`) ou un `<![CDATA[` ouvert en tête de
+  ligne, tout ce qui le suit jusqu'au premier `>`, même plusieurs lignes plus bas, ou jusqu'à la fin
+  sans lui ; le contrôle lit encore ces lignes, la ligne `Tête relue` comme la section des écarts.
+  D'autres formes HTML cachent aussi sur GitHub ce que le contrôle lit : un `<?` ou un `<!DOCTYPE`
+  après une puce, ou en ligne et fermé plus bas ; un `<!--` jamais fermé dans une ligne de bloc
+  HTML, comme `<div><!-- note</div>` ; un attribut ou un titre de lien sur plusieurs lignes. Tous
+  sont bornés : le SHA de cette ligne doit toujours égaler la tête de la PR.
 - **Ne jamais relancer `texte-pr`.** Une relance, par `gh run rerun` ou depuis l'interface de
   GitHub, rejoue l'événement d'origine : elle relit le titre et le corps de ce moment-là, pas ceux
   de la PR telle qu'elle est. Éprouvé dans le dépôt modèle le 07/11/2026 : après une retouche qui
@@ -245,10 +246,10 @@ environnement, jamais dans ses arguments, et contrôle deux choses.
 - **Éprouver le texte avant d'ouvrir la PR.** Une fois la branche envoyée, on lance le contrôle en
   local, depuis la racine du projet, sous Git Bash ou un shell POSIX, sans `MSYS_NO_PATHCONV` ni
   `MSYS2_ARG_CONV_EXCL` : sous Git Bash, Python ne lit le `/tmp/…` de `mktemp` que par la conversion
-  des chemins de MSYS. Le corps est dans un fichier UTF-8, hors du dépôt, comme pour `--body-file` :
-  sur un fichier UTF-16, comme ceux qu'écrit PowerShell 5.1, `$(cat …)` retire les octets nuls, et
-  le contrôle ne lit pas le corps que GitHub recevra : il peut passer comme refuser. Un chemin
-  Windows s'écrit entre les apostrophes de la première ligne, ou avec des `/`.
+  des chemins de MSYS. Le corps est dans un fichier UTF-8 sans BOM, hors du dépôt, comme pour
+  `--body-file` : sur un fichier UTF-16, comme ceux qu'écrit PowerShell 5.1, `$(cat …)` retire les
+  octets nuls, et le contrôle ne lit pas le corps que GitHub recevra : il peut passer comme
+  refuser. Un chemin Windows s'écrit entre les apostrophes de la première ligne, ou avec des `/`.
 
   ```sh
   corps='<fichier du corps>'
@@ -345,8 +346,8 @@ toléré. Dans un dépôt de données, la porte dit que gitleaks seul relit l'hi
 
 - **Un dépôt de code né après M-0006 passe en public sans travail préalable** : il ne lui faut que
   sa règle de protection. L'ordre compte : d'abord, 👤, Edouard change la visibilité ; ensuite
-  seulement, la règle de protection, que GitHub refuse sur un dépôt privé d'un compte gratuit. Son
-  historique est relu chaque semaine.
+  seulement, 👤, la règle de protection, que GitHub refuse sur un dépôt privé d'un compte gratuit.
+  Son historique est relu chaque semaine.
 - **Un dépôt d'avant M-0006 ne passe pas en public** : il se scinde (M-0006, § 7). Il devient le
   dépôt de données, et un nouveau dépôt de code naît d'un seul commit propre. Jusque-là, sa nature
   est `donnees`.
