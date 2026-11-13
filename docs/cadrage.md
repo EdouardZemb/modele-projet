@@ -389,7 +389,39 @@
 >     `git/tags`) et la mise à jour d'une branche (`…/update-branch`), que la liste de la spec
 >     omettait (§ 4.6 ; #129) ;
 >   - au § 6 de `docs/aligner.md`, chaque ligne d'un bloc 👤 se lance par `!`, seule dans son
->     message, et non le seul `POST` (§ 4.4 ; #130).
+>     message, et non le seul `POST` (§ 4.4 ; #130) ;
+> - **seize choix des PR du lot**, qu'elles n'ont pas comptés comme écarts et ont soumis à Edouard
+>   dans leur section « À relire », acceptés par lui le 13/11 (« ok pour les défauts ») :
+>   - le déclencheur de la piste du commentaire jamais fermé n'est pas atteint : #128 change le
+>     message de ce refus, pas sa recherche (décidé dès le 12/11) ;
+>   - un plan à tâches qui porte aussi un titre `### Tranche N` refuse comme plan mêlé ; aucun des
+>     huit plans en cours des projets n'en porte (#128) ;
+>   - le cas du faux `wc` de l'étape « Les plans » ne tourne pas sous Windows, la raison écrite
+>     dans le test (#128) ;
+>   - le mot « tranche » suivi d'un nombre cite une tranche, même quand c'est le verbe ;
+>     « trancher 2 » ne cite rien (#128) ;
+>   - pour un corps UTF-16, `methode.md` dit que le contrôle « peut passer comme refuser », sans
+>     test qui écrive un tel corps : le résultat dépend du shell (#129) ;
+>   - la case du secret passe par Git Bash, « jamais par `cmd /c` », case que la spec ne nommait
+>     pas (#130) ;
+>   - LE-70 et LE-71 gardent le motif « décision appliquée sans en chercher les effets », celui de
+>     LE-39 pesé puis écarté (#130) ; LE-75 va sous « contrôle passé à vide » (#131) ;
+>   - LE-76 ne propose aucune forme de porte : elle revient à Edouard (#131) ;
+>   - un corps UTF-8 avec BOM se règle par le texte de `methode.md`, « sans BOM », sans retirer le
+>     BOM dans `texte_pr.py` (#131) ;
+>   - deux constats d'avant le lot restent tels quels, car ils refusent du côté sûr : un titre de
+>     tranche à espace insécable, et « sous-tranche 2 » ; le corps de #131 en disait trois, et la
+>     forme `<details>` va à la piste du commentaire jamais fermé ;
+>   - le message de `pupitre` : la scission de sa Tranche 8 emporte ses renvois, dans le plan
+>     maître et dans deux plans de tranche ; sans scission, la dérogation à « une tranche à elles »
+>     se dit dans sa PR, non dans son plan ; la décision reste à Edouard, dans cette session ;
+>   - la clôture nomme aussi LE-74 et LE-75 dans « Prochain », ajoute deux lignes longues de
+>     `methode.md` à la piste du lot 11, amende le §13 et dit tenu le premier volet de LE-63 ;
+>   - la revue finale compte 22 constats, 19 sans leurs doublons, et non 23, comme le disaient le
+>     corps de #131 et les notes ; LE-77 en fait une leçon, sous un motif neuf, « dénombrement fait
+>     à la main, repris sans recompter » ;
+>   - LE-40 se clôt en renvoyant au corps de la PR de clôture pour ses exécutions, ses durées
+>     mesurées du début du job au départ de l'étape « Durée du job ».
 
 Ce cadrage est la partie publique de la spec de conception du modèle, issue d'une séance de questions avec Edouard : 12 questions, puis 5 parties de design validées une à une. La partie qui nomme le serveur est privée et n'est pas reproduite ici.
 
