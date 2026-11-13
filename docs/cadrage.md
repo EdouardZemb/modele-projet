@@ -345,6 +345,87 @@
 >   - le geste de la règle d'un projet, dans `docs/aligner.md` § 7, reprend tels quels des
 >     paramètres lus que l'écriture n'a pas encore éprouvés : le premier geste réel le dira
 >     (#122).
+>
+> **Amendé le 2026-11-13, à la clôture du lot 16, de la même façon.** Le lot 16 n'était pas au §11 :
+> il corrige deux défauts de la `v0.10.0` que `pupitre` a relevés le 12/11, le plan d'un lot
+> découpé en tranches, que `plan.py` refusait, et la ligne d'accord d'un écart, qui nommait Edouard,
+> avec cinq retouches des mêmes fichiers suggérées au lot 15 (#127, PR #128 à #131). `methode.md`,
+> `documentation.md` et `docs/aligner.md` sont amendés ; aucun fichier ne s'ajoute à ce que reçoit
+> un projet (§4).
+>
+> - **§5.2** : un lot peut se découper en tranches. Son plan, le plan maître, n'a pour unités que
+>   des titres `### Tranche N`, et chaque tranche qui le demande a son propre plan, à tâches,
+>   ajouté par sa propre PR de plan ; les trois sections valent pour chacun. La PR de clôture du
+>   lot, et elle seule, supprime le plan maître et les plans de tranche, ferme l'issue et nomme sa
+>   tête relue. Un écart à la spec finit par `— accord : JJ/MM/AAAA` ; l'ancienne forme, qui
+>   nommait Edouard, reste admise. `methode.md` donne aussi la commande qui éprouve en local le
+>   texte d'une PR, avant de l'ouvrir ;
+> - **§5.5** : `plan.py` lit les tranches à côté des tâches. Dans un plan maître, « Revues » cite
+>   des tranches, chacune avant celle de la clôture ; un plan qui mêle les deux sortes refuse, et
+>   les refus de forme disent la forme de leur section. L'étape « Les plans » du socle écrit, hors
+>   d'une base nulle, combien de plans la PR ajoute, modifie et supprime. Les messages de
+>   `texte_pr.py` et le gabarit de PR ne nomment personne. Le tableau des garde-fous de
+>   `methode.md` nomme les écritures par l'API que refuse le garde, les règles et protections de
+>   branche comprises ; le garde, lui, ne change pas ;
+> - **§13** : le lot d'alignement donne ses commandes `gh` dans des blocs 👤, dont chaque ligne se
+>   lance par `!`, seule dans son message (`docs/aligner.md` § 6) ; le secret `MOTIFS_INTERDITS`
+>   s'y pose deux fois, pour Actions et pour Dependabot, par Git Bash, jamais par `cmd /c`, que
+>   Git Bash réécrit. Une règle déjà en service se met à jour après la fusion d'une mise à jour
+>   qui change ses contrôles requis (`docs/aligner.md` § 7) : la session lit la règle et prépare
+>   le corps, et Edouard ne lance que la ligne du `PUT`, que le garde refuse à une session.
+>   `Nouveau-Projet.ps1`, après un échec, dit que les commandes qu'il affiche sont pour
+>   PowerShell, jamais pour `!` ;
+> - **le premier geste réel de la règle**, que l'amendement du lot 15 attendait, a eu lieu le
+>   12/11/2026, sur les trois dépôts publics, `veille-emploi`, `pupitre` et `ancrage`, après leur
+>   mise à jour en `v0.10.0` : le `PUT`, son corps construit depuis la règle en service, a été
+>   accepté du premier coup les trois fois. Relue par l'API le 13/11, la règle de `pupitre`
+>   requiert toujours `verifier`, `windows` et `mutants`, et `texte-pr` en plus ;
+> - **trois écarts à la spec du lot**, décidés par son plan, qu'Edouard a accepté le 12/11
+>   (« Ok »), et déclarés chacun dans la section « Écarts à la spec » de sa PR, à la forme
+>   « accord : » :
+>   - la commande qui éprouve le texte en local commence par `corps='<fichier du corps>'`, et la
+>     tête relue s'éprouve à sa troisième ligne, non à la deuxième (§ 4.5 ; #129) ;
+>   - le tableau des garde-fous nomme aussi les objets de git (`git/commits`, `git/trees`,
+>     `git/tags`) et la mise à jour d'une branche (`…/update-branch`), que la liste de la spec
+>     omettait (§ 4.6 ; #129) ;
+>   - au § 6 de `docs/aligner.md`, chaque ligne d'un bloc 👤 se lance par `!`, seule dans son
+>     message, et non le seul `POST` (§ 4.4 ; #130) ;
+> - **seize choix du lot**, que ses PR n'ont pas comptés comme écarts, recueillis dans la section
+>   « À relire » de la PR de clôture, et acceptés par Edouard le 13/11 (« ok pour les défauts ») :
+>   - le déclencheur de la piste du commentaire jamais fermé n'est pas atteint : #128 change le
+>     message de ce refus, pas sa recherche (décidé dès le 12/11) ;
+>   - un plan à tâches qui porte aussi un titre `### Tranche N` refuse comme plan mêlé ; aucun des
+>     huit plans en cours des projets n'en porte (#128) ;
+>   - le cas du faux `wc` de l'étape « Les plans » ne tourne pas sous Windows, la raison écrite
+>     dans le test (#128) ;
+>   - le mot « tranche » suivi d'un nombre cite une tranche, même quand c'est le verbe ;
+>     « trancher 2 » ne cite rien (#128) ;
+>   - pour un corps UTF-16, `methode.md` dit que le contrôle « peut passer comme refuser », sans
+>     test qui écrive un tel corps : le résultat dépend du shell (#129) ;
+>   - la case du secret passe par Git Bash, « jamais par `cmd /c` », case que la spec ne nommait
+>     pas (#130) ;
+>   - LE-70 et LE-71 gardent le motif « décision appliquée sans en chercher les effets », celui de
+>     LE-39 pesé puis écarté (#130) ;
+>   - LE-75 va sous « contrôle passé à vide », 8e constat du motif (#131) ;
+>   - LE-76 ne propose aucune forme de porte : elle revient à Edouard (#131) ;
+>   - un corps UTF-8 avec BOM se règle par le texte de `methode.md`, « sans BOM », sans retirer le
+>     BOM dans `texte_pr.py` (#131) ;
+>   - deux constats d'avant le lot restent tels quels, car ils refusent du côté sûr : un titre de
+>     tranche à espace insécable, et « sous-tranche 2 » (#131) ;
+>   - le corps de #131 disait trois constats restés tels quels : la clôture en compte deux, la
+>     forme `<details>` allant à la piste du commentaire jamais fermé ;
+>   - le message de `pupitre` : la scission de sa Tranche 8 emporte ses renvois, dans le plan
+>     maître et dans deux plans de tranche ; sans scission, la dérogation à « une tranche à elles »
+>     se dit dans sa PR, non dans son plan ; la décision reste à Edouard, dans la session de
+>     `pupitre` ;
+>   - la clôture nomme aussi LE-74 et LE-75 dans « Prochain », ajoute deux lignes longues de
+>     `methode.md` à la piste du lot 11, amende le §13, dit tenu le premier volet de LE-63, et
+>     compte 22 constats à la revue finale, 19 sans leurs doublons, et non 23, comme le disaient le
+>     corps de #131 et les notes ;
+>   - LE-77 fait de cette erreur de compte une leçon, close, sous un motif neuf, « dénombrement
+>     fait à la main, repris sans recompter » ;
+>   - LE-40 se clôt en renvoyant au corps de la PR de clôture pour ses exécutions, ses durées
+>     mesurées du début du job au départ de l'étape « Durée du job ».
 
 Ce cadrage est la partie publique de la spec de conception du modèle, issue d'une séance de questions avec Edouard : 12 questions, puis 5 parties de design validées une à une. La partie qui nomme le serveur est privée et n'est pas reproduite ici.
 
