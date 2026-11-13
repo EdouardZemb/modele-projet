@@ -359,6 +359,55 @@ en perdre les réglages (`tests/modele/daemon_classique.py`), redémarre Docker,
 pilote `overlay2` et l'absence du magasin containerd : ses deux épreuves tournent sur un Docker 29
 en magasin classique, comme la cible. Rien ne change sous `template/`.
 
+Lot 16 fait le 13/11/2026 : les plans par tranches et l'accord sans prénom (#127), étiqueté
+`v0.11.0`. Il corrige deux défauts de la `v0.10.0` que `pupitre` a relevés le 12/11, et fait cinq
+retouches des mêmes fichiers suggérées au lot 15 ; ses trois écarts à la spec, acceptés par Edouard
+le 12/11, sont déclarés chacun dans sa PR (PR #128 à #131).
+- **Les plans par tranches** (LE-70 ; #128). `plan.py` lit deux sortes d'unités, `### Tâche N` (ou
+  `### Task N`) et `### Tranche N`. Un plan qui n'a que des tranches est un plan maître : « Revues »
+  y cite des tranches, la clôture restant la première unité dont le titre dit « clôture ». Un plan
+  qui mêle les deux sortes refuse. Les refus de forme disent la forme de leur section, et le `<!--`
+  jamais fermé a son propre message. L'étape « Les plans » du socle, et sa copie ici, écrit hors
+  d'une base nulle « Plans ajoutés : N, modifiés : M, supprimés : S. ». `methode.md` dit le lot en
+  tranches : seule la PR de clôture du lot supprime le plan maître et les plans de tranche.
+- **L'accord sans prénom** (LE-71 ; #129). Un écart finit par `— accord : JJ/MM/AAAA` ; l'ancienne
+  forme, `— accord d'Edouard : JJ/MM/AAAA`, reste admise. Les messages de `texte_pr.py` et le
+  gabarit de PR ne nomment personne, et le commentaire « Tête relue » du gabarit dit qu'une PR qui
+  ne ferme aucune issue laisse la ligne vide, ou la retire.
+- **Le texte d'une PR s'éprouve en local** (#129). `methode.md` donne la commande qui lance
+  `texte_pr.py` sur le corps, un fichier UTF-8 sans BOM hors du dépôt, avant d'ouvrir la PR ; ce
+  dépôt la lance par sa variante de « Commandes ». Elle commence par `corps='<fichier du corps>'`,
+  et sa variante à la troisième ligne éprouve la tête relue : un écart à la spec (§ 4.5). Elle
+  n'éprouve ni le format du titre ni la confidentialité. Le tableau des garde-fous nomme les
+  écritures par l'API que refuse le garde, dont les objets de git et `…/update-branch`, que la
+  spec omettait : un autre écart (§ 4.6).
+- **Le geste de la règle, partagé** (#130). Au § 7 de `docs/aligner.md`, la session lit la règle en
+  service et prépare `avant.txt` et `regle.json` ; Edouard lance la seule ligne du PUT, par `!`,
+  que le garde refuse à une session. Au § 6, chaque ligne d'un bloc 👤 se lance par `!`, seule dans
+  son message, et non le seul POST : le troisième écart (§ 4.4) ; la liste privée s'y pose par Git
+  Bash, jamais par `cmd /c` (LE-73). Le PUT a réussi du premier coup le 12/11 sur les trois dépôts
+  publics.
+- **La revue finale** a lu `ad8f11b..54f4fe4` en quatre lentilles (la spec, les textes, les cas
+  limites, les mesures), chacune contre-vérifiée, puis par une lecture de complétude : 22 constats,
+  19 sans leurs doublons d'une lentille à l'autre, aucun critique et un important, les leçons du lot
+  sans ligne au registre (LE-76). #131 corrige les onze qui reviennent au lot. Cinq vont à la
+  clôture, dont deux formes HTML d'avant le lot, que nomme désormais la piste du commentaire jamais
+  fermé ; un va au message de `pupitre` ; deux d'avant le lot restent tels quels, car ils refusent
+  du côté sûr : un titre de tranche à espace insécable, et « sous-tranche 2 ». Les huit plans en
+  cours des sept projets donnent la même sortie qu'en `v0.10.0`, aucun des 184 corps de PR relevés
+  dans les projets qui passait en `v0.10.0` ne refuse, et les sept fichiers gérés que le lot change
+  ont dans chaque projet le même blob qu'en `v0.10.0`. Aucun job `tests` n'a été coupé ni n'a
+  averti depuis le lot 15 : sous Windows, il a duré au plus 34 min 55 s, sous le seuil de
+  37 min 30 s. LE-40 est close.
+- **Le registre** gagne LE-70 à LE-76. LE-70, LE-71 et LE-73 rejoignent LE-63 sous « décision
+  appliquée sans en chercher les effets », qui compte désormais sept constats ; LE-76 est le 3e de
+  « étape de clôture oubliée par le plan ». Deux portes sont dues, et leur forme revient à Edouard.
+- **Vers `pupitre`**, la `v0.11.0` part seule, après l'étiquette ; les six autres projets la
+  prendront à leur prochaine mise à jour. Son message lui fait donner au plan maître ses trois
+  sections, scinder sa Tranche 8 en la revue finale et la clôture si Edouard l'accepte dans sa
+  session, écrire ses écarts à la forme « accord : », et dire à Edouard que sa règle sans prénom
+  contredit les fichiers gérés qui le nomment.
+
 Prochain, au choix d'Edouard :
 - le second temps du travail sur la documentation, un lot « documentation » avec sa spec : l'« État »
   réduit du `CLAUDE.md` semé et le journal des versions du modèle ; dans le README, le refus d'une
@@ -369,15 +418,19 @@ Prochain, au choix d'Edouard :
 - le lot 5 (`partition` aligné en cible `aucune`) ;
 - le lot 7 (`creche-planner` aligné en cible `aucune`) ;
 - le workflow `publier`, qui ferait publier Edouard depuis son téléphone : sa piste a pour
-  déclencheur le lot qui suit le lot 15 ;
+  déclencheur un lot choisi par Edouard ;
 - les constats que les portes du lot 15 laissent ouverts, dont un lot suivant pèse les motifs :
   LE-49 (un écart que son auteur ne reconnaît pas), LE-50 (le retrait des images, dans `serveur`),
   LE-54 et LE-61 (des textes que la section du plan ne couvre pas : une piste, un texte de clôture,
   une docstring, `documentation.md`), LE-57 (un cas limite inconnu), LE-65 et LE-66 (une commande
-  que `CLAUDE.md` prescrit à une session), LE-58 (un contrôle local qui diffère de celui de la CI) ;
-  LE-63 et LE-64, nés de la revue finale, chacun avec la porte que propose le registre ; et LE-69
-  (une épreuve renvoyée après le lot, qui n'exerce pas le cas), né de la relecture de la clôture ;
-- LE-40 se clôt à la fin du lot qui suit le lot 15, sans coupure du job `tests` d'ici là.
+  que `CLAUDE.md` prescrit à une session), LE-74 (un comportement d'outil annoncé hors de la section
+  du plan), LE-58 et LE-75 (un contrôle local qui diffère de celui de la CI) ; LE-63 et LE-64, nés
+  de la revue finale, chacun avec la porte que propose le registre, LE-63 rejointe au lot 16 par
+  LE-70, LE-71 et LE-73, du même motif, « décision appliquée sans en chercher les effets », dont la
+  porte est due ; et LE-69 (une épreuve renvoyée après le lot, qui n'exerce pas le cas), né de la
+  relecture de la clôture ;
+- la porte due par LE-76, 3e constat de « étape de clôture oubliée par le plan », après LE-60 et
+  LE-68 : sa forme revient à Edouard.
 
 Le cadrage est dans `docs/cadrage.md` ; ce que les lots ont appris, dans `docs/registre.md`.
 
@@ -419,6 +472,22 @@ Le cadrage est dans `docs/cadrage.md` ; ce que les lots ont appris, dans `docs/r
   vivent dans `Documents\00-boite-de-reception\`, hors du dépôt : l'étape « Les plans » de la CI
   n'en trouve aucun ici. La session lance cette commande depuis le clone principal, avant de
   soumettre un plan à Edouard et après chaque correction.
+- `python -B template/scripts/modele/texte_pr.py --fermetures "$fermetures"` : le contrôle du texte
+  d'une PR avant de l'ouvrir (`methode.md`, « Éprouver le texte avant d'ouvrir la PR »). Ce dépôt
+  n'a pas de `scripts/` à sa racine : le bloc de la méthode s'y lance avec ce chemin, depuis la
+  racine du clone ou du worktree, sous Git Bash, une fois la branche envoyée, le corps dans un
+  fichier UTF-8 sans BOM, hors du dépôt :
+
+  ```sh
+  corps='<fichier du corps>'
+  fermetures="$(mktemp)"
+  printf '%s' '{"data":{"repository":{"pullRequest":{"closingIssuesReferences":{"totalCount":0,"nodes":[]}}}}}' > "$fermetures"
+  CORPS="$(cat "$corps")" AUTEUR="$(gh api user --jq .login)" TETE="$(git rev-parse HEAD)" \
+    python -B template/scripts/modele/texte_pr.py --fermetures "$fermetures"
+  ```
+
+  Avec `"totalCount":1` à la troisième ligne, elle éprouve la tête relue de la PR de clôture. Elle
+  n'éprouve ni le format du titre ni la confidentialité, que `texte-pr` contrôle aussi.
 - `copier copy --vcs-ref <étiquette> gh:EdouardZemb/modele-projet <dossier>` : créer un projet.
 - `copier update` : mettre à jour un projet né du modèle (à lancer dans ce projet, pas ici).
 - `git config core.hooksPath .githooks` : à poser dans chaque clone et chaque worktree.
