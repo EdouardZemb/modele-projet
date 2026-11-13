@@ -361,8 +361,8 @@ en magasin classique, comme la cible. Rien ne change sous `template/`.
 
 Lot 16 fait le 13/11/2026 : les plans par tranches et l'accord sans prénom (#127), étiqueté
 `v0.11.0`. Il corrige deux défauts de la `v0.10.0` que `pupitre` a relevés le 12/11, et fait cinq
-retouches des mêmes fichiers suggérées au lot 15 ; ses trois écarts à la spec, acceptés par Edouard
-le 12/11, sont déclarés chacun dans sa PR (PR #128 à #131).
+retouches des mêmes fichiers suggérées au lot 15 (PR #128 à #131) ; ses trois écarts à la spec,
+acceptés par Edouard le 12/11, sont déclarés chacun dans sa PR (#129, #130).
 - **Les plans par tranches** (LE-70 ; #128). `plan.py` lit deux sortes d'unités, `### Tâche N` (ou
   `### Task N`) et `### Tranche N`. Un plan qui n'a que des tranches est un plan maître : « Revues »
   y cite des tranches, la clôture restant la première unité dont le titre dit « clôture ». Un plan
@@ -375,12 +375,12 @@ le 12/11, sont déclarés chacun dans sa PR (PR #128 à #131).
   gabarit de PR ne nomment personne, et le commentaire « Tête relue » du gabarit dit qu'une PR qui
   ne ferme aucune issue laisse la ligne vide, ou la retire.
 - **Le texte d'une PR s'éprouve en local** (#129). `methode.md` donne la commande qui lance
-  `texte_pr.py` sur le corps, un fichier UTF-8 sans BOM hors du dépôt, avant d'ouvrir la PR ; ce
-  dépôt la lance par sa variante de « Commandes ». Elle commence par `corps='<fichier du corps>'`,
-  et sa variante à la troisième ligne éprouve la tête relue : un écart à la spec (§ 4.5). Elle
-  n'éprouve ni le format du titre ni la confidentialité. Le tableau des garde-fous nomme les
-  écritures par l'API que refuse le garde, dont les objets de git et `…/update-branch`, que la
-  spec omettait : un autre écart (§ 4.6).
+  `texte_pr.py` sur le corps, un fichier UTF-8 hors du dépôt, avant d'ouvrir la PR, et #131 y
+  ajoute « sans BOM » ; ce dépôt la lance par sa variante de « Commandes », qu'un test tient. Elle
+  commence par `corps='<fichier du corps>'`, et sa variante à la troisième ligne éprouve la tête
+  relue : un écart à la spec (§ 4.5). Elle n'éprouve ni le format du titre ni la confidentialité.
+  Le tableau des garde-fous nomme les écritures par l'API que refuse le garde, dont les objets de
+  git et `…/update-branch`, que la spec omettait : un autre écart (§ 4.6).
 - **Le geste de la règle, partagé** (#130). Au § 7 de `docs/aligner.md`, la session lit la règle en
   service et prépare `avant.txt` et `regle.json` ; Edouard lance la seule ligne du PUT, par `!`,
   que le garde refuse à une session. Au § 6, chaque ligne d'un bloc 👤 se lance par `!`, seule dans
@@ -391,17 +391,18 @@ le 12/11, sont déclarés chacun dans sa PR (PR #128 à #131).
   limites, les mesures), chacune contre-vérifiée, puis par une lecture de complétude : 22 constats,
   19 sans leurs doublons d'une lentille à l'autre, aucun critique et un important, les leçons du lot
   sans ligne au registre (LE-76). #131 corrige les onze qui reviennent au lot. Cinq vont à la
-  clôture, dont deux formes HTML d'avant le lot, que nomme désormais la piste du commentaire jamais
-  fermé ; un va au message de `pupitre` ; deux d'avant le lot restent tels quels, car ils refusent
-  du côté sûr : un titre de tranche à espace insécable, et « sous-tranche 2 ». Les huit plans en
-  cours des sept projets donnent la même sortie qu'en `v0.10.0`, aucun des 184 corps de PR relevés
-  dans les projets qui passait en `v0.10.0` ne refuse, et les sept fichiers gérés que le lot change
-  ont dans chaque projet le même blob qu'en `v0.10.0`. Aucun job `tests` n'a été coupé ni n'a
-  averti depuis le lot 15 : sous Windows, il a duré au plus 34 min 55 s, sous le seuil de
-  37 min 30 s. LE-40 est close.
-- **Le registre** gagne LE-70 à LE-76. LE-70, LE-71 et LE-73 rejoignent LE-63 sous « décision
+  clôture, dont un constat d'avant le lot, deux formes HTML que nomme désormais la piste du
+  commentaire jamais fermé ; un va au message de `pupitre` ; deux d'avant le lot restent tels
+  quels, car ils refusent du côté sûr : un titre de tranche à espace insécable, et
+  « sous-tranche 2 ». Les huit plans en cours des sept projets donnent la même sortie qu'en
+  `v0.10.0`, aucun des 184 corps de PR relevés dans les projets qui passait en `v0.10.0` ne
+  refuse, et les sept fichiers gérés que le lot change ont dans chaque projet le même blob qu'en
+  `v0.10.0`. Aucun job `tests` n'a été coupé ni n'a averti depuis le lot 15 : sous Windows, il a
+  duré au plus 34 min 55 s, sous le seuil de 37 min 30 s. LE-40 est close.
+- **Le registre** gagne LE-70 à LE-77. LE-70, LE-71 et LE-73 rejoignent LE-63 sous « décision
   appliquée sans en chercher les effets », qui compte désormais sept constats ; LE-76 est le 3e de
   « étape de clôture oubliée par le plan ». Deux portes sont dues, et leur forme revient à Edouard.
+  LE-77, close, est le compte de la revue finale, 23 dans le corps de #131 pour 22.
 - **Vers `pupitre`**, la `v0.11.0` part seule, après l'étiquette ; les six autres projets la
   prendront à leur prochaine mise à jour. Son message lui fait donner au plan maître ses trois
   sections, scinder sa Tranche 8 en la revue finale et la clôture si Edouard l'accepte dans sa

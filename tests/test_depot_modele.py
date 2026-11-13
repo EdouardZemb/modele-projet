@@ -817,6 +817,41 @@ def test_claude_md_dit_la_commande_des_plans():
     assert "avant de soumettre un plan à Edouard et après chaque correction" in commandes
 
 
+def _bloc_sh(texte, apres):
+    """Le premier bloc `sh` qui suit `apres`, ses lignes sans le retrait de la puce qui le
+    porte."""
+    brut = texte.split(apres, 1)[1].split("```sh\n", 1)[1].split("```", 1)[0]
+    return [ligne.removeprefix("  ") for ligne in brut.split("\n")]
+
+
+def test_claude_md_dit_la_commande_du_texte_de_la_pr():
+    """Ce dépôt n'a pas de `scripts/` à sa racine : « Commandes » donne la variante, pour lui, du
+    bloc de `methode.md` qui éprouve en local le texte d'une PR, avec
+    `template/scripts/modele/texte_pr.py`, et dit d'où la lancer (revue finale du lot 16). Le
+    bloc égale celui de la méthode, au chemin près : il ne dérive pas sans bruit."""
+    commandes = _commandes_de_claude_md()
+    assert (
+        '`python -B template/scripts/modele/texte_pr.py --fermetures "$fermetures"` : le contrôle '
+        "du texte d'une PR avant de l'ouvrir"
+    ) in commandes
+    assert (
+        "le bloc de la méthode s'y lance avec ce chemin, depuis la racine du clone ou du worktree, "
+        "sous Git Bash"
+    ) in commandes
+    # aucun chemin de `texte_pr.py` sans `template/`, que la racine de ce dépôt n'a pas
+    assert re.search(r"(?<!template/)scripts/modele/texte_pr\.py", commandes) is None
+    section = (RACINE / "CLAUDE.md").read_text(encoding="utf-8").split("\n## Commandes\n", 1)[1]
+    variante = _bloc_sh(section, "`python -B template/scripts/modele/texte_pr.py")
+    methode = _bloc_sh(
+        (RACINE / "template/docs/modele/methode.md").read_text(encoding="utf-8"),
+        "**Éprouver le texte avant d'ouvrir la PR.**",
+    )
+    assert variante[0] == "corps='<fichier du corps>'", variante[0]
+    assert variante == [
+        ligne.replace("python -B scripts/", "python -B template/scripts/") for ligne in methode
+    ]
+
+
 def test_claude_md_dit_la_relance_et_les_avertissements_de_duree():
     """LE-40 : « Commandes » dit comment relancer le seul job coupé à son délai, et que la revue
     finale de chaque lot relève les avertissements de durée : personne d'autre ne lit un
