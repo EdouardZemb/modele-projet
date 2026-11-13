@@ -409,6 +409,14 @@ acceptés par Edouard le 12/11, sont déclarés chacun dans sa PR (#129, #130).
   session, écrire ses écarts à la forme « accord : », et dire à Edouard que sa règle sans prénom
   contredit les fichiers gérés qui le nomment.
 
+Versions des projets au 13/11/2026, relevées par l'API : `pupitre` est en `v0.11.0` depuis
+pupitre#35, fusionnée le 13/11 ; les six autres restent en `v0.10.0`. Le plan maître de `pupitre`
+passe `plan.py`, lieux ouverts comme par `--sans-lieux` (81 mécanismes, 43 outils, 3 revues) : sa
+Tranche 8 est scindée en la revue finale et la clôture, la Tranche 9, sur l'accord d'Edouard dans
+la session de `pupitre`. Une session neuve y a relu les trois sections, qu'aucune revue du plan
+n'avait relues. pupitre#36, fusionnée le même jour, excepte de sa règle sans prénom les fichiers
+gérés par le modèle et le nom du compte.
+
 Prochain, au choix d'Edouard :
 - le second temps du travail sur la documentation, un lot « documentation » avec sa spec : l'« État »
   réduit du `CLAUDE.md` semé et le journal des versions du modèle ; dans le README, le refus d'une
