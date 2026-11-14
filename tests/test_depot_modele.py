@@ -846,6 +846,9 @@ def test_claude_md_dit_la_commande_du_releve():
             "ils ne rendent pas le code 1"
         ),
         "seuls les dossiers exclus des formateurs sont comparés",
+        # l'inventaire complet des fichiers gérés
+        "L'inventaire complet des fichiers gérés demande `--depuis <ancienne étiquette>`",
+        "un projet à la version de la tête n'en montre aucun",
     ):
         assert texte in commandes, texte
     assert (RACINE / "poste/releve.py").is_file()

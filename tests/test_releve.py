@@ -28,6 +28,8 @@ import releve
 COMPTE = "compte-essai"
 # Un texte unique, porté par les plans et les corps du banc : la sortie ne le cite jamais.
 MARQUEUR = "Zorglub-7f3a9c"
+# Une branche par défaut qui porte le marqueur : le relevé ne l'affiche jamais.
+BRANCHE = f"principale-{MARQUEUR}"
 FAUX = Path(__file__).resolve().parent / "faux_gh_api.py"
 REGLE = "template/.github/{% if cible != 'donnees' %}modele{% endif %}/ruleset-main.json"
 X_RENDU = (
@@ -107,14 +109,10 @@ def _blobs(racine: Path, version: str) -> dict:
     return blobs
 
 
-@pytest.fixture(scope="module")
-def banc(tmp_path_factory):
-    """Le dépôt git du banc : `copier.yml`, les scripts du modèle, un fichier sous chacun des six
-    chemins gérés, un semé sous l'un d'eux, `.claude/settings.json`, un fichier rendu ; deux
-    étiquettes, la seconde étant la tête."""
-    racine = tmp_path_factory.mktemp("banc")
-    home = tmp_path_factory.mktemp("home-vide")
-    env = dict(
+def _env_git(home: Path) -> dict:
+    """L'environnement des commits du banc : un dossier personnel vide, une identité d'essai."""
+    home.mkdir(parents=True, exist_ok=True)
+    return dict(
         os.environ,
         HOME=str(home),
         USERPROFILE=str(home),
@@ -123,8 +121,40 @@ def banc(tmp_path_factory):
         GIT_COMMITTER_NAME="Essai",
         GIT_COMMITTER_EMAIL="essai@example.com",
     )
+
+
+def _depot_minimal(racine: Path, fichiers: dict, env: dict) -> None:
+    """Un dépôt git d'un seul commit, qui porte `fichiers`."""
+    racine.mkdir()
     _git(racine, "init", "-q", "-b", "main", env=env)
     _git(racine, "config", "core.autocrlf", "false", env=env)
+    _ecrire(racine, fichiers)
+    _git(racine, "add", "--", *fichiers, env=env)
+    _git(racine, "commit", "-q", "-m", "minimal", env=env)
+
+
+@pytest.fixture(scope="module")
+def banc(tmp_path_factory):
+    """Le dépôt git du banc : `copier.yml`, les scripts du modèle, un fichier sous chacun des six
+    chemins gérés, un semé sous l'un d'eux, `.claude/settings.json`, un fichier rendu. Trois
+    étiquettes : `v0.0.9`, dont les scripts plantent ; `v0.1.0` ; `v0.2.0`, la tête."""
+    racine = tmp_path_factory.mktemp("banc")
+    env = _env_git(tmp_path_factory.mktemp("home-vide"))
+    _git(racine, "init", "-q", "-b", "main", env=env)
+    _git(racine, "config", "core.autocrlf", "false", env=env)
+    # une version dont `plan.py` plante (code 1, sans la ligne de refus) et dont `texte_pr.py`
+    # sort par un code hors de {0, 1}
+    _ecrire(
+        racine,
+        {
+            "copier.yml": COPIER_DU_BANC,
+            "template/scripts/modele/plan.py": 'raise RuntimeError("boum")\n',
+            "template/scripts/modele/texte_pr.py": "import sys\n\nsys.exit(3)\n",
+        },
+    )
+    _git(racine, "add", "--", "copier.yml", "template", env=env)
+    _git(racine, "commit", "-q", "-m", "v0.0.9", env=env)
+    _git(racine, "tag", "v0.0.9", env=env)
     scripts = {
         f"template/scripts/modele/{f.name}": f.read_bytes()
         for f in SCRIPTS.iterdir()
@@ -197,14 +227,16 @@ def banc(tmp_path_factory):
 
 @pytest.fixture(scope="module")
 def faux(tmp_path_factory):
-    """Le faux `gh` : un `.cmd` sous Windows, un script `sh` exécutable ailleurs."""
+    """Le faux `gh` : un `.cmd` sous Windows, un script `sh` exécutable ailleurs. Python s'y lance
+    par `-I -S` : le faux n'a besoin ni de `site` ni des variables `PYTHON*`, et chaque appel
+    démarre plus vite, ce que la durée du fichier demande."""
     dossier = tmp_path_factory.mktemp("faux")
     if sys.platform == "win32":
         f = dossier / "gh.cmd"
-        f.write_text(f'@"{sys.executable}" "{FAUX}" %*\r\n', encoding="utf-8")
+        f.write_text(f'@"{sys.executable}" -I -S "{FAUX}" %*\r\n', encoding="utf-8")
     else:
         f = dossier / "gh"
-        f.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{FAUX}" "$@"\n', encoding="utf-8")
+        f.write_text(f'#!/bin/sh\nexec "{sys.executable}" -I -S "{FAUX}" "$@"\n', encoding="utf-8")
         f.chmod(0o755)
     return f
 
@@ -223,10 +255,12 @@ def ok(sortie) -> dict:
 
 
 def erreur(status: int) -> dict:
+    """Une erreur de `gh api` : le JSON sur la sortie standard, le texte sur la sortie
+    d'erreur, l'un et l'autre porteurs du marqueur, que la sortie ne cite pas."""
     return {
         "code": 1,
-        "sortie": {"message": "Erreur", "status": str(status)},
-        "erreur": f"gh: Erreur (HTTP {status})\n",
+        "sortie": {"message": f"Erreur {MARQUEUR}", "status": str(status)},
+        "erreur": f"gh: Erreur {MARQUEUR} (HTTP {status})\n",
     }
 
 
@@ -236,12 +270,12 @@ def b64(octets: bytes, largeur: int = 60) -> str:
     return "\n".join(texte[i : i + largeur] for i in range(0, len(texte), largeur)) + "\n"
 
 
-def depot(nom: str, prive: bool = False, archive: bool = False) -> dict:
+def depot(nom: str, prive: bool = False, archive: bool = False, branche: str = "main") -> dict:
     return {
         "name": nom,
         "private": prive,
         "archived": archive,
-        "default_branch": "main",
+        "default_branch": branche,
         "owner": {"login": COMPTE},
     }
 
@@ -327,7 +361,8 @@ def pr(numero: int, corps: str, auteur: str = "auteur-essai") -> dict:
         "number": numero,
         "body": corps,
         "user": {"login": auteur},
-        "head": {"sha": f"{numero:x}" * 40},
+        "title": f"Une PR {MARQUEUR}",
+        "head": {"sha": f"{numero:x}" * 40, "ref": f"lot/{MARQUEUR}"},
     }
 
 
@@ -341,11 +376,57 @@ def fermetures(numero: int, total: int = 0) -> dict:
     }
 
 
+def regle(*contextes: str) -> list:
+    """Une règle de branche dont les contrôles requis sont `contextes`."""
+    return [
+        {"type": "deletion"},
+        {
+            "type": "required_status_checks",
+            "parameters": {"required_status_checks": [{"context": c} for c in contextes]},
+        },
+    ]
+
+
+def projet(
+    nom: str,
+    version: str = "v0.2.0",
+    entrees: dict | None = None,
+    blobs: dict | None = None,
+    ouvertes: dict | None = None,
+    prs: dict | None = None,
+    regles: list | None = None,
+) -> dict:
+    """Les réponses d'un projet sur `main` : son arbre, ses blobs, ses PR ouvertes et leurs
+    fichiers, ses dernières PR et leurs fermetures (aucune), sa règle (aucune par défaut)."""
+    ouvertes = ouvertes or {}
+    prs = prs or {}
+    reponses = {
+        **reponses_de_base(nom, copier_answers(version)),
+        api(nom, "/git/trees/main", recursive="1"): arbre(entrees or {}),
+        api(nom, "/pulls", state="open", per_page="100"): ok([[{"number": n} for n in ouvertes]]),
+        api(nom, "/pulls", state="all", per_page="50"): ok([pr(n, c) for n, c in prs.items()]),
+        api(nom, "/rules/branches/main"): ok(regles or []),
+    }
+    for sha, texte in (blobs or {}).items():
+        reponses[api(nom, "/git/blobs/" + sha)] = contenu(texte)
+    for n, fichiers in ouvertes.items():
+        reponses[api(nom, f"/pulls/{n}/files", per_page="100")] = ok([fichiers])
+    if prs:
+        reponses[cle("graphql", query=releve.REQUETE, owner=COMPTE, name=nom, n="50")] = ok(
+            {"data": {"repository": {"pullRequests": {"nodes": [fermetures(n) for n in prs]}}}}
+        )
+    return reponses
+
+
 def reponses_completes(banc) -> dict:
     """Six dépôts sur deux pages : `alpha`, public, en `v0.1.0` ; `beta`, privé, à la tête ;
     `gamma`, archivé ; `delta`, sans `.copier-answers.yml` ; `epsilon`, d'un autre modèle ;
     `zeta-donnees`, privé, en cible `donnees`, sans `nature`."""
-    page1 = [depot("alpha"), depot("beta", prive=True), depot("gamma", archive=True)]
+    page1 = [
+        depot("alpha"),
+        depot("beta", prive=True, branche=BRANCHE),
+        depot("gamma", archive=True),
+    ]
     page2 = [depot("delta"), depot("epsilon"), depot("zeta-donnees", prive=True)]
     v1 = banc.v1
     zeta = (
@@ -452,11 +533,11 @@ def reponses_completes(banc) -> dict:
             ]
         ),
         # beta
-        **reponses_de_base("beta", beta),
-        api("beta", "/git/trees/main", recursive="1"): arbre({"README.md": "5" * 40}),
+        api("beta", "/contents/.copier-answers.yml", ref=BRANCHE): contenu(beta),
+        api("beta", f"/git/trees/{BRANCHE}", recursive="1"): arbre({"README.md": "5" * 40}),
         api("beta", "/pulls", state="open", per_page="100"): ok([[]]),
         api("beta", "/pulls", state="all", per_page="50"): ok([]),
-        api("beta", "/rules/branches/main"): ok([]),
+        api("beta", f"/rules/branches/{BRANCHE}"): ok([]),
         # delta, epsilon
         api("delta", "/contents/.copier-answers.yml", ref="main"): erreur(404),
         **reponses_de_base("epsilon", copier_answers("v0.1.0", src="gh:quelquun/autre-modele")),
@@ -536,6 +617,34 @@ def clair(banc, faux, tmp_path_factory):
     reponses = {
         cle("user/repos", affiliation="owner", per_page="100"): ok([[depot("clair")]]),
         **projet_clair("clair"),
+    }
+    code, sortie, appels = lancer(faux, banc, reponses, dossier)
+    return SimpleNamespace(code=code, sortie=sortie, lignes=sortie.splitlines(), appels=appels)
+
+
+@pytest.fixture(scope="module")
+def causes(banc, faux, tmp_path_factory):
+    """Six projets : cinq ont chacun une seule cause du code 1, le dernier rien à lire."""
+    dossier = tmp_path_factory.mktemp("causes")
+    noms = ("c-fichiers", "c-ouvertes", "c-plans", "c-regle", "c-rien", "c-textes")
+    reponses = {
+        cle("user/repos", affiliation="owner", per_page="100"): ok(
+            [[depot(nom, prive=nom != "c-regle") for nom in noms]]
+        ),
+        **projet(
+            "c-plans",
+            "v0.1.0",
+            entrees={".claude/plans/plan-b.md": "b" * 40},
+            blobs={"b" * 40: PLAN_MAL_FORME},
+        ),
+        **projet(
+            "c-ouvertes",
+            ouvertes={1: [{"filename": ".claude/plans/neuf.md", "status": "added"}]},
+        ),
+        **projet("c-textes", "v0.1.0", prs={5: CORPS_ACCORD}),
+        **projet("c-regle", regles=regle("socle / secrets")),
+        **projet("c-fichiers", "v0.1.0", entrees={".githooks/pre-commit": "1" * 40}),
+        **projet("c-rien"),
     }
     code, sortie, appels = lancer(faux, banc, reponses, dossier)
     return SimpleNamespace(code=code, sortie=sortie, lignes=sortie.splitlines(), appels=appels)
@@ -662,7 +771,7 @@ def test_releve_textes(complet):
     # est exempté par les deux versions
     assert not any(t.startswith(("PR 2 ", "PR 4 ")) for t in textes)
     # absente de la réponse GraphQL
-    assert "PR 3 : non relevés" in textes
+    assert "PR 3 : non relevés (absente de la réponse GraphQL)" in textes
     assert textes[-1] == "4 PR lues, 2 verdicts changés, 1 non relevées"
     graphql = [appel["args"] for appel in complet.appels if appel["args"][1] == "graphql"]
     assert len(graphql) == 1 and "name=alpha" in graphql[0]
@@ -756,6 +865,8 @@ def test_releve_erreur_passagere(banc, faux, tmp_path):
     assert "relevé : theta : non relevé : réponses : erreur 502" in lignes
     assert "relevé : iota : non relevé : arbre : erreur 502" in lignes
     assert "relevé : kappa : plans : plan-a.md : même verdict" in lignes
+    # le message de l'erreur, sur l'une et l'autre sortie de `gh`, n'est jamais cité
+    assert MARQUEUR not in sortie
     assert lignes[-1] == "relevé : 4 dépôts examinés, 4 projets, 1 lus, 3 non relevés, 0 à lire"
     assert code == releve.EXIT_A_LIRE
 
@@ -844,13 +955,146 @@ def test_releve_codes(banc, faux, tmp_path, capsys, clair, complet):
     assert sortie == ""
     assert "gh sans accès (dépôts : erreur 401)" in capsys.readouterr().err
     assert len(appels) == 1
+    # une erreur passagère sur la liste des dépôts n'est pas une erreur d'usage
+    reponses = {cle("user/repos", affiliation="owner", per_page="100"): erreur(502)}
+    code, sortie, _ = lancer(faux, banc, reponses, tmp_path / "passagere")
+    assert code == releve.EXIT_A_LIRE
+    assert sortie.splitlines() == ["relevé : non relevé : dépôts : erreur 502"]
+    assert capsys.readouterr().err == ""
+    # un clone dont la tête ne dit pas ses contrôles gérés : absent, vide, illisible
+    env = _env_git(tmp_path / "home")
+    for nom, regle_de_la_tete in (
+        ("sans-regle", None),
+        ("regle-vide", '{"rules": []}'),
+        ("regle-illisible", "{pas du JSON"),
+    ):
+        clone = tmp_path / nom
+        fichiers = {"copier.yml": COPIER_DU_BANC, "template/scripts/modele/plan.py": ""}
+        if regle_de_la_tete is not None:
+            fichiers[REGLE] = regle_de_la_tete
+        _depot_minimal(clone, fichiers, env)
+        options = ["--compte", COMPTE, "--gh", str(faux), "--clone", str(clone)]
+        assert releve.main(options) == releve.EXIT_USAGE, nom
+        sortie = capsys.readouterr()
+        assert sortie.out == "", nom
+        assert "contrôles gérés illisibles dans la tête du clone" in sortie.err, nom
 
 
 def test_releve_sortie_sans_contenu(complet, tmp_path_factory):
+    """Le marqueur est dans les plans, les corps et les titres des PR, le nom de leur branche, la
+    branche par défaut de `beta` et le message d'une erreur de `gh` : la sortie ne le cite pas."""
     assert MARQUEUR not in complet.sortie
+    # la branche qui le porte a bien été lue
+    assert any(BRANCHE in " ".join(appel["args"]) for appel in complet.appels)
     base = tmp_path_factory.getbasetemp()
     for chemin in (base, complet.dossier, complet.tmp):
         for forme in (str(chemin), chemin.as_posix(), chemin.name):
             assert forme not in complet.sortie, forme
     # le dossier temporaire du relevé est retiré
     assert list(complet.tmp.iterdir()) == []
+
+
+def test_releve_causes_du_code_1(causes):
+    """Chacune des cinq causes du code 1, seule dans son projet : un relevé qui en oublierait une
+    compterait un projet à lire de moins."""
+    lignes = causes.lignes
+    assert "relevé : c-plans : plans : plan-b.md : verdict changé" in lignes
+    assert "relevé : c-ouvertes : PR ouvertes : PR 1 : ajoute un plan : neuf.md" in lignes
+    assert "relevé : c-textes : textes : PR 5 : refusait, passe" in lignes
+    assert "relevé : c-regle : règle : contrôle géré absent : texte-pr" in lignes
+    assert (
+        "relevé : c-fichiers : fichiers gérés : .githooks/pre-commit : modifié dans le projet"
+    ) in lignes
+    assert lignes[-1] == "relevé : 6 dépôts examinés, 6 projets, 6 lus, 0 non relevés, 5 à lire"
+    assert causes.code == releve.EXIT_A_LIRE
+
+
+def test_releve_resultat_d_un_script():
+    """Un vrai refus finit par la ligne de refus du script ; un code 1 sans elle est un plantage,
+    et tout autre code qu'un 0 ou un 1, une erreur d'usage ou un plantage."""
+    refus = "plan : refus"
+    assert releve._resultat(None, refus) is None
+    assert releve._resultat((0, ["plan : x"]), refus) == (0, ["plan : x"])
+    assert releve._resultat((1, ["plan : x", refus]), refus) == (1, ["plan : x", refus])
+    assert releve._resultat((1, ["plan : x"]), refus) is None
+    assert releve._resultat((1, []), refus) is None
+    assert releve._resultat((1, [refus, "plan : x"]), refus) is None
+    for code in (2, 3, 64, -1):
+        assert releve._resultat((code, ["plan : x", refus]), refus) is None, code
+
+
+def test_releve_script_en_echec(banc, faux, tmp_path):
+    """`plan.py` qui plante, `texte_pr.py` qui sort par 3, et deux `texte_pr.py` en erreur
+    d'usage (une PR sans auteur) : non relevés, jamais lus comme des verdicts."""
+    reponses = {
+        cle("user/repos", affiliation="owner", per_page="100"): ok(
+            [[depot("rho", prive=True), depot("tau", prive=True)]]
+        ),
+        **projet(
+            "rho",
+            "v0.0.9",
+            entrees={".claude/plans/plan-a.md": "a" * 40},
+            blobs={"a" * 40: PLAN_EN_COURS},
+            prs={1: CORPS_AUCUN},
+        ),
+        **projet("tau", prs={2: CORPS_AUCUN}),
+    }
+    reponses[api("tau", "/pulls", state="all", per_page="50")] = ok(
+        [{**pr(2, CORPS_AUCUN), "user": None}]
+    )
+    code, sortie, _ = lancer(faux, banc, reponses, tmp_path)
+    lignes = sortie.splitlines()
+    assert lignes_de(lignes, "rho", "plans") == [
+        "plan-a.md : non relevé (plan.py en échec : version du projet)"
+    ]
+    assert lignes_de(lignes, "rho", "textes")[0] == (
+        "PR 1 : non relevés (texte_pr.py en échec : version du projet)"
+    )
+    assert lignes_de(lignes, "tau", "textes")[0] == (
+        "PR 2 : non relevés (texte_pr.py en échec : version du projet, tête)"
+    )
+    assert lignes[-1] == "relevé : 2 dépôts examinés, 2 projets, 0 lus, 2 non relevés, 0 à lire"
+    assert code == releve.EXIT_A_LIRE
+
+
+def test_releve_plan_py_qui_ne_se_lance_pas(banc, faux, tmp_path, monkeypatch):
+    """Un `plan.py` qui ne se lance pas, aux trois passages : ni « même verdict », ni « refuserait
+    s'il était neuf », mais un plan non relevé."""
+    lancer_vrai = releve._Releve._lancer
+
+    def sans_plan_py(self, script, args, cwd, env=None):
+        return None if script.name == "plan.py" else lancer_vrai(self, script, args, cwd, env)
+
+    monkeypatch.setattr(releve._Releve, "_lancer", sans_plan_py)
+    reponses = {
+        cle("user/repos", affiliation="owner", per_page="100"): ok([[depot("clair")]]),
+        **projet_clair("clair"),
+    }
+    code, sortie, _ = lancer(faux, banc, reponses, tmp_path)
+    lignes = sortie.splitlines()
+    assert lignes_de(lignes, "clair", "plans") == [
+        "plan-a.md : non relevé (plan.py en échec : version du projet, tête, tête par --neuf)"
+    ]
+    assert lignes[-1] == "relevé : 1 dépôts examinés, 1 projets, 0 lus, 1 non relevés, 0 à lire"
+    assert code == releve.EXIT_A_LIRE
+
+
+def test_releve_dossier_temporaire_non_retire(banc, faux, tmp_path, monkeypatch):
+    """Le dossier temporaire, qui porte des plans privés, ne se retire pas : une ligne fixe le dit,
+    sans son chemin, et le code passe à 1."""
+
+    def verrouille(*args, **kwargs):
+        raise PermissionError("verrouillé")
+
+    monkeypatch.setattr(releve.shutil, "rmtree", verrouille)
+    temporaire = tmp_path / "base-du-releve"
+    temporaire.mkdir()
+    reponses = {cle("user/repos", affiliation="owner", per_page="100"): ok([[]])}
+    code, sortie, _ = lancer(faux, banc, reponses, tmp_path / "faux", tempdir=temporaire)
+    lignes = sortie.splitlines()
+    assert lignes[-2] == "relevé : 0 dépôts examinés, 0 projets, 0 lus, 0 non relevés, 0 à lire"
+    assert lignes[-1] == "relevé : dossier temporaire non retiré"
+    assert code == releve.EXIT_A_LIRE
+    assert len(list(temporaire.iterdir())) == 1
+    for forme in (str(temporaire), temporaire.as_posix(), temporaire.name):
+        assert forme not in sortie, forme

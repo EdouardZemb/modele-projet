@@ -42,7 +42,13 @@ fusion). « La tête » est le commit `HEAD` du clone, extrait comme une autre v
 
 Les scripts d'une version s'extraient une fois, fichier par fichier (`git ls-tree`, puis
 `git show <version>:<chemin>`) : les seuls `*.py` de `template/scripts/modele/`, jamais un
-`.jinja`. Une version absente du clone rend le projet « non relevé ».
+`.jinja`. Une version absente du clone rend le projet « non relevé ». Un script qui ne se lance
+pas, qui plante ou qui sort en erreur d'usage ne donne pas de verdict : un vrai refus rend 1 et
+finit par la ligne `refus` du script, un code 1 sans elle est un plantage, tout autre code qu'un 0
+ou un 1 une erreur ; le plan ou la PR est alors « non relevé », et le projet avec lui.
+
+Le relevé n'écrit que dans un dossier temporaire, qui porte les plans de dépôts privés : s'il ne
+se retire pas à la fin, une ligne fixe le dit, sans son chemin, et le code passe à 1.
 
 Les appels à `gh` : tous par `gh api`, sans `--jq`, chaque appel REST par `-X GET`, ses paramètres
 par `-f clé=valeur`. Aucun argument ne porte `&`, `|`, `<`, `>`, `^`, `%`, `"` ni une fin de ligne,
@@ -59,9 +65,11 @@ Usage : releve.py [--compte COMPTE] [--prs N] [--depuis ÉTIQUETTE] [--clone DOS
         Depuis la racine du clone du modèle, `gh` connecté. --prs : de 1 à 100 (défaut : 50).
         --clone : défaut, le dépôt git du dossier courant. --gh : défaut, `gh`.
 
-Retour : 0 tous les projets lus et rien à lire, 1 quelque chose à lire ou un projet non relevé,
-         64 erreur d'usage (`gh` absent ou sans accès, dossier qui n'est pas un clone du modèle,
-         option invalide).
+Retour : 0 tous les projets lus et rien à lire ; 1 quelque chose à lire, un projet non relevé,
+         une erreur passagère sur la liste des dépôts ou le dossier temporaire non retiré ;
+         64 erreur d'usage (`gh` absent, ou sans accès : un 401 sur la liste des dépôts ; un
+         dossier qui n'est pas un clone du modèle, ou dont la tête ne dit pas ses contrôles
+         gérés ; une option invalide).
 """
 
 from __future__ import annotations
@@ -101,6 +109,10 @@ LIMITES = (
 )
 VERSION_ABSENTE = "version absente du clone, lancer git fetch --tags"
 NEUF = "refuserait s'il était neuf"
+REFUS_DU_PLAN = "plan : refus"
+REFUS_DU_TEXTE = "texte de la PR : refus"
+TEMPORAIRE_NON_RETIRE = "dossier temporaire non retiré"
+GERES_ILLISIBLES = "contrôles gérés illisibles dans la tête du clone (ruleset-main.json)"
 # Ce qu'aucun argument de `gh` ne porte : sous Windows, un `.cmd` le couperait ou le réécrirait.
 INTERDITS = frozenset('&|<>^%"\n\r')
 # Les fermetures des N dernières PR, en une requête par dépôt, sur une ligne et sans guillemets.
@@ -294,7 +306,16 @@ class _NonReleve(Exception):
 
 
 class _Releve:
-    def __init__(self, gh: str, clone: Path, tmp: Path, compte: str, prs: int, depuis: str | None):
+    def __init__(
+        self,
+        gh: str,
+        clone: Path,
+        tmp: Path,
+        compte: str,
+        prs: int,
+        depuis: str | None,
+        geres: set[str],
+    ):
         self.gh = gh
         self.clone = clone
         self.tmp = tmp
@@ -311,7 +332,7 @@ class _Releve:
         self.depuis_nom = depuis
         copier = _git(clone, "show", "HEAD:copier.yml").stdout.decode("utf-8", errors="replace")
         self.semes = _semes(copier)
-        self.geres = self._contextes_geres()
+        self.geres = geres
 
     # --- les sorties ---
 
@@ -353,19 +374,6 @@ class _Releve:
             }
         return self.blobs[sha]
 
-    def _contextes_geres(self) -> set[str]:
-        r = _git(self.clone, "show", f"HEAD:{REGLE}")
-        try:
-            regle = json.loads(r.stdout.decode("utf-8"))
-            return {
-                c["context"]
-                for regles in regle["rules"]
-                if regles.get("type") == "required_status_checks"
-                for c in regles["parameters"]["required_status_checks"]
-            }
-        except (ValueError, KeyError, TypeError, AttributeError):
-            return set()
-
     # --- les lancements ---
 
     def _api(self, rubrique: str, nom: str, point: str, *parametres: str, pages=False):
@@ -393,7 +401,7 @@ class _Releve:
         except subprocess.TimeoutExpired:
             raise _NonReleve(rubrique, "délai dépassé") from None
         except OSError:
-            raise _NonReleve(rubrique, "erreur ?") from None
+            raise _GhAbsent(rubrique, "gh ne se lance pas") from None
         if r.returncode != 0:
             raise _Erreur(rubrique, _statut(r.stdout, r.stderr))
         try:
@@ -429,13 +437,21 @@ class _Releve:
                 ["api", "user/repos", "-X", "GET", "-f", "affiliation=owner", "-f", "per_page=100"]
                 + ["--paginate", "--slurp"],
             )
+        except _GhAbsent:
+            return _usage("gh ne se lance pas")
         except _Erreur as e:
-            return _usage(f"gh sans accès (dépôts : erreur {e.args[1]})")
+            # un accès refusé est une erreur d'usage ; une erreur passagère, un dépôt non relevé
+            if e.args[1] == "401":
+                return _usage("gh sans accès (dépôts : erreur 401)")
+            self._dire("non relevé", "dépôts", f"erreur {e.args[1]}")
+            return EXIT_A_LIRE
         except _NonReleve as e:
-            return _usage(f"gh sans accès (dépôts : {e.args[1]})")
+            self._dire("non relevé", *e.args)
+            return EXIT_A_LIRE
         depots = _aplatir(pages)
         if depots is None:
-            return _usage("gh sans accès (dépôts : réponse illisible)")
+            self._dire("non relevé", "dépôts", "réponse illisible")
+            return EXIT_A_LIRE
         depots = [
             d
             for d in depots
@@ -568,6 +584,21 @@ class _Releve:
             avant = self._verdict_du_plan(ancienne, chemin, prefixe, travail, [])
             apres = self._verdict_du_plan(tete, chemin, prefixe, travail, [])
             neuf = self._verdict_du_plan(tete, chemin, prefixe, travail, ["--neuf"])
+            echecs = [
+                cote
+                for cote, verdict in (
+                    ("version du projet", avant),
+                    ("tête", apres),
+                    ("tête par --neuf", neuf),
+                )
+                if verdict is None
+            ]
+            if echecs:
+                self.incomplet = True
+                self._dire(
+                    nom, "plans", affiche, f"non relevé (plan.py en échec : {', '.join(echecs)})"
+                )
+                continue
             if avant == apres:
                 self._dire(nom, "plans", affiche, "même verdict")
             else:
@@ -581,11 +612,13 @@ class _Releve:
 
     def _verdict_du_plan(self, scripts: Path, chemin: str, prefixe: str, travail: Path, en_plus):
         """(code, lignes) de `plan.py --sans-lieux` sur un plan, sans le résumé ni la ligne
-        `refus`, chaque ligne sans son préfixe ; (`None`, []) s'il ne se lance pas."""
+        `refus`, chaque ligne sans son préfixe ; `None` s'il ne se lance pas, plante ou sort en
+        erreur d'usage (`_resultat`)."""
         lance = self._lancer(scripts / "plan.py", [chemin, "--sans-lieux", *en_plus], travail)
-        if lance is None:
-            return None, []
-        code, lignes = lance
+        resultat = _resultat(lance, REFUS_DU_PLAN)
+        if resultat is None:
+            return None
+        code, lignes = resultat
         gardees = [
             ligne.removeprefix(prefixe)
             for ligne in lignes
@@ -675,15 +708,17 @@ class _Releve:
             numero = _numero(pr)
             if numero is None:
                 raise _NonReleve("textes", "réponse illisible")
-            verdicts = None
             if numero in fermetures:
-                verdicts = self._verdicts_du_texte(
+                echecs, verdicts = self._verdicts_du_texte(
                     pr, numero, fermetures[numero], ancienne, tete, travail
                 )
+                raison = f"texte_pr.py en échec : {', '.join(echecs)}"
+            else:
+                verdicts, raison = None, "absente de la réponse GraphQL"
             if verdicts is None:
                 absentes += 1
                 self.incomplet = True
-                self._dire(nom, "textes", f"PR {numero}", "non relevés")
+                self._dire(nom, "textes", f"PR {numero}", f"non relevés ({raison})")
                 continue
             lues += 1
             avant, apres = verdicts
@@ -698,7 +733,9 @@ class _Releve:
         )
 
     def _verdicts_du_texte(self, pr: dict, numero: int, references, ancienne, tete, travail):
-        """Les verdicts du `texte_pr.py` des deux versions sur une PR, ou `None`."""
+        """Les verdicts du `texte_pr.py` des deux versions sur une PR : (côtés en échec, puis
+        les deux verdicts, ou `None` si l'un des deux ne se lance pas, plante ou sort en erreur
+        d'usage, `_resultat`)."""
         fichier = travail / f"fermetures-{numero}.json"
         fichier.write_text(
             json.dumps(
@@ -713,17 +750,20 @@ class _Releve:
             TETE=str((pr.get("head") or {}).get("sha") or ""),
         )
         verdicts = []
-        for scripts in (ancienne, tete):
+        echecs = []
+        for cote, scripts in (("version du projet", ancienne), ("tête", tete)):
             lance = self._lancer(
                 scripts / "texte_pr.py", ["--fermetures", str(fichier)], travail, env
             )
-            if lance is None:
-                return None
-            code, lignes = lance
-            verdicts.append(
-                (code, [ligne for ligne in lignes if ligne != "texte de la PR : refus"])
-            )
-        return verdicts[0], verdicts[1]
+            resultat = _resultat(lance, REFUS_DU_TEXTE)
+            if resultat is None:
+                echecs.append(cote)
+                continue
+            code, lignes = resultat
+            verdicts.append((code, [ligne for ligne in lignes if ligne != REFUS_DU_TEXTE]))
+        if echecs:
+            return echecs, None
+        return [], (verdicts[0], verdicts[1])
 
     def _regle(self, nom: str, depot_api: str, branche: str, prive: bool) -> None:
         regles = self._api("règle", nom, f"{depot_api}/rules/branches/{branche}")
@@ -788,6 +828,43 @@ class _Releve:
 
 class _Erreur(_NonReleve):
     """Une erreur de `gh api` : (rubrique, statut)."""
+
+
+class _GhAbsent(_NonReleve):
+    """`gh` trouvé, mais qui ne se lance pas : (rubrique, raison)."""
+
+
+def _resultat(lance, refus: str) -> tuple[int, list[str]] | None:
+    """Le verdict d'un script du modèle, (code, lignes), ou `None` : un script qui ne s'est pas
+    lancé, qui a planté ou qui est sorti en erreur d'usage. Un vrai refus rend 1 et finit par la
+    ligne de refus du script (`refus`) ; un code 1 sans elle est un plantage, une exception non
+    rattrapée ; tout autre code qu'un 0 ou un 1 n'est pas un verdict."""
+    if lance is None:
+        return None
+    code, lignes = lance
+    if code == 0 or (code == 1 and lignes and lignes[-1] == refus):
+        return lance
+    return None
+
+
+def _contextes_geres(clone: Path) -> set[str] | None:
+    """Les contrôles requis du fichier géré `ruleset-main.json` de la tête ; `None` s'il est
+    absent, illisible, d'une autre forme, ou s'il n'en nomme aucun."""
+    # absent de la tête, `git show` n'écrit rien : un JSON vide, illisible
+    r = _git(clone, "show", f"HEAD:{REGLE}")
+    try:
+        regle = json.loads(r.stdout.decode("utf-8"))
+        contextes = {
+            c["context"]
+            for regles in regle["rules"]
+            if regles.get("type") == "required_status_checks"
+            for c in regles["parameters"]["required_status_checks"]
+        }
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return None
+    if not contextes or not all(isinstance(c, str) and c for c in contextes):
+        return None
+    return contextes
 
 
 def _statut(sortie: bytes, erreur: bytes) -> str:
@@ -915,8 +992,22 @@ def main(argv: list[str] | None = None) -> int:
         or _git(clone, "rev-parse", "--verify", "--quiet", f"{args.depuis}^{{commit}}").returncode
     ):
         return _usage("--depuis : étiquette absente du clone")
-    with tempfile.TemporaryDirectory(prefix="releve-", ignore_cleanup_errors=True) as tmp:
-        return _Releve(gh, clone, Path(tmp), args.compte, args.prs, args.depuis).lancer()
+    geres = _contextes_geres(clone)
+    if geres is None:
+        return _usage(GERES_ILLISIBLES)
+    tmp = tempfile.mkdtemp(prefix="releve-")
+    code = EXIT_A_LIRE
+    retire = False
+    try:
+        code = _Releve(gh, clone, Path(tmp), args.compte, args.prs, args.depuis, geres).lancer()
+    finally:
+        # il porte des plans de dépôts privés : un échec du retrait se dit, sans le chemin
+        try:
+            shutil.rmtree(tmp)
+            retire = True
+        except OSError:
+            print(PREFIXE + TEMPORAIRE_NON_RETIRE, flush=True)
+    return code if retire else max(code, EXIT_A_LIRE)
 
 
 if __name__ == "__main__":
