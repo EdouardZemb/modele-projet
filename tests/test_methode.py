@@ -1750,9 +1750,10 @@ def test_methode_dit_la_cloture_d_un_plan():
             "`**Plan maître** :`), une espace ou aucune avant les deux-points."
         ),
         (
-            "Le chemin est un code en ligne, sous `.claude/plans/`, fini par `.md` ; un chemin "
-            "absolu, `..`, une barre oblique inverse ou un deux-points refusent avant toute "
-            "lecture, comme pour un mécanisme."
+            "Le chemin est un code en ligne, seul après les deux-points : un texte après lui, même "
+            "un point final, donne « ligne « Plan maître : » sans chemin ». Il est sous "
+            "`.claude/plans/`, fini par `.md` ; un chemin absolu, `..`, une barre oblique inverse "
+            "ou un deux-points refusent avant toute lecture, comme pour un mécanisme."
         ),
         (
             "Lieux ouverts, le fichier existe sous la racine et c'est un plan maître, qui a des "

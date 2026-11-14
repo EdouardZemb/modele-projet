@@ -147,11 +147,13 @@ geste que la clôture ne nomme pas ; elle ne voit pas un geste nommé, mais fait
   `` Plan maître : `.claude/plans/<fichier>.md` ``. `Plan maître` s'écrit sans égard à la casse,
   le gras admis autour du nom, deux-points compris ou non (`**Plan maître :**`,
   `**Plan maître** :`), une espace ou aucune avant les deux-points. Le chemin est un code en ligne,
-  sous `.claude/plans/`, fini par `.md` ; un chemin absolu, `..`, une barre oblique inverse ou un
-  deux-points refusent avant toute lecture, comme pour un mécanisme. Lieux ouverts, le fichier
-  existe sous la racine et c'est un plan maître, qui a des tranches et aucune tâche ; sinon,
-  « plan maître absent : <chemin> », ou « <chemin> n'est pas un plan maître ». Par `--sans-lieux`,
-  la forme, le double et la ligne dans un plan maître se vérifient, sans ouvrir de fichier.
+  seul après les deux-points : un texte après lui, même un point final, donne « ligne « Plan
+  maître : » sans chemin ». Il est sous `.claude/plans/`, fini par `.md` ; un chemin absolu, `..`,
+  une barre oblique inverse ou un deux-points refusent avant toute lecture, comme pour un
+  mécanisme. Lieux ouverts, le fichier existe sous la racine et c'est un plan maître, qui a des
+  tranches et aucune tâche ; sinon, « plan maître absent : <chemin> », ou « <chemin> n'est pas un
+  plan maître ». Par `--sans-lieux`, la forme, le double et la ligne dans un plan maître se
+  vérifient, sans ouvrir de fichier.
 - **Le plan hors lot** (un plan court, une hypothèse, un correctif) porte de même une ligne
   `Hors lot : <raison>`, la raison non vide.
 - Deux lignes de la même sorte refusent, un plan qui porte les deux aussi, et un plan maître qui en

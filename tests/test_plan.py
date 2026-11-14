@@ -1282,8 +1282,9 @@ def plan_de_tranche(entete, **kw):
 
 def test_plan_de_tranche(racine, monkeypatch):
     """La ligne `Plan maître :` dispense un plan de tranche d'unité de clôture et de gestes. Sa
-    forme se vérifie sans ouvrir de fichier ; lieux ouverts, sa cible est un plan maître sous la racine.
-    Elle ne se lit qu'avant la première unité, hors des blocs de code et des commentaires."""
+    forme se vérifie sans ouvrir de fichier ; lieux ouverts, sa cible est un plan maître sous la
+    racine. Elle ne se lit qu'avant la première unité, hors des blocs de code et des
+    commentaires."""
     plans = racine / ".claude/plans"
     plans.mkdir(parents=True)
     (plans / "m.md").write_text(plan_maitre(), encoding="utf-8")
@@ -1476,6 +1477,7 @@ def test_gestes_de_la_methode():
     noms = [element.split(" : ", 1)[0].replace("`", "") for element in liste.split("\n- ")]
     assert noms == list(p.GESTES), noms
     assert p.AUCUNE_CLOTURE in " ".join(texte.split())
+    assert f"« {p.MAITRE_SANS_CHEMIN} »" in " ".join(texte.split())
 
 
 def test_replier():
@@ -1490,41 +1492,212 @@ def test_replier():
 
 
 def test_docstring_dit_la_cloture():
-    """Le module dit la clôture, ses gestes, son texte, `--cloture`, et les deux lignes
-    déclarées ; `verifier` dit ce qu'elle reçoit dans `cloture`."""
+    """Le module dit la clôture, ses gestes, son texte, `--cloture`, et les deux lignes déclarées,
+    chaque phrase neuve par un fragment ; `verifier`, `_texte_de_cloture`,
+    `_verifier_declarations` et `_dit_cloture` disent ce qu'ils font."""
     doc = " ".join(p.__doc__.split())
     for fragment in (
-        "La clôture. Un plan neuf, ou qui porte « Effets cherchés », a une unité de clôture",
+        # la clôture
         (
-            "le plan supprimé, `CLAUDE.md` ou un ADR, le README, les leçons du lot, la fermeture "
-            "de l'issue, la tête relue (`GESTES`)"
+            "La clôture. Un plan neuf, ou qui porte « Effets cherchés », a une unité de clôture, "
+            "celle que lit « Revues » : un titre qui dit « clôture » avant la vraie clôture en "
+            "devient l'unité."
         ),
-        "et chaque mot de `--cloture`, à répéter",
+        (
+            "Elle nomme six gestes, le plan supprimé, `CLAUDE.md` ou un ADR, le README, les leçons "
+            "du lot, la fermeture de l'issue, la tête relue (`GESTES`), et chaque mot de "
+            "`--cloture`, à répéter."
+        ),
         (
             "Son texte va de son titre à la ligne qui précède le titre suivant de niveau 1 à 3, lu "
-            "comme dans `sections()`, ou à la fin du plan"
+            "comme dans `sections()`, ou à la fin du plan."
         ),
-        "les commentaires retirés, les blocs de code gardés, sauf un bloc pris dans un commentaire",
-        "en NFC, apostrophes droites, espaces ordinaires, sans égard à la casse, code compris",
+        (
+            "Il se prend sur les lignes d'origine, les commentaires retirés, les blocs de code "
+            "gardés, sauf un bloc pris dans un commentaire retiré, puis se lit en NFC, apostrophes "
+            "droites, espaces ordinaires, sans égard à la casse, code compris."
+        ),
         (
             "Un mot se cherche sans lettre ni chiffre juste avant ni juste après lui ; `supprim` "
-            "et `suppress` n'ont cette limite qu'avant eux"
+            "et `suppress` n'ont cette limite qu'avant eux ; entre deux mots, tout blanc compte, "
+            "retour à la ligne compris."
         ),
         "Un `<!--` jamais fermé dans l'unité refuse, et cache la suite.",
-        "dans l'ordre de `GESTES` puis des options, un mot de `--cloture` entre guillemets",
-        "Sans unité de clôture, un tel plan refuse (`AUCUNE_CLOTURE`)",
-        "La porte voit un geste que la clôture ne nomme pas, jamais un geste nommé mais fait à",
-        "Les lignes déclarées. Avant la première unité, hors des blocs de code et des commentaires",
-        "`` Plan maître : `.claude/plans/<fichier>.md` `` dit un plan de tranche",
-        "`Hors lot : <raison>` un plan hors lot",
-        "puis hors de `.claude/plans/` ou sans `.md`",
-        "lieux ouverts, il nomme un plan maître sous la racine, lu comme un plan",
+        (
+            "Le refus nomme l'unité et les gestes qui manquent, dans l'ordre de `GESTES` puis des "
+            "options, un mot de `--cloture` entre guillemets."
+        ),
+        (
+            "Sans unité de clôture, un tel plan refuse (`AUCUNE_CLOTURE`), sauf un plan de tranche "
+            "ou un plan hors lot, qui n'est tenu ni à l'unité ni aux gestes."
+        ),
+        (
+            "La porte voit un geste que la clôture ne nomme pas, jamais un geste nommé mais fait à "
+            "moitié."
+        ),
+        # les lignes déclarées
+        (
+            "Les lignes déclarées. Avant la première unité, hors des blocs de code et des "
+            "commentaires, jusqu'à trois espaces en tête, le gras admis autour du nom, deux-points "
+            "compris ou non : `` Plan maître : `.claude/plans/<fichier>.md` `` dit un plan de "
+            "tranche, `Hors lot : <raison>` un plan hors lot."
+        ),
+        (
+            "Le chemin, un code en ligne seul après les deux-points, refuse avant toute lecture "
+            "pour les raisons d'un lieu, puis hors de `.claude/plans/` ou sans `.md` ; lieux "
+            "ouverts, il nomme un plan maître sous la racine, lu comme un plan."
+        ),
         (
             "Une raison vide, deux lignes de la même sorte, les deux sortes ensemble, ou l'une "
             "d'elles dans un plan maître refusent."
         ),
-        "un plan neuf, tenu aussi à sa clôture. --cloture MOT ajoute un mot",
+        "Sans `--neuf` ni « Effets cherchés », ni la clôture ni ces lignes ne se vérifient.",
+        # la sortie et l'usage
+        (
+            "les titres des sections, les noms des gestes, les mots de `--cloture` et les formes "
+            "fixes des refus"
+        ),
+        (
+            "--neuf exige « Effets cherchés » : un plan neuf, tenu aussi à sa clôture. --cloture "
+            "MOT ajoute un mot que la clôture doit nommer."
+        ),
     ):
         assert fragment in doc, fragment
-    assert "sans effet encore" not in " ".join(p.verifier.__doc__.split())
-    assert "des mots déjà repliés par `_replier`" in " ".join(p.verifier.__doc__.split())
+    verifier_doc = " ".join(p.verifier.__doc__.split())
+    for fragment in (
+        "Les sections d'un plan, puis sa clôture : (lignes, refus).",
+        (
+            "Avec `lieux=False`, la forme de chaque lieu se vérifie par `lieu()`, sans ouvrir de "
+            "fichier, et la cible d'une ligne `Plan maître :` n'est pas lue."
+        ),
+        (
+            "Avec `neuf`, ou la section présente, l'unité de clôture nomme les gestes et chaque "
+            "mot de `cloture`, sauf dans un plan de tranche ou un plan hors lot."
+        ),
+        (
+            "`cloture` : des mots déjà repliés par `_replier`, sans blanc autour, comme `main` les "
+            "passe."
+        ),
+    ):
+        assert fragment in verifier_doc, fragment
+    assert "sans effet encore" not in verifier_doc
+    for fonction, fragments in (
+        (
+            p._texte_de_cloture,
+            (
+                (
+                    "Le texte de l'unité de clôture, replié, et le rang dans le plan, la première "
+                    "ligne au rang 1, d'un `<!--` jamais fermé qu'elle porte, ou `None` ; `None` "
+                    "sans unité de clôture."
+                ),
+                (
+                    "Un `<!--` dans un bloc de code ne retire rien ; un bloc pris dans un "
+                    "commentaire retiré ne revient pas."
+                ),
+                "Un `<!--` jamais fermé, hors du code, cache la suite : le texte s'arrête à lui.",
+            ),
+        ),
+        (
+            p._verifier_declarations,
+            (
+                (
+                    "Un plan qui en porte une est dispensé d'unité de clôture et de gestes, sauf "
+                    "un plan maître, qui ne peut en porter aucune."
+                ),
+            ),
+        ),
+        (
+            p._declarations,
+            ("le contenu de leur code en ligne, s'il est seul après les deux-points, ou `\"\"`",),
+        ),
+        (
+            p._dit_cloture,
+            (
+                (
+                    "Le titre replié d'une unité dit la clôture : « clôture » ou « closure ». "
+                    "`verifier` et `_texte_de_cloture` reconnaissent l'unité de clôture par lui "
+                    "seul."
+                ),
+            ),
+        ),
+    ):
+        texte = " ".join(fonction.__doc__.split())
+        for fragment in fragments:
+            assert fragment in texte, (fonction.__name__, fragment)
+
+
+def test_cloture_un_seul_predicat(racine, monkeypatch):
+    """`verifier` et `_texte_de_cloture` reconnaissent l'unité de clôture par le même prédicat,
+    `_dit_cloture` : changé, il change les deux, et le refus nomme l'unité dont le texte est lu."""
+    assert p._dit_cloture("### tâche 2 : la clôture")
+    assert p._dit_cloture("### task 2: closure")
+    assert not p._dit_cloture("### tâche 2 : la porte")
+    taches = (
+        "### Tâche 1 : x",
+        "### Tâche 2 : la porte",
+        "### Tâche 3 : la clôture\n\n" + CLOTURE_CONFORME,
+    )
+    lignes, refus = verifier(plan_neuf(taches=taches), racine, neuf=True)
+    assert not refus, lignes
+    monkeypatch.setattr(p, "_dit_cloture", lambda titre: "porte" in titre)
+    lignes, refus = verifier(plan_neuf(taches=taches), racine, neuf=True)
+    assert refus
+    assert non_nommes(TOUS_LES_GESTES) in lignes, lignes
+
+
+def test_texte_de_cloture_rang_du_commentaire_ouvert():
+    """`_texte_de_cloture` rend le rang dans le plan, la première ligne au rang 1, du `<!--` jamais
+    fermé de l'unité, un bloc de code avant lui compris dans le compte ; `None` sans lui ; et `None`
+    au lieu du couple sans unité de clôture."""
+    doc = p._documentation()
+    bloc = "```sh\nune commande\n\nune autre\n```"
+    for suite in ("\n\n<!-- une note", " texte <!-- une note", f"\n\n{bloc}\n\n<!-- une note"):
+        texte = plan_neuf(taches=cloture(CLOTURE_CONFORME + suite))
+        lu = p._texte_de_cloture(texte, doc)
+        assert lu is not None, suite
+        rang = next(i for i, ligne in enumerate(texte.split("\n"), 1) if "<!-- une note" in ligne)
+        assert lu[1] == rang, (suite, lu[1], rang)
+    for texte in (plan_neuf(), plan_neuf(taches=cloture(CLOTURE_CONFORME + f"\n\n{bloc}"))):
+        lu = p._texte_de_cloture(texte, doc)
+        assert lu is not None and lu[1] is None, lu
+    assert p._texte_de_cloture(plan(taches=("### Tâche 1 : x",)), doc) is None
+
+
+def test_cloture_lignes_vides_hors_des_blocs(racine):
+    """Seules les lignes d'un bloc de code clôturé y tiennent la place d'un jeton : une ligne vide
+    hors d'un bloc reste vide, et arrête un code en ligne. Un accent grave seul, puis, après une
+    ligne vide, un `<!--` jamais fermé qui ouvre un bloc de commentaire : il refuse, et n'est pas
+    pris dans un code en ligne qui franchirait la ligne vide."""
+    texte = CLOTURE_CONFORME + "\n\nUn accent ` seul.\n\n<!-- une note\n\nLa suite ` ici."
+    lignes, refus = verifier(plan_neuf(taches=cloture(texte)), racine, neuf=True)
+    assert refus
+    assert f"clôture (Tâche 2) : {p.COMMENTAIRE_OUVERT}" in lignes, lignes
+
+
+def test_declarations_formes(racine):
+    """Les formes d'une ligne déclarée : trois espaces en tête, pas quatre ; « maître » écrit avec
+    un « î » décomposé, une espace insécable avant les deux-points, lues comme la forme simple ; le
+    chemin seul après les deux-points, un point final ou un texte après lui donnant « sans
+    chemin »."""
+    plans = racine / ".claude/plans"
+    plans.mkdir(parents=True)
+    (plans / "m.md").write_text(plan_maitre(), encoding="utf-8")
+    chemin = "`.claude/plans/m.md`"
+    for entete in (
+        f"   Plan maître : {chemin}",
+        f"Plan mai\u0302tre : {chemin}",
+        f"Plan maître\u00a0: {chemin}",
+        f"**Plan maître\u202f:** {chemin}",
+        "Hors lot\u00a0: une hypothèse",
+        "   Hors lot : une hypothèse",
+    ):
+        lignes, refus = verifier(plan_de_tranche(entete), racine, neuf=True)
+        assert not refus, (entete, lignes)
+    for entete in (f"    Plan maître : {chemin}", "    Hors lot : une hypothèse"):
+        lignes, refus = verifier(plan_de_tranche(entete), racine, neuf=True)
+        assert refus, (entete, lignes)
+        assert p.AUCUNE_CLOTURE in lignes, (entete, lignes)
+    for entete in (f"Plan maître : {chemin}.", f"Plan maître : {chemin} (la tranche 1)"):
+        lignes, refus = verifier(plan_de_tranche(entete), racine, neuf=True)
+        assert refus, (entete, lignes)
+        assert "ligne « Plan maître : » sans chemin" in lignes, (entete, lignes)

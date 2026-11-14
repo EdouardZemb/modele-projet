@@ -81,11 +81,11 @@ mais fait à moitié.
 Les lignes déclarées. Avant la première unité, hors des blocs de code et des commentaires, jusqu'à
 trois espaces en tête, le gras admis autour du nom, deux-points compris ou non :
 `` Plan maître : `.claude/plans/<fichier>.md` `` dit un plan de tranche, `Hors lot : <raison>` un
-plan hors lot. Le chemin, un code en ligne, refuse avant toute lecture pour les raisons d'un lieu,
-puis hors de `.claude/plans/` ou sans `.md` ; lieux ouverts, il nomme un plan maître sous la
-racine, lu comme un plan. Une raison vide, deux lignes de la même sorte, les deux sortes ensemble,
-ou l'une d'elles dans un plan maître refusent. Sans `--neuf` ni « Effets cherchés », ni la clôture
-ni ces lignes ne se vérifient.
+plan hors lot. Le chemin, un code en ligne seul après les deux-points, refuse avant toute lecture
+pour les raisons d'un lieu, puis hors de `.claude/plans/` ou sans `.md` ; lieux ouverts, il nomme
+un plan maître sous la racine, lu comme un plan. Une raison vide, deux lignes de la même sorte, les
+deux sortes ensemble, ou l'une d'elles dans un plan maître refusent. Sans `--neuf` ni « Effets
+cherchés », ni la clôture ni ces lignes ne se vérifient.
 
 Les fichiers. Un plan qui commence par un BOM UTF-16 se lit en UTF-16, ce qu'écrivent `>` et
 `Out-File` de PowerShell 5.1 ; sinon, le plan et les fichiers cités se lisent en UTF-8, BOM retiré,
@@ -469,6 +469,12 @@ def _titres_d_unites(texte: str, doc) -> list[tuple[int, str, int, str]]:
     return titres
 
 
+def _dit_cloture(titre: str) -> bool:
+    """Le titre replié d'une unité dit la clôture : « clôture » ou « closure ». `verifier` et
+    `_texte_de_cloture` reconnaissent l'unité de clôture par lui seul."""
+    return any(mot in titre for mot in _CLOTURE)
+
+
 def _texte_de_cloture(texte: str, doc) -> tuple[str, int | None] | None:
     """Le texte de l'unité de clôture, replié, et le rang dans le plan, la première ligne au rang 1,
     d'un `<!--` jamais fermé qu'elle porte, ou `None` ; `None` sans unité de clôture.
@@ -482,8 +488,7 @@ def _texte_de_cloture(texte: str, doc) -> tuple[str, int | None] | None:
     texte = doc._en_lf(texte)
     lignes = texte.split("\n")
     debut = next(
-        (i for i, _, _, titre in _titres_d_unites(texte, doc) if any(m in titre for m in _CLOTURE)),
-        None,
+        (i for i, _, _, titre in _titres_d_unites(texte, doc) if _dit_cloture(titre)), None
     )
     if debut is None:
         return None
@@ -525,9 +530,9 @@ def _texte_de_cloture(texte: str, doc) -> tuple[str, int | None] | None:
 
 
 def _declarations(texte: str, doc) -> tuple[list[str], list[str]]:
-    """Les valeurs des lignes `Plan maître :`, le contenu de leur code en ligne ou `""` sans lui,
-    et `Hors lot :`, leur raison, vide ou non. Elles se lisent avant la première unité, hors des
-    blocs de code et des commentaires, jusqu'à trois espaces en tête."""
+    """Les valeurs des lignes `Plan maître :`, le contenu de leur code en ligne, s'il est seul
+    après les deux-points, ou `""`, et `Hors lot :`, leur raison, vide ou non. Elles se lisent avant
+    la première unité, hors des blocs de code et des commentaires, jusqu'à trois espaces en tête."""
     titres = _titres_d_unites(texte, doc)
     lignes = doc.sans_bloc_ni_commentaire("\n".join(_visibles(texte, doc))).split("\n")
     maitres: list[str] = []
@@ -600,11 +605,12 @@ def _verifier_cloture(
 ) -> list[str]:
     """Les refus de l'unité de clôture : son absence, un `<!--` jamais fermé, puis les gestes et les
     mots de `cloture` qu'elle ne nomme pas, dans l'ordre de `GESTES` puis des mots."""
-    lu = _texte_de_cloture(texte, doc)
-    if rang_cloture is None or lu is None:
+    if rang_cloture is None:
         return [AUCUNE_CLOTURE]
+    # `rang_cloture` et `_texte_de_cloture` trouvent la même unité, par `_titres_d_unites` et
+    # `_dit_cloture` : un désaccord lèverait une erreur, au lieu de se taire en `AUCUNE_CLOTURE`
+    texte_de_cloture, ouvert = _texte_de_cloture(texte, doc)
     sorte, numero, _ = unites[rang_cloture]
-    texte_de_cloture, ouvert = lu
     refus = []
     if ouvert is not None:
         refus.append(f"clôture ({sorte} {numero}) : {COMMENTAIRE_OUVERT}")
@@ -645,10 +651,7 @@ def verifier(
         citees = (TACHE, TRANCHE)
     else:
         citees = (TRANCHE,) if sortes == {TRANCHE} else (TACHE,)
-    rang_cloture = next(
-        (i for i, (_, _, titre) in enumerate(unites) if any(mot in titre for mot in _CLOTURE)),
-        None,
-    )
+    rang_cloture = next((i for i, (_, _, titre) in enumerate(unites) if _dit_cloture(titre)), None)
 
     def revue(ligne: str) -> list[str]:
         cites = []
