@@ -364,6 +364,12 @@ nombre_de_lancements() {
   [[ "$limite" < "$premier" ]]
   [[ "$second" < "$maintenant" ]]
   [ "${premier%%T*}" = "$(jour_de_l_horloge)" ]
+  # la veille, et non le jour même
+  [[ "$(jour_de_l_horloge)" < "${maintenant%%T*}" ]]
+  # le jour se relève une fois par test : un test qui passe minuit garde le sien
+  date -u -d '2 days ago' +%Y%m%d >"$BATS_TEST_TMPDIR/horloge-jour"
+  horloge_qui_avance
+  [ "$(date -u +%Y%m%dT%H%M%SZ)" = "$(date -u -d '2 days ago' +%Y%m%d)T000003Z" ]
 }
 
 # Le retour arrière manuel prend son instantané comme un déploiement : son .couple nomme le couple
