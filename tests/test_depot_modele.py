@@ -50,14 +50,16 @@ def test_ruleset_du_depot_modele():
     assert contextes <= produits
 
 
-def test_le_job_des_tests_a_50_minutes():
+def test_le_job_des_tests_a_60_minutes():
     """LE-29, puis LE-40 : sous Windows, la suite a dépassé 15, puis 25 min, sans test en échec.
     Puis, sur les douze exécutions de `main` du 04 au 07/11, jusqu'à 31 min 41 : trois ont passé
     les trois quarts de 40 min. Puis 32 min 39 s sur la PR #118, sous le seuil de 33 min 45 du
-    délai de 45 min, et le job 34 min 36 s sur la PR #123, au-delà : le premier avertissement.
-    Edouard avait décidé le 09/11 qu'il ferait monter le délai à 50 min, seuil 37 min 30."""
+    délai de 45 min, et le job 34 min 36 s sur la PR #123, au-delà : le premier avertissement,
+    qui a fait monter le délai à 50 min, seuil 37 min 30. Puis 45 min 52 s sur la PR #135, qui ne
+    changeait que des textes, quand la suite avait pris 32 min 25 s au push d'avant : la variance
+    du runner. Edouard a décidé le 14/11 de monter le délai à 60 min, seuil 45 min."""
     jobs = yaml.safe_load(CI.read_text(encoding="utf-8"))["jobs"]
-    assert jobs["tests"]["timeout-minutes"] == 50
+    assert jobs["tests"]["timeout-minutes"] == 60
 
 
 def test_le_job_menage_cible_a_2_minutes():

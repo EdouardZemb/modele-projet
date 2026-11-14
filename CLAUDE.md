@@ -417,6 +417,13 @@ la session de `pupitre`. Une session neuve y a relu les trois sections, qu'aucun
 n'avait relues. pupitre#36, fusionnée le même jour, excepte de sa règle sans prénom les fichiers
 gérés par le modèle et le nom du compte.
 
+Correctif du 14/11 : le délai du job `tests` de ce dépôt passe de 50 à 60 min, seuil 45 min.
+Sur #135, qui ne changeait que `CLAUDE.md` et `docs/registre.md`, il a pris 45 min 52 s sous
+Windows, au-delà du seuil de 37 min 30 s et à 4 min de son délai : la suite y a duré 45 min 19 s,
+contre 32 min 25 s au push de la clôture du lot 16, pour les mêmes tests. Le lot 17 ajoute des
+tests ; Edouard a décidé le 14/11 de monter le délai avant sa première tâche, et de porter
+l'avertissement au registre à sa clôture. Rien ne change sous `template/`.
+
 Prochain, au choix d'Edouard :
 - le second temps du travail sur la documentation, un lot « documentation » avec sa spec : l'« État »
   réduit du `CLAUDE.md` semé et le journal des versions du modèle ; dans le README, le refus d'une
@@ -446,7 +453,7 @@ Le cadrage est dans `docs/cadrage.md` ; ce que les lots ont appris, dans `docs/r
 ## Commandes
 
 - `python -m pytest -q` : les tests, environ 6 à 8 minutes sous Ubuntu et 20 à 33 sous Windows,
-  mesurées en CI, sans `tests/test_mecanique.py`, sur la PR #118. `tests/test_mecanique.py` lance
+  mesurées en CI, sans `tests/test_mecanique.py`, sur la PR #118, mais 45 sous Windows sur #135. `tests/test_mecanique.py` lance
   les tests bats d'un projet rendu dans une image Docker : il lui faut Docker avec un serveur Linux,
   et il saute sans lui.
 - `ruff check .` : le style.
