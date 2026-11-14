@@ -1187,10 +1187,11 @@ def test_releve_dossier_temporaire_non_retire(banc, faux, tmp_path, monkeypatch)
 
 
 def test_releve_aucun_projet(banc, faux, tmp_path, clair):
-    """Aucun projet né du modèle relevé : rien n'a été lu, et le relevé rend 1, avec une ligne fixe,
-    avant la ligne des limites. C'est le cas d'un `--compte` qui n'est pas celui de `gh` : la liste
+    """Aucun projet né du modèle relevé : une ligne fixe le dit, avant la ligne des limites, comme
+    une information, et le relevé rend 0, comme le § 5.4 de la spec (« 0, tous les projets lus et
+    rien à lire », vrai à vide). C'est le cas d'un `--compte` qui n'est pas celui de `gh` : la liste
     des dépôts n'a que ceux d'un autre propriétaire, et aucun n'est examiné (revue finale du lot
-    17)."""
+    17, puis la relecture de ses corrections)."""
     ailleurs = {**depot("autre"), "owner": {"login": "un-autre-compte"}}
     for cas, depots, examines in (
         ("compte-faux", [ailleurs], 0),
@@ -1207,7 +1208,7 @@ def test_releve_aucun_projet(banc, faux, tmp_path, clair):
             LIMITES,
             f"relevé : {examines} dépôts examinés, 0 projets, 0 lus, 0 non relevés, 0 à lire",
         ], cas
-        assert code == releve.EXIT_A_LIRE, cas
+        assert code == releve.EXIT_RIEN, cas
         assert len(appels) == 1 + examines, cas
     # un projet relevé : la ligne ne paraît pas, et le code reste à 0
     assert releve.AUCUN_PROJET == "aucun projet né du modèle relevé"

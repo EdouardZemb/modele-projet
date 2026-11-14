@@ -868,9 +868,15 @@ def test_claude_md_dit_la_commande_du_releve():
             "ils ne rendent pas le code 1"
         ),
         "seuls les dossiers exclus des formateurs sont comparés",
-        # aucun projet relevé rend 1 ; `gh` jamais connecté sort par 4, et rend 64 (revue finale
-        # du lot 17)
-        "aucun projet relevé, comme sous un `--compte` qui n'est pas celui de `gh`), 0 sinon",
+        # aucun projet relevé est une information, et rend 0 (spec du lot 17, § 5.4) ; `gh` jamais
+        # connecté sort par 4, et rend 64 (revue finale du lot 17, puis la relecture de ses
+        # corrections)
+        "le dossier temporaire non retiré), 0 sinon",
+        (
+            "ils ne rendent pas le code 1, comme les contrôles propres d'une règle, et comme la "
+            "ligne « aucun projet né du modèle relevé », d'un relevé qui n'en trouve aucun, par "
+            "exemple sous un `--compte` qui n'est pas celui de `gh` : il rend alors 0."
+        ),
         "`gh` absent ou sans accès (un 401, ou `gh` qui sort par 4, jamais connecté)",
         # `--depuis` ouvre l'intervalle, sans comparer ce que le modèle n'a pas changé depuis
         # (revue finale du lot 17)
@@ -885,6 +891,8 @@ def test_claude_md_dit_la_commande_du_releve():
     ):
         assert texte in commandes, texte
     assert "L'inventaire complet des fichiers gérés demande" not in commandes
+    # aucun projet relevé ne compte plus parmi ce qui n'est pas relevé
+    assert "aucun projet relevé, comme sous" not in commandes
     assert (RACINE / "poste/releve.py").is_file()
 
 

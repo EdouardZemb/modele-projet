@@ -535,18 +535,18 @@ Le cadrage est dans `docs/cadrage.md` ; ce que les lots ont appris, dans `docs/r
   (un verdict qui change, une PR ouverte qui ajoute un plan, un contrôle géré absent d'une règle,
   un fichier géré modifié dans un projet), ou que quelque chose n'est pas relevé (une erreur de
   l'API, une version absente du clone : `git fetch --tags`, un script du modèle qui plante, le
-  dossier temporaire non retiré, aucun projet relevé, comme sous un `--compte` qui n'est pas celui
-  de `gh`), 0 sinon. Il rend 64 pour une erreur d'usage : `gh` absent ou sans accès (un 401, ou
-  `gh` qui sort par 4, jamais connecté), un dossier qui n'est pas un clone du modèle qu'il sait
-  lire. Les plans en cours qui
-  « refuseraient s'ils étaient neufs » sont une information : ils ne rendent pas le code 1, comme
-  les contrôles propres d'une règle. Parmi les fichiers gérés, seuls les dossiers exclus des
-  formateurs sont comparés, pas le gabarit de PR ni les autres fichiers gérés hors d'eux. Par
-  défaut, il compare ceux que le modèle change entre la version de chaque projet et la tête, et un
-  projet à la version de la tête n'en montre aucun. `--depuis <ancienne étiquette>` ouvre cet
-  intervalle pour tous les projets, chacun comparé au modèle à sa version : il compare les fichiers
-  gérés que le modèle a changés depuis cette étiquette, et un fichier géré que le modèle n'a pas
-  changé depuis elle n'est pas comparé, quelle que soit l'étiquette. Ce n'est donc pas un
+  dossier temporaire non retiré), 0 sinon. Il rend 64 pour une erreur d'usage : `gh` absent ou sans
+  accès (un 401, ou `gh` qui sort par 4, jamais connecté), un dossier qui n'est pas un clone du
+  modèle qu'il sait lire. Les plans en cours qui « refuseraient s'ils étaient neufs » sont une
+  information : ils ne rendent pas le code 1, comme les contrôles propres d'une règle, et comme la
+  ligne « aucun projet né du modèle relevé », d'un relevé qui n'en trouve aucun, par exemple sous un
+  `--compte` qui n'est pas celui de `gh` : il rend alors 0. Parmi les fichiers gérés, seuls les
+  dossiers exclus des formateurs sont comparés, pas le gabarit de PR ni les autres fichiers gérés
+  hors d'eux. Par défaut, il compare ceux que le modèle change entre la version de chaque projet et
+  la tête, et un projet à la version de la tête n'en montre aucun. `--depuis <ancienne étiquette>`
+  ouvre cet intervalle pour tous les projets, chacun comparé au modèle à sa version : il compare les
+  fichiers gérés que le modèle a changés depuis cette étiquette, et un fichier géré que le modèle
+  n'a pas changé depuis elle n'est pas comparé, quelle que soit l'étiquette. Ce n'est donc pas un
   inventaire complet des fichiers gérés. `--prs N`, de 1 à 100, dit combien de PR récentes passent
   par les deux `texte_pr.py` (50 par défaut). `tests/test_releve.py` l'éprouve contre un faux `gh`.
 - `copier copy --vcs-ref <étiquette> gh:EdouardZemb/modele-projet <dossier>` : créer un projet.

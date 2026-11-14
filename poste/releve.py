@@ -66,9 +66,11 @@ Usage : releve.py [--compte COMPTE] [--prs N] [--depuis ÉTIQUETTE] [--clone DOS
         Depuis la racine du clone du modèle, `gh` connecté. --prs : de 1 à 100 (défaut : 50).
         --clone : défaut, le dépôt git du dossier courant. --gh : défaut, `gh`.
 
-Retour : 0 tous les projets lus et rien à lire ; 1 quelque chose à lire, un projet non relevé,
-         aucun projet relevé (un `--compte` qui n'est pas celui de `gh` n'en trouve aucun), une
-         erreur passagère sur la liste des dépôts ou le dossier temporaire non retiré ;
+Retour : 0 tous les projets lus et rien à lire, aucun projet relevé compris : la ligne « aucun
+         projet né du modèle relevé » (un `--compte` qui n'est pas celui de `gh` n'en trouve
+         aucun) est une information, pas une cause du code 1 ; 1 quelque chose à lire, un projet
+         non relevé, une erreur passagère sur la liste des dépôts ou le dossier temporaire non
+         retiré ;
          64 erreur d'usage (`gh` absent, ou sans accès : un 401 sur la liste des dépôts, ou `gh`
          qui y sort par 4, authentification requise, même sans rien écrire ; un dossier qui n'est
          pas un clone du modèle, ou dont la tête ne dit pas ses contrôles gérés ; une option
@@ -481,7 +483,8 @@ class _Releve:
             non_releves += incomplet
             lus += not incomplet
             a_lire += aussi_a_lire
-        # aucun projet : rien n'est lu, et un `--compte` faux ne passe pas pour un relevé propre
+        # aucun projet : une information, que le code ne compte pas (spec du lot 17, § 5.4 : « 0,
+        # tous les projets lus et rien à lire », vrai à vide)
         if not projets:
             self._dire(AUCUN_PROJET)
         self._dire(LIMITES)
@@ -489,7 +492,7 @@ class _Releve:
             f"{len(depots)} dépôts examinés, {projets} projets, {lus} lus, "
             f"{non_releves} non relevés, {a_lire} à lire"
         )
-        return EXIT_A_LIRE if non_releves or a_lire or not projets else EXIT_RIEN
+        return EXIT_A_LIRE if non_releves or a_lire else EXIT_RIEN
 
     def _projet(self, depot: dict) -> tuple[bool, bool] | None:
         """Un dépôt : `None` s'il n'est pas un projet ; sinon (non relevé, à lire)."""
