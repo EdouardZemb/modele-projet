@@ -814,10 +814,11 @@ def test_claude_md_dit_la_commande_des_plans():
     # clone principal, voisin de celui de `serveur` (revue finale du lot 15)
     section = (RACINE / "CLAUDE.md").read_text(encoding="utf-8").split("\n## Commandes\n", 1)[1]
     bloc = _bloc_sh(section, "- `python -B template/scripts/modele/plan.py` :")
-    assert [ligne for ligne in bloc if ligne.strip()] == [
+    commande = (
         "python -B template/scripts/modele/plan.py --racine . --depot serveur=../serveur --neuf "
         '--cloture cadrage --cloture "À relire" --cloture pistes --cloture relevé <plan>'
-    ], bloc
+    )
+    assert [ligne for ligne in bloc if ligne.strip()] == [commande], bloc
     # plus de code en ligne coupé sur deux lignes, qui donnerait deux commandes copié tel quel
     assert "`python -B template/scripts/modele/plan.py --racine" not in commandes
     # les deux conventions des plans du modèle (spec du lot 17, § 2.4 et § 3.3)
@@ -869,9 +870,7 @@ def test_claude_md_dit_la_commande_du_releve():
         "seuls les dossiers exclus des formateurs sont comparés",
         # aucun projet relevé rend 1 ; `gh` jamais connecté sort par 4, et rend 64 (revue finale
         # du lot 17)
-        (
-            "aucun projet relevé, comme sous un `--compte` qui n'est pas celui de `gh`), 0 sinon"
-        ),
+        "aucun projet relevé, comme sous un `--compte` qui n'est pas celui de `gh`), 0 sinon",
         "`gh` absent ou sans accès (un 401, ou `gh` qui sort par 4, jamais connecté)",
         # `--depuis` ouvre l'intervalle, sans comparer ce que le modèle n'a pas changé depuis
         # (revue finale du lot 17)
