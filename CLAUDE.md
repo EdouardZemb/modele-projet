@@ -417,12 +417,12 @@ la session de `pupitre`. Une session neuve y a relu les trois sections, qu'aucun
 n'avait relues. pupitre#36, fusionnée le même jour, excepte de sa règle sans prénom les fichiers
 gérés par le modèle et le nom du compte.
 
-Correctif du 14/11 : l'horloge du banc de la cible `serveur` ne vieillit plus (#136). Elle
-datait les instantanés des tests du 15/10/2026, et la purge de 30 jours, qui lit la vraie date, les
-a retirés à partir du 14/11 à 00:00 UTC : le banc était rouge dans `ancrage`, dans `veille-emploi`
-et dans le job `mecanique` de ce dépôt (LE-78). Elle tombe désormais la veille de la vraie date,
-et un test bats la place dans la fenêtre de la purge. Les projets en cible `serveur` le reçoivent
-par leur mise à jour.
+Correctif du 14/11 : l'horloge du banc de la cible `serveur` ne vieillit plus (#136), étiqueté
+`v0.11.1`. Elle datait les instantanés des tests du 15/10/2026, et la purge de 30 jours, qui lit
+la vraie date, les a retirés à partir du 14/11 à 00:00 UTC : le banc était rouge dans `ancrage`,
+dans `veille-emploi` et dans le job `mecanique` de ce dépôt (LE-78). Elle tombe désormais la veille
+de la vraie date, et un test bats la place dans la fenêtre de la purge. Les projets en cible
+`serveur` le reçoivent par leur mise à jour.
 
 Second correctif du 14/11 : le délai du job `tests` de ce dépôt passe de 50 à 60 min, seuil 45 min.
 Sur #135, qui ne changeait que `CLAUDE.md` et `docs/registre.md`, il a pris 45 min 52 s sous
@@ -431,29 +431,119 @@ contre 32 min 25 s au push de la clôture du lot 16, pour les mêmes tests. Le l
 tests ; Edouard a décidé le 14/11 de monter le délai avant sa première tâche, et de porter
 l'avertissement au registre à sa clôture. Rien ne change sous `template/`.
 
+Lot 17 fait le 14/11/2026 : les effets cherchés et les gestes de clôture (#134), étiqueté
+`v0.12.0`. Il écrit les deux portes dues du registre : celle de « décision appliquée sans en
+chercher les effets » (LE-63, LE-70, LE-71, LE-73), par une section des plans et le relevé des
+projets, et celle d'« étape de clôture oubliée par le plan » (LE-76), par les gestes de clôture et
+la commande des plans du modèle (PR #139 à #143). Aucune de ses PR ne déclare d'écart à la spec ;
+les questions 7 à 9, nées de la revue du plan, et la question 10, posée le 14/11 après #135, ont
+reçu le oui d'Edouard le 14/11.
+- **« Effets cherchés » et `--neuf`** (#139). `plan.py` lit une quatrième section,
+  `## Effets cherchés` : une ligne par décision du plan qui change ce que reçoit un autre lieu,
+  `- <décision> — <où elle arrive> — <comment c'est vérifié>`, ou « Aucun. ». L'option `--neuf`,
+  distincte de `--sans-lieux`, l'exige d'un plan neuf ; sans elle, son absence ne refuse pas, mais
+  la section présente se vérifie, et le résumé compte les effets. L'étape « Les plans » du socle,
+  et sa copie ici, passe `--neuf` à un plan ajouté, renommé compris, à la PR comme au push ; un
+  plan modifié reste vérifié par `--sans-lieux`. `methode.md` dit les quatre sections, les trois
+  sortes de lieux en exemples, et la revue du plan, qui relit chaque effet là où il arrive.
+- **Les gestes de clôture** (#140). Un plan neuf, ou qui porte « Effets cherchés », a une unité de
+  clôture qui nomme six gestes, chacun reconnu à son expression : le plan supprimé, `CLAUDE.md` ou
+  un ADR, le README, les leçons du lot (« leçon » ou « constat »), la fermeture de l'issue, la tête
+  relue ; « retire » et « se ferme » ne valent pas (questions 7 et 8). `--cloture MOT` ajoute un
+  mot. Un plan de tranche s'en dispense par la ligne
+  `` Plan maître : `.claude/plans/<fichier>.md` ``, un plan hors lot par `Hors lot : <raison>` ;
+  sans unité de clôture ni l'une de ces lignes, un plan neuf refuse. Le point 5 du cycle porte au
+  registre les leçons du lot, le gabarit de PR les nomme dans sa liste de contrôle, et
+  `documentation.md` nomme les écarts au rendu de GitHub du texte de l'unité de clôture et des deux
+  lignes.
+- **Le relevé des projets** (#141). `poste/releve.py` lit par `gh api`, en lecture seule, les
+  projets nés du modèle, dépôts privés compris ; il lance sur leurs plans et leurs textes de PR les
+  scripts du modèle de leur version et de la tête, et compare leurs règles et leurs fichiers
+  gérés. Ses deux rôles, l'inventaire et la mesure de l'effet, ses trois moments, avant une spec ou
+  un plan, à la revue finale et à la clôture, et ses codes, 0, 1 et 64, sont dans « Commandes ». Il
+  tourne sur le poste, par la session ; `tests/test_releve.py` l'éprouve contre un faux `gh`.
+- **Les textes de ce dépôt** (#142). `docs/aligner.md` : un plan en cours garde ses trois sections
+  d'avant le lot, jamais « Effets cherchés » après coup, et un plan renommé compte pour neuf.
+  « Commandes » donne la commande des plans du modèle, par `--neuf` et les mots `cadrage`,
+  `À relire`, `pistes` et `relevé`. LE-63, LE-70, LE-71, LE-73 et LE-76 sont closes : `pupitre`,
+  relu par l'API, est en `v0.11.0` et son plan maître passe `plan.py`, et sa règle, relue le 13/11
+  puis par le relevé, requiert toujours ses contrôles propres.
+- **La revue finale** a lu `cbda229..1bbd98b` en cinq lentilles (la spec, les textes, les cas
+  limites, le relevé, les mesures), chaque constat contre-vérifié, puis par une lecture de
+  complétude : 29 constats, 25 sans leurs doublons, aucun critique, 3 importants et 22 mineurs. La
+  PR #143 en corrige 20, dont les trois importants : le point 5 du cycle, qui disait par une
+  relative entre virgules qu'aucun dépôt de données n'a de registre, quand seul un dépôt de la cible
+  `donnees` n'en a pas ; un `gh` jamais connecté, qui sort par 4 et faisait rendre 1 au relevé, au
+  lieu de 64 ; le test de l'entrée fermée de `gh`, que la capture de pytest rendait vain. Quatre
+  vont à la clôture, et un reste tel quel, la case du gabarit de PR, à 107 caractères. La relecture
+  des corrections a ramené au code de la spec, avant l'ouverture de #143, un remède de
+  contre-vérification : un relevé sans aucun projet rend 0, et le dit (§ 5.4). Aucun job coupé ni
+  avertissement de durée dans le lot : sous Windows, le job `tests` a duré au plus 34 min 36 s
+  (#139), sous le seuil de 45 min, et 33 min 17 s sur #143.
+- **Le relevé de la clôture**, sur `3b7ab38`, rend 0 : 75 dépôts examinés, 7 projets, 7 lus,
+  0 non relevé, 0 à lire. Les huit plans en cours gardent à la tête le verdict qu'ils ont à la
+  version de leur projet, sept qui passent et un qui refuse déjà ; tous refuseraient s'ils étaient
+  neufs, celui d'`ancrage` pour la seule section « Effets cherchés », sa clôture nommant déjà les
+  six gestes. Aucun des 249 textes de PR lus ne change de verdict, aucune règle ne perd un contrôle
+  géré, aucun fichier géré n'est modifié dans un projet. Deux PR sont ouvertes, et aucune n'ajoute
+  un plan ; pupitre#38, un brouillon, en modifie un, que le relevé ne lit pas : relu à la main à la
+  revue finale, ce plan passait les `plan.py` de la `v0.11.0` et de la tête.
+- **Le registre** gagne LE-79 à LE-89, AM-5 et AM-6, et LE-69 sa seconde preuve. L'avertissement
+  de #135 est LE-79, 5e constat de « délai mesuré à vide », que sa porte a vu. Les leçons de
+  `pupitre` (LE-80, AM-5), de #138, le correctif de #136 (LE-81, LE-82), de la revue finale (LE-83
+  à LE-87) et des revues de tâche (LE-88, LE-89) rejoignent chacune un motif dont la porte est
+  écrite, et disent ce qui lui échappe : la troisième pièce d'une ligne de plan, ce qu'une clôture
+  livre de plus que ses gestes, une recherche trop étroite, un double installé deux fois, un écart
+  que son auteur ne voit pas, un cas limite inconnu de `gh` et du rendu de GitHub, des tests que
+  leur environnement rendait vains, le remède d'une revue de tâche appliqué sans relire le code,
+  des changements qu'aucun test ne tenait, un échec lu comme un résultat. AM-6, le garde qui
+  refuse la simple lecture de la clé des hooks, ouvre un motif neuf. Aucune porte n'est due. Les
+  cinq lignes closes par le lot nomment leurs PR (#139, #141 et #142 ; #140 et #142 pour LE-76) et
+  la forme de la porte choisie par Edouard le 13/11.
+- **Vers les projets**, la `v0.12.0` part vers les sept projets après l'étiquette, chacun avec son
+  message, `serveur` d'abord : `ancrage` et `veille-emploi` depuis la `v0.11.1`, `pupitre` depuis
+  la `v0.11.0`, les quatre autres depuis la `v0.10.0`, avec ce qu'ont apporté les versions
+  d'entre-deux.
+
+Versions des projets au 14/11/2026, relevées par l'API : `ancrage` et `veille-emploi` sont en
+`v0.11.1` depuis le 14/11 (ancrage#39, veille-emploi#25). La `v0.11.1`, sans effet hors de la
+cible `serveur`, ne fait pas monter les cinq autres : `pupitre` reste en `v0.11.0`, et `serveur`,
+`pupitre-donnees`, `ancrage-donnees` et `veille-emploi-donnees` en `v0.10.0`. Une seconde preuve
+de la lecture des fermetures par `texte-pr` dans un dépôt privé : serveur#70, PR de clôture d'un
+lot, qui ferme une issue, a eu `texte-pr` vert sur « ferme une issue : tête relue égale à la
+tête » (LE-69).
+
 Prochain, au choix d'Edouard :
 - le second temps du travail sur la documentation, un lot « documentation » avec sa spec : l'« État »
   réduit du `CLAUDE.md` semé et le journal des versions du modèle ; dans le README, le refus d'une
   copie qui se périme (un arbre de fichiers, une heure, une version) et le signal d'une issue citée
   au futur mais fermée ; la ligne « Confirmation » et le régime des ADR ; les blocs engendrés. La
-  piste « Le second temps de la documentation » y ajoute trois relevés des projets ;
+  piste « Le second temps de la documentation » y ajoute trois relevés des projets, et une
+  contradiction d'avant le lot 17 ;
 - le lot 3 (la cible `statique`) ;
 - le lot 5 (`partition` aligné en cible `aucune`) ;
 - le lot 7 (`creche-planner` aligné en cible `aucune`) ;
 - le workflow `publier`, qui ferait publier Edouard depuis son téléphone : sa piste a pour
   déclencheur un lot choisi par Edouard ;
+- #133, « Cible serveur : le journal d'une application survit à son déploiement », une issue
+  ouverte le 13/11 sur le signal de `veille-emploi`, hors du lot 17 ;
 - les constats que les portes du lot 15 laissent ouverts, dont un lot suivant pèse les motifs :
   LE-49 (un écart que son auteur ne reconnaît pas), LE-50 (le retrait des images, dans `serveur`),
   LE-54 et LE-61 (des textes que la section du plan ne couvre pas : une piste, un texte de clôture,
   une docstring, `documentation.md`), LE-57 (un cas limite inconnu), LE-65 et LE-66 (une commande
   que `CLAUDE.md` prescrit à une session), LE-74 (un comportement d'outil annoncé hors de la section
-  du plan), LE-58 et LE-75 (un contrôle local qui diffère de celui de la CI) ; LE-63 et LE-64, nés
-  de la revue finale, chacun avec la porte que propose le registre, LE-63 rejointe au lot 16 par
-  LE-70, LE-71 et LE-73, du même motif, « décision appliquée sans en chercher les effets », dont la
-  porte est due ; et LE-69 (une épreuve renvoyée après le lot, qui n'exerce pas le cas), né de la
-  relecture de la clôture ;
-- la porte due par LE-76, 3e constat de « étape de clôture oubliée par le plan », après LE-60 et
-  LE-68 : sa forme revient à Edouard.
+  du plan), LE-58 et LE-75 (un contrôle local qui diffère de celui de la CI) ; LE-64, né de la
+  revue finale, avec la porte que propose le registre ; et LE-69 (une épreuve renvoyée après le
+  lot, qui n'exerce pas le cas), né de la relecture de la clôture ;
+- ceux que le lot 17 laisse ouverts, de même : LE-83, avec LE-49 (un écart que son auteur ne
+  reconnaît pas) ; LE-80 et LE-86 (un texte que « Mécanismes annoncés » ne couvre pas : la
+  troisième pièce d'une ligne de plan, le remède d'une revue de tâche) ; LE-82, LE-84 et LE-87 (un
+  comportement d'outil supposé, hors de ce que le plan ou le correctif nommait : un double installé
+  deux fois, un `gh` jamais connecté, quatre formes du rendu de GitHub) ; LE-81, LE-85, LE-88 et
+  LE-89 (un contrôle qui passe sans voir ce qu'il doit voir : une recherche trop étroite, des tests
+  que leur environnement rendait vains, des changements qu'aucun test ne tenait, un échec lu comme
+  un résultat) ; AM-5 (ce qu'une clôture livre de plus que ses gestes, avec sa piste) et AM-6 (le
+  garde et la simple lecture de la clé des hooks).
 
 Le cadrage est dans `docs/cadrage.md` ; ce que les lots ont appris, dans `docs/registre.md`.
 

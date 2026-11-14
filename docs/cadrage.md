@@ -426,6 +426,91 @@
 >     fait à la main, repris sans recompter » ;
 >   - LE-40 se clôt en renvoyant au corps de la PR de clôture pour ses exécutions, ses durées
 >     mesurées du début du job au départ de l'étape « Durée du job ».
+>
+> **Amendé le 2026-11-14, à la clôture du lot 17, de la même façon.** Le lot 17 n'était pas au §11 :
+> il écrit les deux portes dues par le registre, celle de « décision appliquée sans en chercher les
+> effets » (LE-63, LE-70, LE-71 et LE-73), par une section des plans et le relevé des projets, et
+> celle d'« étape de clôture oubliée par le plan » (LE-76), par les gestes de clôture et la commande
+> des plans du modèle (#134, PR #139 à #143). `methode.md`, `documentation.md`, le gabarit de PR et
+> `docs/aligner.md` sont amendés ; aucun fichier ne s'ajoute à ce que reçoit un projet (§4).
+>
+> - **§1** : `poste/` porte aussi `releve.py`, le relevé des projets nés du modèle, avec son test,
+>   hors de `template/` : il n'est pas distribué. Il lit les projets par `gh api`, en lecture
+>   seule, dépôts privés compris, lance sur leurs plans et leurs textes de PR les scripts du modèle
+>   de leur version et de la tête, et compare leurs règles et leurs fichiers gérés à ceux du modèle.
+>   Il tourne sur le poste, par la session, jamais en CI, qui n'a pas de jeton qui lirait tous les
+>   dépôts privés : avant une spec ou un plan, à la revue finale et à la clôture ;
+> - **§5.2** : le plan d'un lot porte quatre sections : « Effets cherchés » s'ajoute aux trois du
+>   lot 15, une ligne par décision du plan qui change une forme, une règle, un geste ou un défaut
+>   que reçoit un autre lieu (un projet né du modèle, un autre chemin d'exécution, un autre
+>   environnement), que la revue du plan relit là où l'effet arrive. L'unité de clôture d'un plan
+>   neuf nomme six gestes : le plan supprimé, `CLAUDE.md` ou un ADR, le README, les leçons du lot,
+>   la fermeture de l'issue et la tête relue ; un plan de tranche s'en dispense par la ligne
+>   `Plan maître :`, un plan hors lot par la ligne `Hors lot :`. La PR de clôture porte au registre
+>   les leçons du lot encore sans ligne, et un dépôt de la cible `donnees`, qui n'a pas de registre
+>   à lui, au registre de son dépôt de code. Un plan en cours n'est pas tenu à ces exigences tant
+>   qu'il n'est pas vérifié comme neuf et ne porte pas « Effets cherchés » ; la session vérifie son
+>   plan comme neuf (`--neuf`) jusqu'à son accord ;
+> - **§5.5** : l'étape « Les plans » du socle, et sa copie dans la CI de ce dépôt, vérifient les
+>   quatre sections, puis, d'un plan neuf ou qui porte « Effets cherchés », l'unité de clôture et
+>   ses gestes, ou la ligne qui l'en dispense. Un plan ajouté, renommé compris, s'y vérifie comme
+>   neuf (`--neuf`), à la PR comme au push ; un plan modifié se vérifie toujours sans ouvrir ses
+>   lieux, et sans `--neuf`. Le gabarit de PR [G] nomme, dans sa liste de contrôle, les leçons du
+>   lot au registre, à la clôture ;
+> - **§11** : un projet aligné donne à chaque plan en cours ses trois sections d'avant le lot 17,
+>   jamais « Effets cherchés » après coup ; un plan renommé compte pour neuf (`docs/aligner.md`) ;
+> - **les plans du modèle**, qui vivent hors du dépôt et que la CI ne voit pas, se vérifient par la
+>   commande de « Commandes », dans `CLAUDE.md` : `--neuf` jusqu'à l'accord, un `--depot` par dépôt
+>   cité, et les mots `cadrage`, `À relire`, `pistes` et `relevé` en plus des six gestes. Une ligne
+>   d'« Effets cherchés » dont le lieu est un projet cite le relevé dans son troisième morceau ; la
+>   clôture d'un plan du modèle dit que le plan, hors du dépôt, n'est pas supprimé, et que son
+>   en-tête est mis à jour ;
+> - **le relevé de la clôture**, sur `3b7ab38`, rend 0 : sept projets lus, rien à lire. Les huit
+>   plans en cours gardent à la tête le verdict qu'ils ont à la version de leur projet, et tous
+>   refuseraient s'ils étaient neufs ; celui d'`ancrage` pour la seule section « Effets cherchés » :
+>   sa clôture nomme déjà les six gestes, « constats » valant « leçons » depuis la question 7 de la
+>   spec du lot, acceptée le 14/11, alors que son § 3.1, écrit avant, disait qu'aucune des clôtures
+>   en cours ne les nommait ;
+> - **aucun écart à la spec du lot** : ses cinq PR déclarent « Aucun. ». Un remède de la revue
+>   finale, un relevé sans aucun projet rendant 1, s'écartait du § 5.4 de la spec, qui donne 0 ; la
+>   relecture des corrections l'a trouvé, et le code est revenu à 0 avant l'ouverture de #143
+>   (LE-83) ;
+> - **dix-sept choix du lot**, que ses PR n'ont pas comptés comme écarts, recueillis dans la section
+>   « À relire » de la PR de clôture, et acceptés par Edouard le 14/11 (« ok pour les défauts ») :
+>   - la revue finale lit `cbda229..1bbd98b`, sans les deux correctifs hors du lot, #137 et #138 ;
+>   - la ligne `Plan maître :` n'admet que le chemin, en code en ligne, seul après les
+>     deux-points ; une ligne déclarée, même refusée pour sa forme, dispense de la clôture, sauf
+>     dans un plan maître (#140) ;
+>   - la ligne d'« Effets cherchés » du plan qui disait qu'aucune clôture en cours ne nommait les
+>     six gestes est corrigée pour `ancrage` ; la spec garde son constat d'avant (#140) ;
+>   - le relevé compare par défaut les fichiers gérés que le modèle change entre la version de
+>     chaque projet et la tête ; `--depuis` élargit l'intervalle, sans donner un inventaire
+>     complet ; une règle illisible à la tête arrête par 64 ; le faux `gh` des tests tourne par
+>     `python -I -S` (#141, #143) ;
+>   - LE-63, LE-70, LE-71, LE-73 et LE-76 se closent après une relecture de `pupitre` par l'API
+>     (#142) ;
+>   - le registre d'un dépôt de données est retenu Important à la revue finale, contre le
+>     « Mineur » de sa contre-vérification (#143) ;
+>   - « sans lettre ni chiffre » devient « sans lettre, chiffre ni `_` » dans les textes, sans que
+>     le code change : une clôture en `__gras__` refuse (#143) ;
+>   - sous Windows, la cible d'une ligne `Plan maître :` se trouve sans égard à la casse : les
+>     textes le disent, le code ne change pas (#143) ;
+>   - la case du gabarit de PR, de 107 caractères, dictée par le plan, reste telle quelle ;
+>   - les quatre constats de la lecture de complétude sont retenus sans contre-vérification à
+>     part, chacun prouvé par un mutant (#143) ;
+>   - un relevé sans aucun projet rend 0 et le dit par une ligne ; « même verdict (passe) » et
+>     « même verdict (refuse) » gardent le nom que la spec donne au verdict, et ne sont pas un
+>     écart (#143) ;
+>   - deux lectures des titres d'avant le lot, qui laissent passer une clôture, sont nommées parmi
+>     les écarts connus ; quatre autres refusent du côté sûr et restent telles quelles (#143) ;
+>   - le relevé ne lit que les PR ouvertes qui ajoutent un plan, comme le dit la spec, et non
+>     celles qui en modifient un : une piste ;
+>   - LE-88 et LE-89 portent les leçons des revues de tâche ; un constat est écarté par écrit, un
+>     test écrit contre une consigne du lot, sans leçon générale ;
+>   - AM-6 ouvre un motif neuf, « refus du garde plus large que sa règle » ;
+>   - LE-85 reste sous « contrôle passé à vide », comme LE-62 ;
+>   - le déclencheur de la piste du commentaire jamais fermé n'est pas atteint : la lecture du
+>     texte de l'unité de clôture (#140) suit déjà sa première voie.
 
 Ce cadrage est la partie publique de la spec de conception du modèle, issue d'une séance de questions avec Edouard : 12 questions, puis 5 parties de design validées une à une. La partie qui nomme le serveur est privée et n'est pas reproduite ici.
 
