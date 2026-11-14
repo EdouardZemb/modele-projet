@@ -133,7 +133,13 @@ def test_scripts_sous_python_isole(rendre, env_isole, tmp_path):
         plan(taches=("### Tâche 1 : x",)).encode("utf-8")
     )
     r = isole(rendu, env, "plan.py", ".claude/plans/essai.md")
-    exiger("plan.py", r, 0, ["0 mécanismes vérifiés"], ["Traceback"])
+    exiger(
+        "plan.py",
+        r,
+        0,
+        ["0 mécanismes vérifiés, 0 non vérifiés, 0 outils, 0 effets, 1 revues"],
+        ["Traceback"],
+    )
 
     assert not echecs, "\n\n".join(echecs)
     # Avant tout lancement sans `-I` dans ce rendu : les imports ont eu lieu, puisque les textes

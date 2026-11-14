@@ -1274,7 +1274,7 @@ DOCUMENTATION_ET_DOCSTRING = (
         "un `<!--` jamais fermé, ouvert dans un élément de liste après quatre espaces ou plus (une "
         "puce imbriquée, ou une ligne qui continue la puce), cache sur GitHub tout ce qui le suit, "
         "mais les contrôles lisent encore la suite : un titre, et donc la section « Ce qui fait "
-        "foi », la section des écarts à la spec, les trois sections d'un plan et ses titres de "
+        "foi », la section des écarts à la spec, les sections d'un plan et ses titres de "
         "tâche ou de tranche, et la ligne « Tête relue », qui doit toujours nommer la tête de la PR"
     ),
     # un bloc `<?`, `<!DOCTYPE` ou `<![CDATA[`, qui cache tout jusqu'au premier `>`, même plus bas,
@@ -1284,7 +1284,7 @@ DOCUMENTATION_ET_DOCSTRING = (
         "par `<!` suivi d'une majuscule (`<!DOCTYPE`) ou par `<![CDATA[` cache de même sur "
         "GitHub tout ce qui le suit jusqu'au premier `>`, même plusieurs lignes plus bas, ou "
         "jusqu'à la fin sans lui, mais `texte_pr.py` et `plan.py`, qui ne cherchent que `<!--`, "
-        "lisent encore la ligne « Tête relue », la section des écarts, les trois sections d'un "
+        "lisent encore la ligne « Tête relue », la section des écarts, les sections d'un "
         "plan et ses titres de tâche ou de tranche."
     ),
     # une liste non close : deux écarts connus, puis les autres formes en une phrase (relecture de
@@ -1491,18 +1491,19 @@ def test_methode_nomme_documentation_md():
 
 
 def test_methode_dit_les_plans():
-    """Le contrôle des plans (LE-53, LE-55, LE-56) : les trois sections d'un plan et la forme de
+    """Le contrôle des plans (LE-53, LE-55, LE-56) : les quatre sections d'un plan et la forme de
     leurs lignes, la revue du plan, les revues comme tâches du plan, le cas limite d'un outil, le
     mutant, et ce que la CI vérifie d'un plan ajouté ou modifié, à la PR et au push. Le tableau des
-    garde-fous nomme le script ; le point 2 du cycle renvoie aux trois sections et à la revue du
-    plan."""
+    garde-fous nomme le script ; le point 2 du cycle renvoie aux quatre sections et à la revue du
+    plan. « Effets cherchés » et `--neuf` sont dits avec leur limite, la revue du plan relit la
+    section, et la CI passe `--neuf` à un plan ajouté, renommé compris."""
     texte = _aplati(lire(METHODE))
     for fragment in (
         # la règle de la place est séparée du contrôle, qui ne la vérifie pas (revue finale du
         # lot 15)
         (
-            "un plan porte trois sections de niveau 2, que `scripts/modele/plan.py` vérifie. On les "
-            "écrit avant ses tâches ; le script n'en vérifie pas la place."
+            "un plan porte quatre sections de niveau 2, que `scripts/modele/plan.py` vérifie. On "
+            "les écrit avant ses tâches ; le script n'en vérifie pas la place."
         ),
         # les puces que `plan.py` admet, et le refus d'une section en double
         "n'admet que des puces `-` ou `*`",
@@ -1527,12 +1528,38 @@ def test_methode_dit_les_plans():
         "une session vérifie ce lieu en lançant `plan.py` avec `--depot <dépôt>=<clone>`",
         "`## Mécanismes annoncés`",
         "`## Outils et cas limites`",
+        "`## Effets cherchés`",
         "`## Revues`",
         "`` - `<chemin>:<ligne>` — `<extrait>` — <comportement annoncé> ``",
         "`<chemin>:<ligne>-<fin>`",
         "`<dépôt>:<chemin>:<ligne>`",
         "`--depot <dépôt>=<clone>`",
         "`- <outil> — <cas limite que l'outil traite autrement> — <test qui l'exerce>`",
+        "`- <décision> — <où elle arrive> — <comment c'est vérifié>`",
+        # les trois sortes de lieux, en exemples, sans qu'aucune soit imposée (lot 17)
+        (
+            "un projet né du modèle (sa règle de protection, ses plans, ses textes, les règles de "
+            "son `CLAUDE.md`) ; un autre chemin d'exécution (un retour arrière, un geste à la "
+            "main, un envoi direct) ; un autre environnement (un autre shell : PowerShell, Git "
+            "Bash lancé par `!`, le `dash` du runner ; la CI ou le poste ; Windows ou Linux)"
+        ),
+        "« Aucun. » ne s'écrit que si le plan ne change rien qu'un autre lieu reçoive",
+        # l'option `--neuf`, distincte de `--sans-lieux`, et la limite de la section retirée
+        (
+            "distincte de `--sans-lieux`, qui ne dit que de ne pas ouvrir les fichiers cités"
+        ),
+        "sans `--neuf`, retirer la section entière d'un plan qui la portait n'est pas vu",
+        "« Aucun. » admis dans les trois premières",
+        (
+            "elle relit dans le code chaque ligne de « Mécanismes annoncés » et d'« Effets "
+            "cherchés », et juge un « Aucun. » contre ce que le plan décrit"
+        ),
+        "Un plan renommé compte pour un ajout (`git diff --no-renames`) : il reçoit `--neuf`",
+        (
+            "La session lance aussi `python scripts/modele/plan.py --neuf <plan>` avant de "
+            "soumettre son plan à Edouard, et après chaque correction, tant qu'il n'est pas "
+            "accepté ; ensuite, sans `--neuf`"
+        ),
         "`- <revue> : Tâche N`",
         "`- <revue> : Tâche N`, ou `Tranche N` dans un plan maître",
         "`Tâche N` ou `Task N`",
@@ -1601,13 +1628,15 @@ def test_methode_dit_les_plans():
     assert "un lieu d'un autre dépôt restant « non vérifié », sans refus" in ligne, ligne
     au_push = (
         "Au push sur la branche principale, un plan ajouté se vérifie aussi sans ouvrir les "
-        "fichiers cités, ses lieux vérifiés à la PR."
+        "fichiers cités, ses lieux vérifiés à la PR, et chaque plan ajouté, renommé compris, "
+        "par `--neuf`."
     )
     assert au_push in ligne, ligne
     cycle = lire(METHODE).split("## Le cycle d'un lot", 1)[1].split("\n## ", 1)[0]
     (point,) = [b for b in blocs(cycle) if b[0].startswith("2. ")]
     point = _aplati(" ".join(point))
-    assert "trois sections" in point, point
+    assert "quatre sections" in point, point
+    assert "trois sections" not in point, point
     assert "la revue du plan" in point, point
 
 

@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 import yaml
 from conftest import RACINE, REPONSES_SERVEUR, SH, git, sans_echappatoire
-from test_plan import A_PY, plan
+from test_plan import A_PY, plan, plan_neuf
 
 SOCLE = ".github/workflows/modele-socle.yml"
 CI = ".github/workflows/ci.yml"
@@ -418,8 +418,11 @@ def test_etape_de_la_documentation(rendre):
 ETAPE_DES_PLANS = "Les plans (.claude/plans)"
 # Un plan conforme : il cite la ligne 2 de `src/a.py`, et chacune de ses tâches a une case.
 MECA_CONFORME = "- `src/a.py:2` — `def f(` — la fonction existe déjà."
-PLAN_CONFORME = plan(meca=MECA_CONFORME)
-RESUME_CONFORME = "1 mécanismes vérifiés, 0 non vérifiés, 0 outils, 1 revues"
+PLAN_CONFORME = plan_neuf(meca=MECA_CONFORME)
+RESUME_CONFORME = "1 mécanismes vérifiés, 0 non vérifiés, 0 outils, 0 effets, 1 revues"
+# Un plan en cours : sans « Effets cherchés », qu'exige seul un plan neuf (`--neuf`).
+PLAN_EN_COURS = plan(meca=MECA_CONFORME)
+EFFETS_ABSENTE = "section « Effets cherchés » absente (titre de niveau 2)"
 
 
 @pytest.mark.skipif(SH is None, reason="aucun sh trouvé")
@@ -560,7 +563,10 @@ def test_etape_des_plans(rendre, env_isole, tmp_path):
     commit(autre_fusion, {".claude/plans/p.md": PLAN_CONFORME})
     code, sortie = lancer(autre_fusion, "push")
     assert code == 0, sortie
-    assert "Push : un plan ajouté se vérifie sans ouvrir ses lieux, vérifiés à la PR." in sortie
+    assert (
+        "Push : un plan ajouté se vérifie sans ouvrir ses lieux, vérifiés à la PR, et comme un "
+        "plan neuf."
+    ) in sortie
     assert "plan : .claude/plans/p.md : 1 mécanismes, lieux non ouverts" in sortie, sortie
     for evenement in ("pull_request", "workflow_dispatch", ""):
         code, sortie = lancer(autre_fusion, evenement)
@@ -589,6 +595,27 @@ def test_etape_des_plans(rendre, env_isole, tmp_path):
     assert code != 0, sortie
     attendu = "plan : .claude/plans/q.md : Mécanismes annoncés, ligne 2 : extrait absent de "
     assert attendu + "src/a.py:3" in sortie, sortie
+
+    # Un plan neuf : un plan ajouté qui n'a pas « Effets cherchés » refuse, à la PR comme au push
+    # (`--neuf` à chaque appel des plans ajoutés) ; le même plan, modifié, passe, comme un plan en
+    # cours ; renommé, il refuse comme un ajouté.
+    ajoute = commit(base, {".claude/plans/e.md": PLAN_EN_COURS})
+    for evenement in ("pull_request", "push"):
+        code, sortie = lancer(base, evenement)
+        assert code != 0, (evenement, sortie)
+        assert f"plan : .claude/plans/e.md : {EFFETS_ABSENTE}" in sortie, (evenement, sortie)
+    commit(ajoute, {".claude/plans/e.md": PLAN_EN_COURS.replace("- [ ]", "- [x]", 1)})
+    for evenement in ("pull_request", "push"):
+        code, sortie = lancer(ajoute, evenement)
+        assert code == 0, (evenement, sortie)
+        assert EFFETS_ABSENTE not in sortie, (evenement, sortie)
+    git(rendu, env, "checkout", "-q", "--detach", ajoute)
+    git(rendu, env, "mv", ".claude/plans/e.md", ".claude/plans/f.md")
+    git(rendu, env, "commit", "-q", "-m", "feat: le plan en cours renommé")
+    for evenement in ("pull_request", "push"):
+        code, sortie = lancer(ajoute, evenement)
+        assert code != 0, (evenement, sortie)
+        assert f"plan : .claude/plans/f.md : {EFFETS_ABSENTE}" in sortie, (evenement, sortie)
 
     # La ligne de comptes : combien de plans la PR ajoute, modifie et supprime, hors d'une
     # base nulle.

@@ -1,6 +1,7 @@
-"""Le contrôle d'un plan : ses trois sections de niveau 2, « Mécanismes annoncés », « Outils et cas
-limites » et « Revues ». Le socle le lance sur les plans d'une PR (`.claude/plans/*.md`) ; une
-session le lance sur son plan, avant de le soumettre et après chaque correction.
+"""Le contrôle d'un plan : ses quatre sections de niveau 2, « Mécanismes annoncés », « Outils et cas
+limites », « Effets cherchés » et « Revues ». Le socle le lance sur les plans d'une PR
+(`.claude/plans/*.md`) ; une session le lance sur son plan, avant de le soumettre et après chaque
+correction.
 
 Les sections. Chacune se lit bornée : de son titre de niveau 2 jusqu'au premier titre, quel que
 soit son niveau, ou à la première ligne de séparation (`---`). Sans titre de niveau 2, elle est
@@ -41,6 +42,14 @@ la CI vérifie ainsi un plan modifié, dont les numéros de ligne dérivent avec
 Outils et cas limites. Une puce, coupée aux deux premiers séparateurs hors du code en ligne, en
 trois morceaux non vides : l'outil, le cas limite qu'il traite autrement, le test qui l'exerce.
 
+Effets cherchés. Une puce par décision du plan qui change une forme, une règle, un geste ou un
+défaut que reçoit un autre lieu, coupée comme « Outils et cas limites » en trois morceaux non
+vides : la décision, où elle arrive, comment c'est vérifié. « Aucun. » seul est admis. La section
+n'est exigée que d'un plan neuf (`--neuf`) ; présente, elle se vérifie dans tous les modes.
+`--neuf` ne dit rien de plus que la nouveauté du plan : il est distinct de `--sans-lieux`, qui ne
+dit que de ne pas ouvrir les fichiers cités. Sa limite : sans `--neuf`, retirer la section entière
+d'un plan qui la portait n'est pas vu.
+
 Revues. Une puce par temps de revue, qui cite au moins une unité du plan, présente dans ses titres
 de niveau 3, lus hors des blocs de code clôturés et des blocs de commentaire HTML, fermés ou non.
 Une unité est une tâche, `### Tâche N : …` ou `### Task N: …`, citée par `Tâche N` ou `Task N`, ou
@@ -64,10 +73,11 @@ remplacé par `?`. Elle finit par un résumé, puis par `refus` s'il y a refus.
 
 Bibliothèque standard seule, Python 3.10 ou plus.
 
-Usage : plan.py PLAN [--racine DOSSIER] [--depot NOM=CLONE]... [--sans-lieux]
+Usage : plan.py PLAN [--racine DOSSIER] [--depot NOM=CLONE]... [--sans-lieux] [--neuf]
+                [--cloture MOT]...
         PLAN se lit où qu'il soit. Un chemin sans préfixe part de DOSSIER (défaut : le dossier
         courant), un chemin préfixé par NOM, de CLONE. --sans-lieux vérifie la forme de chaque
-        lieu, sans ouvrir de fichier.
+        lieu, sans ouvrir de fichier. --neuf exige « Effets cherchés » : un plan neuf.
 
 Retour : 0 rien à signaler, 1 refus, 64 erreur d'usage (plan illisible, racine ou clone absents,
          --depot mal formé).
@@ -87,6 +97,7 @@ PLAGE_MAX = 40
 PREFIXE = "plan : "
 MECANISMES = "Mécanismes annoncés"
 OUTILS = "Outils et cas limites"
+EFFETS = "Effets cherchés"
 REVUES = "Revues"
 AUCUN = "Aucun."
 TACHE = "Tâche"
@@ -104,6 +115,8 @@ FORMES = {
     MECANISMES: "forme attendue : - `<chemin>:<ligne>` — `<extrait>` — <comportement annoncé>, "
     "ou « Aucun. » seul",
     OUTILS: "forme attendue : - <outil> — <cas limite> — <test>, ou « Aucun. » seul",
+    EFFETS: "forme attendue : - <décision> — <où elle arrive> — <comment c'est vérifié>, "
+    "ou « Aucun. » seul",
     REVUES: "forme attendue : - <revue> : Tâche N, ou Tranche N dans un plan maître ; "
     "jamais « Aucun. »",
 }
@@ -347,16 +360,23 @@ def _unites(texte: str, doc) -> list[tuple[str, int, str]]:
 
 
 def verifier(
-    texte: str, racine: Path, depots: dict[str, Path], lieux: bool = True
+    texte: str,
+    racine: Path,
+    depots: dict[str, Path],
+    lieux: bool = True,
+    neuf: bool = False,
+    cloture: tuple[str, ...] = (),
 ) -> tuple[list[str], bool]:
-    """Les trois sections d'un plan : (lignes, refus). La dernière ligne est le résumé. Avec
-    `lieux=False`, la forme de chaque lieu se vérifie par `lieu()`, sans ouvrir de fichier."""
+    """Les sections d'un plan : (lignes, refus). La dernière ligne est le résumé. Avec
+    `lieux=False`, la forme de chaque lieu se vérifie par `lieu()`, sans ouvrir de fichier. Avec
+    `neuf`, « Effets cherchés » est exigée. `cloture` : des mots déjà normalisés, sans effet
+    encore."""
     doc = _documentation()
     texte = doc._en_lf(texte)
     lignes: list[str] = []
     refus = False
     resolues: dict[Path, Path] = {}
-    comptes = {"vérifié": 0, "non vérifié": 0, OUTILS: 0, REVUES: 0}
+    comptes = {"vérifié": 0, "non vérifié": 0, OUTILS: 0, EFFETS: 0, REVUES: 0}
     unites = _unites(texte, doc)
     sortes = {sorte for sorte, _, _ in unites}
     mele = len(sortes) == 2
@@ -365,7 +385,7 @@ def verifier(
         citees = (TACHE, TRANCHE)
     else:
         citees = (TRANCHE,) if sortes == {TRANCHE} else (TACHE,)
-    cloture = next(
+    rang_cloture = next(
         (i for i, (_, _, titre) in enumerate(unites) if any(mot in titre for mot in _CLOTURE)),
         None,
     )
@@ -383,16 +403,18 @@ def verifier(
             rang = next((i for i, (s, num, _) in enumerate(unites) if (s, num) == (sorte, n)), None)
             if rang is None:
                 motifs.append(f"{sorte} {n} absente des titres")
-            elif cloture is not None and rang >= cloture:
-                sorte_cloture, numero_cloture, _ = unites[cloture]
+            elif rang_cloture is not None and rang >= rang_cloture:
+                sorte_cloture, numero_cloture, _ = unites[rang_cloture]
                 motifs.append(
                     f"{sorte} {n} ne précède pas la clôture ({sorte_cloture} {numero_cloture})"
                 )
         return motifs
 
-    for titre in (MECANISMES, OUTILS, REVUES):
+    for titre in (MECANISMES, OUTILS, EFFETS, REVUES):
         morceaux = doc.sections(texte, titre, niveau=2, bornee=True)
         if not morceaux:
+            if titre == EFFETS and not neuf:
+                continue
             lignes.append(f"section « {titre} » absente (titre de niveau 2)")
             refus = True
             continue
@@ -420,13 +442,13 @@ def verifier(
                     comptes[etat] += 1
                     if message is not None:
                         constats.append((rang, message, False))
-            elif titre == OUTILS:
+            elif titre in (OUTILS, EFFETS):
                 # une espace devant : un séparateur en tête laisse un premier morceau vide
                 morceaux = _couper(" " + ligne, 2, doc)
                 if len(morceaux) == 3 and all(morceau.strip() for morceau in morceaux):
-                    comptes[OUTILS] += 1
+                    comptes[titre] += 1
                 else:
-                    constats.append((rang, FORMES[OUTILS], True))
+                    constats.append((rang, FORMES[titre], True))
             else:
                 motifs = revue(ligne)
                 constats += [(rang, motif, True) for motif in motifs]
@@ -445,7 +467,9 @@ def verifier(
         tete = f"{comptes['vérifié']} mécanismes vérifiés, {comptes['non vérifié']} non vérifiés"
     else:
         tete = f"{comptes['vérifié']} mécanismes, lieux non ouverts"
-    lignes.append(f"{tete}, {comptes[OUTILS]} outils, {comptes[REVUES]} revues")
+    lignes.append(
+        f"{tete}, {comptes[OUTILS]} outils, {comptes[EFFETS]} effets, {comptes[REVUES]} revues"
+    )
     return lignes, refus
 
 
@@ -468,7 +492,8 @@ def main(argv: list[str] | None = None) -> int:
     p = _Analyseur(
         prog="plan.py",
         description=(
-            "Les trois sections d'un plan : mécanismes annoncés, outils et cas limites, revues."
+            "Les sections d'un plan : mécanismes annoncés, outils et cas limites, effets cherchés, "
+            "revues."
         ),
     )
     p.add_argument("plan", metavar="PLAN", help="le plan, lu où qu'il soit")
@@ -491,6 +516,18 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="la forme de chaque lieu, sans ouvrir de fichier (un plan modifié)",
     )
+    p.add_argument(
+        "--neuf",
+        action="store_true",
+        help="un plan neuf : « Effets cherchés » et la clôture exigées",
+    )
+    p.add_argument(
+        "--cloture",
+        action="append",
+        default=[],
+        metavar="MOT",
+        help="un mot de plus exigé de la clôture ; à répéter",
+    )
     try:
         args = p.parse_args(argv)
     except SystemExit as sortie:
@@ -506,12 +543,17 @@ def main(argv: list[str] | None = None) -> int:
         depots[nom] = Path(clone)
     if not args.racine.is_dir():
         return _usage("racine introuvable")
+    mots = tuple(mot.strip() for mot in args.cloture)
+    if not all(mot.strip() for mot in args.cloture):
+        return _usage("--cloture MOT attendu")
     nom_du_plan = doc._affichable(args.plan)
     try:
         octets = Path(args.plan).read_bytes()
     except OSError:
         return _usage(f"plan illisible : {nom_du_plan}")
-    lignes, refus = verifier(lire_plan(octets), args.racine, depots, not args.sans_lieux)
+    lignes, refus = verifier(
+        lire_plan(octets), args.racine, depots, not args.sans_lieux, args.neuf, mots
+    )
     for ligne in lignes:
         print(f"{PREFIXE}{nom_du_plan} : {ligne}")
     if refus:
