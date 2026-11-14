@@ -1130,8 +1130,9 @@ def test_cloture_mots_coupes_en_fin_de_ligne(racine):
 def test_cloture_commentaires_et_blocs(racine):
     """Un geste nommé dans un commentaire ne compte pas ; dans un bloc de code, il compte, sauf
     dans un bloc pris dans un commentaire retiré. L'unité court jusqu'au titre suivant de niveau 1
-    à 3, lu hors des blocs de code : un `# commentaire` dans un bloc ou un titre de niveau 4 ne la
-    coupe pas. Un `<!--` jamais fermé dans l'unité refuse."""
+    à 3, lu hors des blocs de code et des blocs de commentaire : un `# commentaire` dans un bloc,
+    un `### …` dans un bloc de commentaire ou un titre de niveau 4 ne la coupe pas ; un titre de
+    niveau 3, 2 ou 1 après elle la coupe. Un `<!--` jamais fermé dans l'unité refuse."""
     sans_readme = CLOTURE_CONFORME.replace("README relu ; ", "")
     for texte in (
         CLOTURE_CONFORME.replace("README relu", "<!-- README relu -->"),
@@ -1149,13 +1150,19 @@ def test_cloture_commentaires_et_blocs(racine):
         sans_readme + "\n\n```html\n<!-- début\n```\n\nREADME relu.",
         sans_readme + " Un `<!--` en code en ligne. README relu.",
         sans_readme + " <!-- note --> README relu.",
+        # un titre de niveau 3 dans un bloc de commentaire ne coupe pas l'unité (revue finale du
+        # lot 17)
+        sans_readme + "\n\n<!--\n### Une note\n-->\n\nREADME relu.",
     ):
         lignes, refus = verifier(plan_neuf(taches=cloture(texte)), racine, neuf=True)
         assert not refus, (texte, lignes)
-    taches = (*cloture(sans_readme), "### Tâche 3 : x\n\nREADME relu.")
-    lignes, refus = verifier(plan_neuf(taches=taches), racine, neuf=True)
-    assert refus
-    assert non_nommes("le README") in lignes, lignes
+    # un titre de niveau 3, 2 ou 1 après l'unité la coupe : le geste nommé après lui ne compte pas
+    # (revue finale du lot 17)
+    for suite in ("### Tâche 3 : x", "## Annexe", "# Annexe"):
+        taches = (*cloture(sans_readme), f"{suite}\n\nREADME relu.")
+        lignes, refus = verifier(plan_neuf(taches=taches), racine, neuf=True)
+        assert refus, (suite, lignes)
+        assert non_nommes("le README") in lignes, (suite, lignes)
     ouvert = f"clôture (Tâche 2) : {p.COMMENTAIRE_OUVERT}"
     assert ouvert == "clôture (Tâche 2) : commentaire HTML jamais fermé, qui cache la suite"
     for texte, manquants in (
@@ -1169,6 +1176,50 @@ def test_cloture_commentaires_et_blocs(racine):
         assert ouvert in lignes, (texte, lignes)
         nommes = [ligne for ligne in lignes if "gestes non nommés" in ligne]
         assert nommes == ([] if manquants is None else [non_nommes(manquants)]), (texte, lignes)
+
+
+def test_cloture_souligne_colle_au_mot(racine):
+    """Un mot se cherche sans lettre, chiffre ni `_` à côté de lui : `\\w` compte `_`. L'emphase
+    par soulignés, `_README_` ou `__Tête relue__`, cache le geste, et le refus le nomme ; le gras
+    par astérisques, `**Tête relue**`, le laisse lire. De même pour un mot de `--cloture` (revue
+    finale du lot 17)."""
+    for nom, tournure in (("le README", "_README_ relu"), ("la tête relue", "__Tête relue__")):
+        texte = CLOTURE_CONFORME.replace(PASSAGES[nom], tournure)
+        assert texte != CLOTURE_CONFORME, tournure
+        lignes, refus = verifier(plan_neuf(taches=cloture(texte)), racine, neuf=True)
+        assert refus, (tournure, lignes)
+        assert non_nommes(nom) in lignes, (tournure, lignes)
+    for tournure in ("**Tête relue**", "*Tête relue*"):
+        texte = CLOTURE_CONFORME.replace(PASSAGES["la tête relue"], tournure)
+        lignes, refus = verifier(plan_neuf(taches=cloture(texte)), racine, neuf=True)
+        assert not refus, (tournure, lignes)
+    avec = plan_neuf(taches=cloture(CLOTURE_CONFORME + " Le _cadrage_ amendé."))
+    lignes, refus = verifier(avec, racine, neuf=True, cloture=("cadrage",))
+    assert non_nommes("« cadrage »") in lignes, lignes
+    avec = plan_neuf(taches=cloture(CLOTURE_CONFORME + " Le **cadrage** amendé."))
+    lignes, refus = verifier(avec, racine, neuf=True, cloture=("cadrage",))
+    assert not refus, lignes
+
+
+def test_ordre_des_sections_dans_les_refus(racine):
+    """Les refus des sections suivent l'ordre des sections, mécanismes, outils, effets, revues,
+    quel que soit l'ordre du plan : le relevé compare ces lignes (revue finale du lot 17)."""
+    attendus = [MECA_REFUSE, OUTIL_REFUSE, EFFETS_REFUSE, REVUES_REFUSE]
+    mal = "Une phrase."
+    texte = plan(meca=mal, outils=mal, effets=mal, revues=mal)
+    lignes, refus = verifier(texte, racine)
+    assert refus
+    assert [ligne for ligne in lignes if ligne in attendus] == attendus, lignes
+    # les sections écrites dans un autre ordre : les refus gardent le leur
+    a_l_envers = (
+        "# Un plan\n\n"
+        f"## Revues\n\n{mal}\n\n## Effets cherchés\n\n{mal}\n\n"
+        f"## Outils et cas limites\n\n{mal}\n\n## Mécanismes annoncés\n\n{mal}\n\n"
+        "---\n\n### Tâche 1 : x\n\n### Tâche 2 : la clôture\n\n" + CLOTURE_CONFORME + "\n"
+    )
+    lignes, refus = verifier(a_l_envers, racine)
+    assert refus
+    assert [ligne for ligne in lignes if ligne in attendus] == attendus, lignes
 
 
 def test_cloture_mots_du_depot(racine, lancer):
@@ -1517,10 +1568,12 @@ def test_docstring_dit_la_cloture():
             "gardés, sauf un bloc pris dans un commentaire retiré, puis se lit en NFC, apostrophes "
             "droites, espaces ordinaires, sans égard à la casse, code compris."
         ),
+        # `\w` compte `_` (revue finale du lot 17)
         (
-            "Un mot se cherche sans lettre ni chiffre juste avant ni juste après lui ; `supprim` "
-            "et `suppress` n'ont cette limite qu'avant eux ; entre deux mots, tout blanc compte, "
-            "retour à la ligne compris."
+            "Un mot se cherche sans lettre, chiffre ni `_` juste avant ni juste après lui (`\\w`, "
+            "qui compte `_` : l'emphase `_README_` cache le mot) ; `supprim` et `suppress` n'ont "
+            "cette limite qu'avant eux ; entre deux mots, tout blanc compte, retour à la ligne "
+            "compris."
         ),
         "Un `<!--` jamais fermé dans l'unité refuse, et cache la suite.",
         (
@@ -1581,6 +1634,10 @@ def test_docstring_dit_la_cloture():
     ):
         assert fragment in verifier_doc, fragment
     assert "sans effet encore" not in verifier_doc
+    assert "sans lettre ni chiffre" not in doc
+    assert "sans lettre, chiffre ni `_` juste avant ni juste après." in " ".join(
+        p._mot.__doc__.split()
+    )
     for fonction, fragments in (
         (
             p._texte_de_cloture,

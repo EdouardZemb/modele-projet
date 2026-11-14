@@ -1731,9 +1731,11 @@ def test_methode_dit_la_cloture_d_un_plan():
         "- la fermeture de l'issue : le mot `Closes`, le mot `Fixes`, ou `ferme l'issue` ;",
         "- la tête relue : `Tête relue`.",
         (
-            "Un mot se cherche sans lettre ni chiffre juste avant ni juste après lui ; `supprim` "
-            "et `suppress` n'ont cette limite qu'avant eux. Entre deux mots d'une suite, tout "
-            "blanc compte, retour à la ligne et indentation compris : une clôture coupée à 100 "
+            # `\w` compte `_` : l'emphase par soulignés cache le mot (revue finale du lot 17)
+            "Un mot se cherche sans lettre, chiffre ni `_` juste avant ni juste après lui : un `_` "
+            "collé au mot, comme l'emphase `_README_`, le cache, et `**README**` le laisse lire ; "
+            "`supprim` et `suppress` n'ont cette limite qu'avant eux. Entre deux mots d'une suite, "
+            "tout blanc compte, retour à la ligne et indentation compris : une clôture coupée à 100 "
             "colonnes coupe aussi « Tête relue ». « retire » ne vaut pas « supprime », ni « se "
             "ferme » « ferme l'issue »."
         ),
@@ -1785,6 +1787,7 @@ def test_methode_dit_la_cloture_d_un_plan():
     ):
         assert fragment in texte, fragment
     assert "ce qui doit survivre, et relit le README" not in texte
+    assert "sans lettre ni chiffre" not in texte
     assert not RENVOI_AU_PLAN.search(texte)
     section = lire(METHODE).split("## Les garde-fous", 1)[1].split("\n## ", 1)[0]
     (ligne,) = [ligne for ligne in section.splitlines() if "`scripts/modele/plan.py`" in ligne]

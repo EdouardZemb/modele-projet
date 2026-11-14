@@ -128,7 +128,8 @@ nomme :
 - la fermeture de l'issue : le mot `Closes`, le mot `Fixes`, ou `ferme l'issue` ;
 - la tête relue : `Tête relue`.
 
-Un mot se cherche sans lettre ni chiffre juste avant ni juste après lui ; `supprim` et `suppress`
+Un mot se cherche sans lettre, chiffre ni `_` juste avant ni juste après lui : un `_` collé au mot,
+comme l'emphase `_README_`, le cache, et `**README**` le laisse lire ; `supprim` et `suppress`
 n'ont cette limite qu'avant eux. Entre deux mots d'une suite, tout blanc compte, retour à la ligne
 et indentation compris : une clôture coupée à 100 colonnes coupe aussi « Tête relue ». « retire »
 ne vaut pas « supprime », ni « se ferme » « ferme l'issue ». L'option `--cloture MOT` de `plan.py`,

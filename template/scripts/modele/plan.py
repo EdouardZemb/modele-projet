@@ -69,14 +69,14 @@ l'issue, la tête relue (`GESTES`), et chaque mot de `--cloture`, à répéter. 
 titre à la ligne qui précède le titre suivant de niveau 1 à 3, lu comme dans `sections()`, ou à la
 fin du plan. Il se prend sur les lignes d'origine, les commentaires retirés, les blocs de code
 gardés, sauf un bloc pris dans un commentaire retiré, puis se lit en NFC, apostrophes droites,
-espaces ordinaires, sans égard à la casse, code compris. Un mot se cherche sans lettre ni chiffre
-juste avant ni juste après lui ; `supprim` et `suppress` n'ont cette limite qu'avant eux ; entre
-deux mots, tout blanc compte, retour à la ligne compris. Un `<!--` jamais fermé dans l'unité
-refuse, et cache la suite. Le refus nomme l'unité et les gestes qui manquent, dans l'ordre de
-`GESTES` puis des options, un mot de `--cloture` entre guillemets. Sans unité de clôture, un tel
-plan refuse (`AUCUNE_CLOTURE`), sauf un plan de tranche ou un plan hors lot, qui n'est tenu ni à
-l'unité ni aux gestes. La porte voit un geste que la clôture ne nomme pas, jamais un geste nommé
-mais fait à moitié.
+espaces ordinaires, sans égard à la casse, code compris. Un mot se cherche sans lettre, chiffre ni
+`_` juste avant ni juste après lui (`\\w`, qui compte `_` : l'emphase `_README_` cache le mot) ;
+`supprim` et `suppress` n'ont cette limite qu'avant eux ; entre deux mots, tout blanc compte,
+retour à la ligne compris. Un `<!--` jamais fermé dans l'unité refuse, et cache la suite. Le refus
+nomme l'unité et les gestes qui manquent, dans l'ordre de `GESTES` puis des options, un mot de
+`--cloture` entre guillemets. Sans unité de clôture, un tel plan refuse (`AUCUNE_CLOTURE`), sauf un
+plan de tranche ou un plan hors lot, qui n'est tenu ni à l'unité ni aux gestes. La porte voit un
+geste que la clôture ne nomme pas, jamais un geste nommé mais fait à moitié.
 
 Les lignes déclarées. Avant la première unité, hors des blocs de code et des commentaires, jusqu'à
 trois espaces en tête, le gras admis autour du nom, deux-points compris ou non :
@@ -276,7 +276,7 @@ def _replier(texte: str) -> str:
 
 def _mot(mot: str) -> re.Pattern:
     """L'expression d'un mot de `--cloture`, déjà replié : ses mots échappés, joints par tout blanc,
-    retour à la ligne compris, sans lettre ni chiffre juste avant ni juste après."""
+    retour à la ligne compris, sans lettre, chiffre ni `_` juste avant ni juste après."""
     return re.compile(r"(?<!\w)" + r"\s+".join(map(re.escape, mot.split())) + r"(?!\w)")
 
 
