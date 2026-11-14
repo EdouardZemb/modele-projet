@@ -417,7 +417,14 @@ la session de `pupitre`. Une session neuve y a relu les trois sections, qu'aucun
 n'avait relues. pupitre#36, fusionnée le même jour, excepte de sa règle sans prénom les fichiers
 gérés par le modèle et le nom du compte.
 
-Correctif du 14/11 : le délai du job `tests` de ce dépôt passe de 50 à 60 min, seuil 45 min.
+Correctif du 14/11 : l'horloge du banc de la cible `serveur` ne vieillit plus (#136). Elle
+datait les instantanés des tests du 15/10/2026, et la purge de 30 jours, qui lit la vraie date, les
+a retirés à partir du 14/11 à 00:00 UTC : le banc était rouge dans `ancrage`, dans `veille-emploi`
+et dans le job `mecanique` de ce dépôt (LE-78). Elle tombe désormais la veille de la vraie date,
+et un test bats la place dans la fenêtre de la purge. Les projets en cible `serveur` le reçoivent
+par leur mise à jour.
+
+Second correctif du 14/11 : le délai du job `tests` de ce dépôt passe de 50 à 60 min, seuil 45 min.
 Sur #135, qui ne changeait que `CLAUDE.md` et `docs/registre.md`, il a pris 45 min 52 s sous
 Windows, au-delà du seuil de 37 min 30 s et à 4 min de son délai : la suite y a duré 45 min 19 s,
 contre 32 min 25 s au push de la clôture du lot 16, pour les mêmes tests. Le lot 17 ajoute des
