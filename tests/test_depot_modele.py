@@ -819,6 +819,38 @@ def test_claude_md_dit_la_commande_des_plans():
     assert "avant de soumettre un plan à Edouard et après chaque correction" in commandes
 
 
+def test_claude_md_dit_la_commande_du_releve():
+    """Le relevé des projets lit des dépôts privés : il tourne sur le poste, par la session.
+    « Commandes » donne sa commande, ses deux rôles, ses trois moments, ce qu'une PR en cite, et
+    ce qu'il ne compte pas comme à lire."""
+    commandes = _commandes_de_claude_md()
+    # un chemin relatif à la racine du clone, que Git Bash ne coupe pas
+    assert "`python -B poste/releve.py [--depuis <étiquette>] [--prs N]`" in commandes
+    assert "depuis la racine du clone, sous Git Bash, `gh` connecté" in commandes
+    for texte in (
+        # ses deux rôles
+        "l'inventaire, avant une spec ou un plan",
+        "la mesure de l'effet de ce que la tête change",
+        # ses trois moments
+        "avant de soumettre une spec ou un plan, pour en écrire les « Effets cherchés »",
+        "à la revue finale, dont il est une lentille",
+        "à la clôture, dont la PR cite sa sortie",
+        # ce qu'une PR en cite
+        (
+            "Une PR n'en cite que des comptes et des noms de dépôts publics, après la porte de "
+            "confidentialité : ni les noms des plans ni les numéros de PR des dépôts privés"
+        ),
+        # ce qui n'est pas à lire
+        (
+            "Les plans en cours qui « refuseraient s'ils étaient neufs » sont une information : "
+            "ils ne rendent pas le code 1"
+        ),
+        "seuls les dossiers exclus des formateurs sont comparés",
+    ):
+        assert texte in commandes, texte
+    assert (RACINE / "poste/releve.py").is_file()
+
+
 def _bloc_sh(texte, apres):
     """Le premier bloc `sh` qui suit `apres`, ses lignes sans le retrait de la puce qui le
     porte."""
