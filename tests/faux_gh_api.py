@@ -1,14 +1,21 @@
 """Le faux `gh` du relevé (`poste/releve.py`) : il ne connaît que `gh api`.
 
-Il lit d'abord son entrée jusqu'à la fin, comme un `gh` qui attendrait une requête : un appelant
-qui laisserait son entrée ouverte l'attendrait. Puis il note ses arguments dans le journal que
-nomme `FAUX_GH_JOURNAL`, une ligne JSON par appel, avec la valeur de `GH_PAGER`.
+Il lit d'abord son entrée jusqu'à la fin, comme un `gh` qui attendrait une requête. Sous la capture
+de pytest, cette entrée est déjà fermée : c'est l'espion de `lancer`, dans `tests/test_releve.py`,
+qui vérifie que chaque lancement passe `stdin=subprocess.DEVNULL`. Puis il note ses arguments dans
+le journal que nomme `FAUX_GH_JOURNAL`, une ligne JSON par appel, avec la valeur de `GH_PAGER`.
 
 Il refuse, par le code 2 :
 - un premier argument autre que `api`, une option qu'il ne connaît pas, et `--jq` ;
 - un argument qui porte `&`, `|`, `<`, `>`, `^`, `%`, `"` ou une fin de ligne : sous Windows, le
   `.cmd` qui l'enveloppe couperait ou réécrirait cet argument ;
-- un appel REST, tout point d'API sauf `graphql`, sans `-X GET` : `gh api -f` l'enverrait en POST.
+- un appel REST, tout point d'API sauf `graphql`, sans `-X GET` : `gh api -f` l'enverrait en POST ;
+- un appel que P9 pagine, sans `--paginate` ou sans `--slurp` : la liste des dépôts
+  (`user/repos`), les PR ouvertes (`repos/<o>/<d>/pulls` avec `state=open`) et leurs fichiers
+  (`repos/<o>/<d>/pulls/<n>/files`). Sans eux, le vrai `gh` ne rendrait que la première page,
+  plate, et non une page par élément d'un tableau ;
+- une requête `graphql` dont `n` ne passe pas par `-F` : par `-f`, il arrive en texte, et GitHub le
+  refuse pour un `Int!` (« Variable $n of type Int! was provided invalid value »).
 
 Il répond d'après le fichier JSON que nomme `FAUX_GH_REPONSES`. La clé est le point d'API suivi de
 ses paramètres `-f` et `-F` triés, `chemin?clé=valeur&…` ; la valeur, `{"code": 0 ou 1,
@@ -18,16 +25,32 @@ ses paramètres `-f` et `-F` triés, `chemin?clé=valeur&…` ; la valeur, `{"co
 
 import json
 import os
+import re
 import sys
 
 INTERDITS = set('&|<>^%"\n\r')
 AVEC_VALEUR = {"-X", "--method", "-f", "--raw-field", "-F", "--field"}
+TEXTE = {"-f", "--raw-field"}
+TYPE = {"-F", "--field"}
 DRAPEAUX = {"--paginate", "--slurp"}
+# Les appels que P9 pagine : la liste des dépôts, les PR ouvertes (avec `state=open`) et leurs
+# fichiers.
+_FICHIERS_DE_PR = re.compile(r"repos/[^/]+/[^/]+/pulls/[0-9]+/files")
+_PR = re.compile(r"repos/[^/]+/[^/]+/pulls")
 
 
 def _refus(message: str) -> int:
     sys.stderr.write(f"faux gh : {message}\n")
     return 2
+
+
+def _pagine(point: str, textes: list[str]) -> bool:
+    """L'appel est l'un de ceux que P9 pagine."""
+    return (
+        point == "user/repos"
+        or _FICHIERS_DE_PR.fullmatch(point) is not None
+        or (_PR.fullmatch(point) is not None and "state=open" in textes)
+    )
 
 
 def main(argv: list[str]) -> int:
@@ -40,7 +63,8 @@ def main(argv: list[str]) -> int:
         return _refus("seul gh api est connu")
     methode = None
     point = None
-    parametres: list[str] = []
+    textes: list[str] = []
+    types: list[str] = []
     drapeaux: set[str] = set()
     i = 1
     while i < len(argv):
@@ -51,8 +75,10 @@ def main(argv: list[str]) -> int:
             valeur = argv[i + 1]
             if argument in ("-X", "--method"):
                 methode = valeur
+            elif argument in TEXTE:
+                textes.append(valeur)
             else:
-                parametres.append(valeur)
+                types.append(valeur)
             i += 2
             continue
         if argument in DRAPEAUX:
@@ -70,7 +96,11 @@ def main(argv: list[str]) -> int:
         return _refus("--slurp sans --paginate")
     if point != "graphql" and methode != "GET":
         return _refus("appel REST sans -X GET")
-    cle = point + ("?" + "&".join(sorted(parametres)) if parametres else "")
+    if _pagine(point, textes) and drapeaux != DRAPEAUX:
+        return _refus("appel paginé sans --paginate --slurp")
+    if point == "graphql" and not any(valeur.startswith("n=") for valeur in types):
+        return _refus("graphql : n ne passe pas par -F")
+    cle = point + ("?" + "&".join(sorted(textes + types)) if textes or types else "")
     with open(os.environ["FAUX_GH_REPONSES"], encoding="utf-8") as f:
         reponses = json.load(f)
     if cle not in reponses:

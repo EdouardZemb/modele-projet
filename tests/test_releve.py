@@ -581,7 +581,12 @@ def reponses_completes(banc) -> dict:
 
 
 def lancer(faux, banc, reponses: dict, dossier: Path, *options, tempdir=None):
-    """Le relevé, lancé dans le processus contre le faux `gh` : (code, sortie, appels)."""
+    """Le relevé, lancé dans le processus contre le faux `gh` : (code, sortie, appels).
+
+    Un espion sur `subprocess.run` note l'entrée de chaque lancement du faux : chacun passe
+    `stdin=subprocess.DEVNULL` (P9). Le faux lit son entrée jusqu'à la fin, mais cela ne prouve
+    rien seul : sous la capture de pytest, le descripteur 0 du processus, dont un enfant hérite, est
+    déjà fermé (revue finale du lot 17)."""
     dossier.mkdir(parents=True, exist_ok=True)
     fichier = dossier / "reponses.json"
     fichier.write_text(json.dumps(reponses), encoding="utf-8")
@@ -593,13 +598,23 @@ def lancer(faux, banc, reponses: dict, dossier: Path, *options, tempdir=None):
     os.environ["FAUX_GH_JOURNAL"] = str(journal)
     if tempdir is not None:
         tempfile.tempdir = str(tempdir)
+    vrai_run = releve.subprocess.run
+    entrees = []
+
+    def espion(commande, *args, **kwargs):
+        if Path(str(commande[0])).name.casefold() == faux.name.casefold():
+            entrees.append(kwargs.get("stdin", "absente"))
+        return vrai_run(commande, *args, **kwargs)
+
     sortie = io.StringIO()
+    releve.subprocess.run = espion
     try:
         with contextlib.redirect_stdout(sortie):
             code = releve.main(
                 [*options, "--compte", COMPTE, "--gh", str(faux), "--clone", str(banc.racine)]
             )
     finally:
+        releve.subprocess.run = vrai_run
         tempfile.tempdir = ancien_tempdir
         for k, v in anciens.items():
             if v is None:
@@ -607,6 +622,9 @@ def lancer(faux, banc, reponses: dict, dossier: Path, *options, tempdir=None):
             else:
                 os.environ[k] = v
     appels = [json.loads(ligne) for ligne in journal.read_text(encoding="utf-8").splitlines()]
+    # l'espion a vu chaque lancement du faux, et chacun a fermé son entrée
+    assert len(entrees) == len(appels), (len(entrees), len(appels))
+    assert all(entree is subprocess.DEVNULL for entree in entrees), entrees
     return code, sortie.getvalue(), appels
 
 
@@ -705,7 +723,8 @@ def test_releve_projets(complet):
     # ni l'archivé ni le dépôt d'un autre propriétaire ne sont lus
     for nom in ("gamma", "omicron"):
         assert not any(nom in json.dumps(appel["args"]) for appel in complet.appels), nom
-    # chaque appel a vu son entrée fermée : le faux, qui la lit jusqu'à la fin, a répondu
+    # chaque lancement du faux a passé `stdin=subprocess.DEVNULL`, ce que l'espion de `lancer`
+    # vérifie à chaque relevé : la capture de pytest ferme déjà l'entrée dont un enfant hérite
     assert complet.code == releve.EXIT_A_LIRE
 
 

@@ -1341,6 +1341,11 @@ def test_plan_de_tranche(racine, monkeypatch):
     (plans / "m.md").write_text(plan_maitre(), encoding="utf-8")
     (plans / "u.md").write_bytes(plan_maitre().encode("utf-16"))
     (plans / "t.md").write_text(plan_neuf(), encoding="utf-8")
+    # un plan maître a des tranches et aucune tâche : ni une cible mêlée, ni une cible sans unité
+    # (revue finale du lot 17)
+    melee = ("### Tranche 1 · x", "### Tâche 2 : la clôture")
+    (plans / "x.md").write_text(plan_neuf(taches=melee), encoding="utf-8")
+    (plans / "v.md").write_text(plan_neuf(taches=()), encoding="utf-8")
     (plans / "d.md").mkdir()
     ligne = "Plan maître : `.claude/plans/m.md`"
     for entete in (
@@ -1359,6 +1364,8 @@ def test_plan_de_tranche(racine, monkeypatch):
         (".claude/plans/absent.md", "plan maître absent : .claude/plans/absent.md"),
         (".claude/plans/d.md", "plan maître absent : .claude/plans/d.md"),
         (".claude/plans/t.md", ".claude/plans/t.md n'est pas un plan maître"),
+        (".claude/plans/x.md", ".claude/plans/x.md n'est pas un plan maître"),
+        (".claude/plans/v.md", ".claude/plans/v.md n'est pas un plan maître"),
     ):
         lignes, refus = verifier(plan_de_tranche(f"Plan maître : `{chemin}`"), racine, neuf=True)
         assert refus, (chemin, lignes)
