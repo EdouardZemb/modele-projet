@@ -15,10 +15,10 @@ modifie pas dans le projet. Un défaut se corrige dans `modele-projet`, pour tou
 5. Une PR de clôture : elle **supprime le plan** (dans un lot en tranches, le plan maître et les
    plans de tranche), reporte dans `CLAUDE.md` ou dans un ADR ce qui doit survivre, relit le
    README d'après `docs/modele/documentation.md`, et porte au registre du dépôt les leçons du lot
-   encore sans ligne ; un dépôt de données, qui n'a pas de registre à lui, les porte au registre de
-   son dépôt de code (voir « Le registre »). Elle seule porte « Closes #N », les autres PR du lot
-   disant « Partie de #N », et elle nomme la tête relue (voir « Le texte de la PR »). L'unité de
-   clôture du plan nomme ces gestes (voir « La clôture d'un plan »).
+   encore sans ligne ; un dépôt de la cible `donnees`, qui n'a pas de registre à lui, les porte au
+   registre de son dépôt de code (voir « Le registre »). Elle seule porte « Closes #N », les autres
+   PR du lot disant « Partie de #N », et elle nomme la tête relue (voir « Le texte de la PR »).
+   L'unité de clôture du plan nomme ces gestes (voir « La clôture d'un plan »).
 6. L'étiquette `vX.Y.Z`, **avec l'accord d'Edouard**.
 
 ## Les outils
@@ -519,7 +519,8 @@ Les numéros ne se réutilisent jamais. **Au 3e constat portant le même motif, 
 test, un hook, une vérification de CI), et la ligne le dit. La compétence `/consigner`
 (`.claude/skills/consigner/SKILL.md`) écrit la ligne.
 
-Un dépôt de données n'a pas de registre à lui : ses leçons vont au registre de son dépôt de code.
+Un dépôt de la cible `donnees` n'a pas de registre à lui : ses leçons vont au registre de son dépôt
+de code.
 
 ## Les familles de garde-fous de l'écosystème
 

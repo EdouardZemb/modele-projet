@@ -163,8 +163,8 @@ est pire qu'un texte absent.
 | ce que les lots ont appris | `docs/registre.md` |
 | la mise en service et les secours | `docs/exploitation.md`, en cible `serveur` |
 
-Dans un dépôt de données, `CLAUDE.md` dit ce que le dépôt porte, et ses leçons vont au registre du
-dépôt de code.
+Dans un dépôt de la cible `donnees`, `CLAUDE.md` dit ce que le dépôt porte, et ses leçons vont au
+registre du dépôt de code.
 
 ## Les textes d'un projet
 
@@ -179,8 +179,8 @@ dépôt de code.
 | plans | conduite | une session | la session | supprimés à la clôture |
 | brief, cadrage | explication | Edouard, une session | figés | jamais |
 
-Les fichiers de `docs/modele/`, ce texte compris, sont tenus par le modèle. Un dépôt de données n'a
-ni registre, ni pistes, ni plans, ni ADR à lui.
+Les fichiers de `docs/modele/`, ce texte compris, sont tenus par le modèle. Un dépôt de la cible
+`donnees` n'a ni registre, ni pistes, ni plans, ni ADR à lui.
 
 ## Retirer un texte
 

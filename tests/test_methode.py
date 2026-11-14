@@ -255,11 +255,14 @@ def test_modele_de_pr_ferme_l_issue():
 
 
 def test_modele_de_pr_renvoie_un_depot_de_donnees_au_registre_du_code():
+    """Seul un dépôt de la cible `donnees` n'a pas de registre à lui : `serveur` et
+    `pupitre-donnees`, de nature `donnees` en cible `aucune`, ont le leur (revue finale du lot 17)."""
     texte = " ".join(lire(TEMPLATE / ".github/pull_request_template.md").split())
     assert (
-        "ou « aucun constat ». Dans un dépôt de données, le registre est celui du dépôt de code."
-        in texte
+        "ou « aucun constat ». Dans un dépôt de la cible `donnees`, le registre est celui du dépôt "
+        "de code." in texte
     )
+    assert "Dans un dépôt de données, le registre" not in texte
 
 
 # --- revue finale du lot 1 ---
@@ -507,11 +510,13 @@ def test_methode_dit_la_nature_des_depots():
         "le message d'un commit compte comme un chemin, `message`",
         "le modèle outille en partie seulement « aucune donnée réelle dans le dépôt »",
         "**Le test d'isolation des chemins de données reste une obligation du projet**",
-        "Un dépôt de données n'a pas de registre à lui",
+        # seul un dépôt de la cible `donnees` n'a pas de registre (revue finale du lot 17)
+        "Un dépôt de la cible `donnees` n'a pas de registre à lui",
         "Arbitrage du 16/10 : le modèle outille **quatre** familles",
     ):
         assert fragment in texte, fragment
     assert "Avant de passer un dépôt privé en public" not in texte
+    assert "Un dépôt de données n'a pas de registre" not in texte
 
 
 def test_garde_fous_dit_la_porte_des_masques():
@@ -1362,6 +1367,12 @@ def test_documentation_md(tmp_path, env_isole):
         "un lien `docs/Cadrage.md` vers `docs/cadrage.md`",
         "un avertissement de trop, jamais un refus",
         *DOCUMENTATION_ET_DOCSTRING,
+        # seul un dépôt de la cible `donnees` n'a pas de registre à lui (revue finale du lot 17)
+        (
+            "Dans un dépôt de la cible `donnees`, `CLAUDE.md` dit ce que le dépôt porte, et ses "
+            "leçons vont au registre du dépôt de code."
+        ),
+        "Un dépôt de la cible `donnees` n'a ni registre, ni pistes, ni plans, ni ADR à lui.",
     ):
         assert fragment in plat, fragment
     for ancien in (
@@ -1370,6 +1381,8 @@ def test_documentation_md(tmp_path, env_isole):
         "Quatre laissent passer",
         "Un autre laisse passer à tort ce que GitHub cache",
         "Deux autres laissent passer",
+        "Un dépôt de données n'a ni registre",
+        "Dans un dépôt de données, `CLAUDE.md` dit",
     ):
         assert ancien not in plat, ancien
     # Les lignes de la licence et de la carte, telles que le script les écrit sur une racine, sont
@@ -1657,7 +1670,7 @@ def test_methode_dit_les_plans():
 
 def test_methode_dit_la_cloture_d_un_plan():
     """La clôture d'un plan (lot 17) : le point 5 du cycle porte les leçons au registre, celui du
-    dépôt de code pour un dépôt de données ; un lot en tranches dit la ligne `Plan maître :` et les
+    dépôt de code pour un dépôt de la cible `donnees` ; un lot en tranches dit la ligne `Plan maître :` et les
     gestes de la clôture du lot ; « La clôture d'un plan » dit l'unité, son texte, ses gestes et
     leurs expressions, `--cloture`, le refus, ce que la porte ne voit pas, le plan de tranche et le
     plan hors lot ; le tableau des garde-fous dit la clôture."""
@@ -1666,8 +1679,8 @@ def test_methode_dit_la_cloture_d_un_plan():
         # le point 5 du cycle
         (
             "relit le README d'après `docs/modele/documentation.md`, et porte au registre du dépôt "
-            "les leçons du lot encore sans ligne ; un dépôt de données, qui n'a pas de registre à "
-            "lui, les porte au registre de son dépôt de code (voir « Le registre »)."
+            "les leçons du lot encore sans ligne ; un dépôt de la cible `donnees`, qui n'a pas de "
+            "registre à lui, les porte au registre de son dépôt de code (voir « Le registre »)."
         ),
         "L'unité de clôture du plan nomme ces gestes (voir « La clôture d'un plan »).",
         # un lot en tranches
