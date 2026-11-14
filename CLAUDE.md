@@ -511,6 +511,30 @@ Le cadrage est dans `docs/cadrage.md` ; ce que les lots ont appris, dans `docs/r
 
   Avec `"totalCount":1` à la troisième ligne, elle éprouve la tête relue de la PR de clôture. Elle
   n'éprouve ni le format du titre ni la confidentialité, que `texte-pr` contrôle aussi.
+- `python -B poste/releve.py [--depuis <étiquette>] [--prs N]` : le relevé des projets nés du
+  modèle, depuis la racine du clone, sous Git Bash, `gh` connecté. Il lit GitHub par `gh api`, en
+  lecture seule, dépôts privés compris, ce que la CI ne peut pas : il tourne sur le poste, par la
+  session. Il lance sur ce qu'il lit les scripts du modèle de deux versions, celle de chaque projet
+  et la tête du clone (son `HEAD`). Ses deux rôles : l'inventaire, avant une spec ou un plan,
+  quand la tête ne porte pas encore le changement (les règles des projets, leurs plans en cours,
+  leurs fichiers gérés modifiés) ; la mesure de l'effet de ce que la tête change. Ses trois
+  moments : avant de soumettre une spec ou un plan, pour en écrire les « Effets cherchés » ; à la
+  revue finale, dont il est une lentille ; à la clôture, dont la PR cite sa sortie. Une PR n'en
+  cite que des comptes et des noms de dépôts publics, après la porte de confidentialité : ni les
+  noms des plans ni les numéros de PR des dépôts privés. Il rend 1 quand quelque chose est à lire
+  (un verdict qui change, une PR ouverte qui ajoute un plan, un contrôle géré absent d'une règle,
+  un fichier géré modifié dans un projet), ou que quelque chose n'est pas relevé (une erreur de
+  l'API, une version absente du clone : `git fetch --tags`, un script du modèle qui plante, le
+  dossier temporaire non retiré), 0 sinon. Il rend 64 pour une erreur d'usage : `gh` absent ou
+  sans accès, un dossier qui n'est pas un clone du modèle qu'il sait lire. Les plans en cours qui
+  « refuseraient s'ils étaient neufs » sont une information : ils ne rendent pas le code 1, comme
+  les contrôles propres d'une règle. Parmi les fichiers gérés, seuls les dossiers exclus des
+  formateurs sont comparés, pas le gabarit de PR ni les autres fichiers gérés hors d'eux. Par
+  défaut, il compare ceux que le modèle change entre la version de chaque projet et la tête, et un
+  projet à la version de la tête n'en montre aucun. L'inventaire complet des fichiers gérés
+  demande `--depuis <ancienne étiquette>`, qui ouvre cet intervalle pour tous les projets, chacun
+  comparé au modèle à sa version. `--prs N`, de 1 à 100, dit combien de PR récentes passent par les
+  deux `texte_pr.py` (50 par défaut). `tests/test_releve.py` l'éprouve contre un faux `gh`.
 - `copier copy --vcs-ref <étiquette> gh:EdouardZemb/modele-projet <dossier>` : créer un projet.
 - `copier update` : mettre à jour un projet né du modèle (à lancer dans ce projet, pas ici).
 - `git config core.hooksPath .githooks` : à poser dans chaque clone et chaque worktree.
