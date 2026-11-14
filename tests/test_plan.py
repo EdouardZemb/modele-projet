@@ -9,6 +9,7 @@ from pathlib import Path
 import plan as p
 import pytest
 import texte_pr
+from conftest import RACINE
 
 A_PY = "un\ndef f():\n    return 2\n"
 REFUS = "plan : refus"
@@ -45,10 +46,31 @@ def plan(
     return "\n".join(morceaux)
 
 
+# une clôture qui nomme les six gestes, chacun par un passage de `PASSAGES`
+CLOTURE_CONFORME = (
+    "Supprimer le plan ; `CLAUDE.md` à jour ; README relu ; les leçons du lot au registre ; "
+    "« Closes #1 » ; Tête relue."
+)
+PASSAGES = {
+    "le plan supprimé": "Supprimer le plan",
+    "CLAUDE.md ou un ADR": "`CLAUDE.md` à jour",
+    "le README": "README relu",
+    "les leçons du lot": "les leçons du lot au registre",
+    "la fermeture de l'issue": "« Closes #1 »",
+    "la tête relue": "Tête relue",
+}
+
+
+def cloture(texte=CLOTURE_CONFORME, titre="### Tâche 2 : la clôture"):
+    """Les tâches d'un plan dont l'unité de clôture, la Tâche 2, porte `texte`."""
+    return ("### Tâche 1 : x", f"{titre}\n\n{texte}")
+
+
 def plan_neuf(**kw):
-    """Un plan neuf : celui de `plan()`, avec « Effets cherchés » à « Aucun. » sauf si `effets`
-    est donné."""
+    """Un plan neuf : celui de `plan()`, avec « Effets cherchés » à « Aucun. » et une clôture qui
+    nomme les six gestes, sauf si `effets` ou `taches` sont donnés."""
     kw.setdefault("effets", "Aucun.")
+    kw.setdefault("taches", cloture())
     return plan(**kw)
 
 
@@ -986,3 +1008,523 @@ def test_main_neuf(racine, lancer):
     assert "--cloture MOT attendu" in sortie
     code, sortie = lancer(plan(), "--racine", str(racine), "--cloture", "cadrage")
     assert code == 0, sortie
+
+
+# --- la clôture d'un plan neuf, le plan de tranche et le plan hors lot ---
+
+TOUS_LES_GESTES = (
+    "le plan supprimé, CLAUDE.md ou un ADR, le README, les leçons du lot, la fermeture de l'issue, "
+    "la tête relue"
+)
+
+
+def non_nommes(noms, unite="Tâche 2"):
+    """Le refus d'une clôture qui ne nomme pas `noms`."""
+    return f"clôture ({unite}) : gestes non nommés : {noms}"
+
+
+def test_cloture_conforme(racine):
+    """Une clôture qui nomme les six gestes passe ; il en manque un, puis deux : le refus les nomme
+    dans l'ordre de `GESTES`, jamais le texte du plan."""
+    assert list(p.GESTES) == [
+        "le plan supprimé",
+        "CLAUDE.md ou un ADR",
+        "le README",
+        "les leçons du lot",
+        "la fermeture de l'issue",
+        "la tête relue",
+    ]
+    assert list(PASSAGES) == list(p.GESTES)
+    assert p.AUCUNE_CLOTURE == (
+        "aucune unité de clôture : un titre `### Tâche N : … clôture`, ou `### Tranche N · … "
+        "clôture` dans un plan maître ; un plan de tranche porte la ligne `Plan maître :`, un plan "
+        "hors lot la ligne `Hors lot :`"
+    )
+    for lieux in (True, False):
+        lignes, refus = verifier(plan_neuf(), racine, lieux=lieux, neuf=True)
+        assert not refus, lignes
+    sans_readme = CLOTURE_CONFORME.replace("README relu ; ", "")
+    lignes, refus = verifier(plan_neuf(taches=cloture(sans_readme)), racine, neuf=True)
+    assert refus
+    assert non_nommes("le README") in lignes, lignes
+    sans_deux = sans_readme.replace("les leçons du lot au registre ; ", "")
+    lignes, refus = verifier(plan_neuf(taches=cloture(sans_deux)), racine, neuf=True)
+    assert refus
+    assert non_nommes("le README, les leçons du lot") in lignes, lignes
+    # la clôture se vérifie après les sections, avant le double des numéros et le résumé
+    taches = (*cloture(sans_readme), "### Tâche 2 : y")
+    lignes, refus = verifier(plan_neuf(outils="Une phrase.", taches=taches), racine, neuf=True)
+    assert lignes[-4:-1] == [OUTIL_REFUSE, non_nommes("le README"), "Tâche 2 en double"], lignes
+
+
+def test_cloture_expressions(racine):
+    """Chaque geste se reconnaît à son expression, cherchée dans le texte replié de l'unité : ses
+    tournures admises passent, et un voisin refuse en le nommant. Pour chaque borne `(?<!\\w)` et
+    `(?!\\w)`, un cas que seule elle refuse."""
+    admis = {
+        "le plan supprimé": ("plan supprimé", "Suppression du plan"),
+        "CLAUDE.md ou un ADR": ("un ADR", "ADR"),
+        "les leçons du lot": ("leçons", "les constats au registre"),
+        "la fermeture de l'issue": (
+            "Fixes #1",
+            "ferme l'issue",
+            # l'apostrophe typographique dans un code en ligne : `_normaliser` l'y laisserait
+            "`ferme l\u2019issue`",
+        ),
+        "la tête relue": ("Tête  relue", "Te\u0302te relue", "`Tête\u00a0relue`"),
+    }
+    for nom, tournures in admis.items():
+        for tournure in tournures:
+            texte = CLOTURE_CONFORME.replace(PASSAGES[nom], tournure)
+            assert texte != CLOTURE_CONFORME, tournure
+            lignes, refus = verifier(plan_neuf(taches=cloture(texte)), racine, neuf=True)
+            assert not refus, (nom, tournure, lignes)
+    refuses = {
+        # le voisin, puis un cas par borne
+        "le plan supprimé": ("retire le plan", "nonsupprimé le plan"),
+        "CLAUDE.md ou un ADR": (
+            "`CLAUDE-md` à jour",
+            "monclaude.md",
+            "CLAUDE.mdx",
+            "cadr",
+            "adrénaline",
+            "le cadrage",
+        ),
+        "le README": ("LISEZMOI relu", "xreadme", "readmes"),
+        "les leçons du lot": ("le registre", "surleçon", "leçonnaire"),
+        "la fermeture de l'issue": (
+            "« Closed #1 »",
+            "encloses",
+            "closeset",
+            "prefixes",
+            "fixesx",
+            "referme l'issue",
+            "ferme l'issues",
+            "se ferme",
+        ),
+        "la tête relue": ("tête lue", "l'entête relue", "tête relues"),
+    }
+    for nom, voisins in refuses.items():
+        for voisin in voisins:
+            texte = CLOTURE_CONFORME.replace(PASSAGES[nom], voisin)
+            lignes, refus = verifier(plan_neuf(taches=cloture(texte)), racine, neuf=True)
+            assert refus, (nom, voisin, lignes)
+            assert non_nommes(nom) in lignes, (nom, voisin, lignes)
+
+
+def test_cloture_mots_coupes_en_fin_de_ligne(racine):
+    """Une clôture en prose coupée à 100 colonnes, sous une puce indentée : « ferme l'issue »,
+    « Tête relue » et un mot de `--cloture` enjambent une fin de ligne, et passent."""
+    texte = (
+        "- [ ] **Étape 1 : la PR de clôture.** Elle supprime le plan, reporte dans `CLAUDE.md` ce\n"
+        "  qui doit survivre, relit le README et porte au registre les leçons du lot ; elle ferme\n"
+        "  l'issue, nomme la tête\n"
+        "  relue, et recueille les « À\n"
+        "  relire »."
+    )
+    taches = cloture(texte)
+    lignes, refus = verifier(plan_neuf(taches=taches), racine, neuf=True, cloture=("à relire",))
+    assert not refus, lignes
+
+
+def test_cloture_commentaires_et_blocs(racine):
+    """Un geste nommé dans un commentaire ne compte pas ; dans un bloc de code, il compte, sauf
+    dans un bloc pris dans un commentaire retiré. L'unité court jusqu'au titre suivant de niveau 1
+    à 3, lu hors des blocs de code : un `# commentaire` dans un bloc ou un titre de niveau 4 ne la
+    coupe pas. Un `<!--` jamais fermé dans l'unité refuse."""
+    sans_readme = CLOTURE_CONFORME.replace("README relu ; ", "")
+    for texte in (
+        CLOTURE_CONFORME.replace("README relu", "<!-- README relu -->"),
+        CLOTURE_CONFORME.replace("README relu", "<!--\nREADME relu\n-->"),
+        sans_readme + "\n\n<!--\n```sh\ngit add README.md\n```\n-->",
+    ):
+        lignes, refus = verifier(plan_neuf(taches=cloture(texte)), racine, neuf=True)
+        assert refus, (texte, lignes)
+        assert non_nommes("le README") in lignes, (texte, lignes)
+    for texte in (
+        sans_readme + "\n\n```sh\ngit add README.md\n```",
+        sans_readme + "\n\n```sh\n# un commentaire\n```\n\nREADME relu.",
+        sans_readme + "\n\n#### Le dernier geste\n\nREADME relu.",
+        # un `<!--` dans un bloc de code, ou dans un code en ligne, ne retire rien
+        sans_readme + "\n\n```html\n<!-- début\n```\n\nREADME relu.",
+        sans_readme + " Un `<!--` en code en ligne. README relu.",
+        sans_readme + " <!-- note --> README relu.",
+    ):
+        lignes, refus = verifier(plan_neuf(taches=cloture(texte)), racine, neuf=True)
+        assert not refus, (texte, lignes)
+    taches = (*cloture(sans_readme), "### Tâche 3 : x\n\nREADME relu.")
+    lignes, refus = verifier(plan_neuf(taches=taches), racine, neuf=True)
+    assert refus
+    assert non_nommes("le README") in lignes, lignes
+    ouvert = f"clôture (Tâche 2) : {p.COMMENTAIRE_OUVERT}"
+    assert ouvert == "clôture (Tâche 2) : commentaire HTML jamais fermé, qui cache la suite"
+    for texte, manquants in (
+        (CLOTURE_CONFORME + "\n\n<!-- une note", None),
+        (CLOTURE_CONFORME + " texte <!-- une note", None),
+        # le commentaire cache la suite : le README, nommé après lui, ne compte pas
+        (sans_readme + "\n\n<!-- une note\n\nREADME relu.", "le README"),
+    ):
+        lignes, refus = verifier(plan_neuf(taches=cloture(texte)), racine, neuf=True)
+        assert refus, (texte, lignes)
+        assert ouvert in lignes, (texte, lignes)
+        nommes = [ligne for ligne in lignes if "gestes non nommés" in ligne]
+        assert nommes == ([] if manquants is None else [non_nommes(manquants)]), (texte, lignes)
+
+
+def test_cloture_mots_du_depot(racine, lancer):
+    """`--cloture` ajoute des mots, repliés comme le texte : le refus les nomme entre guillemets,
+    après les gestes, chaque caractère de contrôle remplacé ; une valeur vide rend 64 ; `#133` se
+    trouve après une espace."""
+    avec = CLOTURE_CONFORME + " Le cadrage amendé ; les « À relire » recueillis."
+    mots = ("cadrage", "à relire")
+    lignes, refus = verifier(plan_neuf(taches=cloture(avec)), racine, neuf=True, cloture=mots)
+    assert not refus, lignes
+    lignes, refus = verifier(plan_neuf(), racine, neuf=True, cloture=mots)
+    assert refus
+    assert non_nommes("« cadrage », « à relire »") in lignes, lignes
+    sans_readme = CLOTURE_CONFORME.replace("README relu ; ", "")
+    texte = plan_neuf(taches=cloture(sans_readme))
+    lignes, refus = verifier(texte, racine, neuf=True, cloture=mots)
+    assert non_nommes("le README, « cadrage », « à relire »") in lignes, lignes
+    lignes, refus = verifier(plan_neuf(), racine, neuf=True, cloture=("a\x07b",))
+    assert non_nommes("« a?b »") in lignes, lignes
+    options = ("--racine", str(racine), "--neuf")
+    # « À relire » de l'option contre « À relire » du texte, sans égard à la casse ni aux blancs
+    for mot in ("À relire", "À  relire", "à relire"):
+        code, sortie = lancer(
+            plan_neuf(taches=cloture(avec)), *options, "--cloture", "cadrage", "--cloture", mot
+        )
+        assert code == 0, (mot, sortie)
+    code, sortie = lancer(plan_neuf(), *options, "--cloture", "À relire")
+    assert code == 1, sortie
+    assert non_nommes("« à relire »") in sortie, sortie
+    for vide in ("", "\u00a0"):
+        code, sortie = lancer(plan_neuf(), *options, "--cloture", vide)
+        assert code == 64, sortie
+        assert "--cloture MOT attendu" in sortie, sortie
+    prochain = plan_neuf(taches=cloture(CLOTURE_CONFORME + " Prochain cite #133."))
+    code, sortie = lancer(prochain, *options, "--cloture", "#133")
+    assert code == 0, sortie
+    code, sortie = lancer(plan_neuf(), *options, "--cloture", "#133")
+    assert code == 1, sortie
+    assert non_nommes("« #133 »") in sortie, sortie
+
+
+def test_cloture_exigee_quand_la_section_est_presente(racine):
+    """Un plan neuf qui porte « Effets cherchés », vérifié plus tard sans `--neuf` comme un plan
+    modifié, reste tenu à sa clôture : le retrait d'un geste refuse. Un plan en cours, avec la même
+    clôture, passe."""
+    sans_readme = cloture(CLOTURE_CONFORME.replace("README relu ; ", ""))
+    for lieux in (True, False):
+        lignes, refus = verifier(plan_neuf(taches=sans_readme), racine, lieux=lieux)
+        assert refus, (lieux, lignes)
+        assert non_nommes("le README") in lignes, lignes
+        lignes, refus = verifier(plan(taches=sans_readme), racine, lieux=lieux)
+        assert not refus, (lieux, lignes)
+    lignes, refus = verifier(plan_neuf(), racine)
+    assert not refus, lignes
+
+
+def test_cloture_absente(racine):
+    """Sans unité de clôture, un plan neuf refuse, par `AUCUNE_CLOTURE` ; un plan en cours
+    passe."""
+    une_tache = ("### Tâche 1 : x",)
+    for lieux in (True, False):
+        lignes, refus = verifier(plan(taches=une_tache), racine, lieux=lieux, neuf=True)
+        assert refus
+        assert p.AUCUNE_CLOTURE in lignes, lignes
+        lignes, refus = verifier(plan(taches=une_tache), racine, lieux=lieux)
+        assert not refus, lignes
+        lignes, refus = verifier(plan_neuf(taches=une_tache), racine, lieux=lieux)
+        assert refus
+        assert p.AUCUNE_CLOTURE in lignes, lignes
+
+
+def test_cloture_premier_titre(racine):
+    """L'unité de clôture est la première dont le titre dit « clôture » : un titre qui le dit avant
+    la vraie clôture en devient l'unité, et le refus la nomme."""
+    taches = (
+        "### Tâche 1 : x",
+        "### Tâche 2 : la porte de clôture",
+        "### Tâche 3 : la clôture\n\n" + CLOTURE_CONFORME,
+    )
+    lignes, refus = verifier(plan_neuf(taches=taches), racine, neuf=True)
+    assert refus
+    assert non_nommes(TOUS_LES_GESTES) in lignes, lignes
+    assert not [ligne for ligne in lignes if "Tâche 3" in ligne], lignes
+
+
+MAITRE_CONFORME = ("### Tranche 1 · x", "### Tranche 2 · y", "### Tranche 3 · la clôture")
+REVUE_DE_TRANCHE = "- relecture : Tranche 1"
+
+
+def plan_maitre(texte=CLOTURE_CONFORME, **kw):
+    """Un plan maître neuf, dont la Tranche 3 est la clôture qui porte `texte`."""
+    titres = (*MAITRE_CONFORME[:2], f"{MAITRE_CONFORME[2]}\n\n{texte}")
+    return plan_neuf(revues=REVUE_DE_TRANCHE, taches=titres, **kw)
+
+
+def test_cloture_plan_maitre(racine):
+    """Un plan maître est tenu à sa clôture comme un plan à tâches : sa tranche de clôture nomme les
+    gestes, et le refus nomme la tranche."""
+    lignes, refus = verifier(plan_maitre(), racine, neuf=True)
+    assert not refus, lignes
+    lignes, refus = verifier(plan_maitre("Une étape."), racine, neuf=True)
+    assert refus
+    assert non_nommes(TOUS_LES_GESTES, "Tranche 3") in lignes, lignes
+
+
+def plan_de_tranche(entete, **kw):
+    """Un plan neuf qui porte `entete` et n'a qu'une tâche, sans unité de clôture."""
+    kw.setdefault("taches", ("### Tâche 1 : x",))
+    return plan_neuf(entete=entete, **kw)
+
+
+def test_plan_de_tranche(racine, monkeypatch):
+    """La ligne `Plan maître :` dispense un plan de tranche d'unité de clôture et de gestes. Sa
+    forme se vérifie sans ouvrir de fichier ; lieux ouverts, sa cible est un plan maître sous la racine.
+    Elle ne se lit qu'avant la première unité, hors des blocs de code et des commentaires."""
+    plans = racine / ".claude/plans"
+    plans.mkdir(parents=True)
+    (plans / "m.md").write_text(plan_maitre(), encoding="utf-8")
+    (plans / "u.md").write_bytes(plan_maitre().encode("utf-16"))
+    (plans / "t.md").write_text(plan_neuf(), encoding="utf-8")
+    (plans / "d.md").mkdir()
+    ligne = "Plan maître : `.claude/plans/m.md`"
+    for entete in (
+        ligne,
+        "**Plan maître :** `.claude/plans/m.md`",
+        "**Plan maître** : `.claude/plans/m.md`",
+        "Plan maître: `.claude/plans/m.md`",
+        "   PLAN MAÎTRE : `.claude/plans/m.md`  ",
+        "Plan maître : `.claude/plans/u.md`",
+        "\n### Les écarts\n\n" + ligne,
+    ):
+        for lieux in (True, False):
+            lignes, refus = verifier(plan_de_tranche(entete), racine, lieux=lieux, neuf=True)
+            assert not refus, (entete, lieux, lignes)
+    for chemin, attendu in (
+        (".claude/plans/absent.md", "plan maître absent : .claude/plans/absent.md"),
+        (".claude/plans/d.md", "plan maître absent : .claude/plans/d.md"),
+        (".claude/plans/t.md", ".claude/plans/t.md n'est pas un plan maître"),
+    ):
+        lignes, refus = verifier(plan_de_tranche(f"Plan maître : `{chemin}`"), racine, neuf=True)
+        assert refus, (chemin, lignes)
+        assert attendu in lignes, (chemin, lignes)
+        # sans les lieux, la cible n'est pas lue
+        lignes, refus = verifier(
+            plan_de_tranche(f"Plan maître : `{chemin}`"), racine, lieux=False, neuf=True
+        )
+        assert not refus, (chemin, lignes)
+    b = chr(92)
+    raisons = {
+        "C:/x.md": "deux-points dans le chemin",
+        "/x.md": "chemin absolu",
+        f".claude{b}plans{b}m.md": "barre oblique inverse",
+        ".claude/plans/../m.md": "..",
+        "docs/m.md": "hors de .claude/plans/",
+        ".claude/plans/m.txt": "sans .md",
+    }
+    for chemin, raison in raisons.items():
+        assert p._chemin_du_plan_maitre(chemin) == raison, chemin
+    assert p._chemin_du_plan_maitre(".claude/plans/m.md") is None
+    assert p._chemin_du_plan_maitre(".claude/plans/x/m.md") is None
+    vus = espionner(monkeypatch)
+    for chemin, raison in raisons.items():
+        for lieux in (True, False):
+            vus.clear()
+            texte = plan_de_tranche(f"Plan maître : `{chemin}`")
+            lignes, refus = verifier(texte, racine, lieux=lieux, neuf=True)
+            assert refus, (chemin, lignes)
+            assert f"chemin du plan maître refusé ({raison})" in lignes, (chemin, lignes)
+            assert vus == [], (chemin, vus)
+    # sans les lieux, rien n'est lu, et le double refuse toujours
+    absent = "Plan maître : `.claude/plans/absent.md`"
+    vus.clear()
+    lignes, refus = verifier(plan_de_tranche(absent), racine, lieux=False, neuf=True)
+    assert not refus and vus == [], (lignes, vus)
+    for lieux in (True, False):
+        texte = plan_de_tranche(f"{ligne}\n{absent}")
+        lignes, refus = verifier(texte, racine, lieux=lieux, neuf=True)
+        assert refus
+        assert "plan maître en double" in lignes, lignes
+    monkeypatch.undo()
+    for entete in ("Plan maître :", "Plan maître : .claude/plans/m.md", f"{ligne} et la suite"):
+        lignes, refus = verifier(plan_de_tranche(entete), racine, neuf=True)
+        assert refus, (entete, lignes)
+        assert "ligne « Plan maître : » sans chemin" in lignes, (entete, lignes)
+    lignes, refus = verifier(plan_maitre(entete=ligne), racine, neuf=True)
+    assert refus
+    assert "un plan maître ne nomme pas de plan maître" in lignes, lignes
+    # la ligne ne dispense pas un plan maître de sa clôture
+    lignes, refus = verifier(plan_maitre("Une étape.", entete=ligne), racine, neuf=True)
+    assert "un plan maître ne nomme pas de plan maître" in lignes, lignes
+    assert non_nommes(TOUS_LES_GESTES, "Tranche 3") in lignes, lignes
+    # après la première unité, dans un bloc de code ou dans un commentaire, la ligne ne compte pas
+    for texte in (
+        plan_neuf(taches=(f"### Tâche 1 : x\n\n{ligne}",)),
+        plan_de_tranche(f"```\n{ligne}\n```"),
+        plan_de_tranche(f"<!-- {ligne} -->"),
+    ):
+        lignes, refus = verifier(texte, racine, neuf=True)
+        assert refus, lignes
+        assert p.AUCUNE_CLOTURE in lignes, lignes
+    # sans `--neuf` ni « Effets cherchés », aucune de ces règles ne s'applique
+    for entete in ("Plan maître : `C:/x.md`", f"{ligne}\n{ligne}", "Plan maître :"):
+        lignes, refus = verifier(plan(entete=entete, taches=("### Tâche 1 : x",)), racine)
+        assert not refus, (entete, lignes)
+
+
+def test_plan_hors_lot(racine):
+    """La ligne `Hors lot :` dispense un plan d'unité de clôture et de gestes ; sa raison vide, son
+    double, sa présence dans un plan maître ou à côté de `Plan maître :` refusent."""
+    for entete in ("Hors lot : une hypothèse", "**Hors lot :** un correctif", "Hors lot: un essai"):
+        for lieux in (True, False):
+            lignes, refus = verifier(plan_de_tranche(entete), racine, lieux=lieux, neuf=True)
+            assert not refus, (entete, lignes)
+    ligne = "Hors lot : une hypothèse"
+    for texte, attendu in (
+        (plan_de_tranche("Hors lot :"), "ligne « Hors lot : » sans raison"),
+        (plan_de_tranche("Hors lot :   "), "ligne « Hors lot : » sans raison"),
+        (plan_de_tranche(f"{ligne}\nHors lot : un essai"), "ligne « Hors lot : » en double"),
+        (plan_maitre(entete=ligne), "un plan maître n'est pas hors lot"),
+        (
+            plan_de_tranche(f"{ligne}\nPlan maître : `.claude/plans/m.md`"),
+            "un plan ne porte pas à la fois « Plan maître : » et « Hors lot : »",
+        ),
+    ):
+        for lieux in (True, False):
+            lignes, refus = verifier(texte, racine, lieux=lieux, neuf=True)
+            assert refus, (attendu, lignes)
+            assert attendu in lignes, (attendu, lignes)
+    # la ligne ne dispense pas un plan maître de sa clôture
+    lignes, refus = verifier(plan_maitre("Une étape.", entete=ligne), racine, neuf=True)
+    assert "un plan maître n'est pas hors lot" in lignes, lignes
+    assert non_nommes(TOUS_LES_GESTES, "Tranche 3") in lignes, lignes
+    lignes, refus = verifier(plan(entete="Hors lot :", taches=("### Tâche 1 : x",)), racine)
+    assert not refus, lignes
+
+
+ANGLAIS = SUPERPOWERS.replace("## Revues", "## Effets cherchés\n\nAucun.\n\n## Revues").split(
+    "### Task 2: closure"
+)[0] + (
+    "### Task 2: closure\n\n"
+    "- [ ] **Step 1: Delete the plan**\n"
+    "- [ ] **Step 2: Add the lessons to the registry**\n"
+    "- [ ] **Step 3: Close the issue, and name the reviewed head**\n"
+)
+
+
+def test_cloture_plan_en_anglais(racine, lancer):
+    """Un plan neuf au gabarit de *superpowers*, dont la clôture dit ses gestes en anglais : il
+    refuse en nommant les six gestes, sans planter (Review Focus 1)."""
+    code, sortie = lancer(ANGLAIS, "--racine", str(racine), "--neuf")
+    assert code == 1, sortie
+    assert non_nommes(TOUS_LES_GESTES) in sortie, sortie
+    assert "Traceback" not in sortie, sortie
+
+
+# Des plans de banc de la forme des huit plans en cours (relevés le 13/11), et les lignes que
+# leur donnait `plan.py` en `v0.11.0`, par `--sans-lieux`, hors du résumé.
+EN_COURS = {
+    "un plan à tâches, sans « Effets cherchés » ni gestes": (
+        plan(
+            taches=cloture(
+                "Elle retire ce plan ; #3 se ferme ; le registre reçoit les constats du lot."
+            )
+        ),
+        [],
+    ),
+    "un plan maître sans ses sections": (
+        "# Un plan maître\n\n### Tranche 1 · x\n\n### Tranche 2 · la clôture\n\n- [ ] une étape\n",
+        [
+            "section « Mécanismes annoncés » absente (titre de niveau 2)",
+            "section « Outils et cas limites » absente (titre de niveau 2)",
+            "section « Revues » absente (titre de niveau 2)",
+        ],
+    ),
+    "un plan de tranche à ligne « Spécification : »": (
+        plan(
+            entete="**Spécification :** le plan maître `.claude/plans/lot1.md`, tranche 1.\n",
+            taches=("### Tâche 1 : x", "### Tâche 2 : la clôture de la Tranche 1"),
+        ),
+        [],
+    ),
+    "un plan sans unité de clôture": (
+        plan(taches=("### Tâche 1 : x", "### Ensuite")),
+        [],
+    ),
+}
+
+
+def test_plans_en_cours(racine):
+    """Les plans en cours, sans « Effets cherchés », vérifiés sans `--neuf` comme la CI vérifie un
+    plan modifié : les mêmes lignes qu'en `v0.11.0`, hors du résumé, qui gagne le compte des
+    effets."""
+    for nom, (texte, attendues) in EN_COURS.items():
+        lignes, refus = verifier(texte, racine, lieux=False)
+        assert lignes[:-1] == attendues, (nom, lignes)
+        assert refus == bool(attendues), (nom, lignes)
+
+
+def test_gestes_de_la_methode():
+    """La liste des gestes du paragraphe « La clôture d'un plan » de `methode.md` est celle de
+    `GESTES`, dans l'ordre ; le refus sans unité de clôture y est cité tel quel."""
+    texte = (RACINE / "template/docs/modele/methode.md").read_text(encoding="utf-8")
+    suite = texte.split("**La clôture d'un plan.**", 1)[1]
+    liste = suite.split("\n\n- ", 1)[1].split("\n\n", 1)[0]
+    noms = [element.split(" : ", 1)[0].replace("`", "") for element in liste.split("\n- ")]
+    assert noms == list(p.GESTES), noms
+    assert p.AUCUNE_CLOTURE in " ".join(texte.split())
+
+
+def test_replier():
+    """Le texte de la clôture et les mots de `--cloture` se replient sur tout leur texte, code en
+    ligne compris : NFC, apostrophes droites, espaces ordinaires, sans égard à la casse."""
+    brut = "Te\u0302te\u00a0RELUE, `l\u2019Issue\u202f`"
+    assert p._replier(brut) == "tête relue, `l'issue `"
+    assert p._mot("à relire").search("les « à\n  relire »")
+    assert not p._mot("à relire").search("les « à relirex »")
+    assert not p._mot("cadrage").search("encadrage")
+    assert p._mot("#133").search("cite #133.")
+
+
+def test_docstring_dit_la_cloture():
+    """Le module dit la clôture, ses gestes, son texte, `--cloture`, et les deux lignes
+    déclarées ; `verifier` dit ce qu'elle reçoit dans `cloture`."""
+    doc = " ".join(p.__doc__.split())
+    for fragment in (
+        "La clôture. Un plan neuf, ou qui porte « Effets cherchés », a une unité de clôture",
+        (
+            "le plan supprimé, `CLAUDE.md` ou un ADR, le README, les leçons du lot, la fermeture "
+            "de l'issue, la tête relue (`GESTES`)"
+        ),
+        "et chaque mot de `--cloture`, à répéter",
+        (
+            "Son texte va de son titre à la ligne qui précède le titre suivant de niveau 1 à 3, lu "
+            "comme dans `sections()`, ou à la fin du plan"
+        ),
+        "les commentaires retirés, les blocs de code gardés, sauf un bloc pris dans un commentaire",
+        "en NFC, apostrophes droites, espaces ordinaires, sans égard à la casse, code compris",
+        (
+            "Un mot se cherche sans lettre ni chiffre juste avant ni juste après lui ; `supprim` "
+            "et `suppress` n'ont cette limite qu'avant eux"
+        ),
+        "Un `<!--` jamais fermé dans l'unité refuse, et cache la suite.",
+        "dans l'ordre de `GESTES` puis des options, un mot de `--cloture` entre guillemets",
+        "Sans unité de clôture, un tel plan refuse (`AUCUNE_CLOTURE`)",
+        "La porte voit un geste que la clôture ne nomme pas, jamais un geste nommé mais fait à",
+        "Les lignes déclarées. Avant la première unité, hors des blocs de code et des commentaires",
+        "`` Plan maître : `.claude/plans/<fichier>.md` `` dit un plan de tranche",
+        "`Hors lot : <raison>` un plan hors lot",
+        "puis hors de `.claude/plans/` ou sans `.md`",
+        "lieux ouverts, il nomme un plan maître sous la racine, lu comme un plan",
+        (
+            "Une raison vide, deux lignes de la même sorte, les deux sortes ensemble, ou l'une "
+            "d'elles dans un plan maître refusent."
+        ),
+        "un plan neuf, tenu aussi à sa clôture. --cloture MOT ajoute un mot",
+    ):
+        assert fragment in doc, fragment
+    assert "sans effet encore" not in " ".join(p.verifier.__doc__.split())
+    assert "des mots déjà repliés par `_replier`" in " ".join(p.verifier.__doc__.split())
