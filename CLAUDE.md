@@ -527,8 +527,10 @@ Le cadrage est dans `docs/cadrage.md` ; ce que les lots ont appris, dans `docs/r
   (un verdict qui change, une PR ouverte qui ajoute un plan, un contrôle géré absent d'une règle,
   un fichier géré modifié dans un projet), ou que quelque chose n'est pas relevé (une erreur de
   l'API, une version absente du clone : `git fetch --tags`, un script du modèle qui plante, le
-  dossier temporaire non retiré), 0 sinon. Il rend 64 pour une erreur d'usage : `gh` absent ou
-  sans accès, un dossier qui n'est pas un clone du modèle qu'il sait lire. Les plans en cours qui
+  dossier temporaire non retiré, aucun projet relevé, comme sous un `--compte` qui n'est pas celui
+  de `gh`), 0 sinon. Il rend 64 pour une erreur d'usage : `gh` absent ou sans accès (un 401, ou
+  `gh` qui sort par 4, jamais connecté), un dossier qui n'est pas un clone du modèle qu'il sait
+  lire. Les plans en cours qui
   « refuseraient s'ils étaient neufs » sont une information : ils ne rendent pas le code 1, comme
   les contrôles propres d'une règle. Parmi les fichiers gérés, seuls les dossiers exclus des
   formateurs sont comparés, pas le gabarit de PR ni les autres fichiers gérés hors d'eux. Par

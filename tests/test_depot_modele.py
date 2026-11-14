@@ -851,6 +851,12 @@ def test_claude_md_dit_la_commande_du_releve():
             "ils ne rendent pas le code 1"
         ),
         "seuls les dossiers exclus des formateurs sont comparés",
+        # aucun projet relevé rend 1 ; `gh` jamais connecté sort par 4, et rend 64 (revue finale
+        # du lot 17)
+        (
+            "aucun projet relevé, comme sous un `--compte` qui n'est pas celui de `gh`), 0 sinon"
+        ),
+        "`gh` absent ou sans accès (un 401, ou `gh` qui sort par 4, jamais connecté)",
         # l'inventaire complet des fichiers gérés
         "L'inventaire complet des fichiers gérés demande `--depuis <ancienne étiquette>`",
         "un projet à la version de la tête n'en montre aucun",

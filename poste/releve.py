@@ -17,10 +17,11 @@ Les relevés de chaque projet, après une en-tête (sa version, sa cible, sa nat
 fusion). « La tête » est le commit `HEAD` du clone, extrait comme une autre version.
 - Les plans : chaque `*.md` sous `.claude/plans/` de la branche par défaut, sous-dossiers compris,
   lu par son blob. Il passe par le `plan.py` de la version du projet, puis par celui de la tête,
-  chacun par `--sans-lieux` : « même verdict » (même code, mêmes lignes hors du résumé) ou
-  « verdict changé », à lire ; puis par celui de la tête par `--sans-lieux --neuf` : « refuserait
-  s'il était neuf », une information, avec ses refus. `plan.py` se lance depuis le dossier
-  temporaire, sur `.claude/plans/<nom>` : ses lignes ne portent aucun chemin du poste.
+  chacun par `--sans-lieux` : « même verdict (passe) » ou « même verdict (refuse) » (même code,
+  mêmes lignes hors du résumé), ou « verdict changé », à lire ; puis par celui de la tête par
+  `--sans-lieux --neuf` : « refuserait s'il était neuf », une information, avec ses refus.
+  `plan.py` se lance depuis le dossier temporaire, sur `.claude/plans/<nom>` : ses lignes ne
+  portent aucun chemin du poste.
 - Les PR ouvertes qui ajoutent un plan (`added`, ou `renamed`) : elles seront vérifiées sur leur
   commit de fusion, donc comme des plans neufs. Elles sont à lire.
 - Les textes des N dernières PR (`--prs`), tous états, lus par REST, qui donne l'auteur tel que le
@@ -66,10 +67,12 @@ Usage : releve.py [--compte COMPTE] [--prs N] [--depuis ÉTIQUETTE] [--clone DOS
         --clone : défaut, le dépôt git du dossier courant. --gh : défaut, `gh`.
 
 Retour : 0 tous les projets lus et rien à lire ; 1 quelque chose à lire, un projet non relevé,
-         une erreur passagère sur la liste des dépôts ou le dossier temporaire non retiré ;
-         64 erreur d'usage (`gh` absent, ou sans accès : un 401 sur la liste des dépôts ; un
-         dossier qui n'est pas un clone du modèle, ou dont la tête ne dit pas ses contrôles
-         gérés ; une option invalide).
+         aucun projet relevé (un `--compte` qui n'est pas celui de `gh` n'en trouve aucun), une
+         erreur passagère sur la liste des dépôts ou le dossier temporaire non retiré ;
+         64 erreur d'usage (`gh` absent, ou sans accès : un 401 sur la liste des dépôts, ou `gh`
+         qui y sort par 4, authentification requise, même sans rien écrire ; un dossier qui n'est
+         pas un clone du modèle, ou dont la tête ne dit pas ses contrôles gérés ; une option
+         invalide).
 """
 
 from __future__ import annotations
@@ -112,6 +115,9 @@ NEUF = "refuserait s'il était neuf"
 REFUS_DU_PLAN = "plan : refus"
 REFUS_DU_TEXTE = "texte de la PR : refus"
 TEMPORAIRE_NON_RETIRE = "dossier temporaire non retiré"
+AUCUN_PROJET = "aucun projet né du modèle relevé"
+# Le code de sortie de `gh` quand il n'est pas connecté : « authentification requise ».
+GH_SANS_AUTHENTIFICATION = 4
 GERES_ILLISIBLES = "contrôles gérés illisibles dans la tête du clone (ruleset-main.json)"
 # Ce qu'aucun argument de `gh` ne porte : sous Windows, un `.cmd` le couperait ou le réécrirait.
 INTERDITS = frozenset('&|<>^%"\n\r')
@@ -402,6 +408,9 @@ class _Releve:
             raise _NonReleve(rubrique, "délai dépassé") from None
         except OSError:
             raise _GhAbsent(rubrique, "gh ne se lance pas") from None
+        if r.returncode == GH_SANS_AUTHENTIFICATION:
+            # `gh` jamais connecté : ni JSON ni `HTTP NNN`, seulement ce code
+            raise _SansAcces(rubrique, "authentification requise")
         if r.returncode != 0:
             raise _Erreur(rubrique, _statut(r.stdout, r.stderr))
         try:
@@ -439,6 +448,8 @@ class _Releve:
             )
         except _GhAbsent:
             return _usage("gh ne se lance pas")
+        except _SansAcces:
+            return _usage("gh sans accès (dépôts : authentification requise, code 4)")
         except _Erreur as e:
             # un accès refusé est une erreur d'usage ; une erreur passagère, un dépôt non relevé
             if e.args[1] == "401":
@@ -470,12 +481,15 @@ class _Releve:
             non_releves += incomplet
             lus += not incomplet
             a_lire += aussi_a_lire
+        # aucun projet : rien n'est lu, et un `--compte` faux ne passe pas pour un relevé propre
+        if not projets:
+            self._dire(AUCUN_PROJET)
         self._dire(LIMITES)
         self._dire(
             f"{len(depots)} dépôts examinés, {projets} projets, {lus} lus, "
             f"{non_releves} non relevés, {a_lire} à lire"
         )
-        return EXIT_A_LIRE if non_releves or a_lire else EXIT_RIEN
+        return EXIT_A_LIRE if non_releves or a_lire or not projets else EXIT_RIEN
 
     def _projet(self, depot: dict) -> tuple[bool, bool] | None:
         """Un dépôt : `None` s'il n'est pas un projet ; sinon (non relevé, à lire)."""
@@ -600,7 +614,8 @@ class _Releve:
                 )
                 continue
             if avant == apres:
-                self._dire(nom, "plans", affiche, "même verdict")
+                commun = "passe" if avant[0] == 0 else "refuse"
+                self._dire(nom, "plans", affiche, f"même verdict ({commun})")
             else:
                 self.a_lire = True
                 self._dire(nom, "plans", affiche, "verdict changé")
@@ -832,6 +847,10 @@ class _Erreur(_NonReleve):
 
 class _GhAbsent(_NonReleve):
     """`gh` trouvé, mais qui ne se lance pas : (rubrique, raison)."""
+
+
+class _SansAcces(_NonReleve):
+    """`gh` qui sort par 4, sans connexion : (rubrique, raison)."""
 
 
 def _resultat(lance, refus: str) -> tuple[int, list[str]] | None:
