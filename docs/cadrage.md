@@ -474,7 +474,43 @@
 > - **aucun écart à la spec du lot** : ses cinq PR déclarent « Aucun. ». Un remède de la revue
 >   finale, un relevé sans aucun projet rendant 1, s'écartait du § 5.4 de la spec, qui donne 0 ; la
 >   relecture des corrections l'a trouvé, et le code est revenu à 0 avant l'ouverture de #143
->   (LE-83).
+>   (LE-83) ;
+> - **dix-sept choix du lot**, que ses PR n'ont pas comptés comme écarts, recueillis dans la section
+>   « À relire » de la PR de clôture, et acceptés par Edouard le 14/11 (« ok pour les défauts ») :
+>   - la revue finale lit `cbda229..1bbd98b`, sans les deux correctifs hors du lot, #137 et #138 ;
+>   - la ligne `Plan maître :` n'admet que le chemin, en code en ligne, seul après les
+>     deux-points ; une ligne déclarée, même refusée pour sa forme, dispense de la clôture, sauf
+>     dans un plan maître (#140) ;
+>   - la ligne d'« Effets cherchés » du plan qui disait qu'aucune clôture en cours ne nommait les
+>     six gestes est corrigée pour `ancrage` ; la spec garde son constat d'avant (#140) ;
+>   - le relevé compare par défaut les fichiers gérés que le modèle change entre la version de
+>     chaque projet et la tête ; `--depuis` élargit l'intervalle, sans donner un inventaire
+>     complet ; une règle illisible à la tête arrête par 64 ; le faux `gh` des tests tourne par
+>     `python -I -S` (#141, #143) ;
+>   - LE-63, LE-70, LE-71, LE-73 et LE-76 se closent après une relecture de `pupitre` par l'API
+>     (#142) ;
+>   - le registre d'un dépôt de données est retenu Important à la revue finale, contre le
+>     « Mineur » de sa contre-vérification (#143) ;
+>   - « sans lettre ni chiffre » devient « sans lettre, chiffre ni `_` » dans les textes, sans que
+>     le code change : une clôture en `__gras__` refuse (#143) ;
+>   - sous Windows, la cible d'une ligne `Plan maître :` se trouve sans égard à la casse : les
+>     textes le disent, le code ne change pas (#143) ;
+>   - la case du gabarit de PR, de 107 caractères, dictée par le plan, reste telle quelle ;
+>   - les quatre constats de la lecture de complétude sont retenus sans contre-vérification à
+>     part, chacun prouvé par un mutant (#143) ;
+>   - un relevé sans aucun projet rend 0 et le dit par une ligne ; « même verdict (passe) » et
+>     « même verdict (refuse) » gardent le nom que la spec donne au verdict, et ne sont pas un
+>     écart (#143) ;
+>   - deux lectures des titres d'avant le lot, qui laissent passer une clôture, sont nommées parmi
+>     les écarts connus ; quatre autres refusent du côté sûr et restent telles quelles (#143) ;
+>   - le relevé ne lit que les PR ouvertes qui ajoutent un plan, comme le dit la spec, et non
+>     celles qui en modifient un : une piste ;
+>   - LE-88 et LE-89 portent les leçons des revues de tâche ; un constat est écarté par écrit, un
+>     test écrit contre une consigne du lot, sans leçon générale ;
+>   - AM-6 ouvre un motif neuf, « refus du garde plus large que sa règle » ;
+>   - LE-85 reste sous « contrôle passé à vide », comme LE-62 ;
+>   - le déclencheur de la piste du commentaire jamais fermé n'est pas atteint : la lecture du
+>     texte de l'unité de clôture (#140) suit déjà sa première voie.
 
 Ce cadrage est la partie publique de la spec de conception du modèle, issue d'une séance de questions avec Edouard : 12 questions, puis 5 parties de design validées une à une. La partie qui nomme le serveur est privée et n'est pas reproduite ici.
 
