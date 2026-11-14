@@ -1250,6 +1250,14 @@ TITRES_DOCUMENTATION = [
 ]
 # Ce que le texte géré et la docstring de `documentation.py` disent dans les mêmes mots : ce que
 # la carte ne compte pas, ce qu'un lancement local dit de la CI, et les écarts connus à GitHub.
+# Le remède des écarts connus vaut aussi pour la clôture d'un plan et pour la casse, et reste vrai
+# des liens (relecture des corrections de la revue finale du lot 17).
+REMEDE_DES_ECARTS = (
+    "Le remède, chaque fois : écrire le lien sous une forme ordinaire, hors de ces blocs ; dans un "
+    "plan, écrire de même les gestes de la clôture et les titres du plan sous la forme que GitHub "
+    "rend, hors d'un commentaire et d'une définition, chaque titre en `#`, seul sur sa ligne ; "
+    "écrire un chemin dans la casse du fichier."
+)
 DOCUMENTATION_ET_DOCSTRING = (
     "`CLAUDE.local.md`, que le `.gitignore` semé exclut ; un projet né plus tôt l'y ajoute",
     "un `.md` de la racine non suivi compte en local, et la CI ne le voit pas",
@@ -1313,14 +1321,22 @@ DOCUMENTATION_ET_DOCSTRING = (
         "`<div><!-- note</div>` ; un attribut ou un titre de lien sur plusieurs lignes."
     ),
     # sous Windows, la casse touche aussi les lieux de `plan.py` et la cible de « Plan maître : »
-    # (revue finale du lot 17)
-    "Un dernier tient à Windows, où l'existence d'un chemin se lit sans égard à la casse.",
+    # (revue finale du lot 17) ; « Un autre », dans une liste qui n'est pas close, et ce que le
+    # contrôle du gabarit resté vide lit, et où (relecture de ses corrections)
+    "Un autre tient à Windows, où l'existence d'un chemin se lit sans égard à la casse.",
+    (
+        "Sous Windows, le contrôle du gabarit resté vide trouve le fichier `docs/cadrage.md` "
+        "derrière un lien `docs/Cadrage.md` du README, et peut avertir si ce fichier n'a que son "
+        "gabarit, alors que GitHub casse ce lien ; sous Linux, il ne trouve pas ce fichier, et ne "
+        "dit rien."
+    ),
     (
         "Dans `plan.py`, lancé sous Windows, un lieu de « Mécanismes annoncés » ou la cible d'une "
         "ligne « Plan maître : » écrits dans une autre casse que le fichier passent, alors que la "
         "CI, sous Linux, les refuse (« fichier absent », « plan maître absent ») : la vérification "
         "locale passe là où la CI refuse."
     ),
+    REMEDE_DES_ECARTS,
 )
 # Les écarts de la clôture d'un plan au rendu de GitHub, dans le texte géré et la docstring : quatre
 # formes qui la laissent passer, et une liste qui n'est pas close (revue finale du lot 17).
@@ -1406,7 +1422,7 @@ def test_documentation_md(tmp_path, env_isole):
         "porte un deux-points sous Windows, qui y nomme un lecteur (`Z:`, en tête comme plus loin",
         # les écarts connus au rendu de GitHub, repris de la docstring du script
         "dans un bloc de code indenté",
-        "un lien `docs/Cadrage.md` vers `docs/cadrage.md`",
+        "trouve le fichier `docs/cadrage.md` derrière un lien `docs/Cadrage.md` du README",
         "un avertissement de trop, jamais un refus",
         *DOCUMENTATION_ET_DOCSTRING,
         # seul un dépôt de la cible `donnees` n'a pas de registre à lui (revue finale du lot 17)
@@ -1426,6 +1442,11 @@ def test_documentation_md(tmp_path, env_isole):
         "Un dernier ne touche que le gabarit resté vide",
         "Un dépôt de données n'a ni registre",
         "Dans un dépôt de données, `CLAUDE.md` dit",
+        # « Un dernier » dans une liste qui n'est pas close, un lien lu « dans le gabarit », et le
+        # remède des seuls liens (relecture des corrections de la revue finale du lot 17)
+        "Un dernier tient à Windows",
+        "y est lu, et peut avertir",
+        "écrire le lien sous une forme ordinaire, hors de ces blocs.",
     ):
         assert ancien not in plat, ancien
     # Les lignes de la licence et de la carte, telles que le script les écrit sur une racine, sont
@@ -1516,6 +1537,9 @@ def test_docstring_suit_documentation_md():
         "Un autre laisse passer à tort ce que GitHub cache",
         "Deux autres laissent passer",
         "Un dernier ne touche que le gabarit resté vide",
+        # relecture des corrections de la revue finale du lot 17
+        "Un dernier tient à Windows",
+        "y est lu, et peut avertir",
     ):
         assert ancien not in docstring, ancien
 
@@ -1868,6 +1892,13 @@ def test_ecarts_connus_nomment_la_cloture():
         assert "les sections d'un plan et ses titres de tâche ou de tranche" not in plat, nom
         for fragment in ECARTS_DE_LA_CLOTURE:
             assert fragment in plat, (nom, fragment)
+        # la liste se dit non close à la fin du passage : après le cas de Windows et le remède,
+        # jamais avant un « dernier » (relecture des corrections de la revue finale du lot 17)
+        non_close = plat.index("La liste des écarts connus n'est pas close")
+        assert plat.index("La clôture d'un plan en a quatre de plus") < non_close, nom
+        assert plat.index("Un autre tient à Windows") < non_close, nom
+        assert plat.index(REMEDE_DES_ECARTS) < non_close, nom
+        assert "Un dernier" not in plat, nom
 
 
 def test_methode_dit_le_budget_du_garde():

@@ -379,15 +379,19 @@ ligne, qui ferme un commentaire ouvert dans un paragraphe, fait un titre d'unit�
 rend la ligne en paragraphe ; un `<!--` ouvert dans un paragraphe et fermé plus bas cache à
 `plan.py` un titre de clôture que GitHub montre, et `plan.py` vérifie l'unité de clôture suivante.
 Ces deux derniers, des commentaires ouverts dans un paragraphe, laissent passer la clôture, alors
-qu'un tel commentaire fait refuser à tort un lien. La liste des écarts connus n'est pas close :
-d'autres formes rares peuvent encore séparer ce que lisent les contrôles de ce que rend GitHub.
+qu'un tel commentaire fait refuser à tort un lien.
 
-Un dernier tient à Windows, où l'existence d'un chemin se lit sans égard à la casse. Dans le
-gabarit resté vide, un lien `docs/Cadrage.md` vers `docs/cadrage.md` y est lu, et peut avertir,
-alors que GitHub casse ce lien ; sous Linux, il est ignoré. C'est un avertissement de trop, jamais
-un refus. Dans `plan.py`, lancé sous Windows, un lieu de « Mécanismes annoncés » ou la cible d'une
-ligne « Plan maître : » écrits dans une autre casse que le fichier passent, alors que la CI, sous
-Linux, les refuse (« fichier absent », « plan maître absent ») : la vérification locale passe là où
-la CI refuse.
+Un autre tient à Windows, où l'existence d'un chemin se lit sans égard à la casse. Sous Windows, le
+contrôle du gabarit resté vide trouve le fichier `docs/cadrage.md` derrière un lien
+`docs/Cadrage.md` du README, et peut avertir si ce fichier n'a que son gabarit, alors que GitHub
+casse ce lien ; sous Linux, il ne trouve pas ce fichier, et ne dit rien. C'est un avertissement de
+trop, jamais un refus. Dans `plan.py`, lancé sous Windows, un lieu de « Mécanismes annoncés » ou la
+cible d'une ligne « Plan maître : » écrits dans une autre casse que le fichier passent, alors que la
+CI, sous Linux, les refuse (« fichier absent », « plan maître absent ») : la vérification locale
+passe là où la CI refuse.
 
-Le remède, chaque fois : écrire le lien sous une forme ordinaire, hors de ces blocs.
+Le remède, chaque fois : écrire le lien sous une forme ordinaire, hors de ces blocs ; dans un plan,
+écrire de même les gestes de la clôture et les titres du plan sous la forme que GitHub rend, hors
+d'un commentaire et d'une définition, chaque titre en `#`, seul sur sa ligne ; écrire un chemin dans
+la casse du fichier. La liste des écarts connus n'est pas close : d'autres formes rares peuvent
+encore séparer ce que lisent les contrôles de ce que rend GitHub.
