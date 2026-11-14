@@ -1,5 +1,5 @@
-"""Le contrôle des plans (`scripts/modele/plan.py`) : les trois sections d'un plan, « Mécanismes
-annoncés » (LE-53), « Outils et cas limites » (LE-56) et « Revues » (LE-55)."""
+"""Le contrôle des plans (`scripts/modele/plan.py`) : les sections d'un plan, « Mécanismes
+annoncés » (LE-53), « Outils et cas limites » (LE-56), « Effets cherchés » et « Revues » (LE-55)."""
 
 import codecs
 import re
@@ -23,16 +23,19 @@ APRES_LA_CLOTURE = ("### Tâche 1 : x", "### Tâche 2 : la clôture", "### Tâch
 def plan(
     meca="Aucun.",
     outils="Aucun.",
+    effets=None,
     revues="- relecture : Tâche 1",
     taches=("### Tâche 1 : x", "### Tâche 2 : la clôture"),
+    entete="",
 ):
-    """Un plan, dans cet ordre : un titre, les trois sections, `---`, puis les tâches. Une section
-    à None est omise ; la ligne 1 d'une section est la ligne vide qui suit son titre, et son
-    contenu commence à la ligne 2."""
-    morceaux = ["# Un plan\n\n**Goal :** x\n"]
+    """Un plan en cours, dans cet ordre : un titre, `entete`, les sections, `---`, puis les tâches.
+    Une section à None est omise ; « Effets cherchés » l'est par défaut ; la ligne 1 d'une
+    section est la ligne vide qui suit son titre, et son contenu commence à la ligne 2."""
+    morceaux = ["# Un plan\n\n**Goal :** x\n" + entete]
     for titre, contenu in (
         ("Mécanismes annoncés", meca),
         ("Outils et cas limites", outils),
+        ("Effets cherchés", effets),
         ("Revues", revues),
     ):
         if contenu is not None:
@@ -40,6 +43,13 @@ def plan(
     morceaux.append("---\n")
     morceaux.extend(f"{tache}\n\n- [ ] une étape\n" for tache in taches)
     return "\n".join(morceaux)
+
+
+def plan_neuf(**kw):
+    """Un plan neuf : celui de `plan()`, avec « Effets cherchés » à « Aucun. » sauf si `effets`
+    est donné."""
+    kw.setdefault("effets", "Aucun.")
+    return plan(**kw)
 
 
 def meca(lieu, extrait, comportement="le comportement annoncé"):
@@ -73,8 +83,8 @@ def lancer(tmp_path, capsys):
     return _lancer
 
 
-def verifier(texte, racine, depots=None, lieux=True):
-    return p.verifier(texte, racine, depots or {}, lieux)
+def verifier(texte, racine, depots=None, lieux=True, neuf=False, cloture=()):
+    return p.verifier(texte, racine, depots or {}, lieux, neuf, cloture)
 
 
 def espionner(monkeypatch):
@@ -101,7 +111,7 @@ def test_sections(racine):
     morceaux."""
     lignes, refus = verifier(plan(), racine)
     assert not refus, lignes
-    assert lignes == ["0 mécanismes vérifiés, 0 non vérifiés, 0 outils, 1 revues"]
+    assert lignes == ["0 mécanismes vérifiés, 0 non vérifiés, 0 outils, 0 effets, 1 revues"]
     for cle, titre in (
         ("meca", "Mécanismes annoncés"),
         ("outils", "Outils et cas limites"),
@@ -144,7 +154,7 @@ def test_sections(racine):
     )
     lignes, refus = verifier(plan(outils=outils), racine)
     assert not refus, lignes
-    assert lignes[-1] == "0 mécanismes vérifiés, 0 non vérifiés, 2 outils, 1 revues"
+    assert lignes[-1] == "0 mécanismes vérifiés, 0 non vérifiés, 2 outils, 0 effets, 1 revues"
     # deux sections du même titre refusent, en double, et aucune des deux n'est lue : jointes, les
     # lignes de la seconde seraient nommées par un rang qui n'est pas le leur
     for titre, cle, contenu, resume in (
@@ -152,13 +162,13 @@ def test_sections(racine):
             "Revues",
             "revues",
             "- relecture : Tâche 1\n\n## Revues\n\n- une relecture",
-            "0 mécanismes vérifiés, 0 non vérifiés, 0 outils, 0 revues",
+            "0 mécanismes vérifiés, 0 non vérifiés, 0 outils, 0 effets, 0 revues",
         ),
         (
             "Outils et cas limites",
             "outils",
             "- a — b — c\n\n## Outils et cas limites\n\n- d",
-            "0 mécanismes vérifiés, 0 non vérifiés, 0 outils, 1 revues",
+            "0 mécanismes vérifiés, 0 non vérifiés, 0 outils, 0 effets, 1 revues",
         ),
     ):
         lignes, refus = verifier(plan(**{cle: contenu}), racine)
@@ -192,9 +202,9 @@ def test_sous_liste_et_bloc_html(racine):
     }
     # le résumé, la puce d'avant comptée ; « Revues » garde sa puce par défaut dans les deux autres
     resumes = {
-        "meca": "1 mécanismes vérifiés, 0 non vérifiés, 0 outils, 1 revues",
-        "outils": "0 mécanismes vérifiés, 0 non vérifiés, 1 outils, 1 revues",
-        "revues": "0 mécanismes vérifiés, 0 non vérifiés, 0 outils, 1 revues",
+        "meca": "1 mécanismes vérifiés, 0 non vérifiés, 0 outils, 0 effets, 1 revues",
+        "outils": "0 mécanismes vérifiés, 0 non vérifiés, 1 outils, 0 effets, 1 revues",
+        "revues": "0 mécanismes vérifiés, 0 non vérifiés, 0 outils, 0 effets, 1 revues",
     }
     # « 1) », et un commentaire collé à une puce, que la lecture prendrait pour une puce en
     # colonne 0 (relecture de la revue finale du lot 15) ; « 2. », « 10. » et une sous-puce à six
@@ -345,11 +355,8 @@ def test_normalisation_hors_du_code(racine):
         reponses = {"meca": meca("src/a.py:2", "def f("), "outils": "- a — b — c", cle: ligne}
         lignes, refus = verifier(plan(**reponses), racine)
         assert not refus, (nom, cle, lignes)
-        assert lignes[-1] == "1 mécanismes vérifiés, 0 non vérifiés, 1 outils, 1 revues", (
-            nom,
-            cle,
-            lignes,
-        )
+        resume = "1 mécanismes vérifiés, 0 non vérifiés, 1 outils, 0 effets, 1 revues"
+        assert lignes[-1] == resume, (nom, cle, lignes)
     doc = p._documentation()
     brut = "l\u2019outil, l\u02bcoutil,\u00a0un\u202fcas, e\u0301 ; `l\u2019outil\u00a0`"
     assert p._normaliser(brut, doc) == "l'outil, l'outil, un cas, é ; `l\u2019outil\u00a0`"
@@ -422,7 +429,7 @@ def test_plan_forme_superpowers(racine, lancer):
     premier titre ou séparateur : sans quoi « Revues » avalerait les tâches."""
     code, sortie = lancer(SUPERPOWERS, "--racine", str(racine))
     assert code == 0, sortie
-    assert "1 mécanismes vérifiés, 0 non vérifiés, 1 outils, 1 revues" in sortie, sortie
+    assert "1 mécanismes vérifiés, 0 non vérifiés, 1 outils, 0 effets, 1 revues" in sortie, sortie
 
 
 def test_mecanismes(racine):
@@ -494,7 +501,7 @@ def test_sans_lieux(racine, lancer):
         plan(meca=meca("src/a.py:9", "def f(")), "--racine", str(racine), "--sans-lieux"
     )
     assert code == 0, sortie
-    assert "1 mécanismes, lieux non ouverts, 0 outils, 1 revues" in sortie, sortie
+    assert "1 mécanismes, lieux non ouverts, 0 outils, 0 effets, 1 revues" in sortie, sortie
     sortant = plan(meca=meca("../x.py:1", "x"))
     code, sortie = lancer(sortant, "--racine", str(racine), "--sans-lieux")
     assert code == 1, sortie
@@ -631,7 +638,7 @@ def test_plan_tranches_unites(racine):
     revues = "- relecture : Tranche 1, Tranche 2"
     lignes, refus = verifier(plan(revues=revues, taches=maitre), racine)
     assert not refus, lignes
-    assert lignes == ["0 mécanismes vérifiés, 0 non vérifiés, 0 outils, 1 revues"]
+    assert lignes == ["0 mécanismes vérifiés, 0 non vérifiés, 0 outils, 0 effets, 1 revues"]
     doubles = ("### Tranche 2.1 · a", "### Tranche 2.2 · b", "### Tranche 3 · la clôture")
     lignes, refus = verifier(plan(revues="- relecture : Tranche 2", taches=doubles), racine)
     assert refus and "Tranche 2 en double" in lignes, lignes
@@ -744,6 +751,8 @@ def test_formes_dites(racine):
         "<comportement annoncé>, ou « Aucun. » seul",
         "Outils et cas limites": "forme attendue : - <outil> — <cas limite> — <test>, "
         "ou « Aucun. » seul",
+        "Effets cherchés": "forme attendue : - <décision> — <où elle arrive> — "
+        "<comment c'est vérifié>, ou « Aucun. » seul",
         "Revues": "forme attendue : - <revue> : Tâche N, ou Tranche N dans un plan maître ; "
         "jamais « Aucun. »",
     }
@@ -835,6 +844,25 @@ def test_docstring_dit_les_tranches():
         assert fragment in doc, fragment
 
 
+def test_docstring_dit_les_effets():
+    """Le module dit la quatrième section, `--neuf` et sa limite, la ligne « Usage : » et le 64
+    de la valeur vide de `--cloture`."""
+    doc = " ".join(p.__doc__.split())
+    for fragment in (
+        "ses quatre sections de niveau 2",
+        "« Effets cherchés » et « Revues »",
+        "Effets cherchés. Une puce par décision du plan",
+        "« Aucun. » seul est admis",
+        "La section n'est exigée que d'un plan neuf (`--neuf`)",
+        "`--neuf` ne dit rien de plus que la nouveauté du plan : il est distinct de `--sans-lieux`",
+        "sans `--neuf`, retirer la section entière d'un plan qui la portait n'est pas vu",
+        "[--sans-lieux] [--neuf] [--cloture MOT]...",
+        "--neuf exige « Effets cherchés » : un plan neuf",
+        "valeur vide de --cloture",
+    ):
+        assert fragment in doc, fragment
+
+
 def test_plan_encodages(racine, lancer):
     """Un plan écrit sous PowerShell 5.1, en UTF-16 ou en UTF-8 avec BOM, se lit ; un fichier cité
     en CRLF, ou qui porte U+2028, se numérote comme git et GitHub le numérotent, par `\\n`."""
@@ -870,7 +898,7 @@ def test_main(racine, lancer):
     assert code == 0, sortie
     assert REFUS not in sortie
     lignes = sortie.splitlines()
-    resume = "plan.md : 0 mécanismes vérifiés, 0 non vérifiés, 0 outils, 1 revues"
+    resume = "plan.md : 0 mécanismes vérifiés, 0 non vérifiés, 0 outils, 0 effets, 1 revues"
     assert lignes[-1].endswith(resume), sortie
     assert all(ligne.startswith("plan : ") for ligne in lignes), sortie
     refuse = plan(
@@ -893,3 +921,68 @@ def test_main(racine, lancer):
     ):
         assert code == p.EXIT_USAGE == 64, sortie
         assert "SENTINELLE" not in sortie, sortie
+
+
+EFFETS_ABSENTE = "section « Effets cherchés » absente (titre de niveau 2)"
+EFFETS_REFUSE = f"Effets cherchés, ligne 2 : {p.FORMES[p.EFFETS]}"
+
+
+def test_effets_section(racine):
+    """« Effets cherchés » se lit comme « Outils et cas limites » : trois morceaux non vides,
+    « Aucun. » seul, une seule section ; le résumé compte ses lignes."""
+    lignes, refus = verifier(plan_neuf(), racine, neuf=True)
+    assert not refus, lignes
+    assert lignes[-1] == "0 mécanismes vérifiés, 0 non vérifiés, 0 outils, 0 effets, 1 revues"
+    lignes, refus = verifier(plan_neuf(effets="- a — b — c"), racine)
+    assert not refus, lignes
+    assert lignes[-1].endswith("0 outils, 1 effets, 1 revues"), lignes
+    for mauvais in ("- — b — c", "- a — b"):
+        lignes, refus = verifier(plan(effets=mauvais), racine)
+        assert refus
+        assert EFFETS_REFUSE in lignes, (mauvais, lignes)
+    assert p.FORMES[p.EFFETS] == (
+        "forme attendue : - <décision> — <où elle arrive> — <comment c'est vérifié>, "
+        "ou « Aucun. » seul"
+    )
+    double = plan(effets="- a — b — c").replace("---\n", "## Effets cherchés\n\nAucun.\n\n---\n")
+    lignes, refus = verifier(double, racine)
+    assert refus
+    assert "section « Effets cherchés » en double" in lignes, lignes
+
+
+def test_effets_neuf(racine):
+    """Avec `--neuf`, « Effets cherchés » absente refuse, lieux ouverts comme par `--sans-lieux` ;
+    sans lui, son absence ne refuse pas, mais mal formée elle refuse."""
+    for lieux in (True, False):
+        lignes, refus = verifier(plan(), racine, lieux=lieux, neuf=True)
+        assert refus, lieux
+        assert EFFETS_ABSENTE in lignes, lignes
+    lignes, refus = verifier(plan(), racine)
+    assert not refus, lignes
+    assert EFFETS_ABSENTE not in lignes
+    lignes, refus = verifier(plan(effets="Une phrase."), racine)
+    assert refus
+    assert EFFETS_REFUSE in lignes, lignes
+
+
+def test_effets_resume_sans_lieux(racine):
+    lignes, refus = verifier(plan_neuf(), racine, lieux=False, neuf=True)
+    assert not refus, lignes
+    assert lignes[-1] == "0 mécanismes, lieux non ouverts, 0 outils, 0 effets, 1 revues"
+
+
+def test_main_neuf(racine, lancer):
+    """`--neuf` : 1 sur un plan sans « Effets cherchés », 0 sans l'option ; la valeur vide de
+    `--cloture` est une erreur d'usage."""
+    code, sortie = lancer(plan(), "--racine", str(racine), "--neuf")
+    assert code == 1, sortie
+    assert EFFETS_ABSENTE in sortie
+    code, sortie = lancer(plan(), "--racine", str(racine))
+    assert code == 0, sortie
+    code, sortie = lancer(plan_neuf(), "--racine", str(racine), "--neuf")
+    assert code == 0, sortie
+    code, sortie = lancer(plan(), "--racine", str(racine), "--cloture", "  ")
+    assert code == 64, sortie
+    assert "--cloture MOT attendu" in sortie
+    code, sortie = lancer(plan(), "--racine", str(racine), "--cloture", "cadrage")
+    assert code == 0, sortie
