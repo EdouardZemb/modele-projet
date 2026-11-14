@@ -86,16 +86,17 @@ D'autres laissent passer à tort ce que GitHub cache, et touchent aussi `texte_p
 qui s'appuient sur ce script ; deux sont connus : un `<!--` jamais fermé, ouvert dans un élément de
 liste après quatre espaces ou plus (une puce imbriquée, ou une ligne qui continue la puce), cache
 sur GitHub tout ce qui le suit, mais les contrôles lisent encore la suite : un titre, et donc la
-section « Ce qui fait foi », la section des écarts à la spec, les sections d'un plan et ses
-titres de tâche ou de tranche, et la ligne « Tête relue », qui doit toujours nommer la tête de la
-PR ; un bloc ouvert en tête de ligne par `<?`, par `<!` suivi d'une majuscule (`<!DOCTYPE`) ou par
-`<![CDATA[` cache de même sur GitHub tout ce qui le suit jusqu'au premier `>`, même plusieurs lignes
-plus bas, ou jusqu'à la fin sans lui, mais `texte_pr.py` et `plan.py`, qui ne cherchent que `<!--`,
-lisent encore la ligne « Tête relue », la section des écarts, les sections d'un plan et ses
-titres de tâche ou de tranche. D'autres formes HTML cachent aussi sur GitHub ce que les contrôles
-lisent : un `<?` ou un `<!DOCTYPE` après une puce, ou en ligne et fermé plus bas ; un `<!--` jamais
-fermé dans une ligne de bloc HTML, comme `<div><!-- note</div>` ; un attribut ou un titre de lien
-sur plusieurs lignes.
+section « Ce qui fait foi », la section des écarts à la spec, les sections d'un plan, ses titres
+de tâche ou de tranche, le texte de son unité de clôture et ses lignes « Plan maître : » et
+« Hors lot : », et la ligne « Tête relue », qui doit toujours nommer la tête de la PR ; un bloc
+ouvert en tête de ligne par `<?`, par `<!` suivi d'une majuscule (`<!DOCTYPE`) ou par `<![CDATA[`
+cache de même sur GitHub tout ce qui le suit jusqu'au premier `>`, même plusieurs lignes plus bas,
+ou jusqu'à la fin sans lui, mais `texte_pr.py` et `plan.py`, qui ne cherchent que `<!--`, lisent
+encore la ligne « Tête relue », la section des écarts, les sections d'un plan, ses titres de tâche
+ou de tranche, le texte de son unité de clôture et ses lignes « Plan maître : » et « Hors lot : ».
+D'autres formes HTML cachent aussi sur GitHub ce que les contrôles lisent : un `<?` ou un
+`<!DOCTYPE` après une puce, ou en ligne et fermé plus bas ; un `<!--` jamais fermé dans une ligne
+de bloc HTML, comme `<div><!-- note</div>` ; un attribut ou un titre de lien sur plusieurs lignes.
 Un dernier ne touche que le gabarit resté vide. Sous Windows, il lit l'existence d'un chemin lié
 sans égard à la casse : un lien `docs/Cadrage.md` vers `docs/cadrage.md` y est lu, et peut
 avertir, alors que GitHub casse ce lien ; sous Linux, il est ignoré. C'est un avertissement de

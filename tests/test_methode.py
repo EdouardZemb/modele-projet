@@ -210,14 +210,18 @@ def test_modele_de_pr():
 
 def test_modele_de_pr_a_la_case_du_readme():
     """La case du README relu, une ligne entière, après les trois cases d'aujourd'hui : elle paraît
-    sur toute PR, et son libellé dit quand elle compte (lot 14)."""
+    sur toute PR, et son libellé dit quand elle compte (lot 14). Elle nomme aussi les leçons du lot
+    au registre, un geste de la clôture (lot 17)."""
     lignes = lire(TEMPLATE / ".github/pull_request_template.md").splitlines()
     cases = [ligne for ligne in lignes if ligne.startswith("- [ ] ")]
     assert cases == [
         "- [ ] Tests verts",
         "- [ ] CI verte",
         "- [ ] `CLAUDE.md` et ADR à jour si la PR change une règle ou une décision",
-        "- [ ] README relu, à la clôture d'un lot (`docs/modele/documentation.md`)",
+        (
+            "- [ ] README relu, et les leçons du lot au registre, à la clôture d'un lot "
+            "(`docs/modele/documentation.md`)"
+        ),
     ]
 
 
@@ -1274,8 +1278,9 @@ DOCUMENTATION_ET_DOCSTRING = (
         "un `<!--` jamais fermé, ouvert dans un élément de liste après quatre espaces ou plus (une "
         "puce imbriquée, ou une ligne qui continue la puce), cache sur GitHub tout ce qui le suit, "
         "mais les contrôles lisent encore la suite : un titre, et donc la section « Ce qui fait "
-        "foi », la section des écarts à la spec, les sections d'un plan et ses titres de "
-        "tâche ou de tranche, et la ligne « Tête relue », qui doit toujours nommer la tête de la PR"
+        "foi », la section des écarts à la spec, les sections d'un plan, ses titres de tâche ou "
+        "de tranche, le texte de son unité de clôture et ses lignes « Plan maître : » et « Hors "
+        "lot : », et la ligne « Tête relue », qui doit toujours nommer la tête de la PR"
     ),
     # un bloc `<?`, `<!DOCTYPE` ou `<![CDATA[`, qui cache tout jusqu'au premier `>`, même plus bas,
     # et que `texte_pr.py` et `plan.py` ne cherchent pas (relecture de la revue finale du lot 15)
@@ -1284,8 +1289,9 @@ DOCUMENTATION_ET_DOCSTRING = (
         "par `<!` suivi d'une majuscule (`<!DOCTYPE`) ou par `<![CDATA[` cache de même sur "
         "GitHub tout ce qui le suit jusqu'au premier `>`, même plusieurs lignes plus bas, ou "
         "jusqu'à la fin sans lui, mais `texte_pr.py` et `plan.py`, qui ne cherchent que `<!--`, "
-        "lisent encore la ligne « Tête relue », la section des écarts, les sections d'un "
-        "plan et ses titres de tâche ou de tranche."
+        "lisent encore la ligne « Tête relue », la section des écarts, les sections d'un plan, "
+        "ses titres de tâche ou de tranche, le texte de son unité de clôture et ses lignes « Plan "
+        "maître : » et « Hors lot : »."
     ),
     # une liste non close : deux écarts connus, puis les autres formes en une phrase (relecture de
     # la revue finale du lot 15, ronde 3)
@@ -1295,8 +1301,9 @@ DOCUMENTATION_ET_DOCSTRING = (
     ),
     "; deux sont connus : un `<!--` jamais fermé, ouvert dans un élément de liste",
     (
-        "plan et ses titres de tâche ou de tranche. D'autres formes HTML cachent aussi sur GitHub "
-        "ce que les contrôles lisent : un `<?` ou un `<!DOCTYPE` après une puce, ou en ligne et "
+        "ses lignes « Plan maître : » et « Hors lot : ». D'autres formes HTML cachent aussi sur "
+        "GitHub ce que les contrôles lisent : un `<?` ou un `<!DOCTYPE` après une puce, ou en "
+        "ligne et "
         "fermé plus bas ; un `<!--` jamais fermé dans une ligne de bloc HTML, comme "
         "`<div><!-- note</div>` ; un attribut ou un titre de lien sur plusieurs lignes."
     ),
@@ -1646,6 +1653,151 @@ def test_methode_dit_les_plans():
     assert "quatre sections" in point, point
     assert "trois sections" not in point, point
     assert "la revue du plan" in point, point
+
+
+def test_methode_dit_la_cloture_d_un_plan():
+    """La clôture d'un plan (lot 17) : le point 5 du cycle porte les leçons au registre, celui du
+    dépôt de code pour un dépôt de données ; un lot en tranches dit la ligne `Plan maître :` et les
+    gestes de la clôture du lot ; « La clôture d'un plan » dit l'unité, son texte, ses gestes et
+    leurs expressions, `--cloture`, le refus, ce que la porte ne voit pas, le plan de tranche et le
+    plan hors lot ; le tableau des garde-fous dit la clôture."""
+    texte = _aplati(lire(METHODE))
+    for fragment in (
+        # le point 5 du cycle
+        (
+            "relit le README d'après `docs/modele/documentation.md`, et porte au registre du dépôt "
+            "les leçons du lot encore sans ligne ; un dépôt de données, qui n'a pas de registre à "
+            "lui, les porte au registre de son dépôt de code (voir « Le registre »)."
+        ),
+        "L'unité de clôture du plan nomme ces gestes (voir « La clôture d'un plan »).",
+        # un lot en tranches
+        (
+            "- Le plan d'une tranche porte, avant sa première unité, la ligne `` Plan maître : "
+            "`.claude/plans/<fichier>.md` ``, qui nomme le plan maître du lot : il n'est tenu ni à "
+            "une unité de clôture ni à ses gestes (voir « La clôture d'un plan »)."
+        ),
+        (
+            "Comme toute PR de clôture, elle porte aussi au registre les leçons du lot, relit le "
+            "README et reporte dans `CLAUDE.md` ou dans un ADR ce qui doit survivre : la tranche "
+            "de clôture du plan maître nomme ces gestes."
+        ),
+        # la clôture d'un plan
+        (
+            "**La clôture d'un plan.** Un plan neuf, vérifié par `--neuf`, ou qui porte « Effets "
+            "cherchés », même vérifié sans `--neuf`, a une unité de clôture : celle que lit "
+            "« Revues », la première dont le titre dit « clôture » ou « closure »."
+        ),
+        (
+            "Un titre d'unité qui dit « clôture » avant la vraie clôture en devient l'unité, et se "
+            "renomme."
+        ),
+        (
+            "Le texte de l'unité va de son titre à la ligne qui précède le titre suivant de "
+            "niveau 1 à 3, ou à la fin du plan ; ces titres se lisent hors des blocs de code "
+            "clôturés et des blocs de commentaire, et un `# commentaire` dans un bloc de code ne "
+            "coupe pas l'unité."
+        ),
+        (
+            "Il se prend sur les lignes d'origine : les commentaires s'en retirent comme GitHub "
+            "les cache, les blocs de code restent, puisqu'une commande nomme aussi un geste, et un "
+            "`<!--` dans un bloc de code ne retire rien ; un `<!--` jamais fermé dans l'unité "
+            "refuse."
+        ),
+        (
+            "Tout le texte, code compris, se lit en NFC, apostrophes droites, espaces insécables "
+            "devenues des espaces, sans égard à la casse. Il nomme ces gestes, chacun reconnu à "
+            "son expression, dans l'ordre où le refus les nomme :"
+        ),
+        (
+            "- le plan supprimé : un mot qui commence par `supprim` ou `suppress` (supprime, "
+            "supprimé, suppression) ;"
+        ),
+        "- `CLAUDE.md` ou un ADR : `CLAUDE.md`, point compris, ou le mot `ADR` ;",
+        "- le README : le mot `README` ;",
+        "- les leçons du lot : le mot `leçon`, `leçons`, `constat` ou `constats` ;",
+        "- la fermeture de l'issue : le mot `Closes`, le mot `Fixes`, ou `ferme l'issue` ;",
+        "- la tête relue : `Tête relue`.",
+        (
+            "Un mot se cherche sans lettre ni chiffre juste avant ni juste après lui ; `supprim` "
+            "et `suppress` n'ont cette limite qu'avant eux. Entre deux mots d'une suite, tout "
+            "blanc compte, retour à la ligne et indentation compris : une clôture coupée à 100 "
+            "colonnes coupe aussi « Tête relue ». « retire » ne vaut pas « supprime », ni « se "
+            "ferme » « ferme l'issue »."
+        ),
+        (
+            "L'option `--cloture MOT` de `plan.py`, à répéter, ajoute un mot ou une suite de mots, "
+            "lus comme le texte et cherchés de même ; une valeur vide est une erreur d'usage (64)."
+        ),
+        (
+            "Le refus nomme l'unité et les gestes qui manquent, dans l'ordre de la liste puis des "
+            "options, jamais le texte du plan : « clôture (Tâche N) : gestes non nommés : le "
+            "README, les leçons du lot » ; un mot de `--cloture` y paraît entre guillemets."
+        ),
+        (
+            "La porte voit un geste que la clôture ne nomme pas ; elle ne voit pas un geste nommé, "
+            "mais fait à moitié."
+        ),
+        "- **Sans unité de clôture**, un tel plan refuse : « aucune unité de clôture : un titre",
+        (
+            "Le plan de tranche et le plan hors lot ne sont tenus ni à une unité de clôture ni aux "
+            "gestes."
+        ),
+        (
+            "- **Le plan de tranche** porte, avant sa première unité, hors des blocs de code et "
+            "des commentaires, jusqu'à trois espaces en tête, la ligne `` Plan maître : "
+            "`.claude/plans/<fichier>.md` ``. `Plan maître` s'écrit sans égard à la casse, le gras "
+            "admis autour du nom, deux-points compris ou non (`**Plan maître :**`, "
+            "`**Plan maître** :`), une espace ou aucune avant les deux-points."
+        ),
+        (
+            "Le chemin est un code en ligne, seul après les deux-points : un texte après lui, même "
+            "un point final, donne « ligne « Plan maître : » sans chemin ». Il est sous "
+            "`.claude/plans/`, fini par `.md` ; un chemin absolu, `..`, une barre oblique inverse "
+            "ou un deux-points refusent avant toute lecture, comme pour un mécanisme."
+        ),
+        (
+            "Lieux ouverts, le fichier existe sous la racine et c'est un plan maître, qui a des "
+            "tranches et aucune tâche ; sinon, « plan maître absent : <chemin> », ou « <chemin> "
+            "n'est pas un plan maître ». Par `--sans-lieux`, la forme, le double et la ligne dans "
+            "un plan maître se vérifient, sans ouvrir de fichier."
+        ),
+        (
+            "- **Le plan hors lot** (un plan court, une hypothèse, un correctif) porte de même une "
+            "ligne `Hors lot : <raison>`, la raison non vide."
+        ),
+        (
+            "- Deux lignes de la même sorte refusent, un plan qui porte les deux aussi, et un plan "
+            "maître qui en porte une, puisqu'il est tenu à sa clôture."
+        ),
+    ):
+        assert fragment in texte, fragment
+    assert "ce qui doit survivre, et relit le README" not in texte
+    assert not RENVOI_AU_PLAN.search(texte)
+    section = lire(METHODE).split("## Les garde-fous", 1)[1].split("\n## ", 1)[0]
+    (ligne,) = [ligne for ligne in section.splitlines() if "`scripts/modele/plan.py`" in ligne]
+    assert (
+        "vérifie les quatre sections (voir « Les outils »), puis, d'un plan neuf ou qui porte "
+        "« Effets cherchés », l'unité de clôture et ses gestes, ou la ligne `Plan maître :` ou "
+        "`Hors lot :` qui l'en dispense (voir « La clôture d'un plan ») : un plan ajouté,"
+    ) in ligne, ligne
+
+
+def test_ecarts_connus_nomment_la_cloture():
+    """La liste des écarts connus au rendu de GitHub, dans `documentation.md` et dans la docstring
+    de `documentation.py`, nomme aussi le texte de l'unité de clôture et les lignes déclarées d'un
+    plan, que lisent les mêmes fonctions (lot 17), et plus l'ancienne énumération."""
+    import documentation
+
+    for nom, texte in (
+        ("documentation.md", lire(TEMPLATE / "docs/modele/documentation.md")),
+        ("documentation.py", documentation.__doc__),
+    ):
+        plat = _aplati(texte)
+        assert plat.count(
+            "ses titres de tâche ou de tranche, le texte de son unité de clôture et ses lignes "
+            "« Plan maître : » et « Hors lot : »"
+        ) == 2, nom
+        assert "les sections d'un plan et ses titres de tâche ou de tranche" not in plat, nom
 
 
 def test_methode_dit_le_budget_du_garde():

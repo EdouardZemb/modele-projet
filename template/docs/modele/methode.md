@@ -13,9 +13,12 @@ modifie pas dans le projet. Un défaut se corrige dans `modele-projet`, pour tou
 3. Une ou plusieurs PR d'implémentation.
 4. Une PR de revue finale.
 5. Une PR de clôture : elle **supprime le plan** (dans un lot en tranches, le plan maître et les
-   plans de tranche), reporte dans `CLAUDE.md` ou dans un ADR ce qui doit survivre, et relit le
-   README d'après `docs/modele/documentation.md`. Elle seule porte « Closes #N », les autres PR du
-   lot disant « Partie de #N », et elle nomme la tête relue (voir « Le texte de la PR »).
+   plans de tranche), reporte dans `CLAUDE.md` ou dans un ADR ce qui doit survivre, relit le
+   README d'après `docs/modele/documentation.md`, et porte au registre du dépôt les leçons du lot
+   encore sans ligne ; un dépôt de données, qui n'a pas de registre à lui, les porte au registre de
+   son dépôt de code (voir « Le registre »). Elle seule porte « Closes #N », les autres PR du lot
+   disant « Partie de #N », et elle nomme la tête relue (voir « Le texte de la PR »). L'unité de
+   clôture du plan nomme ces gestes (voir « La clôture d'un plan »).
 6. L'étiquette `vX.Y.Z`, **avec l'accord d'Edouard**.
 
 ## Les outils
@@ -89,15 +92,72 @@ unités que des titres `### Tranche N` ; chaque tranche qui le demande a son pro
 - Dans le plan maître, « Revues » cite des tranches : la revue de chaque plan de tranche, puis
   la revue finale du lot et la relecture de ses corrections, dans une tranche à elles, avant celle
   de la clôture. Le plan d'une tranche cite ses tâches.
+- Le plan d'une tranche porte, avant sa première unité, la ligne
+  `` Plan maître : `.claude/plans/<fichier>.md` ``, qui nomme le plan maître du lot : il n'est tenu
+  ni à une unité de clôture ni à ses gestes (voir « La clôture d'un plan »).
 - Dans un plan à tâches, `Tranche N` n'est que du texte ; dans un plan maître, `Tâche N` de même ;
   un plan qui mêle des tâches et des tranches refuse, sans nommer de ligne.
 - Seule la PR de clôture du lot clôt le lot : la clôture d'une tranche, dans son plan, ne supprime
   pas ce plan et ne ferme pas l'issue ; la PR de clôture du lot supprime le plan maître et les
-  plans de tranche, porte « Closes #N » et nomme sa tête relue.
+  plans de tranche, porte « Closes #N » et nomme sa tête relue. Comme toute PR de clôture, elle
+  porte aussi au registre les leçons du lot, relit le README et reporte dans `CLAUDE.md` ou dans un
+  ADR ce qui doit survivre : la tranche de clôture du plan maître nomme ces gestes.
 - Les cas limites des expressions, sans égard à la casse : le mot « tranche » suivi d'un nombre
   cite une tranche dans un plan maître, même quand c'est le verbe
   (« qui tranche 2 questions ») ; « trancher 2 », « Tranches » et « Tâches » ne citent rien ;
   `### Tranche 2.1` est la tranche 2.
+
+**La clôture d'un plan.** Un plan neuf, vérifié par `--neuf`, ou qui porte « Effets cherchés »,
+même vérifié sans `--neuf`, a une unité de clôture : celle que lit « Revues », la première dont le
+titre dit « clôture » ou « closure ». Un titre d'unité qui dit « clôture » avant la vraie clôture
+en devient l'unité, et se renomme. Le texte de l'unité va de son titre à la ligne qui précède le
+titre suivant de niveau 1 à 3, ou à la fin du plan ; ces titres se lisent hors des blocs de code
+clôturés et des blocs de commentaire, et un `# commentaire` dans un bloc de code ne coupe pas
+l'unité. Il se prend sur les lignes d'origine : les commentaires s'en retirent comme GitHub les
+cache, les blocs de code restent, puisqu'une commande nomme aussi un geste, et un `<!--` dans un
+bloc de code ne retire rien ; un `<!--` jamais fermé dans l'unité refuse. Tout le texte, code
+compris, se lit en NFC, apostrophes droites, espaces insécables devenues des espaces, sans égard à
+la casse. Il nomme ces gestes, chacun reconnu à son expression, dans l'ordre où le refus les
+nomme :
+
+- le plan supprimé : un mot qui commence par `supprim` ou `suppress` (supprime, supprimé,
+  suppression) ;
+- `CLAUDE.md` ou un ADR : `CLAUDE.md`, point compris, ou le mot `ADR` ;
+- le README : le mot `README` ;
+- les leçons du lot : le mot `leçon`, `leçons`, `constat` ou `constats` ;
+- la fermeture de l'issue : le mot `Closes`, le mot `Fixes`, ou `ferme l'issue` ;
+- la tête relue : `Tête relue`.
+
+Un mot se cherche sans lettre ni chiffre juste avant ni juste après lui ; `supprim` et `suppress`
+n'ont cette limite qu'avant eux. Entre deux mots d'une suite, tout blanc compte, retour à la ligne
+et indentation compris : une clôture coupée à 100 colonnes coupe aussi « Tête relue ». « retire »
+ne vaut pas « supprime », ni « se ferme » « ferme l'issue ». L'option `--cloture MOT` de `plan.py`,
+à répéter, ajoute un mot ou une suite de mots, lus comme le texte et cherchés de même ; une valeur
+vide est une erreur d'usage (64). Le refus nomme l'unité et les gestes qui manquent, dans l'ordre
+de la liste puis des options, jamais le texte du plan : « clôture (Tâche N) : gestes non nommés :
+le README, les leçons du lot » ; un mot de `--cloture` y paraît entre guillemets. La porte voit un
+geste que la clôture ne nomme pas ; elle ne voit pas un geste nommé, mais fait à moitié.
+
+- **Sans unité de clôture**, un tel plan refuse : « aucune unité de clôture : un titre
+  `### Tâche N : … clôture`, ou `### Tranche N · … clôture` dans un plan maître ; un plan de
+  tranche porte la ligne `Plan maître :`, un plan hors lot la ligne `Hors lot :` ». Le plan de
+  tranche et le plan hors lot ne sont tenus ni à une unité de clôture ni aux gestes.
+- **Le plan de tranche** porte, avant sa première unité, hors des blocs de code et des
+  commentaires, jusqu'à trois espaces en tête, la ligne
+  `` Plan maître : `.claude/plans/<fichier>.md` ``. `Plan maître` s'écrit sans égard à la casse,
+  le gras admis autour du nom, deux-points compris ou non (`**Plan maître :**`,
+  `**Plan maître** :`), une espace ou aucune avant les deux-points. Le chemin est un code en ligne,
+  seul après les deux-points : un texte après lui, même un point final, donne « ligne « Plan
+  maître : » sans chemin ». Il est sous `.claude/plans/`, fini par `.md` ; un chemin absolu, `..`,
+  une barre oblique inverse ou un deux-points refusent avant toute lecture, comme pour un
+  mécanisme. Lieux ouverts, le fichier existe sous la racine et c'est un plan maître, qui a des
+  tranches et aucune tâche ; sinon, « plan maître absent : <chemin> », ou « <chemin> n'est pas un
+  plan maître ». Par `--sans-lieux`, la forme, le double et la ligne dans un plan maître se
+  vérifient, sans ouvrir de fichier.
+- **Le plan hors lot** (un plan court, une hypothèse, un correctif) porte de même une ligne
+  `Hors lot : <raison>`, la raison non vide.
+- Deux lignes de la même sorte refusent, un plan qui porte les deux aussi, et un plan maître qui en
+  porte une, puisqu'il est tenu à sa clôture.
 
 **La revue du plan** se fait avant l'exécution, par une autre session ou par Edouard :
 
@@ -188,7 +248,7 @@ sessions à distance.
 | hook Claude `SessionStart` (au démarrage et à la reprise) | affiche ce qui est rouge sur GitHub : les exécutions de la branche principale, les PR ouvertes et les workflows désactivés. Il ne bloque jamais. Il signale aussi un gabarit resté vide que le README lie, et un README qui ne lie aucun document du dépôt. Ce que n'importe qui écrit depuis un fork n'entre pas dans le contexte de Claude : les exécutions de PR (`pull_request…`) sont écartées, et une PR ou un workflow venus d'ailleurs que le dépôt s'affichent sans le texte qu'ils portent. Une PR d'un fork paraît ainsi sans titre ni nom de contrôle, un workflow absent de la copie, sans son nom |
 | CI de base | gitleaks examine les commits de chaque PR et de chaque envoi, et tout l'historique chaque semaine et à la demande (`modele-historique.yml`) ; la porte relit aussi l'historique d'un dépôt de code chaque semaine (`modele-historique.yml`), à côté de gitleaks, et refuse tout constat absent de `.github/constats-acceptes.txt` ; confidentialité du diff et des messages de commit ; format des commits ; le garde de Claude **et les signaux** toujours branchés dans `.claude/settings.json` ; la licence et la carte de la racine (`scripts/modele/documentation.py`) ; actions épinglées par SHA |
 | workflow `texte-pr` | `modele-texte-pr.yml`, seul à écouter `edited` : il relit le texte de chaque PR à son ouverture, à chaque envoi et à chaque retouche de son titre ou de son corps. La confidentialité et le format du titre et du corps, puis la section des écarts à la spec et la tête relue d'une PR qui ferme une issue (`scripts/modele/texte_pr.py`, voir plus bas). Son job, `texte-pr`, est un contrôle requis par la règle de protection d'un dépôt public ; dans un dépôt privé, qui n'a pas de règle, le garde le lit avant une fusion en mode `session` |
-| CI de base, étape « Les plans (.claude/plans) » | sur chaque plan de `.claude/plans/` que la PR ajoute ou modifie, `scripts/modele/plan.py` vérifie les quatre sections (voir « Les outils ») : un plan ajouté, renommé compris, en entier, par `--neuf`, chaque fichier du dépôt cité ouvert, un lieu d'un autre dépôt restant « non vérifié », sans refus ; un plan modifié sans ouvrir les fichiers cités, ses numéros de ligne dérivant avec le code. Au push sur la branche principale, un plan ajouté se vérifie aussi sans ouvrir les fichiers cités, ses lieux vérifiés à la PR, lui aussi par `--neuf`. Sur une base nulle, rien n'est contrôlé. L'étape précède la dernière, celle de la licence et de la carte de la racine |
+| CI de base, étape « Les plans (.claude/plans) » | sur chaque plan de `.claude/plans/` que la PR ajoute ou modifie, `scripts/modele/plan.py` vérifie les quatre sections (voir « Les outils »), puis, d'un plan neuf ou qui porte « Effets cherchés », l'unité de clôture et ses gestes, ou la ligne `Plan maître :` ou `Hors lot :` qui l'en dispense (voir « La clôture d'un plan ») : un plan ajouté, renommé compris, en entier, par `--neuf`, chaque fichier du dépôt cité ouvert, un lieu d'un autre dépôt restant « non vérifié », sans refus ; un plan modifié sans ouvrir les fichiers cités, ses numéros de ligne dérivant avec le code. Au push sur la branche principale, un plan ajouté se vérifie aussi sans ouvrir les fichiers cités, ses lieux vérifiés à la PR, lui aussi par `--neuf`. Sur une base nulle, rien n'est contrôlé. L'étape précède la dernière, celle de la licence et de la carte de la racine |
 | Dependabot | chaque lundi, les versions des actions épinglées (`.github/dependabot.yml`), après trois jours de recul |
 | règle de protection GitHub | tout commit qui arrive sur la branche principale est la tête d'une PR dont les contrôles requis sont verts ; un envoi direct de cette tête est accepté et marque la PR fusionnée, sans squash. Côté agent, c'est le refus de pousser vers la branche principale par le garde qui ferme ce chemin. Ni force-push ni suppression de la branche principale. Posée sur les dépôts publics |
 
