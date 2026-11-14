@@ -1312,6 +1312,48 @@ DOCUMENTATION_ET_DOCSTRING = (
         "fermé plus bas ; un `<!--` jamais fermé dans une ligne de bloc HTML, comme "
         "`<div><!-- note</div>` ; un attribut ou un titre de lien sur plusieurs lignes."
     ),
+    # sous Windows, la casse touche aussi les lieux de `plan.py` et la cible de « Plan maître : »
+    # (revue finale du lot 17)
+    "Un dernier tient à Windows, où l'existence d'un chemin se lit sans égard à la casse.",
+    (
+        "Dans `plan.py`, lancé sous Windows, un lieu de « Mécanismes annoncés » ou la cible d'une "
+        "ligne « Plan maître : » écrits dans une autre casse que le fichier passent, alors que la "
+        "CI, sous Linux, les refuse (« fichier absent », « plan maître absent ») : la vérification "
+        "locale passe là où la CI refuse."
+    ),
+)
+# Les écarts de la clôture d'un plan au rendu de GitHub, dans le texte géré et la docstring : quatre
+# formes qui la laissent passer, et une liste qui n'est pas close (revue finale du lot 17).
+ECARTS_DE_LA_CLOTURE = (
+    (
+        "La clôture d'un plan en a quatre de plus, qui ne touchent que `plan.py` et laissent "
+        "passer une clôture que GitHub rend autrement"
+    ),
+    (
+        "un titre souligné (une ligne de `===` ou de `---` sous une ligne) après l'unité de "
+        "clôture ne la borne pas, et un geste nommé après lui compte"
+    ),
+    "une définition `[//]: # (…)`, que GitHub n'affiche pas, compte",
+    (
+        "un `-->` suivi de `###` en tête de ligne, qui ferme un commentaire ouvert dans un "
+        "paragraphe, fait un titre d'unité, alors que GitHub rend la ligne en paragraphe"
+    ),
+    (
+        "un `<!--` ouvert dans un paragraphe et fermé plus bas cache à `plan.py` un titre de "
+        "clôture que GitHub montre, et `plan.py` vérifie l'unité de clôture suivante"
+    ),
+    (
+        "Ces deux derniers, des commentaires ouverts dans un paragraphe, laissent passer la "
+        "clôture, alors qu'un tel commentaire fait refuser à tort un lien."
+    ),
+    (
+        "cache les liens jusqu'à sa fermeture, plus loin (pour la clôture d'un plan, il laisse "
+        "passer : voir plus bas)"
+    ),
+    (
+        "La liste des écarts connus n'est pas close : d'autres formes rares peuvent encore séparer "
+        "ce que lisent les contrôles de ce que rend GitHub."
+    ),
 )
 
 
@@ -1381,6 +1423,7 @@ def test_documentation_md(tmp_path, env_isole):
         "Quatre laissent passer",
         "Un autre laisse passer à tort ce que GitHub cache",
         "Deux autres laissent passer",
+        "Un dernier ne touche que le gabarit resté vide",
         "Un dépôt de données n'a ni registre",
         "Dans un dépôt de données, `CLAUDE.md` dit",
     ):
@@ -1472,6 +1515,7 @@ def test_docstring_suit_documentation_md():
         "comme en CI : un fichier qu'il ignore",
         "Un autre laisse passer à tort ce que GitHub cache",
         "Deux autres laissent passer",
+        "Un dernier ne touche que le gabarit resté vide",
     ):
         assert ancien not in docstring, ancien
 
@@ -1575,6 +1619,12 @@ def test_methode_dit_les_plans():
         "Sans lui, son absence ne refuse pas ; présente, elle se vérifie dans tous les modes",
         "Un plan ajouté se vérifie en entier, par `--neuf`, chaque fichier du dépôt qu'il cite",
         "un plan modifié se vérifie sans ouvrir les fichiers cités (`--sans-lieux`), sans `--neuf`",
+        # un plan modifié qui porte « Effets cherchés » est tenu à sa clôture (revue finale du
+        # lot 17)
+        (
+            "ses sections, la forme de chaque ligne et ses revues, et, s'il porte « Effets "
+            "cherchés », sa clôture, ou la ligne qui l'en dispense (voir « La clôture d'un plan »)."
+        ),
         "Il reçoit `--neuf` comme à la PR",
         (
             "elle relit dans le code chaque ligne de « Mécanismes annoncés », et chaque ligne "
@@ -1801,7 +1851,9 @@ def test_methode_dit_la_cloture_d_un_plan():
 def test_ecarts_connus_nomment_la_cloture():
     """La liste des écarts connus au rendu de GitHub, dans `documentation.md` et dans la docstring
     de `documentation.py`, nomme aussi le texte de l'unité de clôture et les lignes déclarées d'un
-    plan, que lisent les mêmes fonctions (lot 17), et plus l'ancienne énumération."""
+    plan, que lisent les mêmes fonctions (lot 17), et plus l'ancienne énumération. Elle nomme les
+    quatre formes qui laissent passer une clôture que GitHub rend autrement, range parmi elles le
+    commentaire ouvert dans un paragraphe, et se dit non close (revue finale du lot 17)."""
     import documentation
 
     for nom, texte in (
@@ -1814,6 +1866,8 @@ def test_ecarts_connus_nomment_la_cloture():
             "« Plan maître : » et « Hors lot : »"
         ) == 2, nom
         assert "les sections d'un plan et ses titres de tâche ou de tranche" not in plat, nom
+        for fragment in ECARTS_DE_LA_CLOTURE:
+            assert fragment in plat, (nom, fragment)
 
 
 def test_methode_dit_le_budget_du_garde():

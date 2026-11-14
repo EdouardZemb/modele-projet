@@ -186,17 +186,18 @@ chaque fichier du dépôt qu'il cite ouvert, mais un lieu préfixé par un autre
 vérifié », sans refus : l'étape ne passe pas `--depot`, et une session vérifie ce lieu en lançant
 `plan.py` avec `--depot <dépôt>=<clone>`, puis la revue du plan le relit ; un plan modifié se
 vérifie sans ouvrir les fichiers cités (`--sans-lieux`), sans `--neuf` : ses sections, la forme de
-chaque ligne et ses revues. Une PR d'implémentation modifie souvent son plan avec le code qu'il
-cite, et les numéros de ligne dérivent : les mécanismes se vérifient à l'entrée du plan, quand la
-revue du plan les relit, et un mécanisme ajouté plus tard se relit à la revue. Le socle tourne aussi
-au push sur la branche principale, sur les plans que ce push ajoute ou modifie : un plan ajouté s'y
-vérifie aussi sans ouvrir les fichiers cités, puisque ses lieux l'ont été à la PR, et qu'une autre
-PR, fusionnée entre-temps, a pu décaler une ligne citée. Il reçoit `--neuf` comme à la PR. Un plan
-renommé compte pour un ajout (`git diff --no-renames`) : il reçoit `--neuf`. Sur une base nulle,
-l'étape ne contrôle rien. Hors d'une base nulle, elle dit toujours combien de plans la PR ajoute,
-modifie et supprime, zéro compris : « Plans ajoutés : N, modifiés : M, supprimés : S. » ; un plan
-supprimé n'est pas contrôlé. Une PR qui ne touche aucun plan passe, comme la PR de clôture, qui
-supprime les plans du lot. La session lance aussi `python scripts/modele/plan.py --neuf <plan>`
+chaque ligne et ses revues, et, s'il porte « Effets cherchés », sa clôture, ou la ligne qui l'en
+dispense (voir « La clôture d'un plan »). Une PR d'implémentation modifie souvent son plan avec le
+code qu'il cite, et les numéros de ligne dérivent : les mécanismes se vérifient à l'entrée du plan,
+quand la revue du plan les relit, et un mécanisme ajouté plus tard se relit à la revue. Le socle
+tourne aussi au push sur la branche principale, sur les plans que ce push ajoute ou modifie : un
+plan ajouté s'y vérifie aussi sans ouvrir les fichiers cités, puisque ses lieux l'ont été à la PR,
+et qu'une autre PR, fusionnée entre-temps, a pu décaler une ligne citée. Il reçoit `--neuf` comme à
+la PR. Un plan renommé compte pour un ajout (`git diff --no-renames`) : il reçoit `--neuf`. Sur une
+base nulle, l'étape ne contrôle rien. Hors d'une base nulle, elle dit toujours combien de plans la
+PR ajoute, modifie et supprime, zéro compris : « Plans ajoutés : N, modifiés : M, supprimés : S. » ;
+un plan supprimé n'est pas contrôlé. Une PR qui ne touche aucun plan passe, comme la PR de clôture,
+qui supprime les plans du lot. La session lance aussi `python scripts/modele/plan.py --neuf <plan>`
 avant de soumettre son plan à Edouard, et après chaque correction, tant qu'il n'est pas accepté ;
 ensuite, sans `--neuf`.
 

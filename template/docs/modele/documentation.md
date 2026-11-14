@@ -345,7 +345,7 @@ D'autres font refuser à tort :
 - une entité dans la cible (`&#46;`) n'est pas décodée ;
 - un fichier dont le nom porte une barre oblique inverse, que Windows refuse, n'est jamais lié ;
 - un commentaire HTML ouvert dans un paragraphe cache les liens jusqu'à sa fermeture, plus
-  loin ;
+  loin (pour la clôture d'un plan, il laisse passer : voir plus bas) ;
 - une définition n'est pas lue quand elle suit une ligne de commentaire (`<!-- liens -->`, puis les
   définitions), quand elle est dans un élément de liste ou dans une citation, quand elle suit une
   ligne de séparation (`***`), ou quand son titre tient sur deux lignes ;
@@ -371,9 +371,23 @@ contrôles lisent : un `<?` ou un `<!DOCTYPE` après une puce, ou en ligne et fe
 `<!--` jamais fermé dans une ligne de bloc HTML, comme `<div><!-- note</div>` ; un attribut ou un
 titre de lien sur plusieurs lignes.
 
-Un dernier ne touche que le gabarit resté vide. Sous Windows, l'existence d'un chemin lié s'y lit
-sans égard à la casse : un lien `docs/Cadrage.md` vers `docs/cadrage.md` y est lu, et peut avertir,
+La clôture d'un plan en a quatre de plus, qui ne touchent que `plan.py` et laissent passer une
+clôture que GitHub rend autrement : un titre souligné (une ligne de `===` ou de `---` sous une
+ligne) après l'unité de clôture ne la borne pas, et un geste nommé après lui compte ; une
+définition `[//]: # (…)`, que GitHub n'affiche pas, compte ; un `-->` suivi de `###` en tête de
+ligne, qui ferme un commentaire ouvert dans un paragraphe, fait un titre d'unité, alors que GitHub
+rend la ligne en paragraphe ; un `<!--` ouvert dans un paragraphe et fermé plus bas cache à
+`plan.py` un titre de clôture que GitHub montre, et `plan.py` vérifie l'unité de clôture suivante.
+Ces deux derniers, des commentaires ouverts dans un paragraphe, laissent passer la clôture, alors
+qu'un tel commentaire fait refuser à tort un lien. La liste des écarts connus n'est pas close :
+d'autres formes rares peuvent encore séparer ce que lisent les contrôles de ce que rend GitHub.
+
+Un dernier tient à Windows, où l'existence d'un chemin se lit sans égard à la casse. Dans le
+gabarit resté vide, un lien `docs/Cadrage.md` vers `docs/cadrage.md` y est lu, et peut avertir,
 alors que GitHub casse ce lien ; sous Linux, il est ignoré. C'est un avertissement de trop, jamais
-un refus.
+un refus. Dans `plan.py`, lancé sous Windows, un lieu de « Mécanismes annoncés » ou la cible d'une
+ligne « Plan maître : » écrits dans une autre casse que le fichier passent, alors que la CI, sous
+Linux, les refuse (« fichier absent », « plan maître absent ») : la vérification locale passe là où
+la CI refuse.
 
 Le remède, chaque fois : écrire le lien sous une forme ordinaire, hors de ces blocs.
