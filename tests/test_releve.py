@@ -37,6 +37,10 @@ X_RENDU = (
     "{% if cible == 'serveur' and nature == 'code' %}modele-x.yml{% endif %}"
 )
 CONSIGNER = "template/.claude/skills/{% if cible != 'donnees' %}consigner{% endif %}/SKILL.md"
+# deux chemins gérés à condition simple, neufs à la tête : `{% if <réponse> %}`, puis
+# `{% if <réponse> == '<valeur>' %}` (revue finale du lot 17)
+SAUVEGARDES = "template/docs/modele/{% if sauvegardes %}sauvegardes.md{% endif %}"
+SERVEUR = "template/docs/modele/{% if cible == 'serveur' %}serveur.md{% endif %}"
 INTERDITS = set('&|<>^%"\n\r')
 LIMITES = (
     "relevé : fichiers gérés : seuls les dossiers exclus des formateurs (methode.md) sont "
@@ -75,6 +79,8 @@ def _plan(outils: str = "Aucun.") -> str:
 
 PLAN_EN_COURS = _plan()
 PLAN_MAL_FORME = _plan(outils=f"- un outil sans séparateur {MARQUEUR}")
+# sans « Revues » : il refuse aux deux versions, par les mêmes lignes
+PLAN_SANS_REVUES = PLAN_EN_COURS.replace("## Revues\n\n- La revue de la tâche : Tâche 1\n\n", "")
 CORPS_AUCUN = f"Partie de #1, {MARQUEUR}.\n\n## Écarts à la spec\n\nAucun.\n"
 CORPS_ACCORD = (
     f"## Écarts à la spec\n\n- un écart {MARQUEUR} — promesse : § 1 — accord : 13/11/2026\n"
@@ -136,8 +142,9 @@ def _depot_minimal(racine: Path, fichiers: dict, env: dict) -> None:
 @pytest.fixture(scope="module")
 def banc(tmp_path_factory):
     """Le dépôt git du banc : `copier.yml`, les scripts du modèle, un fichier sous chacun des six
-    chemins gérés, un semé sous l'un d'eux, `.claude/settings.json`, un fichier rendu. Trois
-    étiquettes : `v0.0.9`, dont les scripts plantent ; `v0.1.0` ; `v0.2.0`, la tête."""
+    chemins gérés, un semé sous l'un d'eux, `.claude/settings.json`, un fichier rendu, et, à la
+    tête, deux fichiers gérés à condition simple. Trois étiquettes : `v0.0.9`, dont les scripts
+    plantent ; `v0.1.0` ; `v0.2.0`, la tête."""
     racine = tmp_path_factory.mktemp("banc")
     env = _env_git(tmp_path_factory.mktemp("home-vide"))
     _git(racine, "init", "-q", "-b", "main", env=env)
@@ -212,6 +219,8 @@ def banc(tmp_path_factory):
         "template/docs/modele/methode.md": "méthode v2\n",
         "template/docs/modele/seme.md": "semé v2\n",
         "template/docs/modele/nouveau.md": "nouveau\n",
+        SAUVEGARDES: "sauvegardes\n",
+        SERVEUR: "serveur\n",
         REGLE: (RACINE / REGLE).read_bytes(),
         "template/.github/workflows/modele-socle.yml": "socle v2\n",
         X_RENDU: "x v2\n",
@@ -419,15 +428,21 @@ def projet(
 
 
 def reponses_completes(banc) -> dict:
-    """Six dépôts sur deux pages : `alpha`, public, en `v0.1.0` ; `beta`, privé, à la tête ;
-    `gamma`, archivé ; `delta`, sans `.copier-answers.yml` ; `epsilon`, d'un autre modèle ;
-    `zeta-donnees`, privé, en cible `donnees`, sans `nature`."""
+    """Six dépôts du compte sur deux pages : `alpha`, public, en `v0.1.0` ; `beta`, privé, à la
+    tête ; `gamma`, archivé ; `delta`, sans `.copier-answers.yml` ; `epsilon`, d'un autre modèle ;
+    `zeta-donnees`, privé, en cible `donnees`, sans `nature`. Un septième, `omicron`, d'un autre
+    propriétaire, porte un projet : il n'est pas examiné."""
     page1 = [
         depot("alpha"),
         depot("beta", prive=True, branche=BRANCHE),
         depot("gamma", archive=True),
     ]
-    page2 = [depot("delta"), depot("epsilon"), depot("zeta-donnees", prive=True)]
+    page2 = [
+        depot("delta"),
+        {**depot("omicron"), "owner": {"login": "un-autre-compte"}},
+        depot("epsilon"),
+        depot("zeta-donnees", prive=True),
+    ]
     v1 = banc.v1
     zeta = (
         "# Écrit par Copier. Ne pas modifier à la main.\n"
@@ -557,6 +572,8 @@ def reponses_completes(banc) -> dict:
         api("zeta-donnees", "/pulls", state="open", per_page="100"): ok([[]]),
         api("zeta-donnees", "/pulls", state="all", per_page="50"): ok([]),
         api("zeta-donnees", "/rules/branches/main"): ok([]),
+        # omicron, d'un autre propriétaire : examiné, ce serait un projet
+        **projet("omicron"),
     }
 
 
@@ -564,7 +581,12 @@ def reponses_completes(banc) -> dict:
 
 
 def lancer(faux, banc, reponses: dict, dossier: Path, *options, tempdir=None):
-    """Le relevé, lancé dans le processus contre le faux `gh` : (code, sortie, appels)."""
+    """Le relevé, lancé dans le processus contre le faux `gh` : (code, sortie, appels).
+
+    Un espion sur `subprocess.run` note l'entrée de chaque lancement du faux : chacun passe
+    `stdin=subprocess.DEVNULL` (P9). Le faux lit son entrée jusqu'à la fin, mais cela ne prouve
+    rien seul : sous la capture de pytest, le descripteur 0 du processus, dont un enfant hérite, est
+    déjà fermé (revue finale du lot 17)."""
     dossier.mkdir(parents=True, exist_ok=True)
     fichier = dossier / "reponses.json"
     fichier.write_text(json.dumps(reponses), encoding="utf-8")
@@ -576,13 +598,23 @@ def lancer(faux, banc, reponses: dict, dossier: Path, *options, tempdir=None):
     os.environ["FAUX_GH_JOURNAL"] = str(journal)
     if tempdir is not None:
         tempfile.tempdir = str(tempdir)
+    vrai_run = releve.subprocess.run
+    entrees = []
+
+    def espion(commande, *args, **kwargs):
+        if Path(str(commande[0])).name.casefold() == faux.name.casefold():
+            entrees.append(kwargs.get("stdin", "absente"))
+        return vrai_run(commande, *args, **kwargs)
+
     sortie = io.StringIO()
+    releve.subprocess.run = espion
     try:
         with contextlib.redirect_stdout(sortie):
             code = releve.main(
                 [*options, "--compte", COMPTE, "--gh", str(faux), "--clone", str(banc.racine)]
             )
     finally:
+        releve.subprocess.run = vrai_run
         tempfile.tempdir = ancien_tempdir
         for k, v in anciens.items():
             if v is None:
@@ -590,6 +622,9 @@ def lancer(faux, banc, reponses: dict, dossier: Path, *options, tempdir=None):
             else:
                 os.environ[k] = v
     appels = [json.loads(ligne) for ligne in journal.read_text(encoding="utf-8").splitlines()]
+    # l'espion a vu chaque lancement du faux, et chacun a fermé son entrée
+    assert len(entrees) == len(appels), (len(entrees), len(appels))
+    assert all(entree is subprocess.DEVNULL for entree in entrees), entrees
     return code, sortie.getvalue(), appels
 
 
@@ -612,11 +647,20 @@ def complet(banc, faux, tmp_path_factory):
 
 @pytest.fixture(scope="module")
 def clair(banc, faux, tmp_path_factory):
-    """Le relevé d'un seul projet, qui n'a rien à lire."""
+    """Le relevé d'un seul projet, qui n'a rien à lire : l'un de ses plans refuse aux deux
+    versions, par les mêmes lignes, ce qui n'est pas à lire."""
     dossier = tmp_path_factory.mktemp("clair")
     reponses = {
         cle("user/repos", affiliation="owner", per_page="100"): ok([[depot("clair")]]),
         **projet_clair("clair"),
+        api("clair", "/git/trees/main", recursive="1"): arbre(
+            {
+                ".claude/plans": None,
+                ".claude/plans/plan-a.md": "a" * 40,
+                ".claude/plans/plan-c.md": "c" * 40,
+            }
+        ),
+        api("clair", "/git/blobs/" + "c" * 40): contenu(PLAN_SANS_REVUES),
     }
     code, sortie, appels = lancer(faux, banc, reponses, dossier)
     return SimpleNamespace(code=code, sortie=sortie, lignes=sortie.splitlines(), appels=appels)
@@ -624,9 +668,9 @@ def clair(banc, faux, tmp_path_factory):
 
 @pytest.fixture(scope="module")
 def causes(banc, faux, tmp_path_factory):
-    """Six projets : cinq ont chacun une seule cause du code 1, le dernier rien à lire."""
+    """Sept projets : six ont chacun une seule cause du code 1, le dernier rien à lire."""
     dossier = tmp_path_factory.mktemp("causes")
-    noms = ("c-fichiers", "c-ouvertes", "c-plans", "c-regle", "c-rien", "c-textes")
+    noms = ("c-fichiers", "c-message", "c-ouvertes", "c-plans", "c-regle", "c-rien", "c-textes")
     reponses = {
         cle("user/repos", affiliation="owner", per_page="100"): ok(
             [[depot(nom, prive=nom != "c-regle") for nom in noms]]
@@ -642,6 +686,12 @@ def causes(banc, faux, tmp_path_factory):
             ouvertes={1: [{"filename": ".claude/plans/neuf.md", "status": "added"}]},
         ),
         **projet("c-textes", "v0.1.0", prs={5: CORPS_ACCORD}),
+        # refusée par les deux versions, chacune pour sa raison : l'accord sans prénom pour la
+        # version du projet, la tête relue absente pour la tête, qui lit la fermeture
+        **projet("c-message", "v0.1.0", prs={7: CORPS_ACCORD}),
+        cle("graphql", query=releve.REQUETE, owner=COMPTE, name="c-message", n="50"): ok(
+            {"data": {"repository": {"pullRequests": {"nodes": [fermetures(7, total=1)]}}}}
+        ),
         **projet("c-regle", regles=regle("socle / secrets")),
         **projet("c-fichiers", "v0.1.0", entrees={".githooks/pre-commit": "1" * 40}),
         **projet("c-rien"),
@@ -664,14 +714,17 @@ def test_releve_projets(complet):
     assert "relevé : beta : v0.2.0, cible aucune, nature donnees, fusion edouard" in lignes
     # la cible `donnees` n'a pas de ligne `nature` : sa nature est `donnees`
     assert "relevé : zeta-donnees : v0.1.0, cible donnees, nature donnees, fusion session" in lignes
-    for nom in ("gamma", "delta", "epsilon"):
+    for nom in ("gamma", "delta", "epsilon", "omicron"):
         assert not any(ligne.startswith(f"relevé : {nom} :") for ligne in lignes), nom
-    # deux pages de `user/repos`, l'archivé compris : six dépôts examinés
+    # deux pages de `user/repos`, l'archivé compris, l'autre propriétaire écarté : six dépôts
+    # examinés
     assert lignes[-1] == "relevé : 6 dépôts examinés, 3 projets, 2 lus, 1 non relevés, 1 à lire"
     assert lignes[-2] == LIMITES
-    # l'archivé n'est pas lu
-    assert not any("gamma" in json.dumps(appel["args"]) for appel in complet.appels)
-    # chaque appel a vu son entrée fermée : le faux, qui la lit jusqu'à la fin, a répondu
+    # ni l'archivé ni le dépôt d'un autre propriétaire ne sont lus
+    for nom in ("gamma", "omicron"):
+        assert not any(nom in json.dumps(appel["args"]) for appel in complet.appels), nom
+    # chaque lancement du faux a passé `stdin=subprocess.DEVNULL`, ce que l'espion de `lancer`
+    # vérifie à chaque relevé : la capture de pytest ferme déjà l'entrée dont un enfant hérite
     assert complet.code == releve.EXIT_A_LIRE
 
 
@@ -722,7 +775,7 @@ def test_releve_arguments(complet):
 def test_releve_plans(complet, clair):
     alpha = lignes_de(complet.lignes, "alpha", "plans")
     # le plan d'un sous-dossier, lu par son blob, en base64 coupé ; un `.txt` n'est pas un plan
-    assert "sous/plan-a.md : même verdict" in alpha
+    assert "sous/plan-a.md : même verdict (passe)" in alpha
     assert "sous/plan-a.md : refuserait s'il était neuf" in alpha
     assert (
         "sous/plan-a.md : neuf : section « Effets cherchés » absente (titre de niveau 2)" in alpha
@@ -738,10 +791,17 @@ def test_releve_plans(complet, clair):
     ) in alpha
     assert not any("notes.txt" in ligne for ligne in alpha)
     # « refuserait s'il était neuf » est une information : le code reste à 0
-    assert lignes_de(clair.lignes, "clair", "plans")[:2] == [
-        "plan-a.md : même verdict",
+    plans = lignes_de(clair.lignes, "clair", "plans")
+    assert plans[:2] == [
+        "plan-a.md : même verdict (passe)",
         "plan-a.md : refuserait s'il était neuf",
     ]
+    # le verdict commun dit s'il passe ou refuse ; un refus commun n'est pas à lire, et ses lignes
+    # ne paraissent qu'avec « neuf »
+    assert "plan-c.md : même verdict (refuse)" in plans
+    assert "plan-c.md : neuf : section « Revues » absente (titre de niveau 2)" in plans
+    assert not any(ligne.startswith("plan-c.md : section") for ligne in plans)
+    assert not any(ligne.endswith(": même verdict") for ligne in clair.lignes)
     assert clair.code == releve.EXIT_RIEN
 
 
@@ -864,7 +924,7 @@ def test_releve_erreur_passagere(banc, faux, tmp_path):
     assert "relevé : eta : non relevé : réponses : erreur 403" in lignes
     assert "relevé : theta : non relevé : réponses : erreur 502" in lignes
     assert "relevé : iota : non relevé : arbre : erreur 502" in lignes
-    assert "relevé : kappa : plans : plan-a.md : même verdict" in lignes
+    assert "relevé : kappa : plans : plan-a.md : même verdict (passe)" in lignes
     # le message de l'erreur, sur l'une et l'autre sortie de `gh`, n'est jamais cité
     assert MARQUEUR not in sortie
     assert lignes[-1] == "relevé : 4 dépôts examinés, 4 projets, 1 lus, 3 non relevés, 0 à lire"
@@ -955,6 +1015,16 @@ def test_releve_codes(banc, faux, tmp_path, capsys, clair, complet):
     assert sortie == ""
     assert "gh sans accès (dépôts : erreur 401)" in capsys.readouterr().err
     assert len(appels) == 1
+    # `gh` jamais connecté : il sort par 4, sans rien écrire, ni JSON ni `HTTP NNN` (revue finale
+    # du lot 17)
+    reponses = {cle("user/repos", affiliation="owner", per_page="100"): {"code": 4, "sortie": ""}}
+    code, sortie, appels = lancer(faux, banc, reponses, tmp_path / "non-connecte")
+    assert code == releve.EXIT_USAGE
+    assert sortie == ""
+    erreur_de_gh = capsys.readouterr().err
+    assert erreur_de_gh.startswith("relevé : usage invalide"), erreur_de_gh
+    assert "gh sans accès (dépôts : authentification requise, code 4)" in erreur_de_gh
+    assert len(appels) == 1
     # une erreur passagère sur la liste des dépôts n'est pas une erreur d'usage
     reponses = {cle("user/repos", affiliation="owner", per_page="100"): erreur(502)}
     code, sortie, _ = lancer(faux, banc, reponses, tmp_path / "passagere")
@@ -995,17 +1065,29 @@ def test_releve_sortie_sans_contenu(complet, tmp_path_factory):
 
 
 def test_releve_causes_du_code_1(causes):
-    """Chacune des cinq causes du code 1, seule dans son projet : un relevé qui en oublierait une
-    compterait un projet à lire de moins."""
+    """Chacune des six causes du code 1, seule dans son projet : un relevé qui en oublierait une
+    compterait un projet à lire de moins. Un texte refusé par les deux versions, chacune pour sa
+    raison, est un « message changé » (revue finale du lot 17)."""
     lignes = causes.lignes
     assert "relevé : c-plans : plans : plan-b.md : verdict changé" in lignes
     assert "relevé : c-ouvertes : PR ouvertes : PR 1 : ajoute un plan : neuf.md" in lignes
     assert "relevé : c-textes : textes : PR 5 : refusait, passe" in lignes
+    messages = lignes_de(lignes, "c-message", "textes")
+    assert messages[0] == "PR 7 : message changé", messages
+    assert any(
+        m.startswith("PR 7 : version du projet : texte de la PR : écarts à la spec : ligne 2")
+        for m in messages
+    ), messages
+    assert (
+        "PR 7 : tête : texte de la PR : ferme une issue : ligne « Tête relue : <SHA complet> » "
+        "absente"
+    ) in messages
+    assert messages[-1] == "1 PR lues, 1 verdicts changés, 0 non relevées", messages
     assert "relevé : c-regle : règle : contrôle géré absent : texte-pr" in lignes
     assert (
         "relevé : c-fichiers : fichiers gérés : .githooks/pre-commit : modifié dans le projet"
     ) in lignes
-    assert lignes[-1] == "relevé : 6 dépôts examinés, 6 projets, 6 lus, 0 non relevés, 5 à lire"
+    assert lignes[-1] == "relevé : 7 dépôts examinés, 7 projets, 7 lus, 0 non relevés, 6 à lire"
     assert causes.code == releve.EXIT_A_LIRE
 
 
@@ -1089,12 +1171,75 @@ def test_releve_dossier_temporaire_non_retire(banc, faux, tmp_path, monkeypatch)
     monkeypatch.setattr(releve.shutil, "rmtree", verrouille)
     temporaire = tmp_path / "base-du-releve"
     temporaire.mkdir()
-    reponses = {cle("user/repos", affiliation="owner", per_page="100"): ok([[]])}
+    # un projet qui n'a rien à lire : le code 1 vient du seul dossier
+    reponses = {
+        cle("user/repos", affiliation="owner", per_page="100"): ok([[depot("clair")]]),
+        **projet_clair("clair"),
+    }
     code, sortie, _ = lancer(faux, banc, reponses, tmp_path / "faux", tempdir=temporaire)
     lignes = sortie.splitlines()
-    assert lignes[-2] == "relevé : 0 dépôts examinés, 0 projets, 0 lus, 0 non relevés, 0 à lire"
+    assert lignes[-2] == "relevé : 1 dépôts examinés, 1 projets, 1 lus, 0 non relevés, 0 à lire"
     assert lignes[-1] == "relevé : dossier temporaire non retiré"
     assert code == releve.EXIT_A_LIRE
     assert len(list(temporaire.iterdir())) == 1
     for forme in (str(temporaire), temporaire.as_posix(), temporaire.name):
         assert forme not in sortie, forme
+
+
+def test_releve_aucun_projet(banc, faux, tmp_path, clair):
+    """Aucun projet né du modèle relevé : une ligne fixe le dit, avant la ligne des limites, comme
+    une information, et le relevé rend 0, comme le § 5.4 de la spec (« 0, tous les projets lus et
+    rien à lire », vrai à vide). C'est le cas d'un `--compte` qui n'est pas celui de `gh` : la liste
+    des dépôts n'a que ceux d'un autre propriétaire, et aucun n'est examiné (revue finale du lot
+    17, puis la relecture de ses corrections)."""
+    ailleurs = {**depot("autre"), "owner": {"login": "un-autre-compte"}}
+    for cas, depots, examines in (
+        ("compte-faux", [ailleurs], 0),
+        ("sans-projet", [depot("delta")], 1),
+        ("vide", [], 0),
+    ):
+        reponses = {
+            cle("user/repos", affiliation="owner", per_page="100"): ok([depots]),
+            api("delta", "/contents/.copier-answers.yml", ref="main"): erreur(404),
+        }
+        code, sortie, appels = lancer(faux, banc, reponses, tmp_path / cas)
+        assert sortie.splitlines() == [
+            "relevé : aucun projet né du modèle relevé",
+            LIMITES,
+            f"relevé : {examines} dépôts examinés, 0 projets, 0 lus, 0 non relevés, 0 à lire",
+        ], cas
+        assert code == releve.EXIT_RIEN, cas
+        assert len(appels) == 1 + examines, cas
+    # un projet relevé : la ligne ne paraît pas, et le code reste à 0
+    assert releve.AUCUN_PROJET == "aucun projet né du modèle relevé"
+    assert releve.AUCUN_PROJET not in clair.sortie
+    assert clair.code == releve.EXIT_RIEN
+
+
+def test_releve_conditions_simples(banc, faux, tmp_path):
+    """Les deux formes de condition qu'un segment de chemin géré peut porter, évaluées avec les
+    réponses du projet (revue finale du lot 17) : `{% if sauvegardes %}` rend son fichier pour
+    `mu`, dont la réponse est vraie, et pas pour `nu`, dont elle est fausse ;
+    `{% if cible == 'serveur' %}`, pour `mu`, en cible `serveur`, et pas pour `nu`, en cible
+    `aucune`."""
+    serveur = copier_answers("v0.1.0", cible="serveur") + "sauvegardes: true\n"
+    aucune = copier_answers("v0.1.0") + "sauvegardes: false\n"
+    reponses = {
+        cle("user/repos", affiliation="owner", per_page="100"): ok(
+            [[depot("mu", prive=True), depot("nu", prive=True)]]
+        ),
+        **projet("mu", "v0.1.0"),
+        **projet("nu", "v0.1.0"),
+    }
+    reponses.update(reponses_de_base("mu", serveur))
+    reponses.update(reponses_de_base("nu", aucune))
+    code, sortie, _ = lancer(faux, banc, reponses, tmp_path)
+    lignes = sortie.splitlines()
+    mu = lignes_de(lignes, "mu", "fichiers gérés")
+    assert "docs/modele/sauvegardes.md : nouveau dans le modèle" in mu, mu
+    assert "docs/modele/serveur.md : nouveau dans le modèle" in mu, mu
+    nu = lignes_de(lignes, "nu", "fichiers gérés")
+    assert nu, lignes
+    assert not any("sauvegardes.md" in ligne or "serveur.md" in ligne for ligne in nu), nu
+    assert lignes[-1] == "relevé : 2 dépôts examinés, 2 projets, 2 lus, 0 non relevés, 0 à lire"
+    assert code == releve.EXIT_RIEN

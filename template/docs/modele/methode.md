@@ -15,10 +15,10 @@ modifie pas dans le projet. Un défaut se corrige dans `modele-projet`, pour tou
 5. Une PR de clôture : elle **supprime le plan** (dans un lot en tranches, le plan maître et les
    plans de tranche), reporte dans `CLAUDE.md` ou dans un ADR ce qui doit survivre, relit le
    README d'après `docs/modele/documentation.md`, et porte au registre du dépôt les leçons du lot
-   encore sans ligne ; un dépôt de données, qui n'a pas de registre à lui, les porte au registre de
-   son dépôt de code (voir « Le registre »). Elle seule porte « Closes #N », les autres PR du lot
-   disant « Partie de #N », et elle nomme la tête relue (voir « Le texte de la PR »). L'unité de
-   clôture du plan nomme ces gestes (voir « La clôture d'un plan »).
+   encore sans ligne ; un dépôt de la cible `donnees`, qui n'a pas de registre à lui, les porte au
+   registre de son dépôt de code (voir « Le registre »). Elle seule porte « Closes #N », les autres
+   PR du lot disant « Partie de #N », et elle nomme la tête relue (voir « Le texte de la PR »).
+   L'unité de clôture du plan nomme ces gestes (voir « La clôture d'un plan »).
 6. L'étiquette `vX.Y.Z`, **avec l'accord d'Edouard**.
 
 ## Les outils
@@ -128,7 +128,8 @@ nomme :
 - la fermeture de l'issue : le mot `Closes`, le mot `Fixes`, ou `ferme l'issue` ;
 - la tête relue : `Tête relue`.
 
-Un mot se cherche sans lettre ni chiffre juste avant ni juste après lui ; `supprim` et `suppress`
+Un mot se cherche sans lettre, chiffre ni `_` juste avant ni juste après lui : un `_` collé au mot,
+comme l'emphase `_README_`, le cache, et `**README**` le laisse lire ; `supprim` et `suppress`
 n'ont cette limite qu'avant eux. Entre deux mots d'une suite, tout blanc compte, retour à la ligne
 et indentation compris : une clôture coupée à 100 colonnes coupe aussi « Tête relue ». « retire »
 ne vaut pas « supprime », ni « se ferme » « ferme l'issue ». L'option `--cloture MOT` de `plan.py`,
@@ -185,17 +186,18 @@ chaque fichier du dépôt qu'il cite ouvert, mais un lieu préfixé par un autre
 vérifié », sans refus : l'étape ne passe pas `--depot`, et une session vérifie ce lieu en lançant
 `plan.py` avec `--depot <dépôt>=<clone>`, puis la revue du plan le relit ; un plan modifié se
 vérifie sans ouvrir les fichiers cités (`--sans-lieux`), sans `--neuf` : ses sections, la forme de
-chaque ligne et ses revues. Une PR d'implémentation modifie souvent son plan avec le code qu'il
-cite, et les numéros de ligne dérivent : les mécanismes se vérifient à l'entrée du plan, quand la
-revue du plan les relit, et un mécanisme ajouté plus tard se relit à la revue. Le socle tourne aussi
-au push sur la branche principale, sur les plans que ce push ajoute ou modifie : un plan ajouté s'y
-vérifie aussi sans ouvrir les fichiers cités, puisque ses lieux l'ont été à la PR, et qu'une autre
-PR, fusionnée entre-temps, a pu décaler une ligne citée. Il reçoit `--neuf` comme à la PR. Un plan
-renommé compte pour un ajout (`git diff --no-renames`) : il reçoit `--neuf`. Sur une base nulle,
-l'étape ne contrôle rien. Hors d'une base nulle, elle dit toujours combien de plans la PR ajoute,
-modifie et supprime, zéro compris : « Plans ajoutés : N, modifiés : M, supprimés : S. » ; un plan
-supprimé n'est pas contrôlé. Une PR qui ne touche aucun plan passe, comme la PR de clôture, qui
-supprime les plans du lot. La session lance aussi `python scripts/modele/plan.py --neuf <plan>`
+chaque ligne et ses revues, et, s'il porte « Effets cherchés », sa clôture, ou la ligne qui l'en
+dispense (voir « La clôture d'un plan »). Une PR d'implémentation modifie souvent son plan avec le
+code qu'il cite, et les numéros de ligne dérivent : les mécanismes se vérifient à l'entrée du plan,
+quand la revue du plan les relit, et un mécanisme ajouté plus tard se relit à la revue. Le socle
+tourne aussi au push sur la branche principale, sur les plans que ce push ajoute ou modifie : un
+plan ajouté s'y vérifie aussi sans ouvrir les fichiers cités, puisque ses lieux l'ont été à la PR,
+et qu'une autre PR, fusionnée entre-temps, a pu décaler une ligne citée. Il reçoit `--neuf` comme à
+la PR. Un plan renommé compte pour un ajout (`git diff --no-renames`) : il reçoit `--neuf`. Sur une
+base nulle, l'étape ne contrôle rien. Hors d'une base nulle, elle dit toujours combien de plans la
+PR ajoute, modifie et supprime, zéro compris : « Plans ajoutés : N, modifiés : M, supprimés : S. » ;
+un plan supprimé n'est pas contrôlé. Une PR qui ne touche aucun plan passe, comme la PR de clôture,
+qui supprime les plans du lot. La session lance aussi `python scripts/modele/plan.py --neuf <plan>`
 avant de soumettre son plan à Edouard, et après chaque correction, tant qu'il n'est pas accepté ;
 ensuite, sans `--neuf`.
 
@@ -519,7 +521,8 @@ Les numéros ne se réutilisent jamais. **Au 3e constat portant le même motif, 
 test, un hook, une vérification de CI), et la ligne le dit. La compétence `/consigner`
 (`.claude/skills/consigner/SKILL.md`) écrit la ligne.
 
-Un dépôt de données n'a pas de registre à lui : ses leçons vont au registre de son dépôt de code.
+Un dépôt de la cible `donnees` n'a pas de registre à lui : ses leçons vont au registre de son dépôt
+de code.
 
 ## Les familles de garde-fous de l'écosystème
 

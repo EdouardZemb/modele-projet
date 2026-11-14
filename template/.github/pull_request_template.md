@@ -26,7 +26,7 @@ Tête relue :
 
 ## Registre
 
-<!-- Les lignes ajoutées à docs/registre.md (numéros), ou « aucun constat ». Dans un dépôt de données, le registre est celui du dépôt de code. -->
+<!-- Les lignes ajoutées à docs/registre.md (numéros), ou « aucun constat ». Dans un dépôt de la cible `donnees`, le registre est celui du dépôt de code. -->
 
 ## Pour un fix : cause racine et prévention
 

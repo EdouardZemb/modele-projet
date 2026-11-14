@@ -490,13 +490,21 @@ Le cadrage est dans `docs/cadrage.md` ; ce que les lots ont appris, dans `docs/r
   aussi le script à blanc, sur le poste d'Edouard. `tests/test_poste.py` le lance, et compare les
   bits d'exécution du premier commit à ceux du modèle : sous Windows seulement ; ailleurs, seul le
   contrôle du BOM tourne.
-- `python -B template/scripts/modele/plan.py --racine . --depot serveur=../serveur --neuf
-  --cloture cadrage --cloture "À relire" --cloture pistes --cloture relevé <plan>` : le contrôle
-  d'un plan neuf, ses sections et sa clôture (`methode.md`, « Les outils »). Il faut une option
-  `--depot <dépôt>=../<dépôt>` par dépôt que le plan cite ; un plan accepté se revérifie sans
-  `--neuf`. Les plans du modèle vivent dans `Documents\00-boite-de-reception\`, hors du dépôt :
-  l'étape « Les plans » de la CI n'en trouve aucun ici. La session lance cette commande depuis le
-  clone principal, avant de soumettre un plan à Edouard et après chaque correction.
+- `python -B template/scripts/modele/plan.py` : le contrôle d'un plan neuf, ses sections et sa
+  clôture (`methode.md`, « Les outils »), par cette commande, sur une seule ligne :
+
+  ```sh
+  python -B template/scripts/modele/plan.py --racine . --depot serveur=../serveur --neuf --cloture cadrage --cloture "À relire" --cloture pistes --cloture relevé <plan>
+  ```
+
+  Il faut une option `--depot <dépôt>=../<dépôt>` par dépôt que le plan cite ; un plan accepté se
+  revérifie sans `--neuf`. Les plans du modèle vivent dans `Documents\00-boite-de-reception\`,
+  hors du dépôt : l'étape « Les plans » de la CI n'en trouve aucun ici. La session lance cette
+  commande depuis le clone principal, avant de soumettre un plan à Edouard et après chaque
+  correction. Dans ce dépôt, une ligne d'« Effets cherchés » dont le lieu est un projet cite le
+  relevé (`poste/releve.py`) dans son troisième morceau. La clôture d'un plan du modèle ne
+  supprime aucun plan, et le dit (« le plan, hors du dépôt, n'est pas supprimé : son en-tête est
+  mis à jour ») : le geste « le plan supprimé » y trouve le mot qu'il cherche.
 - `python -B template/scripts/modele/texte_pr.py --fermetures "$fermetures"` : le contrôle du texte
   d'une PR avant de l'ouvrir (`methode.md`, « Éprouver le texte avant d'ouvrir la PR »). Ce dépôt
   n'a pas de `scripts/` à sa racine : le bloc de la méthode s'y lance avec ce chemin, depuis la
@@ -527,16 +535,20 @@ Le cadrage est dans `docs/cadrage.md` ; ce que les lots ont appris, dans `docs/r
   (un verdict qui change, une PR ouverte qui ajoute un plan, un contrôle géré absent d'une règle,
   un fichier géré modifié dans un projet), ou que quelque chose n'est pas relevé (une erreur de
   l'API, une version absente du clone : `git fetch --tags`, un script du modèle qui plante, le
-  dossier temporaire non retiré), 0 sinon. Il rend 64 pour une erreur d'usage : `gh` absent ou
-  sans accès, un dossier qui n'est pas un clone du modèle qu'il sait lire. Les plans en cours qui
-  « refuseraient s'ils étaient neufs » sont une information : ils ne rendent pas le code 1, comme
-  les contrôles propres d'une règle. Parmi les fichiers gérés, seuls les dossiers exclus des
-  formateurs sont comparés, pas le gabarit de PR ni les autres fichiers gérés hors d'eux. Par
-  défaut, il compare ceux que le modèle change entre la version de chaque projet et la tête, et un
-  projet à la version de la tête n'en montre aucun. L'inventaire complet des fichiers gérés
-  demande `--depuis <ancienne étiquette>`, qui ouvre cet intervalle pour tous les projets, chacun
-  comparé au modèle à sa version. `--prs N`, de 1 à 100, dit combien de PR récentes passent par les
-  deux `texte_pr.py` (50 par défaut). `tests/test_releve.py` l'éprouve contre un faux `gh`.
+  dossier temporaire non retiré), 0 sinon. Il rend 64 pour une erreur d'usage : `gh` absent ou sans
+  accès (un 401, ou `gh` qui sort par 4, jamais connecté), un dossier qui n'est pas un clone du
+  modèle qu'il sait lire. Les plans en cours qui « refuseraient s'ils étaient neufs » sont une
+  information : ils ne rendent pas le code 1, comme les contrôles propres d'une règle, et comme la
+  ligne « aucun projet né du modèle relevé », d'un relevé qui n'en trouve aucun, par exemple sous un
+  `--compte` qui n'est pas celui de `gh` : il rend alors 0. Parmi les fichiers gérés, seuls les
+  dossiers exclus des formateurs sont comparés, pas le gabarit de PR ni les autres fichiers gérés
+  hors d'eux. Par défaut, il compare ceux que le modèle change entre la version de chaque projet et
+  la tête, et un projet à la version de la tête n'en montre aucun. `--depuis <ancienne étiquette>`
+  ouvre cet intervalle pour tous les projets, chacun comparé au modèle à sa version : il compare les
+  fichiers gérés que le modèle a changés depuis cette étiquette, et un fichier géré que le modèle
+  n'a pas changé depuis elle n'est pas comparé, quelle que soit l'étiquette. Ce n'est donc pas un
+  inventaire complet des fichiers gérés. `--prs N`, de 1 à 100, dit combien de PR récentes passent
+  par les deux `texte_pr.py` (50 par défaut). `tests/test_releve.py` l'éprouve contre un faux `gh`.
 - `copier copy --vcs-ref <étiquette> gh:EdouardZemb/modele-projet <dossier>` : créer un projet.
 - `copier update` : mettre à jour un projet né du modèle (à lancer dans ce projet, pas ici).
 - `git config core.hooksPath .githooks` : à poser dans chaque clone et chaque worktree.

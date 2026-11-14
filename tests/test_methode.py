@@ -255,11 +255,14 @@ def test_modele_de_pr_ferme_l_issue():
 
 
 def test_modele_de_pr_renvoie_un_depot_de_donnees_au_registre_du_code():
+    """Seul un dépôt de la cible `donnees` n'a pas de registre à lui : `serveur` et
+    `pupitre-donnees`, de nature `donnees` en cible `aucune`, ont le leur (revue finale du lot 17)."""
     texte = " ".join(lire(TEMPLATE / ".github/pull_request_template.md").split())
     assert (
-        "ou « aucun constat ». Dans un dépôt de données, le registre est celui du dépôt de code."
-        in texte
+        "ou « aucun constat ». Dans un dépôt de la cible `donnees`, le registre est celui du dépôt "
+        "de code." in texte
     )
+    assert "Dans un dépôt de données, le registre" not in texte
 
 
 # --- revue finale du lot 1 ---
@@ -507,11 +510,13 @@ def test_methode_dit_la_nature_des_depots():
         "le message d'un commit compte comme un chemin, `message`",
         "le modèle outille en partie seulement « aucune donnée réelle dans le dépôt »",
         "**Le test d'isolation des chemins de données reste une obligation du projet**",
-        "Un dépôt de données n'a pas de registre à lui",
+        # seul un dépôt de la cible `donnees` n'a pas de registre (revue finale du lot 17)
+        "Un dépôt de la cible `donnees` n'a pas de registre à lui",
         "Arbitrage du 16/10 : le modèle outille **quatre** familles",
     ):
         assert fragment in texte, fragment
     assert "Avant de passer un dépôt privé en public" not in texte
+    assert "Un dépôt de données n'a pas de registre" not in texte
 
 
 def test_garde_fous_dit_la_porte_des_masques():
@@ -1245,6 +1250,14 @@ TITRES_DOCUMENTATION = [
 ]
 # Ce que le texte géré et la docstring de `documentation.py` disent dans les mêmes mots : ce que
 # la carte ne compte pas, ce qu'un lancement local dit de la CI, et les écarts connus à GitHub.
+# Le remède des écarts connus vaut aussi pour la clôture d'un plan et pour la casse, et reste vrai
+# des liens (relecture des corrections de la revue finale du lot 17).
+REMEDE_DES_ECARTS = (
+    "Le remède, chaque fois : écrire le lien sous une forme ordinaire, hors de ces blocs ; dans un "
+    "plan, écrire de même les gestes de la clôture et les titres du plan sous la forme que GitHub "
+    "rend, hors d'un commentaire et d'une définition, chaque titre en `#`, seul sur sa ligne ; "
+    "écrire un chemin dans la casse du fichier."
+)
 DOCUMENTATION_ET_DOCSTRING = (
     "`CLAUDE.local.md`, que le `.gitignore` semé exclut ; un projet né plus tôt l'y ajoute",
     "un `.md` de la racine non suivi compte en local, et la CI ne le voit pas",
@@ -1307,6 +1320,56 @@ DOCUMENTATION_ET_DOCSTRING = (
         "fermé plus bas ; un `<!--` jamais fermé dans une ligne de bloc HTML, comme "
         "`<div><!-- note</div>` ; un attribut ou un titre de lien sur plusieurs lignes."
     ),
+    # sous Windows, la casse touche aussi les lieux de `plan.py` et la cible de « Plan maître : »
+    # (revue finale du lot 17) ; « Un autre », dans une liste qui n'est pas close, et ce que le
+    # contrôle du gabarit resté vide lit, et où (relecture de ses corrections)
+    "Un autre tient à Windows, où l'existence d'un chemin se lit sans égard à la casse.",
+    (
+        "Sous Windows, le contrôle du gabarit resté vide trouve le fichier `docs/cadrage.md` "
+        "derrière un lien `docs/Cadrage.md` du README, et peut avertir si ce fichier n'a que son "
+        "gabarit, alors que GitHub casse ce lien ; sous Linux, il ne trouve pas ce fichier, et ne "
+        "dit rien."
+    ),
+    (
+        "Dans `plan.py`, lancé sous Windows, un lieu de « Mécanismes annoncés » ou la cible d'une "
+        "ligne « Plan maître : » écrits dans une autre casse que le fichier passent, alors que la "
+        "CI, sous Linux, les refuse (« fichier absent », « plan maître absent ») : la vérification "
+        "locale passe là où la CI refuse."
+    ),
+    REMEDE_DES_ECARTS,
+)
+# Les écarts de la clôture d'un plan au rendu de GitHub, dans le texte géré et la docstring : quatre
+# formes qui la laissent passer, et une liste qui n'est pas close (revue finale du lot 17).
+ECARTS_DE_LA_CLOTURE = (
+    (
+        "La clôture d'un plan en a quatre de plus, qui ne touchent que `plan.py` et laissent "
+        "passer une clôture que GitHub rend autrement"
+    ),
+    (
+        "un titre souligné (une ligne de `===` ou de `---` sous une ligne) après l'unité de "
+        "clôture ne la borne pas, et un geste nommé après lui compte"
+    ),
+    "une définition `[//]: # (…)`, que GitHub n'affiche pas, compte",
+    (
+        "un `-->` suivi de `###` en tête de ligne, qui ferme un commentaire ouvert dans un "
+        "paragraphe, fait un titre d'unité, alors que GitHub rend la ligne en paragraphe"
+    ),
+    (
+        "un `<!--` ouvert dans un paragraphe et fermé plus bas cache à `plan.py` un titre de "
+        "clôture que GitHub montre, et `plan.py` vérifie l'unité de clôture suivante"
+    ),
+    (
+        "Ces deux derniers, des commentaires ouverts dans un paragraphe, laissent passer la "
+        "clôture, alors qu'un tel commentaire fait refuser à tort un lien."
+    ),
+    (
+        "cache les liens jusqu'à sa fermeture, plus loin (pour la clôture d'un plan, il laisse "
+        "passer : voir plus bas)"
+    ),
+    (
+        "La liste des écarts connus n'est pas close : d'autres formes rares peuvent encore séparer "
+        "ce que lisent les contrôles de ce que rend GitHub."
+    ),
 )
 
 
@@ -1359,9 +1422,15 @@ def test_documentation_md(tmp_path, env_isole):
         "porte un deux-points sous Windows, qui y nomme un lecteur (`Z:`, en tête comme plus loin",
         # les écarts connus au rendu de GitHub, repris de la docstring du script
         "dans un bloc de code indenté",
-        "un lien `docs/Cadrage.md` vers `docs/cadrage.md`",
+        "trouve le fichier `docs/cadrage.md` derrière un lien `docs/Cadrage.md` du README",
         "un avertissement de trop, jamais un refus",
         *DOCUMENTATION_ET_DOCSTRING,
+        # seul un dépôt de la cible `donnees` n'a pas de registre à lui (revue finale du lot 17)
+        (
+            "Dans un dépôt de la cible `donnees`, `CLAUDE.md` dit ce que le dépôt porte, et ses "
+            "leçons vont au registre du dépôt de code."
+        ),
+        "Un dépôt de la cible `donnees` n'a ni registre, ni pistes, ni plans, ni ADR à lui.",
     ):
         assert fragment in plat, fragment
     for ancien in (
@@ -1370,6 +1439,14 @@ def test_documentation_md(tmp_path, env_isole):
         "Quatre laissent passer",
         "Un autre laisse passer à tort ce que GitHub cache",
         "Deux autres laissent passer",
+        "Un dernier ne touche que le gabarit resté vide",
+        "Un dépôt de données n'a ni registre",
+        "Dans un dépôt de données, `CLAUDE.md` dit",
+        # « Un dernier » dans une liste qui n'est pas close, un lien lu « dans le gabarit », et le
+        # remède des seuls liens (relecture des corrections de la revue finale du lot 17)
+        "Un dernier tient à Windows",
+        "y est lu, et peut avertir",
+        "écrire le lien sous une forme ordinaire, hors de ces blocs.",
     ):
         assert ancien not in plat, ancien
     # Les lignes de la licence et de la carte, telles que le script les écrit sur une racine, sont
@@ -1459,6 +1536,10 @@ def test_docstring_suit_documentation_md():
         "comme en CI : un fichier qu'il ignore",
         "Un autre laisse passer à tort ce que GitHub cache",
         "Deux autres laissent passer",
+        "Un dernier ne touche que le gabarit resté vide",
+        # relecture des corrections de la revue finale du lot 17
+        "Un dernier tient à Windows",
+        "y est lu, et peut avertir",
     ):
         assert ancien not in docstring, ancien
 
@@ -1562,6 +1643,12 @@ def test_methode_dit_les_plans():
         "Sans lui, son absence ne refuse pas ; présente, elle se vérifie dans tous les modes",
         "Un plan ajouté se vérifie en entier, par `--neuf`, chaque fichier du dépôt qu'il cite",
         "un plan modifié se vérifie sans ouvrir les fichiers cités (`--sans-lieux`), sans `--neuf`",
+        # un plan modifié qui porte « Effets cherchés » est tenu à sa clôture (revue finale du
+        # lot 17)
+        (
+            "ses sections, la forme de chaque ligne et ses revues, et, s'il porte « Effets "
+            "cherchés », sa clôture, ou la ligne qui l'en dispense (voir « La clôture d'un plan »)."
+        ),
         "Il reçoit `--neuf` comme à la PR",
         (
             "elle relit dans le code chaque ligne de « Mécanismes annoncés », et chaque ligne "
@@ -1657,7 +1744,7 @@ def test_methode_dit_les_plans():
 
 def test_methode_dit_la_cloture_d_un_plan():
     """La clôture d'un plan (lot 17) : le point 5 du cycle porte les leçons au registre, celui du
-    dépôt de code pour un dépôt de données ; un lot en tranches dit la ligne `Plan maître :` et les
+    dépôt de code pour un dépôt de la cible `donnees` ; un lot en tranches dit la ligne `Plan maître :` et les
     gestes de la clôture du lot ; « La clôture d'un plan » dit l'unité, son texte, ses gestes et
     leurs expressions, `--cloture`, le refus, ce que la porte ne voit pas, le plan de tranche et le
     plan hors lot ; le tableau des garde-fous dit la clôture."""
@@ -1666,8 +1753,8 @@ def test_methode_dit_la_cloture_d_un_plan():
         # le point 5 du cycle
         (
             "relit le README d'après `docs/modele/documentation.md`, et porte au registre du dépôt "
-            "les leçons du lot encore sans ligne ; un dépôt de données, qui n'a pas de registre à "
-            "lui, les porte au registre de son dépôt de code (voir « Le registre »)."
+            "les leçons du lot encore sans ligne ; un dépôt de la cible `donnees`, qui n'a pas de "
+            "registre à lui, les porte au registre de son dépôt de code (voir « Le registre »)."
         ),
         "L'unité de clôture du plan nomme ces gestes (voir « La clôture d'un plan »).",
         # un lot en tranches
@@ -1718,9 +1805,11 @@ def test_methode_dit_la_cloture_d_un_plan():
         "- la fermeture de l'issue : le mot `Closes`, le mot `Fixes`, ou `ferme l'issue` ;",
         "- la tête relue : `Tête relue`.",
         (
-            "Un mot se cherche sans lettre ni chiffre juste avant ni juste après lui ; `supprim` "
-            "et `suppress` n'ont cette limite qu'avant eux. Entre deux mots d'une suite, tout "
-            "blanc compte, retour à la ligne et indentation compris : une clôture coupée à 100 "
+            # `\w` compte `_` : l'emphase par soulignés cache le mot (revue finale du lot 17)
+            "Un mot se cherche sans lettre, chiffre ni `_` juste avant ni juste après lui : un `_` "
+            "collé au mot, comme l'emphase `_README_`, le cache, et `**README**` le laisse lire ; "
+            "`supprim` et `suppress` n'ont cette limite qu'avant eux. Entre deux mots d'une suite, "
+            "tout blanc compte, retour à la ligne et indentation compris : une clôture coupée à 100 "
             "colonnes coupe aussi « Tête relue ». « retire » ne vaut pas « supprime », ni « se "
             "ferme » « ferme l'issue »."
         ),
@@ -1772,6 +1861,7 @@ def test_methode_dit_la_cloture_d_un_plan():
     ):
         assert fragment in texte, fragment
     assert "ce qui doit survivre, et relit le README" not in texte
+    assert "sans lettre ni chiffre" not in texte
     assert not RENVOI_AU_PLAN.search(texte)
     section = lire(METHODE).split("## Les garde-fous", 1)[1].split("\n## ", 1)[0]
     (ligne,) = [ligne for ligne in section.splitlines() if "`scripts/modele/plan.py`" in ligne]
@@ -1785,7 +1875,9 @@ def test_methode_dit_la_cloture_d_un_plan():
 def test_ecarts_connus_nomment_la_cloture():
     """La liste des écarts connus au rendu de GitHub, dans `documentation.md` et dans la docstring
     de `documentation.py`, nomme aussi le texte de l'unité de clôture et les lignes déclarées d'un
-    plan, que lisent les mêmes fonctions (lot 17), et plus l'ancienne énumération."""
+    plan, que lisent les mêmes fonctions (lot 17), et plus l'ancienne énumération. Elle nomme les
+    quatre formes qui laissent passer une clôture que GitHub rend autrement, range parmi elles le
+    commentaire ouvert dans un paragraphe, et se dit non close (revue finale du lot 17)."""
     import documentation
 
     for nom, texte in (
@@ -1798,6 +1890,15 @@ def test_ecarts_connus_nomment_la_cloture():
             "« Plan maître : » et « Hors lot : »"
         ) == 2, nom
         assert "les sections d'un plan et ses titres de tâche ou de tranche" not in plat, nom
+        for fragment in ECARTS_DE_LA_CLOTURE:
+            assert fragment in plat, (nom, fragment)
+        # la liste se dit non close à la fin du passage : après le cas de Windows et le remède,
+        # jamais avant un « dernier » (relecture des corrections de la revue finale du lot 17)
+        non_close = plat.index("La liste des écarts connus n'est pas close")
+        assert plat.index("La clôture d'un plan en a quatre de plus") < non_close, nom
+        assert plat.index("Un autre tient à Windows") < non_close, nom
+        assert plat.index(REMEDE_DES_ECARTS) < non_close, nom
+        assert "Un dernier" not in plat, nom
 
 
 def test_methode_dit_le_budget_du_garde():

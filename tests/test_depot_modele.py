@@ -806,13 +806,30 @@ def _commandes_de_claude_md():
 
 def test_claude_md_dit_la_commande_des_plans():
     """Les plans du modèle vivent hors du dépôt, où l'étape « Les plans » de la CI ne les voit
-    pas : « Commandes » donne la commande qui les vérifie, avec le clone voisin de `serveur`."""
+    pas : « Commandes » donne la commande qui les vérifie, avec le clone voisin de `serveur`, dans
+    un bloc `sh`, sur une seule ligne, qui se copie telle quelle (revue finale du lot 17), puis les
+    deux conventions que la spec du lot 17 fixe aux plans du modèle."""
     commandes = _commandes_de_claude_md()
     # un chemin relatif, sans barre oblique inverse, que Git Bash ne coupe pas, lancé depuis le
     # clone principal, voisin de celui de `serveur` (revue finale du lot 15)
+    section = (RACINE / "CLAUDE.md").read_text(encoding="utf-8").split("\n## Commandes\n", 1)[1]
+    bloc = _bloc_sh(section, "- `python -B template/scripts/modele/plan.py` :")
+    commande = (
+        "python -B template/scripts/modele/plan.py --racine . --depot serveur=../serveur --neuf "
+        '--cloture cadrage --cloture "À relire" --cloture pistes --cloture relevé <plan>'
+    )
+    assert [ligne for ligne in bloc if ligne.strip()] == [commande], bloc
+    # plus de code en ligne coupé sur deux lignes, qui donnerait deux commandes copié tel quel
+    assert "`python -B template/scripts/modele/plan.py --racine" not in commandes
+    # les deux conventions des plans du modèle (spec du lot 17, § 2.4 et § 3.3)
     assert (
-        "`python -B template/scripts/modele/plan.py --racine . --depot serveur=../serveur --neuf "
-        '--cloture cadrage --cloture "À relire" --cloture pistes --cloture relevé <plan>`'
+        "Dans ce dépôt, une ligne d'« Effets cherchés » dont le lieu est un projet cite le relevé "
+        "(`poste/releve.py`) dans son troisième morceau."
+    ) in commandes
+    assert (
+        "La clôture d'un plan du modèle ne supprime aucun plan, et le dit (« le plan, hors du "
+        "dépôt, n'est pas supprimé : son en-tête est mis à jour ») : le geste « le plan supprimé » "
+        "y trouve le mot qu'il cherche."
     ) in commandes
     # lot 17 : un `--depot` par dépôt cité, et un plan accepté se revérifie sans `--neuf`
     assert "une option `--depot <dépôt>=../<dépôt>` par dépôt que le plan cite" in commandes
@@ -851,11 +868,31 @@ def test_claude_md_dit_la_commande_du_releve():
             "ils ne rendent pas le code 1"
         ),
         "seuls les dossiers exclus des formateurs sont comparés",
-        # l'inventaire complet des fichiers gérés
-        "L'inventaire complet des fichiers gérés demande `--depuis <ancienne étiquette>`",
+        # aucun projet relevé est une information, et rend 0 (spec du lot 17, § 5.4) ; `gh` jamais
+        # connecté sort par 4, et rend 64 (revue finale du lot 17, puis la relecture de ses
+        # corrections)
+        "le dossier temporaire non retiré), 0 sinon",
+        (
+            "ils ne rendent pas le code 1, comme les contrôles propres d'une règle, et comme la "
+            "ligne « aucun projet né du modèle relevé », d'un relevé qui n'en trouve aucun, par "
+            "exemple sous un `--compte` qui n'est pas celui de `gh` : il rend alors 0."
+        ),
+        "`gh` absent ou sans accès (un 401, ou `gh` qui sort par 4, jamais connecté)",
+        # `--depuis` ouvre l'intervalle, sans comparer ce que le modèle n'a pas changé depuis
+        # (revue finale du lot 17)
+        (
+            "`--depuis <ancienne étiquette>` ouvre cet intervalle pour tous les projets, chacun "
+            "comparé au modèle à sa version : il compare les fichiers gérés que le modèle a "
+            "changés depuis cette étiquette, et un fichier géré que le modèle n'a pas changé "
+            "depuis elle n'est pas comparé, quelle que soit l'étiquette. Ce n'est donc pas un "
+            "inventaire complet des fichiers gérés."
+        ),
         "un projet à la version de la tête n'en montre aucun",
     ):
         assert texte in commandes, texte
+    assert "L'inventaire complet des fichiers gérés demande" not in commandes
+    # aucun projet relevé ne compte plus parmi ce qui n'est pas relevé
+    assert "aucun projet relevé, comme sous" not in commandes
     assert (RACINE / "poste/releve.py").is_file()
 
 
@@ -1395,9 +1432,13 @@ def test_liste_d_alignement():
     trois = " ".join(texte.split("\n## 3. ", 1)[1].split("\n## ", 1)[0].split())
     assert (
         "**Les plans de `.claude/plans/`**, s'il y en a : les relever ; retirer ceux des lots clos, "
-        "puisque la méthode supprime le plan à la clôture ; donner ses trois premières sections à "
-        "chaque plan en cours (`methode.md`, « Les outils »), jamais « Effets cherchés » après coup."
+        "puisque la méthode supprime le plan à la clôture ; donner à chaque plan en cours ses "
+        "trois sections d'avant le lot 17, « Mécanismes annoncés », « Outils et cas limites » et "
+        "« Revues » (`methode.md`, « Les outils »), jamais « Effets cherchés » après coup."
     ) in trois
+    # « les trois premières » de `methode.md` comprennent « Effets cherchés » : les trois sections
+    # d'avant le lot 17 se nomment (revue finale du lot 17)
+    assert "trois premières sections" not in trois
     # lot 17 : un plan renommé compte pour neuf, et la CI le vérifie par `--neuf`
     assert "un plan renommé compte pour neuf, et la CI le vérifie par `--neuf`" in trois
     assert "reste `--sans-lieux`, sans `--neuf`" in trois
