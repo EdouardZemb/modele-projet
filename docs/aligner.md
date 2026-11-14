@@ -86,11 +86,13 @@ Chaque case se coche dans la PR d'alignement. Une case qui ne s'applique pas au 
     `texte-pr` (`modele-texte-pr.yml`) écoute seul ; une retouche du titre ou du corps d'une PR ne
     relance alors que lui, et pas toute la CI.
 - [ ] **Les plans de `.claude/plans/`**, s'il y en a : les relever ; retirer ceux des lots clos,
-      puisque la méthode supprime le plan à la clôture ; donner ses trois sections à chaque plan
-      en cours (`methode.md`, « Les outils »). L'étape « Les plans » du socle refuse toute PR qui
-      ajoute, renomme ou modifie un plan sans elles : un renommage y compte pour un ajout. Lancé
-      depuis la racine, `python -B scripts/modele/plan.py --racine . --sans-lieux <plan>` vérifie
-      un plan comme la CI vérifie un plan modifié.
+      puisque la méthode supprime le plan à la clôture ; donner ses trois premières sections à
+      chaque plan en cours (`methode.md`, « Les outils »), jamais « Effets cherchés » après coup.
+      L'étape « Les plans » du socle refuse toute PR qui ajoute, renomme ou modifie un plan sans
+      elles : un plan renommé compte pour neuf, et la CI le vérifie par `--neuf`, avec ses
+      quatre sections et sa clôture. Lancé depuis la racine,
+      `python -B scripts/modele/plan.py --racine . --sans-lieux <plan>` vérifie un plan comme la CI
+      vérifie un plan modifié : la commande reste `--sans-lieux`, sans `--neuf`.
 - [ ] **`.gitignore`** : `.claude/settings.local.json`, `CLAUDE.local.md` et `__pycache__/`, s'ils
       n'y sont pas.
 - [ ] **`.dockerignore`**, s'il existe : `.githooks` et `scripts/modele`, pour qu'un `COPY` ne les

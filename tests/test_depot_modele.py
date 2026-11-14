@@ -811,8 +811,13 @@ def test_claude_md_dit_la_commande_des_plans():
     # un chemin relatif, sans barre oblique inverse, que Git Bash ne coupe pas, lancé depuis le
     # clone principal, voisin de celui de `serveur` (revue finale du lot 15)
     assert (
-        "`python -B template/scripts/modele/plan.py --racine . --depot serveur=../serveur <plan>`"
+        "`python -B template/scripts/modele/plan.py --racine . --depot serveur=../serveur --neuf "
+        '--cloture cadrage --cloture "À relire" --cloture pistes --cloture relevé <plan>`'
     ) in commandes
+    # lot 17 : un `--depot` par dépôt cité, et un plan accepté se revérifie sans `--neuf`
+    assert "une option `--depot <dépôt>=../<dépôt>` par dépôt que le plan cite" in commandes
+    assert "un plan accepté se revérifie sans `--neuf`" in commandes
+    assert "ses trois sections" not in commandes
     assert "La session lance cette commande depuis le clone principal" in commandes
     assert "serveur=C:" not in commandes
     assert "`Documents\\00-boite-de-reception\\`" in commandes
@@ -1390,10 +1395,12 @@ def test_liste_d_alignement():
     trois = " ".join(texte.split("\n## 3. ", 1)[1].split("\n## ", 1)[0].split())
     assert (
         "**Les plans de `.claude/plans/`**, s'il y en a : les relever ; retirer ceux des lots clos, "
-        "puisque la méthode supprime le plan à la clôture ; donner ses trois sections à chaque plan "
-        "en cours (`methode.md`, « Les outils »)."
+        "puisque la méthode supprime le plan à la clôture ; donner ses trois premières sections à "
+        "chaque plan en cours (`methode.md`, « Les outils »), jamais « Effets cherchés » après coup."
     ) in trois
-    assert "un renommage y compte pour un ajout" in trois
+    # lot 17 : un plan renommé compte pour neuf, et la CI le vérifie par `--neuf`
+    assert "un plan renommé compte pour neuf, et la CI le vérifie par `--neuf`" in trois
+    assert "reste `--sans-lieux`, sans `--neuf`" in trois
     assert "`python -B scripts/modele/plan.py --racine . --sans-lieux <plan>`" in trois
     # `texte-pr` est requis en cible `serveur` comme ailleurs
     assert (
