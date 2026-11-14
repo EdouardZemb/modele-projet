@@ -607,8 +607,9 @@ def _verifier_cloture(
     mots de `cloture` qu'elle ne nomme pas, dans l'ordre de `GESTES` puis des mots."""
     if rang_cloture is None:
         return [AUCUNE_CLOTURE]
-    # `rang_cloture` et `_texte_de_cloture` trouvent la même unité, par `_titres_d_unites` et
-    # `_dit_cloture` : un désaccord lèverait une erreur, au lieu de se taire en `AUCUNE_CLOTURE`
+    # `rang_cloture` et `_texte_de_cloture` ne peuvent viser deux unités : c'est la même recherche,
+    # la première unité de `_titres_d_unites` dont `_dit_cloture` accepte le titre, sur le même
+    # texte en LF (`_unites` en dérive, et `_en_lf` laisse tel quel un texte déjà en LF)
     texte_de_cloture, ouvert = _texte_de_cloture(texte, doc)
     sorte, numero, _ = unites[rang_cloture]
     refus = []
