@@ -356,7 +356,8 @@ aucune_ligne() {
 
 # jour_de_l_horloge : le jour des horodatages de horloge_qui_avance, la veille de la vraie date,
 # relevé une fois par test : un test qui passe minuit garde son jour. Un jour figé vieillit, et la
-# purge de 30 jours, qui lit la vraie date, finit par retirer les instantanés du test (#136).
+# purge de 30 jours, qui lit la vraie date, finit par retirer les instantanés du test
+# (modele-projet#136).
 jour_de_l_horloge() {
   local fichier="$BATS_TEST_TMPDIR/horloge-jour"
   [ -s "$fichier" ] || date -u -d yesterday +%Y%m%d >"$fichier"
