@@ -365,8 +365,8 @@ aucune_copie_jetable() {
   # un seul .partiel qui ne soit pas un lien : celui de la seconde nuit, intact
   partiels="$(find "$q" -mindepth 1 -maxdepth 1 ! -type l -regextype posix-extended \
     -regex '.*/{{ nom }}-[0-9]{8}T[0-9]{6}Z\.partiel')"
-  [ "$partiels" = "$q/{{ nom }}-20261015T000002Z.partiel" ]
-  [ -f "$q/{{ nom }}-20261015T000002Z.partiel/donnees.txt" ]
+  [ "$partiels" = "$q/{{ nom }}-$(jour_de_l_horloge)T000002Z.partiel" ]
+  [ -f "$q/{{ nom }}-$(jour_de_l_horloge)T000002Z.partiel/donnees.txt" ]
   # la sauvegarde complète et les autres noms restent, en entier ; le lien et sa cible aussi
   [ "$(cat "$q/$complet/donnees.txt")" = "instantané de test $complet" ]
   [ -f "$q/$complet/sous/profond.txt" ]
