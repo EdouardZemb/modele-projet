@@ -417,6 +417,13 @@ la session de `pupitre`. Une session neuve y a relu les trois sections, qu'aucun
 n'avait relues. pupitre#36, fusionnée le même jour, excepte de sa règle sans prénom les fichiers
 gérés par le modèle et le nom du compte.
 
+Correctif du 14/11 : l'horloge du banc de la cible `serveur` ne vieillit plus (#136). Elle
+datait les instantanés des tests du 15/10/2026, et la purge de 30 jours, qui lit la vraie date, les
+a retirés à partir du 14/11 à 00:00 UTC : le banc était rouge dans `ancrage`, dans `veille-emploi`
+et dans le job `mecanique` de ce dépôt (LE-78). Elle tombe désormais la veille de la vraie date,
+et un test bats la place dans la fenêtre de la purge. Les projets en cible `serveur` le reçoivent
+par leur mise à jour.
+
 Prochain, au choix d'Edouard :
 - le second temps du travail sur la documentation, un lot « documentation » avec sa spec : l'« État »
   réduit du `CLAUDE.md` semé et le journal des versions du modèle ; dans le README, le refus d'une
