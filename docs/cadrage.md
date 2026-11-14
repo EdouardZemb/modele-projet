@@ -430,9 +430,9 @@
 > **Amendé le 2026-11-14, à la clôture du lot 17, de la même façon.** Le lot 17 n'était pas au §11 :
 > il écrit les deux portes dues par le registre, celle de « décision appliquée sans en chercher les
 > effets » (LE-63, LE-70, LE-71 et LE-73), par une section des plans et le relevé des projets, et
-> celle d'« étape de clôture oubliée par le plan » (LE-76), par les gestes de clôture (#134, PR #139
-> à #143). `methode.md`, `documentation.md`, le gabarit de PR et `docs/aligner.md` sont amendés ;
-> aucun fichier ne s'ajoute à ce que reçoit un projet (§4).
+> celle d'« étape de clôture oubliée par le plan » (LE-76), par les gestes de clôture et la commande
+> des plans du modèle (#134, PR #139 à #143). `methode.md`, `documentation.md`, le gabarit de PR et
+> `docs/aligner.md` sont amendés ; aucun fichier ne s'ajoute à ce que reçoit un projet (§4).
 >
 > - **§1** : `poste/` porte aussi `releve.py`, le relevé des projets nés du modèle, avec son test,
 >   hors de `template/` : il n'est pas distribué. Il lit les projets par `gh api`, en lecture
@@ -473,7 +473,8 @@
 >   en cours ne les nommait ;
 > - **aucun écart à la spec du lot** : ses cinq PR déclarent « Aucun. ». Un remède de la revue
 >   finale, un relevé sans aucun projet rendant 1, s'écartait du § 5.4 de la spec, qui donne 0 ; la
->   relecture des corrections l'a trouvé, et le code est revenu à 0 avant la fusion de #143 (LE-83).
+>   relecture des corrections l'a trouvé, et le code est revenu à 0 avant l'ouverture de #143
+>   (LE-83).
 
 Ce cadrage est la partie publique de la spec de conception du modèle, issue d'une séance de questions avec Edouard : 12 questions, puis 5 parties de design validées une à une. La partie qui nomme le serveur est privée et n'est pas reproduite ici.
 

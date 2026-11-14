@@ -434,9 +434,10 @@ l'avertissement au registre à sa clôture. Rien ne change sous `template/`.
 Lot 17 fait le 14/11/2026 : les effets cherchés et les gestes de clôture (#134), étiqueté
 `v0.12.0`. Il écrit les deux portes dues du registre : celle de « décision appliquée sans en
 chercher les effets » (LE-63, LE-70, LE-71, LE-73), par une section des plans et le relevé des
-projets, et celle d'« étape de clôture oubliée par le plan » (LE-76), par les gestes de clôture
-(PR #139 à #143). Aucune de ses PR ne déclare d'écart à la spec ; les questions 7 à 10, nées de la
-revue du plan, ont reçu le oui d'Edouard le 14/11.
+projets, et celle d'« étape de clôture oubliée par le plan » (LE-76), par les gestes de clôture et
+la commande des plans du modèle (PR #139 à #143). Aucune de ses PR ne déclare d'écart à la spec ;
+les questions 7 à 9, nées de la revue du plan, et la question 10, posée le 14/11 après #135, ont
+reçu le oui d'Edouard le 14/11.
 - **« Effets cherchés » et `--neuf`** (#139). `plan.py` lit une quatrième section,
   `## Effets cherchés` : une ligne par décision du plan qui change ce que reçoit un autre lieu,
   `- <décision> — <où elle arrive> — <comment c'est vérifié>`, ou « Aucun. ». L'option `--neuf`,
@@ -464,20 +465,21 @@ revue du plan, ont reçu le oui d'Edouard le 14/11.
 - **Les textes de ce dépôt** (#142). `docs/aligner.md` : un plan en cours garde ses trois sections
   d'avant le lot, jamais « Effets cherchés » après coup, et un plan renommé compte pour neuf.
   « Commandes » donne la commande des plans du modèle, par `--neuf` et les mots `cadrage`,
-  `À relire`, `pistes` et `relevé`. LE-63, LE-70, LE-71, LE-73 et LE-76 sont closes, après une
-  relecture de `pupitre` par l'API : sa règle requiert toujours ses contrôles propres, et son plan
-  maître passe `plan.py`.
+  `À relire`, `pistes` et `relevé`. LE-63, LE-70, LE-71, LE-73 et LE-76 sont closes : `pupitre`,
+  relu par l'API, est en `v0.11.0` et son plan maître passe `plan.py`, et sa règle, relue le 13/11
+  puis par le relevé, requiert toujours ses contrôles propres.
 - **La revue finale** a lu `cbda229..1bbd98b` en cinq lentilles (la spec, les textes, les cas
-  limites, le relevé, les mesures), chacune contre-vérifiée, puis par une lecture de complétude :
-  29 constats, 25 sans leurs doublons, aucun critique, 3 importants et 22 mineurs. #143 en corrige
-  20, dont les trois importants : le point 5 du cycle, qui disait par une relative entre virgules
-  qu'aucun dépôt de données n'a de registre, quand seul un dépôt de la cible `donnees` n'en a pas ;
-  un `gh` jamais connecté, qui sort par 4 et faisait rendre 1 au relevé, au lieu de 64 ; le test
-  de l'entrée fermée de `gh`, que la capture de pytest rendait vain. Quatre vont à la clôture, et
-  un reste tel quel, la case du gabarit de PR, à 107 caractères. La relecture de #143 a ramené au
-  code de la spec un remède de contre-vérification : un relevé sans aucun projet rend 0, et le dit
-  (§ 5.4). Aucun job coupé ni avertissement de durée dans le lot : sous Windows, le job `tests` a
-  duré au plus 34 min 36 s (#139), sous le seuil de 45 min, et 33 min 17 s sur #143.
+  limites, le relevé, les mesures), chaque constat contre-vérifié, puis par une lecture de
+  complétude : 29 constats, 25 sans leurs doublons, aucun critique, 3 importants et 22 mineurs. La
+  PR #143 en corrige 20, dont les trois importants : le point 5 du cycle, qui disait par une
+  relative entre virgules qu'aucun dépôt de données n'a de registre, quand seul un dépôt de la cible
+  `donnees` n'en a pas ; un `gh` jamais connecté, qui sort par 4 et faisait rendre 1 au relevé, au
+  lieu de 64 ; le test de l'entrée fermée de `gh`, que la capture de pytest rendait vain. Quatre
+  vont à la clôture, et un reste tel quel, la case du gabarit de PR, à 107 caractères. La relecture
+  des corrections a ramené au code de la spec, avant l'ouverture de #143, un remède de
+  contre-vérification : un relevé sans aucun projet rend 0, et le dit (§ 5.4). Aucun job coupé ni
+  avertissement de durée dans le lot : sous Windows, le job `tests` a duré au plus 34 min 36 s
+  (#139), sous le seuil de 45 min, et 33 min 17 s sur #143.
 - **Le relevé de la clôture**, sur `3b7ab38`, rend 0 : 75 dépôts examinés, 7 projets, 7 lus,
   0 non relevé, 0 à lire. Les huit plans en cours gardent à la tête le verdict qu'ils ont à la
   version de leur projet, sept qui passent et un qui refuse déjà ; tous refuseraient s'ils étaient
@@ -486,16 +488,18 @@ revue du plan, ont reçu le oui d'Edouard le 14/11.
   géré, aucun fichier géré n'est modifié dans un projet. Deux PR sont ouvertes, et aucune n'ajoute
   un plan ; pupitre#38, un brouillon, en modifie un, que le relevé ne lit pas : relu à la main à la
   revue finale, ce plan passait les `plan.py` de la `v0.11.0` et de la tête.
-- **Le registre** gagne LE-79 à LE-87, AM-5 et AM-6, et LE-69 sa seconde preuve. L'avertissement
+- **Le registre** gagne LE-79 à LE-89, AM-5 et AM-6, et LE-69 sa seconde preuve. L'avertissement
   de #135 est LE-79, 5e constat de « délai mesuré à vide », que sa porte a vu. Les leçons de
-  `pupitre` (LE-80, AM-5), de #136 (LE-81, LE-82) et de la revue finale (LE-83 à LE-87) rejoignent
-  chacune un motif dont la porte est écrite, et disent ce qui lui échappe : la troisième pièce
-  d'une ligne de plan, ce qu'une clôture livre de plus que ses gestes, une recherche trop étroite,
-  un double installé deux fois, un écart que son auteur ne voit pas, un cas limite inconnu de `gh`
-  et du rendu de GitHub, des tests que leur environnement rendait vains, une phrase d'une ronde de
-  correction. AM-6, le garde qui refuse la simple lecture de la clé des hooks, ouvre un motif
-  neuf. Aucune porte n'est due. Les cinq lignes closes par le lot nomment leurs PR (#139, #141 et
-  #142 ; #140 pour LE-76) et la forme de la porte choisie par Edouard le 13/11.
+  `pupitre` (LE-80, AM-5), de #138, le correctif de #136 (LE-81, LE-82), de la revue finale (LE-83
+  à LE-87) et des revues de tâche (LE-88, LE-89) rejoignent chacune un motif dont la porte est
+  écrite, et disent ce qui lui échappe : la troisième pièce d'une ligne de plan, ce qu'une clôture
+  livre de plus que ses gestes, une recherche trop étroite, un double installé deux fois, un écart
+  que son auteur ne voit pas, un cas limite inconnu de `gh` et du rendu de GitHub, des tests que
+  leur environnement rendait vains, le remède d'une revue de tâche appliqué sans relire le code,
+  des changements qu'aucun test ne tenait, un échec lu comme un résultat. AM-6, le garde qui
+  refuse la simple lecture de la clé des hooks, ouvre un motif neuf. Aucune porte n'est due. Les
+  cinq lignes closes par le lot nomment leurs PR (#139, #141 et #142 ; #140 et #142 pour LE-76) et
+  la forme de la porte choisie par Edouard le 13/11.
 - **Vers les projets**, la `v0.12.0` part vers les sept projets après l'étiquette, chacun avec son
   message, `serveur` d'abord : `ancrage` et `veille-emploi` depuis la `v0.11.1`, `pupitre` depuis
   la `v0.11.0`, les quatre autres depuis la `v0.10.0`, avec ce qu'ont apporté les versions
@@ -533,12 +537,13 @@ Prochain, au choix d'Edouard :
   lot, qui n'exerce pas le cas), né de la relecture de la clôture ;
 - ceux que le lot 17 laisse ouverts, de même : LE-83, avec LE-49 (un écart que son auteur ne
   reconnaît pas) ; LE-80 et LE-86 (un texte que « Mécanismes annoncés » ne couvre pas : la
-  troisième pièce d'une ligne de plan, une phrase écrite à une ronde de correction) ; LE-82, LE-84
-  et LE-87 (un comportement d'outil supposé, hors de ce que le plan nommait : un double installé
-  deux fois, un `gh` jamais connecté, quatre formes du rendu de GitHub) ; LE-81 et LE-85 (un
-  contrôle plus étroit que ce qu'il doit voir : une recherche, des tests que leur environnement
-  rendait vains) ; AM-5 (ce qu'une clôture livre de plus que ses gestes, avec sa piste) et AM-6
-  (le garde et la simple lecture de la clé des hooks).
+  troisième pièce d'une ligne de plan, le remède d'une revue de tâche) ; LE-82, LE-84 et LE-87 (un
+  comportement d'outil supposé, hors de ce que le plan ou le correctif nommait : un double installé
+  deux fois, un `gh` jamais connecté, quatre formes du rendu de GitHub) ; LE-81, LE-85, LE-88 et
+  LE-89 (un contrôle qui passe sans voir ce qu'il doit voir : une recherche trop étroite, des tests
+  que leur environnement rendait vains, des changements qu'aucun test ne tenait, un échec lu comme
+  un résultat) ; AM-5 (ce qu'une clôture livre de plus que ses gestes, avec sa piste) et AM-6 (le
+  garde et la simple lecture de la clé des hooks).
 
 Le cadrage est dans `docs/cadrage.md` ; ce que les lots ont appris, dans `docs/registre.md`.
 
