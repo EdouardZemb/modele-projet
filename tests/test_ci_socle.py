@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 import yaml
 from conftest import RACINE, REPONSES_SERVEUR, SH, git, sans_echappatoire
-from test_plan import A_PY, plan, plan_neuf
+from test_plan import A_PY, EFFETS_ABSENTE, plan, plan_neuf
 
 SOCLE = ".github/workflows/modele-socle.yml"
 CI = ".github/workflows/ci.yml"
@@ -422,7 +422,6 @@ PLAN_CONFORME = plan_neuf(meca=MECA_CONFORME)
 RESUME_CONFORME = "1 mécanismes vérifiés, 0 non vérifiés, 0 outils, 0 effets, 1 revues"
 # Un plan en cours : sans « Effets cherchés », qu'exige seul un plan neuf (`--neuf`).
 PLAN_EN_COURS = plan(meca=MECA_CONFORME)
-EFFETS_ABSENTE = "section « Effets cherchés » absente (titre de niveau 2)"
 
 
 @pytest.mark.skipif(SH is None, reason="aucun sh trouvé")
@@ -439,7 +438,9 @@ def test_etape_des_plans(rendre, env_isole, tmp_path):
     sous-dossier, et chaque plan est lu, même après un refus, la liste des plans modifiés comprise.
     Un plan renommé compte pour ajouté et pour supprimé (`--no-renames`). Hors d'une base nulle,
     l'étape écrit « Plans ajoutés : N, modifiés : M, supprimés : S. » avant la ligne du push, les
-    comptes lus par `wc -c` sur les octets nuls de `git diff -z`, un `wc` BSD compris."""
+    comptes lus par `wc -c` sur les octets nuls de `git diff -z`, un `wc` BSD compris. Un plan
+    ajouté, renommé compris, reçoit `--neuf`, à la PR comme au push : sans « Effets cherchés », il
+    refuse ; le même plan, modifié, passe, sans `--neuf`."""
     rendu = rendre()
     job = charger(rendu, SOCLE)["jobs"]["confidentialite"]
     noms = [e.get("name") for e in job["steps"]]

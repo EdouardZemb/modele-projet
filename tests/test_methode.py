@@ -1550,9 +1550,16 @@ def test_methode_dit_les_plans():
         ),
         "sans `--neuf`, retirer la section entière d'un plan qui la portait n'est pas vu",
         "« Aucun. » admis dans les trois premières",
+        "et les quatre sections dites plus bas",
+        "Avec `--neuf`, la section absente refuse",
+        "Sans lui, son absence ne refuse pas ; présente, elle se vérifie dans tous les modes",
+        "Un plan ajouté se vérifie en entier, par `--neuf`, chaque fichier du dépôt qu'il cite",
+        "un plan modifié se vérifie sans ouvrir les fichiers cités (`--sans-lieux`), sans `--neuf`",
+        "Il reçoit `--neuf` comme à la PR",
         (
-            "elle relit dans le code chaque ligne de « Mécanismes annoncés » et d'« Effets "
-            "cherchés », et juge un « Aucun. » contre ce que le plan décrit"
+            "elle relit dans le code chaque ligne de « Mécanismes annoncés », et chaque ligne "
+            "d'« Effets cherchés » là où l'effet arrive, et juge un « Aucun. » contre ce que le "
+            "plan décrit"
         ),
         "Un plan renommé compte pour un ajout (`git diff --no-renames`) : il reçoit `--neuf`",
         (
@@ -1628,10 +1635,11 @@ def test_methode_dit_les_plans():
     assert "un lieu d'un autre dépôt restant « non vérifié », sans refus" in ligne, ligne
     au_push = (
         "Au push sur la branche principale, un plan ajouté se vérifie aussi sans ouvrir les "
-        "fichiers cités, ses lieux vérifiés à la PR, et chaque plan ajouté, renommé compris, "
-        "par `--neuf`."
+        "fichiers cités, ses lieux vérifiés à la PR, lui aussi par `--neuf`."
     )
     assert au_push in ligne, ligne
+    assert "vérifie les quatre sections" in ligne, ligne
+    assert "un plan ajouté, renommé compris, en entier, par `--neuf`, chaque fichier" in ligne, ligne
     cycle = lire(METHODE).split("## Le cycle d'un lot", 1)[1].split("\n## ", 1)[0]
     (point,) = [b for b in blocs(cycle) if b[0].startswith("2. ")]
     point = _aplati(" ".join(point))

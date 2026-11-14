@@ -80,7 +80,7 @@ Usage : plan.py PLAN [--racine DOSSIER] [--depot NOM=CLONE]... [--sans-lieux] [-
         lieu, sans ouvrir de fichier. --neuf exige « Effets cherchés » : un plan neuf.
 
 Retour : 0 rien à signaler, 1 refus, 64 erreur d'usage (plan illisible, racine ou clone absents,
-         --depot mal formé).
+         --depot mal formé, valeur vide de --cloture).
 """
 
 from __future__ import annotations
@@ -369,8 +369,8 @@ def verifier(
 ) -> tuple[list[str], bool]:
     """Les sections d'un plan : (lignes, refus). La dernière ligne est le résumé. Avec
     `lieux=False`, la forme de chaque lieu se vérifie par `lieu()`, sans ouvrir de fichier. Avec
-    `neuf`, « Effets cherchés » est exigée. `cloture` : des mots déjà normalisés, sans effet
-    encore."""
+    `neuf`, « Effets cherchés » est exigée. `cloture` : des mots que l'appelant a repliés ; `main`
+    ne fait encore que les débarrasser des espaces ; sans effet encore."""
     doc = _documentation()
     texte = doc._en_lf(texte)
     lignes: list[str] = []
@@ -544,7 +544,7 @@ def main(argv: list[str] | None = None) -> int:
     if not args.racine.is_dir():
         return _usage("racine introuvable")
     mots = tuple(mot.strip() for mot in args.cloture)
-    if not all(mot.strip() for mot in args.cloture):
+    if not all(mots):
         return _usage("--cloture MOT attendu")
     nom_du_plan = doc._affichable(args.plan)
     try:

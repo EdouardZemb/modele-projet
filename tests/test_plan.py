@@ -1,5 +1,5 @@
-"""Le contrôle des plans (`scripts/modele/plan.py`) : les sections d'un plan, « Mécanismes annoncés »
-(LE-53), « Outils et cas limites » (LE-56), « Effets cherchés » et « Revues » (LE-55)."""
+"""Le contrôle des plans (`scripts/modele/plan.py`) : les sections d'un plan, « Mécanismes
+annoncés » (LE-53), « Outils et cas limites » (LE-56), « Effets cherchés » et « Revues » (LE-55)."""
 
 import codecs
 import re
@@ -844,6 +844,25 @@ def test_docstring_dit_les_tranches():
         assert fragment in doc, fragment
 
 
+def test_docstring_dit_les_effets():
+    """Le module dit la quatrième section, `--neuf` et sa limite, la ligne « Usage : » et le 64
+    de la valeur vide de `--cloture`."""
+    doc = " ".join(p.__doc__.split())
+    for fragment in (
+        "ses quatre sections de niveau 2",
+        "« Effets cherchés » et « Revues »",
+        "Effets cherchés. Une puce par décision du plan",
+        "« Aucun. » seul est admis",
+        "La section n'est exigée que d'un plan neuf (`--neuf`)",
+        "`--neuf` ne dit rien de plus que la nouveauté du plan : il est distinct de `--sans-lieux`",
+        "sans `--neuf`, retirer la section entière d'un plan qui la portait n'est pas vu",
+        "[--sans-lieux] [--neuf] [--cloture MOT]...",
+        "--neuf exige « Effets cherchés » : un plan neuf",
+        "valeur vide de --cloture",
+    ):
+        assert fragment in doc, fragment
+
+
 def test_plan_encodages(racine, lancer):
     """Un plan écrit sous PowerShell 5.1, en UTF-16 ou en UTF-8 avec BOM, se lit ; un fichier cité
     en CRLF, ou qui porte U+2028, se numérote comme git et GitHub le numérotent, par `\\n`."""
@@ -914,7 +933,7 @@ def test_effets_section(racine):
     lignes, refus = verifier(plan_neuf(), racine, neuf=True)
     assert not refus, lignes
     assert lignes[-1] == "0 mécanismes vérifiés, 0 non vérifiés, 0 outils, 0 effets, 1 revues"
-    lignes, refus = verifier(plan(effets="- a — b — c"), racine)
+    lignes, refus = verifier(plan_neuf(effets="- a — b — c"), racine)
     assert not refus, lignes
     assert lignes[-1].endswith("0 outils, 1 effets, 1 revues"), lignes
     for mauvais in ("- — b — c", "- a — b"):
