@@ -608,6 +608,39 @@ def test_deployer_dit_l_env_de_son_mode_et_le_couple(rendre, reponses, env):
     assert f'"usage : {synopsis} {options} | ' in texte
 
 
+# La copie du journal (modele-projet#133) nomme chaque copie par la version du conteneur, lue dans
+# son environnement, qui porte aussi les secrets que compose.projet.yml lui passe : le format de
+# l'inspection n'en extrait que la variable <préfixe>VERSION. Dans le gabarit, il s'écrit sous
+# {% raw %}, le préfixe hors du bloc : le rendu porte le format entier, avec le préfixe du projet,
+# sans les balises, et aucune forme qui lirait tout l'environnement.
+@pytest.mark.parametrize(
+    "reponses, prefixe",
+    [
+        (REPONSES_SERVEUR, "ESSAI_"),
+        ({**REPONSES_SERVEUR_CODE, "nom": "mon-essai"}, "MON_ESSAI_"),
+    ],
+    ids=["un-depot", "deux-depots"],
+)
+def test_deployer_lit_la_seule_version(rendre, reponses, prefixe):
+    texte = lire(rendre(**reponses), "deploiement/deployer.sh")
+    format_version = (
+        f'{{{{range .Config.Env}}}}{{{{if eq (index (split . "=") 0) "{prefixe}VERSION"}}}}'
+        '{{index (split . "=") 1}}{{end}}{{end}}'
+    )
+    assert f"FORMAT_VERSION='{format_version}'" in texte
+    assert "{{range .Config.Env}}" in texte
+    assert f'"{prefixe}VERSION"' in texte
+    assert 'docker container inspect --format "$FORMAT_VERSION" "$1" 2>/dev/null' in texte
+    for interdit in (
+        "{% raw %}",
+        "{% endraw %}",
+        "{{json .Config}}",
+        "{{.Config.Env}}",
+        "{{json .Config.Env}}",
+    ):
+        assert interdit not in texte, interdit
+
+
 # Les scripts de deploiement/ sont enregistrés exécutables (100755), comme deployer.sh : un projet
 # né du modèle les reçoit ainsi, quel que soit le poste qui l'a créé.
 def test_scripts_de_deploiement_executables_dans_l_index():

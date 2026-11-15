@@ -219,6 +219,28 @@ creer_double_transparent() {
   creer_double "$nom" "exec '$reel' \"\$@\""
 }
 
+# echouer_si <commande> <condition> : un double de <commande>, en tête du PATH, qui rend 1 quand la
+# condition, du code bash qui lit les arguments de l'appel dans "$@", est vraie, et passe sinon la
+# main à la commande d'avant : le double déjà posé, ou la vraie. Il note ses appels dans $APPELS,
+# comme creer_double : un double déjà posé y note les siens une seconde fois.
+echouer_si() {
+  local nom="${1:?commande}" condition="${2:?condition}" suivante
+  if [ -e "$DOUBLES/$nom" ]; then
+    suivante="$DOUBLES/$nom-avant-echouer-si"
+    mv "$DOUBLES/$nom" "$suivante"
+  else
+    suivante="$(PATH="${PATH//"$DOUBLES":/}" command -v "$nom")" || {
+      echo "commande réelle introuvable : $nom" >&2
+      return 1
+    }
+  fi
+  creer_double "$nom" "if $condition; then
+  echo '$nom : échec voulu par le test' >&2
+  exit 1
+fi
+exec '$suivante' \"\$@\""
+}
+
 # installer_doubles <nom…> : place en tête du PATH les doubles écrits d'avance dans
 # tests/deploiement/doubles/ (docker, git, curl{% if sauvegardes %}, rclone{% endif %}). Comme ceux de creer_double, ils notent leurs
 # appels dans $APPELS ; ils se pilotent par des variables DOUBLE_* (voir l'en-tête de chacun).
@@ -282,6 +304,17 @@ poser_donnees() {
   local dossier="${{ prefixe }}RACINE_DONNEES/$1/donnees"
   mkdir -p "$dossier"
   echo "données de test" >"$dossier/base"
+}
+
+# --- Copies du journal (déploiement) -----------------------------------------------------------
+
+# copies_de_journal <env> : les noms des copies du journal de cet environnement, les fichiers
+# ordinaires *.log de son dossier journaux/, un par ligne, dans l'ordre des noms ; rien sans lui.
+# Ni un lien, ni un .partiel.
+copies_de_journal() {
+  local dossier="${{ prefixe }}RACINE_ETAT/$1/journaux"
+  [ -d "$dossier" ] || return 0
+  find "$dossier" -mindepth 1 -maxdepth 1 -type f -name '*.log' -printf '%f\n' | LC_ALL=C sort
 }
 
 # --- Stock d'images et de conteneurs du double de docker (ménage des images) -----------------

@@ -22,10 +22,11 @@
 #     secrets chiffrés pour cette identité, config/ et contenu/ ; deux commits, et l'étiquette
 #     donnees-<AAAA.MM.JJ>.1 sur le premier (deployer.sh ne lit pas les étiquettes : il reçoit le
 #     commit) ;
-#   - une copie du code, d'où deployer.sh est lancé ; les dossiers de données de l'app (/donnees),
-#     vides, comme ceux que la sonde de serveur crée : sur le serveur, le dossier de l'hôte cache le
-#     /donnees de l'image, et l'app sème le sien au premier démarrage ; HOME, un dossier de
-#     l'épreuve ;
+#   - une copie du code, d'où deployer.sh est lancé ; son compose.projet.yml réduit le plafond du
+#     journal de l'app (json-file, max-size 2k, max-file 5), pour qu'il tourne pendant l'épreuve ;
+#     les dossiers de données de l'app (/donnees), vides, comme ceux que la sonde de serveur crée :
+#     sur le serveur, le dossier de l'hôte cache le /donnees de l'image, et l'app sème le sien au
+#     premier démarrage ; HOME, un dossier de l'épreuve ;
 #   - la racine de l'état passe par un lien symbolique, lien-etat -> etat-reel, pendant toute
 #     l'épreuve : deployer.sh compare les montages sans résoudre les liens.
 #
@@ -33,13 +34,22 @@
 #   1. le premier couple, l'image et le commit 1, se déploie en prod : VERIFIER_CONTENU a tourné
 #      (code 0), sans contenu en service ; /config et /contenu montés en lecture seule depuis
 #      instantanes/<commit 1>, sources sans « // », santé « montee » ; le dossier de données, vide
-#      avant, porte MARQUE après : l'app l'a semé ;
+#      avant, porte MARQUE après : l'app l'a semé ; puis 30 requêtes à la santé et une à
+#      /derniere-requete, qui rend 404 : le journal de l'app a tourné (<LogPath>.1 existe, lu en
+#      root) ;
 #   2. seul le commit change (commit 2) : VERIFIER_CONTENU a tourné (code 0) avec /en-service, le
-#      contenu du couple 1 ; le conteneur est recréé sur instantanes/<commit 2>, même image ;
+#      contenu du couple 1 ; le conteneur est recréé sur instantanes/<commit 2>, même image ; avant
+#      son `up`, deployer.sh a copié le journal du conteneur du couple 1 dans journaux/ de l'état,
+#      sous la racine en lien : une copie, en 600, nommée <horodatage>-<version>-<12 premiers
+#      caractères du conteneur>.log, qui porte la ligne de démarrage de l'app, écrite dans un
+#      fichier déjà tourné, et la dernière requête : `docker logs` lit les fichiers tournés, et la
+#      version se lit dans l'environnement du conteneur, seule ;
 #   3. un troisième commit porte une configuration que verifier-config refuse, et le journal en dit
 #      la cause, la version de schéma 99, inconnue : code 1, echec porte le couple, le conteneur en
-#      service n'a pas bougé, /config et /contenu toujours sur le commit 2 ;
-#   4. --retour remet le couple 1 ;
+#      service n'a pas bougé, /config et /contenu toujours sur le commit 2 ; aucune copie de plus ;
+#   4. le conteneur du couple 2 est arrêté (`docker stop`), puis --retour remet le couple 1 : une
+#      seconde copie, celle du conteneur arrêté, que `docker compose ps --all` liste, nommée de
+#      même, porte sa ligne de démarrage ;
 #   5. le ménage qui suit ce retour retire un instantané qui n'est plus gardé : deux instantanés
 #      laissés par d'anciens déploiements, datés de trois et de deux jours, sont posés juste avant ;
 #      avec ceux des commits 2 et 3, ils dépassent la marge (les 3 plus récents) : le plus ancien
@@ -259,6 +269,7 @@ conteneur_app() {
 }
 un_seul() { [ -n "$1" ] && [ "$(printf '%s\n' "$1" | wc -l)" -eq 1 ]; }
 en_marche() { [ "$(docker container inspect --format '{{.State.Running}}' "$1")" = true ]; }
+arrete() { [ "$(docker container inspect --format '{{.State.Running}}' "$1")" = false ]; }
 demarre_le() { docker container inspect --format '{{.State.StartedAt}}' "$1"; }
 image_de() { docker container inspect --format '{{.Image}} {{.Config.Image}}' "$1"; }
 
@@ -269,6 +280,25 @@ lire_montages() {
     | jq -r '.[] | "\(.Destination) \(.RW) \(.Source)"')" || MONTAGES=""
 }
 champ_du_montage() { awk -v p="$1" -v c="$2" '$1 == p { print $c }' <<<"$MONTAGES"; }
+
+# Les copies du journal de la prod, dans journaux/ de son état, sous la racine en lien.
+# nombre_de_copies : les fichiers .log de journaux/ ; copie_du_conteneur <conteneur> : le nom de la
+# copie de ce conteneur, d'après les 12 premiers caractères de son identifiant, vide sans elle ;
+# nom_de_copie <nom> <conteneur> : <horodatage>-<version>-<12 caractères>.log, la version du couple
+# 1 ; copie_dit <nom> <texte> : la copie porte ce texte.
+nombre_de_copies() {
+  find "$ETAT_PROD/journaux" -mindepth 1 -maxdepth 1 -type f -name '*.log' 2>/dev/null | wc -l
+}
+copie_du_conteneur() {
+  find "$ETAT_PROD/journaux" -mindepth 1 -maxdepth 1 -type f -name "*-${1:0:12}.log" \
+    -printf '%f\n' 2>/dev/null
+}
+nom_de_copie() {
+  local motif="^[0-9]{8}T[0-9]{6}Z-${VERSION//./[.]}-${2:0:12}[.]log$"
+  [[ "$1" =~ $motif ]]
+}
+copie_dit() { [ -n "$1" ] && grep -qF -- "$2" "$ETAT_PROD/journaux/$1"; }
+droits_de() { stat -c %a -- "$1" 2>/dev/null; }
 monte_une_fois() { [ "$(awk -v p="$1" '$1 == p' <<<"$MONTAGES" | wc -l)" -eq 1 ]; }
 non_monte() { [ -z "$(champ_du_montage "$1" 1)" ]; }
 sans_double_barre() { [ -n "$1" ] && [[ "$1" != *//* ]]; }
@@ -385,8 +415,10 @@ done
 echo "== le code, les données de l'app et l'état"
 mkdir -p "$CODE_CLONE"
 cp -R "$RENDU/." "$CODE_CLONE/"
-printf 'services:\n  app:\n    user: "%s:%s"\n' "$(id -u)" "$(id -g)" \
-  >"$CODE_CLONE/deploiement/compose.projet.yml"
+# Le journal de l'app tourne tous les 2 Ko, 5 fichiers gardés : quelques requêtes le font
+# tourner, et la copie de deployer.sh doit lire les fichiers déjà tournés.
+printf '%s\n' services: '  app:' "    user: \"$(id -u):$(id -g)\"" '    logging:' '      options:' \
+  '        max-size: 2k' '        max-file: "5"' >"$CODE_CLONE/deploiement/compose.projet.yml"
 # Les dossiers de données, vides, comme la sonde de serveur les crée : l'épreuve ne les sème pas.
 mkdir -p "$DONNEES_PROD" "$DONNEES_STAGING"
 mkdir -p "$ETAT_REEL"
@@ -442,6 +474,18 @@ constater_montage "$APP1" /config prod "$C1" config
 constater_montage "$APP1" /contenu prod "$C1" contenu
 verifier "santé : ok, configuration montee, version $VERSION, révision de l'image" sante_dit "$PORT_PROD" \
   ".statut == \"ok\" and .environnement == \"prod\" and .configuration == \"montee\" and .version == \"$VERSION\" and .revision == \$revision"
+echo "== 1 bis. le journal de la prod tourne"
+# Chaque requête écrit une ligne au journal de l'app : 30 requêtes dépassent ses 2 Ko.
+for _ in $(seq 1 30); do
+  curl -fsS -m 5 -o /dev/null "http://127.0.0.1:$PORT_PROD/api/sante"
+done
+STATUT_HTTP="$(curl -sS -m 5 -o /dev/null -w '%{http_code}' \
+  "http://127.0.0.1:$PORT_PROD/derniere-requete")" || STATUT_HTTP=""
+verifier "/derniere-requete rend 404, et s'écrit au journal de l'app" egaux "$STATUT_HTTP" 404
+# Les fichiers du journal de Docker ne se lisent qu'en root.
+JOURNAL_APP1="$(docker container inspect --format '{{.LogPath}}' "$APP1")"
+verifier "le journal de l'app a tourné : ${JOURNAL_APP1##*/}.1 existe" \
+  en_root test -e "$JOURNAL_APP1.1"
 fin_du_point 1
 
 POINT=2
@@ -462,6 +506,19 @@ constater_montage "$APP2" /config prod "$C2" config
 constater_montage "$APP2" /contenu prod "$C2" contenu
 verifier "santé : ok, configuration montee" sante_dit "$PORT_PROD" \
   '.statut == "ok" and .configuration == "montee"'
+# La copie du journal du conteneur remplacé, faite avant le `up`, sous la racine de l'état en lien.
+COPIE1="$(copie_du_conteneur "$APP1")"
+echo "       copie : ${COPIE1:-aucune} ($ETAT_PROD/journaux)"
+verifier "une copie du journal en prod" egaux "$(nombre_de_copies)" 1
+verifier "son nom : <horodatage>-$VERSION-${APP1:0:12}.log" nom_de_copie "$COPIE1" "$APP1"
+verifier "journaux/ en 700" egaux "$(droits_de "$ETAT_PROD/journaux")" 700
+verifier "la copie en 600" egaux "$(droits_de "$ETAT_PROD/journaux/$COPIE1")" 600
+verifier "elle porte la ligne de démarrage de l'app, écrite dans un fichier déjà tourné" \
+  copie_dit "$COPIE1" "fausse app : http://"
+verifier "… avec sa configuration montee" copie_dit "$COPIE1" "configuration montee"
+verifier "elle porte la dernière requête" copie_dit "$COPIE1" "/derniere-requete"
+verifier "le journal de deployer.sh dit la copie" journal_dit 2 \
+  "journal du conteneur ${APP1:0:12} ($VERSION) copié : journaux/$COPIE1"
 fin_du_point 2
 
 POINT=3
@@ -483,6 +540,8 @@ constater_montage "$APP2" /config prod "$C2" config
 constater_montage "$APP2" /contenu prod "$C2" contenu
 verifier "santé : ok, configuration montee" sante_dit "$PORT_PROD" \
   '.statut == "ok" and .configuration == "montee"'
+verifier "toujours une seule copie du journal : un refus ne copie rien" \
+  egaux "$(nombre_de_copies)" 1
 fin_du_point 3
 
 POINT=4
@@ -492,6 +551,9 @@ ANCIEN1="$(printf 'ancien commit 1' | git hash-object --stdin)"
 ANCIEN2="$(printf 'ancien commit 2' | git hash-object --stdin)"
 planter_instantane "$ANCIEN1" '3 days ago'
 planter_instantane "$ANCIEN2" '2 days ago'
+# Le conteneur du couple 2 arrêté : `docker compose ps` ne le liste plus, `ps --all` encore.
+docker stop "$APP2" >/dev/null
+exiger "le conteneur du couple 2 est arrêté" arrete "$APP2"
 deployer 4 prod --retour
 exiger "code 0" code_vaut 0
 verifier "deploye porte le couple 1" fichier_vaut "$ETAT_PROD/deploye" "$IMAGE $VERSION $C1"
@@ -504,6 +566,12 @@ constater_montage "$APP4" /config prod "$C1" config
 constater_montage "$APP4" /contenu prod "$C1" contenu
 verifier "santé : ok, configuration montee, version $VERSION" sante_dit "$PORT_PROD" \
   ".statut == \"ok\" and .configuration == \"montee\" and .version == \"$VERSION\""
+COPIE2="$(copie_du_conteneur "$APP2")"
+echo "       copie : ${COPIE2:-aucune} ($ETAT_PROD/journaux)"
+verifier "deux copies du journal en prod" egaux "$(nombre_de_copies)" 2
+verifier "la seconde, du conteneur arrêté : <horodatage>-$VERSION-${APP2:0:12}.log" \
+  nom_de_copie "$COPIE2" "$APP2"
+verifier "elle porte la ligne de démarrage de son app" copie_dit "$COPIE2" "fausse app : http://"
 fin_du_point 4
 
 POINT=5
