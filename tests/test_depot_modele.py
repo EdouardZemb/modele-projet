@@ -1578,20 +1578,62 @@ def test_aucun_passage_planifie_ne_lit_le_contexte_du_depot():
     assert len(planifies) >= 2
 
 
-# Ce qui peut précéder `docker logs` pour qu'il commence une commande : le début de la ligne (avec
-# au plus une puce ou un invite), ou un séparateur de commandes ou un mot qui en ouvre une.
-_AVANT_DOCKER_LOGS = re.compile(
-    r"(?:^\s*(?:`|- |\$ |run: |- run: )?"
-    r"|(?:;|&&|\|\||\||\(|\{|`|!\s|\bsudo\s|\bthen\s|\bdo\s|\bif\s|\belif\s"
-    r"|\bwhile\s|\buntil\s|\belse\s)\s*)$"
+# `docker`, ses options globales éventuelles, puis `logs` ou `container logs`. `docker compose logs`
+# n'en est pas : Compose réunit les deux sorties du conteneur sur sa sortie standard.
+_DOCKER_LOGS = re.compile(
+    r"(?<![\w.-])docker"
+    r"(?:\s+(?:(?:-H|--host|-c|--context|--config|-l|--log-level|--tlscacert|--tlscert|--tlskey)"
+    r"(?:=|\s+)\S+|-D|--debug|--tls|--tlsverify))*"
+    r"\s+(?:container\s+)?logs\b"
 )
-_DOCKER_LOGS = re.compile(r"docker\s+(?:container\s+)?logs\b")
+# La fin d'une commande : `;`, `&&` ou `||` (la fin de la ligne aussi). Un tube est un `|` qui n'est
+# ni `||` ni `|&` (qui vaut `2>&1`).
+_FIN_DE_COMMANDE = re.compile(r";|&&|\|\|")
+_TUBE = re.compile(r"(?<!\|)\|(?![|&])")
+
+
+def _ligne_fautive(ligne: str) -> bool:
+    for m in _DOCKER_LOGS.finditer(ligne):
+        commande = ligne[m.end() :]
+        fin = _FIN_DE_COMMANDE.search(commande)
+        if fin:
+            commande = commande[: fin.start()]
+        tube = _TUBE.search(commande)
+        if not tube or "2>&1" in commande[: tube.start()]:
+            continue
+        guillemet = ligne[m.start() - 1] if m.start() else ""
+        if guillemet in ("'", '"', "`") and guillemet in commande[: tube.start()]:
+            continue  # l'argument d'une autre commande : `grep 'docker logs' | wc -l`
+        return True
+    return False
 
 
 def commandes_sans_2_et_1(texte: str) -> list[int]:
-    """Les numéros des lignes où un `docker logs` alimente un tube sans `2>&1` avant lui."""
+    """Les numéros des lignes où un `docker logs` alimente un tube sans `2>&1` avant lui.
+
+    La règle cherche `docker`, ses options globales éventuelles (`-H hôte`, `--context x`,
+    `--host=…`), puis `logs` ou `container logs`, n'importe où sur la ligne, quel que soit ce qui
+    le précède (une affectation, `sudo`, `timeout`, `ssh hôte`, `xargs`, une puce, une invite). Elle
+    déclare la ligne fautive quand un tube (un `|` qui n'est ni `||` ni `|&`) le suit avant la fin
+    de la commande (`;`, `&&`, `||` ou la fin de la ligne) sans `2>&1` entre les deux. Une
+    occurrence ouverte juste avant par une apostrophe, un guillemet ou un accent grave qui se
+    referme avant le tube est l'argument d'une autre commande, et elle est écartée
+    (`grep 'docker logs' | wc -l`) ; un guillemet qui ne se referme qu'après le tube n'écarte rien
+    (`bash -c "docker logs x | grep y"` est fautif). Une ligne finie par `\\` se lit jointe à la
+    suivante, la faute nommant la première ligne de la suite, et chaque ligne de la suite se lit
+    aussi seule : la faute d'une ligne qui suit un `\\` de texte, ou la seconde faute d'une suite,
+    nomme sa propre ligne. `docker compose logs` reste hors de la règle : Compose réunit les deux
+    sorties du conteneur sur sa sortie standard.
+
+    Ses limites : une commande construite par une variable (`$DOCKER logs`, `"${cmd[@]}"`), une
+    fonction ou un alias n'est pas vue ; un tube écrit au-delà d'un `;`, d'un `&&` ou d'un `||`
+    cités (`--since 'a;b'`) n'est pas vu ; un `2>&1` qui appartient à une autre commande placée
+    entre les deux compte. Elle échoue du côté sûr dans les autres cas : un guillemet ouvert plus
+    loin avant `docker` (`grep 'voir docker logs' | wc -l`), un `&` seul, un `2>&1` posé avant
+    `docker`, ou de la prose qui nomme `docker logs` avant un `|`, font une faute à relire.
+    """
     lignes = texte.splitlines()
-    fautes = []
+    fautes: set[int] = set()
     i = 0
     while i < len(lignes):
         debut = i
@@ -1599,20 +1641,12 @@ def commandes_sans_2_et_1(texte: str) -> list[int]:
         while ligne.rstrip().endswith("\\") and i + 1 < len(lignes):
             i += 1
             ligne = ligne.rstrip()[:-1] + " " + lignes[i]
+        if _ligne_fautive(ligne):
+            fautes.add(debut + 1)
+        if i > debut:
+            fautes.update(k + 1 for k in range(debut, i + 1) if _ligne_fautive(lignes[k]))
         i += 1
-        for m in _DOCKER_LOGS.finditer(ligne):
-            avant = ligne[: m.start()]
-            if not _AVANT_DOCKER_LOGS.search(avant):
-                continue
-            commande = ligne[m.end() :]
-            if avant.endswith("`") and "`" in commande:
-                commande = commande.split("`", 1)[0]
-            for tube in re.finditer(r"(?<!\|)\|(?![|&])", commande):
-                if "2>&1" not in commande[: tube.start()]:
-                    if debut + 1 not in fautes:
-                        fautes.append(debut + 1)
-                    break
-    return fautes
+    return sorted(fautes)
 
 
 def test_docker_logs_filtre_porte_2_et_1():
@@ -1641,6 +1675,27 @@ def test_docker_logs_filtre_porte_2_et_1():
         "until docker logs app | grep -q x; do",
         "else docker logs app | grep x",
         "! docker logs app | grep -q x",
+        # n'importe où sur la ligne, quel que soit ce qui précède
+        "NOM=1 docker logs app | grep x",
+        "timeout 5 docker logs app | grep x",
+        "env A=1 docker logs app | grep x",
+        "sudo -u u docker logs app | grep x",
+        "ssh hote docker logs app | grep x",
+        "nohup docker logs app | grep x",
+        "time docker logs app | grep x",
+        "exec docker logs app | grep x",
+        "xargs docker logs | grep x",
+        "vrai & docker logs app | grep x",
+        "- docker logs app | grep x",
+        "$  docker logs app | grep x",
+        # les options globales de docker
+        "docker -H h logs app | grep x",
+        "docker --context x logs app | grep x",
+        "docker --host=tcp://h:2375 container logs app | grep x",
+        "docker -D logs app | grep x",
+        # un guillemet qui ne se referme qu'après le tube n'écarte rien
+        'bash -c "docker logs x | grep y"',
+        "run bash -c 'docker logs app | grep x'",
     ]
     for ligne in fautifs:
         assert commandes_sans_2_et_1(ligne) == [1], ligne
@@ -1649,15 +1704,31 @@ def test_docker_logs_filtre_porte_2_et_1():
         "docker logs app |& grep x",
         "docker logs app || true",
         "grep 'docker logs' | wc -l",
+        'echo "docker logs" | wc -l',
         "`docker logs app` | main|X.Y.Z",
         "docker container logs app 2>&1 | grep x",
         "docker  logs app 2>&1 | grep x",
         'if docker logs "$id" 2>&1 | grep -q x; then',
+        "docker -H h logs app 2>&1 | grep x",
+        # la commande finit avant le tube
+        "docker logs app; ls | wc -l",
+        "docker logs app && ls | wc -l",
+        "{ docker logs app; } 2>&1 | grep x",
+        # compose réunit les deux sorties sur sa sortie standard
+        "docker compose logs app | grep x",
     ]
     for ligne in sains:
         assert commandes_sans_2_et_1(ligne) == [], ligne
     # chaque numéro une seule fois, dans l'ordre
     assert commandes_sans_2_et_1("docker logs a | b; docker logs c | d\nx\ndocker logs e | f") == [1, 3]
+    # une ligne finie par « \ » se lit jointe à la suivante et seule : la faute d'une ligne qui
+    # suit un « \ » de texte la nomme, et celle de la seconde ligne d'une suite fautive aussi
+    assert commandes_sans_2_et_1("Texte \\\ndocker logs app | grep x") == [1, 2]
+    assert commandes_sans_2_et_1("# note \\\ndocker logs app | grep x") == [1, 2]
+    assert commandes_sans_2_et_1("docker logs a | b \\\ndocker logs c | d") == [1, 2]
+    assert commandes_sans_2_et_1("docker logs --tail 5 \\\n  app | grep x") == [1]
+    assert commandes_sans_2_et_1('liste="$(A="$a" \\\n    docker logs app | grep x)"') == [1, 2]
+    assert commandes_sans_2_et_1("docker logs app \\\n  2>&1 | grep x") == []
     suivis = subprocess.run(
         ["git", "ls-files", "-z", "template/"], cwd=RACINE, capture_output=True, check=True
     ).stdout.split(b"\0")
