@@ -1583,54 +1583,132 @@ def test_aucun_passage_planifie_ne_lit_le_contexte_du_depot():
 _DOCKER_LOGS = re.compile(
     r"(?<![\w.-])docker"
     r"(?:\s+(?:(?:-H|--host|-c|--context|--config|-l|--log-level|--tlscacert|--tlscert|--tlskey)"
-    r"(?:=|\s+)\S+|-D|--debug|--tls|--tlsverify))*"
+    r"(?:=|\s+)\S+|-[Hcl]\S+|(?:-D|--debug|--tls|--tlsverify)(?:=\S+)?))*"
     r"\s+(?:container\s+)?logs\b"
 )
-# La fin d'une commande : `;`, `&&` ou `||` (la fin de la ligne aussi). Un tube est un `|` qui n'est
-# ni `||` ni `|&` (qui vaut `2>&1`).
-_FIN_DE_COMMANDE = re.compile(r";|&&|\|\|")
-_TUBE = re.compile(r"(?<!\|)\|(?![|&])")
+# Une expression de Jinja, rendue avant que le shell ne lise la ligne : masquée d'abord.
+_JINJA = re.compile(r"\{\{.*?\}\}")
+# Ce qui, juste avant le guillemet d'une commande citée, la lance : `ssh <hôte> [options]`, ou un
+# shell avec un groupe d'options qui contient `c` (`sh -c`, `bash -euc`).
+_LANCEUR = re.compile(
+    r"(?:(?:^|[\s;&|(\"'`])ssh(?:\s+[^\s|;&]+)*"
+    r"|\b(?:ba|da|k|z)?sh(?:\s+[^\s|;&]+)*?\s+-[A-Za-z]*c[A-Za-z]*)\s*$"
+)
+
+
+def _piles(ligne: str) -> list[tuple[tuple[str, int], ...]]:
+    """Pour chaque caractère de la ligne, les segments ouverts qui le contiennent, du plus large au
+    plus étroit, chacun (genre, position de son ouverture) : `'…'`, `"…"`, `` `…` `` et `$(…)`.
+    Les délimiteurs d'un segment sont au niveau de ce qui l'entoure. Un délimiteur sans partenaire
+    plus loin sur la ligne n'ouvre rien, et une apostrophe qui suit une lettre (`l'app`) non plus.
+    Rien ne s'ouvre dans `'…'` ; dans `"…"`, seuls `$(` et l'accent grave."""
+    pile: list[tuple[str, int]] = []
+    piles = []
+    i = 0
+    while i < len(ligne):
+        haut = pile[-1][0] if pile else ""
+        c = ligne[i]
+        if (c == haut and haut != "$(") or (c == ")" and haut == "$("):
+            pile.pop()
+            piles.append(tuple(pile))
+            i += 1
+            continue
+        genre = ""
+        lettre_avant = i > 0 and (ligne[i - 1].isalnum() or ligne[i - 1] == "_")
+        if haut != "'":
+            if ligne.startswith("$(", i) and ")" in ligne[i + 2 :]:
+                genre = "$("
+            elif c == "`" and "`" in ligne[i + 1 :]:
+                genre = "`"
+            elif haut != '"' and c == '"' and '"' in ligne[i + 1 :]:
+                genre = '"'
+            elif haut != '"' and c == "'" and "'" in ligne[i + 1 :] and not lettre_avant:
+                genre = "'"
+        piles.extend([tuple(pile)] * len(genre or c))
+        if genre:
+            pile.append((genre, i))
+        i += len(genre or c)
+    return piles
 
 
 def _ligne_fautive(ligne: str) -> bool:
+    if not _DOCKER_LOGS.search(ligne):
+        return False
+    ligne = _JINJA.sub(lambda m: "_" * len(m.group()), ligne)
+    piles = _piles(ligne)
     for m in _DOCKER_LOGS.finditer(ligne):
-        commande = ligne[m.end() :]
-        fin = _FIN_DE_COMMANDE.search(commande)
-        if fin:
-            commande = commande[: fin.start()]
-        tube = _TUBE.search(commande)
-        if not tube or "2>&1" in commande[: tube.start()]:
-            continue
-        guillemet = ligne[m.start() - 1] if m.start() else ""
-        if guillemet in ("'", '"', "`") and guillemet in commande[: tube.start()]:
-            continue  # l'argument d'une autre commande : `grep 'docker logs' | wc -l`
-        return True
+        niveau = piles[m.start()]
+        vu = execute = False
+        j = m.end()
+        while j < len(ligne):
+            pile = piles[j]
+            if len(pile) > len(niveau):
+                j += 1  # dans un segment plus étroit : masqué
+                continue
+            if len(pile) < len(niveau):
+                # le délimiteur qui ferme le segment de l'occurrence
+                genre, ouverture = niveau[-1]
+                if genre == "$(":
+                    execute = True
+                elif not execute:
+                    avant = "".join(
+                        c if len(piles[k]) <= len(pile) else "_"
+                        for k, c in enumerate(ligne[:ouverture])
+                    )
+                    if not _LANCEUR.search(avant):
+                        break  # l'argument d'une autre commande : `grep 'docker logs' | wc -l`
+                niveau = pile
+                j += 1
+                continue
+            if ligne.startswith(("2>&1", "|&"), j):
+                vu = True
+                j += 2
+                continue
+            if ligne[j] == ";" or ligne.startswith(("&&", "||"), j):
+                break
+            if ligne[j] == "|":
+                if not vu:
+                    return True
+                break
+            j += 1
     return False
 
 
 def commandes_sans_2_et_1(texte: str) -> list[int]:
     """Les numéros des lignes où un `docker logs` alimente un tube sans `2>&1` avant lui.
 
-    La règle cherche `docker`, ses options globales éventuelles (`-H hôte`, `--context x`,
-    `--host=…`), puis `logs` ou `container logs`, n'importe où sur la ligne, quel que soit ce qui
-    le précède (une affectation, `sudo`, `timeout`, `ssh hôte`, `xargs`, une puce, une invite). Elle
-    déclare la ligne fautive quand un tube (un `|` qui n'est ni `||` ni `|&`) le suit avant la fin
-    de la commande (`;`, `&&`, `||` ou la fin de la ligne) sans `2>&1` entre les deux. Une
-    occurrence ouverte juste avant par une apostrophe, un guillemet ou un accent grave qui se
-    referme avant le tube est l'argument d'une autre commande, et elle est écartée
-    (`grep 'docker logs' | wc -l`) ; un guillemet qui ne se referme qu'après le tube n'écarte rien
-    (`bash -c "docker logs x | grep y"` est fautif). Une ligne finie par `\\` se lit jointe à la
-    suivante, la faute nommant la première ligne de la suite, et chaque ligne de la suite se lit
-    aussi seule : la faute d'une ligne qui suit un `\\` de texte, ou la seconde faute d'une suite,
-    nomme sa propre ligne. `docker compose logs` reste hors de la règle : Compose réunit les deux
-    sorties du conteneur sur sa sortie standard.
+    La règle cherche `docker`, ses options globales éventuelles (`-H hôte`, `-Hhôte`,
+    `--context x`, `--host=…`, `-D`, `--debug=true`…), puis `logs` ou `container logs`, n'importe
+    où sur la ligne, quel que soit ce qui le précède (une affectation, `sudo`, `timeout`,
+    `ssh hôte`, `xargs`, une puce, une invite). Les expressions de Jinja (`{{ … }}`) sont d'abord
+    masquées. La ligne se lit ensuite par segments (`_piles`) : `'…'`, `"…"`, `` `…` `` et
+    `$(…)` ; une apostrophe qui suit une lettre (`l'app`) n'ouvre rien. À partir de l'occurrence,
+    la règle lit sa commande au niveau du segment où elle est, en sautant les segments plus
+    étroits : un séparateur, un tube ou un `2>&1` cités ou dans une substitution ne comptent pas.
+    La ligne est fautive quand un tube (un `|` qui n'est ni `||` ni `|&`) vient avant la fin de la
+    commande (`;`, `&&`, `||` ou la fin de la ligne) sans `2>&1` ni `|&` avant lui. Quand le
+    segment de l'occurrence se ferme d'abord :
+    - un segment cité est l'argument d'une autre commande, et l'occurrence est écartée
+      (`grep 'docker logs' | wc -l`), sauf si ce qui précède son ouverture la lance : `ssh <hôte>`
+      et ses options, ou un shell (`sh`, `bash`, `dash`, `ksh`, `zsh`) dont un groupe d'options
+      contient `c` (`sh -c`, `bash -euc`). La commande continue alors après le segment, et un
+      `2>&1` écrit dedans compte (`ssh h 'docker logs app' | grep x` est fautif) ;
+    - une substitution `$(…)` passe sa sortie à la commande qui l'entoure : la lecture continue
+      après elle, sans plus écarter de segment cité (`echo "$(docker logs app)" | grep x` est
+      fautif).
+    Une ligne finie par `\\` se lit jointe à la suivante, la faute nommant la première ligne de la
+    suite, et chaque ligne de la suite se lit aussi seule : la faute d'une ligne qui suit un `\\`
+    de texte, ou la seconde faute d'une suite, nomme sa propre ligne. `docker compose logs` reste
+    hors de la règle : Compose réunit les deux sorties du conteneur sur sa sortie standard.
 
-    Ses limites : une commande construite par une variable (`$DOCKER logs`, `"${cmd[@]}"`), une
-    fonction ou un alias n'est pas vue ; un tube écrit au-delà d'un `;`, d'un `&&` ou d'un `||`
-    cités (`--since 'a;b'`) n'est pas vu ; un `2>&1` qui appartient à une autre commande placée
-    entre les deux compte. Elle échoue du côté sûr dans les autres cas : un guillemet ouvert plus
-    loin avant `docker` (`grep 'voir docker logs' | wc -l`), un `&` seul, un `2>&1` posé avant
-    `docker`, ou de la prose qui nomme `docker logs` avant un `|`, font une faute à relire.
+    Ses limites connues, sans que la liste soit close. Elle ne voit pas : une commande construite à
+    l'exécution (`$DOCKER logs`, `"${cmd[@]}"`, une fonction, un alias), qu'aucune lecture du
+    texte ne voit ; une commande citée que lance un autre outil que `ssh` ou un shell `-c` (`eval`,
+    `su -c`, `printf '…' | sh`) ; un accent grave, lu comme un code en ligne de Markdown et non
+    comme une substitution (`` echo `docker logs app` | grep x ``) ; une commande citée ou un
+    document en ligne (`<<EOF`) sur plusieurs lignes sans `\\` ; `docker.exe`. Elle échoue du
+    côté sûr quand un `&` seul sépare deux commandes, quand `2>&1` est posé avant `docker`, et sur
+    de la prose qui nomme `docker logs` avant un `|` : une faute à relire.
     """
     lignes = texte.splitlines()
     fautes: set[int] = set()
@@ -1693,9 +1771,31 @@ def test_docker_logs_filtre_porte_2_et_1():
         "docker --context x logs app | grep x",
         "docker --host=tcp://h:2375 container logs app | grep x",
         "docker -D logs app | grep x",
+        "docker --debug=true logs app | grep x",
+        "docker --tls=true logs app | grep x",
+        "docker -Hh logs app | grep x",
         # un guillemet qui ne se referme qu'après le tube n'écarte rien
         'bash -c "docker logs x | grep y"',
         "run bash -c 'docker logs app | grep x'",
+        # un séparateur, un tube ou un `2>&1` cités ou dans une substitution ne comptent pas
+        "docker logs --since 'a;b' app | grep x",
+        'docker logs "$(x 2>&1 | head -1)" | grep x',
+        "docker logs $(x 2>&1 | head -1) | grep x",
+        # l'apostrophe du français n'ouvre pas de segment cité
+        "docker logs l'app | grep l'erreur",
+        # une commande citée que lance ssh ou sh -c : sa sortie d'erreur ne va pas au tube
+        "ssh h 'docker logs app' | grep x",
+        'ssh h "docker logs app" | grep x',
+        'ssh h "docker logs app" | grep "x"',
+        "bash -c 'docker logs app' | grep x",
+        'sh -c "docker logs app" | grep x',
+        "bash -euc 'docker logs app' | grep x",
+        "timeout 5 sh -c 'docker logs app' | grep x",
+        "sudo -u u bash -c 'docker logs app' | grep x",
+        'bash -c "cd / && docker logs app" | grep "x"',
+        "bash -c \"ssh h 'docker logs app'\" | grep x",
+        # la sortie d'une substitution part dans l'argument d'une autre commande, sans l'erreur
+        'echo "$(docker logs app)" | grep x',
     ]
     for ligne in fautifs:
         assert commandes_sans_2_et_1(ligne) == [1], ligne
@@ -1716,6 +1816,19 @@ def test_docker_logs_filtre_porte_2_et_1():
         "{ docker logs app; } 2>&1 | grep x",
         # compose réunit les deux sorties sur sa sortie standard
         "docker compose logs app | grep x",
+        # `|&` avant le premier tube vaut `2>&1`
+        "docker logs app |& grep x | wc -l",
+        "docker logs app |& tee f | grep x",
+        # un tube dans une substitution ou un filtre de Jinja n'est pas le tube de la commande
+        'docker logs "$(cat f | head -1)" 2>&1 | grep x',
+        "docker logs $(cat f | head -1) 2>&1 | grep x",
+        "docker logs {{ nom | lower }}-app-1 2>&1 | grep x",
+        "`docker logs {{ nom | lower }}-app-1 2>&1 | grep …`",
+        # ssh avec `2>&1` dans la commande citée ou après elle ; un argument cité d'un autre outil
+        "ssh h 'docker logs app 2>&1' | grep x",
+        "ssh h 'docker logs app' 2>&1 | grep x",
+        "grep -c 'docker logs' f | wc -l",
+        "grep 'voir docker logs' | wc -l",
     ]
     for ligne in sains:
         assert commandes_sans_2_et_1(ligne) == [], ligne
