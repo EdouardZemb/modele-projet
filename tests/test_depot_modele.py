@@ -1576,3 +1576,94 @@ def test_aucun_passage_planifie_ne_lit_le_contexte_du_depot():
                 planifies.append(chemin)
                 assert "github.event.repository" not in texte, chemin.name
     assert len(planifies) >= 2
+
+
+# Ce qui peut précéder `docker logs` pour qu'il commence une commande : le début de la ligne (avec
+# au plus une puce ou un invite), ou un séparateur de commandes ou un mot qui en ouvre une.
+_AVANT_DOCKER_LOGS = re.compile(
+    r"(?:^\s*(?:`|- |\$ |run: |- run: )?"
+    r"|(?:;|&&|\|\||\||\(|\{|`|!\s|\bsudo\s|\bthen\s|\bdo\s|\bif\s|\belif\s"
+    r"|\bwhile\s|\buntil\s|\belse\s)\s*)$"
+)
+_DOCKER_LOGS = re.compile(r"docker\s+(?:container\s+)?logs\b")
+
+
+def commandes_sans_2_et_1(texte: str) -> list[int]:
+    """Les numéros des lignes où un `docker logs` alimente un tube sans `2>&1` avant lui."""
+    lignes = texte.splitlines()
+    fautes = []
+    i = 0
+    while i < len(lignes):
+        debut = i
+        ligne = lignes[i]
+        while ligne.rstrip().endswith("\\") and i + 1 < len(lignes):
+            i += 1
+            ligne = ligne.rstrip()[:-1] + " " + lignes[i]
+        i += 1
+        for m in _DOCKER_LOGS.finditer(ligne):
+            avant = ligne[: m.start()]
+            if not _AVANT_DOCKER_LOGS.search(avant):
+                continue
+            commande = ligne[m.end() :]
+            if avant.endswith("`") and "`" in commande:
+                commande = commande.split("`", 1)[0]
+            for tube in re.finditer(r"(?<!\|)\|(?![|&])", commande):
+                if "2>&1" not in commande[: tube.start()]:
+                    if debut + 1 not in fautes:
+                        fautes.append(debut + 1)
+                    break
+    return fautes
+
+
+def test_docker_logs_filtre_porte_2_et_1():
+    fautifs = [
+        "docker logs app | grep x",
+        "docker logs app | grep x 2>&1",
+        "sudo docker logs app | grep x",
+        "vrai || docker logs app | grep x",
+        "then docker logs app | grep x",
+        "( docker logs app | grep x )",
+        "- run: docker logs app | grep x",
+        "docker logs --tail 5 \\\n  app | grep x",
+        "docker container logs app | grep x",
+        "docker  logs app | grep x",
+        "$ docker logs app | grep x",
+        "x=`docker logs app | grep x`",
+        "x=$(docker logs app | grep x)",
+        "vrai; docker logs app | grep x",
+        "vrai && docker logs app | grep x",
+        "vrai | docker logs app | grep x",
+        "{ docker logs app | grep x; }",
+        "do docker logs app | grep x",
+        'if docker logs "$id" | grep -q x; then',
+        "elif docker logs app | grep -q x; then",
+        "while docker logs app | grep -q x; do",
+        "until docker logs app | grep -q x; do",
+        "else docker logs app | grep x",
+        "! docker logs app | grep -q x",
+    ]
+    for ligne in fautifs:
+        assert commandes_sans_2_et_1(ligne) == [1], ligne
+    sains = [
+        "docker logs app 2>&1 | grep x",
+        "docker logs app |& grep x",
+        "docker logs app || true",
+        "grep 'docker logs' | wc -l",
+        "`docker logs app` | main|X.Y.Z",
+        "docker container logs app 2>&1 | grep x",
+        "docker  logs app 2>&1 | grep x",
+        'if docker logs "$id" 2>&1 | grep -q x; then',
+    ]
+    for ligne in sains:
+        assert commandes_sans_2_et_1(ligne) == [], ligne
+    # chaque numéro une seule fois, dans l'ordre
+    assert commandes_sans_2_et_1("docker logs a | b; docker logs c | d\nx\ndocker logs e | f") == [1, 3]
+    suivis = subprocess.run(
+        ["git", "ls-files", "-z", "template/"], cwd=RACINE, capture_output=True, check=True
+    ).stdout.split(b"\0")
+    for nom in filter(None, suivis):
+        octets = (RACINE / nom.decode("utf-8")).read_bytes()
+        if b"\0" in octets:
+            continue
+        texte = octets.decode("utf-8", errors="replace")
+        assert commandes_sans_2_et_1(texte) == [], nom.decode("utf-8")

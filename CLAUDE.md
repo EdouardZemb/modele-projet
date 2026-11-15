@@ -522,7 +522,10 @@ message a été repris. `pupitre` a aligné sa ligne de `CONVENTIONS.md` sur la 
 son message, qui omet trois cas de la règle (LE-90). Le plan du lot 3 de `veille-emploi`, dans sa
 PR 28, encore en brouillon, est le premier plan que la porte du lot 17 arrête : le `plan.py` de la
 `v0.12.0` le refuse par `--neuf`, faute d'« Effets cherchés » et des leçons du lot dans sa clôture,
-deux retouches que sa session ajoute avec la correction du plan.
+deux retouches que sa session ajoute avec la correction du plan. Le même jour, sa session a
+corrigé ce plan, que le `plan.py` de la `v0.12.0` passe désormais par `--neuf` (87 mécanismes, 24
+outils, 16 effets, 10 revues), revérifié par l'API avec `--sans-lieux` ; veille-emploi#28 est
+fusionnée.
 
 Prochain, au choix d'Edouard :
 - le second temps du travail sur la documentation, un lot « documentation » avec sa spec : l'« État »
