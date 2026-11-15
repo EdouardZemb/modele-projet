@@ -763,8 +763,11 @@ def test_exploitation_dit_les_copies_du_journal(rendre, sauvegardes):
         "15 Mo",
         "plafond du compose géré ; en staging, `essai-staging-app-1`",
         "`ls ~/.local/state/essai/prod/journaux/` liste les 5 dernières copies",
-        "en échec, il en fait deux quand une version était en service",
-        "Un premier déploiement en échec n'en fait aucune",
+        "en échec, il en fait deux quand une version était en service : celle de l'ancien conteneur,"
+        " puis celle de la version en échec, ou une seconde de l'ancien si le `up` ne l'a pas"
+        " remplacé (aucune dans la même seconde : le nom est pris)",
+        "Un premier déploiement en échec n'en fait aucune : le conteneur qu'il a pu créer reste"
+        " arrêté, `docker logs` le lit encore, et le déploiement suivant le copie",
         "Chaque copie, ou la cause d'une copie manquée, est dite au journal du déploiement",
         "celui de l'unité de la sonde",
         "Aucune durée n'est garantie",
