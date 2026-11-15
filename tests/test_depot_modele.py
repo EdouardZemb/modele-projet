@@ -1590,8 +1590,8 @@ _DOCKER_LOGS = re.compile(
 _JINJA = re.compile(r"\{\{.*?\}\}")
 # Ce qui, juste avant le guillemet d'une commande citée, la lance : `ssh` sans lettre, chiffre, `_`,
 # `.` ni `-` juste avant (`/usr/bin/ssh`), suivi des mots de la même commande ; ou un shell (`sh`,
-# `bash`, `dash`, `ksh`, `zsh`) sans lettre, chiffre ni `_` juste avant, dont le dernier mot, ou le
-# `--` qui le suit, est un groupe d'options qui contient `c` (`sh -c`, `bash -euc`, `bash -c --`).
+# `bash`, `dash`, `ksh`, `zsh`) sans lettre, chiffre ni `_` juste avant, dont le dernier mot est un
+# groupe d'options qui contient `c`, au besoin suivi de `--` (`sh -c`, `bash -euc`, `bash -c --`).
 _LANCEUR = re.compile(
     r"(?:(?<![\w.-])ssh(?:\s+[^\s|;&]+)*"
     r"|\b(?:ba|da|k|z)?sh(?:\s+[^\s|;&]+)*?\s+-[A-Za-z]*c[A-Za-z]*(?:\s+--)?)\s*$"
@@ -1702,8 +1702,8 @@ def commandes_sans_2_et_1(texte: str) -> list[int]:
       (`grep 'docker logs' | wc -l`), sauf si ce qui précède son ouverture la lance : `ssh`, sans
       lettre, chiffre, `_`, `.` ni `-` juste avant (`/usr/bin/ssh`), suivi des mots de la même
       commande ; ou un shell (`sh`, `bash`, `dash`, `ksh`, `zsh`), sans lettre, chiffre ni `_`
-      juste avant, dont le dernier mot avant le guillemet, ou le `--` qui le suit, est un groupe
-      d'options qui contient `c` (`sh -c`, `bash -euc`, `bash -c --`). La commande continue alors
+      juste avant, dont le dernier mot avant le guillemet est un groupe d'options qui contient
+      `c`, au besoin suivi de `--` (`sh -c`, `bash -euc`, `bash -c --`). La commande continue alors
       après le segment, et un `2>&1` écrit dedans avant la fin de la commande compte :
       `ssh h 'docker logs app' | grep x` et `ssh h 'docker logs app; uptime' | grep x` sont
       fautifs, `ssh h 'docker logs app 2>&1; uptime' | grep x` ne l'est pas ;
@@ -1722,11 +1722,14 @@ def commandes_sans_2_et_1(texte: str) -> list[int]:
     séparateur y finit la commande (`{ docker logs app; docker ps; } | grep x`) ; un accent grave,
     lu comme un code en ligne de Markdown et non comme une substitution
     (`` echo `docker logs app` | grep x ``) ; un délimiteur échappé (`\\"`, `\\'`), lu comme un
-    délimiteur ; une commande citée ou un document en ligne (`<<EOF`) sur plusieurs lignes sans
+    délimiteur, et un `\\;` lu comme la fin de la commande (`find … -exec docker logs {} \\; |
+    grep x`) ; une commande citée ou un document en ligne (`<<EOF`) sur plusieurs lignes sans
     `\\` ; `docker.exe`. Elle échoue du côté sûr quand un `&` seul sépare deux commandes, quand
     `2>&1` est posé avant `docker`, quand `ssh` précède un argument cité d'une autre commande
-    (`ssh h grep 'docker logs' f | wc -l`), et sur de la prose qui nomme `docker logs` avant un
-    `|` : une faute à relire.
+    (`ssh h grep 'docker logs' f | wc -l`), quand un séparateur est cité dans une citation
+    imbriquée qu'elle n'ouvre pas, ce qui lui cache le `2>&1` qui suit
+    (`ssh h 'docker logs "a;b" app 2>&1' | grep x`), et sur de la prose qui nomme `docker logs`
+    avant un `|` : une faute à relire.
     """
     lignes = texte.splitlines()
     fautes: set[int] = set()
