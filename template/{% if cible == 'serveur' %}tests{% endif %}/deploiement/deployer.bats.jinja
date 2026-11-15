@@ -2713,9 +2713,10 @@ stock_a_nettoyer() {
 }
 
 # Deux conteneurs, dont le journal du premier ne se lit pas : son échec est noté, et le second est
-# copié quand même, sans hériter de cet échec.
+# copié quand même, sans hériter de cet échec. L'échec vient d'abord : c'est l'ordre qui rendrait
+# visible un code d'échec reporté sur la copie suivante.
 @test "journal_deux_conteneurs_le_premier_en_echec" {
-  local second
+  local second echec copie
   second="5ec0bd$(printf '0%.0s' {1..58})"
   deja_en_service "$ANCIENNE" 0.1.0
   export DOUBLE_DOCKER_SECOND_CONTENEUR="$second"
@@ -2725,6 +2726,10 @@ stock_a_nettoyer() {
   [ "$status" -eq 0 ]
   [ "$(printf '%s\n' "$output" | grep -c ' non copié : docker logs en échec (code 1)$')" -eq 1 ]
   [[ "$output" == *"journal du conteneur 5ec0bd000000 (0.1.0) copié : journaux/"* ]]
+  echec="$(printf '%s\n' "$output" | grep -n ' non copié : docker logs en échec' | cut -d: -f1)"
+  copie="$(printf '%s\n' "$output" | grep -n 'journal du conteneur 5ec0bd000000 (0.1.0) copié' \
+    | cut -d: -f1)"
+  [ "$echec" -lt "$copie" ]
   [ "$(copies_de_journal prod | wc -l)" -eq 1 ]
   [ "$(copies_de_journal prod | grep -c -- '-0\.1\.0-5ec0bd000000\.log$')" -eq 1 ]
   grep -Fx "2026-11-15T12:00:00.000000000Z journal de 5ec0bd000000 : sortie" \
