@@ -1583,16 +1583,18 @@ def test_aucun_passage_planifie_ne_lit_le_contexte_du_depot():
 _DOCKER_LOGS = re.compile(
     r"(?<![\w.-])docker"
     r"(?:\s+(?:(?:-H|--host|-c|--context|--config|-l|--log-level|--tlscacert|--tlscert|--tlskey)"
-    r"(?:=|\s+)\S+|-[Hcl]\S+|(?:-D|--debug|--tls|--tlsverify)(?:=\S+)?))*"
+    r"(?:=|\s+)\S+|-[Hcl][^\s=]\S*|(?:-D|--debug|--tls|--tlsverify)(?:=\S+)?))*"
     r"\s+(?:container\s+)?logs\b"
 )
 # Une expression de Jinja, rendue avant que le shell ne lise la ligne : masquée d'abord.
 _JINJA = re.compile(r"\{\{.*?\}\}")
-# Ce qui, juste avant le guillemet d'une commande citée, la lance : `ssh <hôte> [options]`, ou un
-# shell avec un groupe d'options qui contient `c` (`sh -c`, `bash -euc`).
+# Ce qui, juste avant le guillemet d'une commande citée, la lance : `ssh` sans lettre, chiffre, `_`,
+# `.` ni `-` juste avant (`/usr/bin/ssh`), suivi des mots de la même commande ; ou un shell (`sh`,
+# `bash`, `dash`, `ksh`, `zsh`) sans lettre, chiffre ni `_` juste avant, dont le dernier mot, ou le
+# `--` qui le suit, est un groupe d'options qui contient `c` (`sh -c`, `bash -euc`, `bash -c --`).
 _LANCEUR = re.compile(
-    r"(?:(?:^|[\s;&|(\"'`])ssh(?:\s+[^\s|;&]+)*"
-    r"|\b(?:ba|da|k|z)?sh(?:\s+[^\s|;&]+)*?\s+-[A-Za-z]*c[A-Za-z]*)\s*$"
+    r"(?:(?<![\w.-])ssh(?:\s+[^\s|;&]+)*"
+    r"|\b(?:ba|da|k|z)?sh(?:\s+[^\s|;&]+)*?\s+-[A-Za-z]*c[A-Za-z]*(?:\s+--)?)\s*$"
 )
 
 
@@ -1600,8 +1602,8 @@ def _piles(ligne: str) -> list[tuple[tuple[str, int], ...]]:
     """Pour chaque caractère de la ligne, les segments ouverts qui le contiennent, du plus large au
     plus étroit, chacun (genre, position de son ouverture) : `'…'`, `"…"`, `` `…` `` et `$(…)`.
     Les délimiteurs d'un segment sont au niveau de ce qui l'entoure. Un délimiteur sans partenaire
-    plus loin sur la ligne n'ouvre rien, et une apostrophe qui suit une lettre (`l'app`) non plus.
-    Rien ne s'ouvre dans `'…'` ; dans `"…"`, seuls `$(` et l'accent grave."""
+    plus loin sur la ligne n'ouvre rien, et une apostrophe qui suit une lettre, un chiffre ou `_`
+    (`l'app`) non plus. Rien ne s'ouvre dans `'…'` ; dans `"…"`, seuls `$(` et l'accent grave."""
     pile: list[tuple[str, int]] = []
     piles = []
     i = 0
@@ -1665,7 +1667,13 @@ def _ligne_fautive(ligne: str) -> bool:
                 j += 2
                 continue
             if ligne[j] == ";" or ligne.startswith(("&&", "||"), j):
-                break
+                if not niveau:
+                    break
+                # dans un segment, la commande finit, mais la sortie du segment peut continuer
+                # après lui : la lecture saute à sa fermeture, qui décide
+                while j < len(ligne) and len(piles[j]) >= len(niveau):
+                    j += 1
+                continue
             if ligne[j] == "|":
                 if not vu:
                     return True
@@ -1681,21 +1689,27 @@ def commandes_sans_2_et_1(texte: str) -> list[int]:
     `--context x`, `--host=…`, `-D`, `--debug=true`…), puis `logs` ou `container logs`, n'importe
     où sur la ligne, quel que soit ce qui le précède (une affectation, `sudo`, `timeout`,
     `ssh hôte`, `xargs`, une puce, une invite). Les expressions de Jinja (`{{ … }}`) sont d'abord
-    masquées. La ligne se lit ensuite par segments (`_piles`) : `'…'`, `"…"`, `` `…` `` et
-    `$(…)` ; une apostrophe qui suit une lettre (`l'app`) n'ouvre rien. À partir de l'occurrence,
-    la règle lit sa commande au niveau du segment où elle est, en sautant les segments plus
-    étroits : un séparateur, un tube ou un `2>&1` cités ou dans une substitution ne comptent pas.
-    La ligne est fautive quand un tube (un `|` qui n'est ni `||` ni `|&`) vient avant la fin de la
-    commande (`;`, `&&`, `||` ou la fin de la ligne) sans `2>&1` ni `|&` avant lui. Quand le
-    segment de l'occurrence se ferme d'abord :
+    masquées, chacune seule. La ligne se lit ensuite par segments (`_piles`) : `'…'`, `"…"`,
+    `` `…` `` et `$(…)` ; un délimiteur sans partenaire plus loin sur la ligne n'ouvre rien, ni une
+    apostrophe qui suit une lettre, un chiffre ou `_` (`l'app`). À partir de l'occurrence, la règle
+    lit sa commande au niveau du segment où elle est, en sautant les segments plus étroits : un
+    séparateur, un tube ou un `2>&1` cités ou dans une substitution ne comptent pas. La ligne est
+    fautive quand un tube (un `|` qui n'est ni `||` ni `|&`) vient avant la fin de la commande
+    (`;`, `&&`, `||` ou la fin de la ligne) sans `2>&1` ni `|&` avant lui. Un `;`, un `&&` ou un
+    `||` finit la commande ; dans un segment, la lecture saute alors à sa fermeture, sans plus rien
+    voir dedans. Quand le segment de l'occurrence se ferme :
     - un segment cité est l'argument d'une autre commande, et l'occurrence est écartée
-      (`grep 'docker logs' | wc -l`), sauf si ce qui précède son ouverture la lance : `ssh <hôte>`
-      et ses options, ou un shell (`sh`, `bash`, `dash`, `ksh`, `zsh`) dont un groupe d'options
-      contient `c` (`sh -c`, `bash -euc`). La commande continue alors après le segment, et un
-      `2>&1` écrit dedans compte (`ssh h 'docker logs app' | grep x` est fautif) ;
+      (`grep 'docker logs' | wc -l`), sauf si ce qui précède son ouverture la lance : `ssh`, sans
+      lettre, chiffre, `_`, `.` ni `-` juste avant (`/usr/bin/ssh`), suivi des mots de la même
+      commande ; ou un shell (`sh`, `bash`, `dash`, `ksh`, `zsh`), sans lettre, chiffre ni `_`
+      juste avant, dont le dernier mot avant le guillemet, ou le `--` qui le suit, est un groupe
+      d'options qui contient `c` (`sh -c`, `bash -euc`, `bash -c --`). La commande continue alors
+      après le segment, et un `2>&1` écrit dedans avant la fin de la commande compte :
+      `ssh h 'docker logs app' | grep x` et `ssh h 'docker logs app; uptime' | grep x` sont
+      fautifs, `ssh h 'docker logs app 2>&1; uptime' | grep x` ne l'est pas ;
     - une substitution `$(…)` passe sa sortie à la commande qui l'entoure : la lecture continue
       après elle, sans plus écarter de segment cité (`echo "$(docker logs app)" | grep x` est
-      fautif).
+      fautif, comme `echo "$(docker logs app; date)" | grep x`).
     Une ligne finie par `\\` se lit jointe à la suivante, la faute nommant la première ligne de la
     suite, et chaque ligne de la suite se lit aussi seule : la faute d'une ligne qui suit un `\\`
     de texte, ou la seconde faute d'une suite, nomme sa propre ligne. `docker compose logs` reste
@@ -1704,11 +1718,15 @@ def commandes_sans_2_et_1(texte: str) -> list[int]:
     Ses limites connues, sans que la liste soit close. Elle ne voit pas : une commande construite à
     l'exécution (`$DOCKER logs`, `"${cmd[@]}"`, une fonction, un alias), qu'aucune lecture du
     texte ne voit ; une commande citée que lance un autre outil que `ssh` ou un shell `-c` (`eval`,
-    `su -c`, `printf '…' | sh`) ; un accent grave, lu comme un code en ligne de Markdown et non
-    comme une substitution (`` echo `docker logs app` | grep x ``) ; une commande citée ou un
-    document en ligne (`<<EOF`) sur plusieurs lignes sans `\\` ; `docker.exe`. Elle échoue du
-    côté sûr quand un `&` seul sépare deux commandes, quand `2>&1` est posé avant `docker`, et sur
-    de la prose qui nomme `docker logs` avant un `|` : une faute à relire.
+    `su -c`, `printf '…' | sh`) ; un groupe `{ … }` ou `( … )` dont la sortie va au tube, quand un
+    séparateur y finit la commande (`{ docker logs app; docker ps; } | grep x`) ; un accent grave,
+    lu comme un code en ligne de Markdown et non comme une substitution
+    (`` echo `docker logs app` | grep x ``) ; un délimiteur échappé (`\\"`, `\\'`), lu comme un
+    délimiteur ; une commande citée ou un document en ligne (`<<EOF`) sur plusieurs lignes sans
+    `\\` ; `docker.exe`. Elle échoue du côté sûr quand un `&` seul sépare deux commandes, quand
+    `2>&1` est posé avant `docker`, quand `ssh` précède un argument cité d'une autre commande
+    (`ssh h grep 'docker logs' f | wc -l`), et sur de la prose qui nomme `docker logs` avant un
+    `|` : une faute à relire.
     """
     lignes = texte.splitlines()
     fautes: set[int] = set()
@@ -1794,8 +1812,25 @@ def test_docker_logs_filtre_porte_2_et_1():
         "sudo -u u bash -c 'docker logs app' | grep x",
         'bash -c "cd / && docker logs app" | grep "x"',
         "bash -c \"ssh h 'docker logs app'\" | grep x",
+        "/usr/bin/ssh h 'docker logs app' | grep x",
+        "ssh -p 22 h 'docker logs app' | grep x",
+        "ssh -o 'a|b' h 'docker logs app' | grep x",
+        "bash -c -- 'docker logs app' | grep x",
+        # un séparateur dans la commande lancée la finit, mais sa sortie va au tube
+        "ssh h 'docker logs app || true' | grep x",
+        "ssh h 'docker logs app; uptime' | grep x",
+        "bash -c 'docker logs app; echo fin' | grep x",
         # la sortie d'une substitution part dans l'argument d'une autre commande, sans l'erreur
         'echo "$(docker logs app)" | grep x',
+        'echo "$(docker logs app; date)" | grep x',
+        # un délimiteur sans partenaire plus loin n'ouvre rien, ni une apostrophe après `_`
+        'docker logs l"app | grep x',
+        "docker logs l`app | grep x",
+        "docker logs 'app | grep x",
+        "docker logs a$( | grep x",
+        "docker logs a_'pp | grep _'x",
+        # chaque expression de Jinja est masquée seule
+        "docker logs {{ a }} | grep {{ b }}",
     ]
     for ligne in fautifs:
         assert commandes_sans_2_et_1(ligne) == [1], ligne
@@ -1827,8 +1862,12 @@ def test_docker_logs_filtre_porte_2_et_1():
         # ssh avec `2>&1` dans la commande citée ou après elle ; un argument cité d'un autre outil
         "ssh h 'docker logs app 2>&1' | grep x",
         "ssh h 'docker logs app' 2>&1 | grep x",
+        "ssh h 'docker logs app 2>&1; uptime' | grep x",
+        "ssh h 'docker logs app; uptime' 2>&1 | grep x",
         "grep -c 'docker logs' f | wc -l",
         "grep 'voir docker logs' | wc -l",
+        "grep -c 'docker logs; uptime' f | wc -l",
+        "ls ~/.ssh 'docker logs' | wc -l",
     ]
     for ligne in sains:
         assert commandes_sans_2_et_1(ligne) == [], ligne
@@ -1851,3 +1890,24 @@ def test_docker_logs_filtre_porte_2_et_1():
             continue
         texte = octets.decode("utf-8", errors="replace")
         assert commandes_sans_2_et_1(texte) == [], nom.decode("utf-8")
+
+
+def test_docker_logs_options_en_temps_borne():
+    """Une option que deux branches de `_DOCKER_LOGS` lisaient rendait la recherche exponentielle :
+    40 options `-H=x` sans `logs` se lisent en moins d'une seconde, dans un processus à part que
+    la limite arrête."""
+    code = (
+        "import re, sys, time\n"
+        "motif = re.compile(sys.argv[1])\n"
+        "debut = time.perf_counter()\n"
+        "motif.search(sys.argv[2])\n"
+        "print(time.perf_counter() - debut)\n"
+    )
+    sortie = subprocess.run(
+        [sys.executable, "-B", "-c", code, _DOCKER_LOGS.pattern, "docker" + " -H=x" * 40],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=30,
+    )
+    assert float(sortie.stdout) < 1, sortie.stdout
