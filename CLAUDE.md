@@ -527,6 +527,80 @@ corrigé ce plan, que le `plan.py` de la `v0.12.0` passe désormais par `--neuf`
 outils, 16 effets, 10 revues), revérifié par l'API avec `--sans-lieux` ; veille-emploi#28 est
 fusionnée.
 
+Lot 18 fait le 16/11/2026 : le journal d'une application survit à son déploiement (#133),
+étiqueté `v0.13.0`. Il est né du signal de `veille-emploi`, qui a constaté le 13/11 que la ligne
+qui aurait expliqué un défaut de sa prod était partie avec un conteneur remplacé (PR #146 à #148).
+Aucune de ses PR ne déclare d'écart à la spec.
+- **La copie du journal** (#146). En cible `serveur`, `lancer`, seul geste de `deployer.sh` qui
+  remplace le conteneur, copie d'abord le journal de chaque conteneur `app` du projet, en service
+  ou arrêté (`dc ps --all --quiet app`) : au déploiement d'un couple neuf, au retour arrière
+  automatique d'`echouer`, qui copie la version en échec, et au `--retour`. Tout ce que rend
+  `docker logs --timestamps`, les deux sorties, va sous `~/.local/state/<nom>/<env>/journaux/`, en
+  700, dans un fichier en 600 nommé `<AAAAMMJJTHHMMSSZ>-<version>-<id12>.log` ; la version se lit
+  par un format d'inspection qui n'extrait que `<PREFIXE>VERSION`, jamais tout l'environnement du
+  conteneur, qui porte des secrets (`inconnue` sinon). Les 5 copies les plus récentes restent par
+  environnement : 75 Mo au plus avec le plafond du compose géré, 90 Mo avec le journal en service.
+  Une copie qui échoue est notée au journal du déploiement, son `.partiel` retiré, et n'arrête
+  rien : le code de `lancer` reste celui du `dc up`. Sa limite : les lignes écrites entre la copie
+  et l'arrêt du conteneur, pendant le tirage d'une image absente puis le délai d'arrêt, jusqu'à
+  10 s.
+- **`exploitation.md`**, semé (#147, #148) : le journal en service, jusqu'à 15 Mo ; les copies,
+  combien chaque déploiement en fait, et qu'aucune durée n'est garantie ; où se lit la cause d'une
+  copie manquée ; `2>&1` pour filtrer ; la ligne « Copies du journal » du tableau « Ce qui
+  tourne » ; et, dans « Tout arrêter », que `down` retire les conteneurs sans copie. Un projet qui
+  naît le reçoit ; un projet déjà né, par son message.
+- **Le banc** (#146, #148). Le double de `docker` connaît trois états du conteneur, son
+  identifiant, `logs` et l'inspection de la version ; `deployer.bats` gagne 27 tests (26 sans
+  sauvegardes), et les deux horloges d'`aide.bash` refusent un second double de `date` au lieu de
+  boucler, ce qui clôt LE-82.
+- **L'épreuve sur un vrai Docker** (#146, #148), dans le job `fausse-app` : le plafond de
+  `json-file` réduit, le journal de la prod tourne, et la copie garde la ligne de démarrage, écrite
+  dans un fichier déjà tourné ; un conteneur arrêté par `docker stop` est copié par le `--retour`
+  qui suit ; le nom de chaque copie se lit en entier, version comprise. C'est prouvé sur le moteur
+  29.4.2 du runner, en magasin classique, et non sur le 29.5.3 de la cible, où `menage-cible` ne
+  lance que l'épreuve du ménage : les premières copies des projets sur la cible n'en prouveront
+  que le cas ordinaire, ni la rotation ni le conteneur arrêté (S-5).
+- **Le test de `2>&1`** (#147, #148), dans `tests/test_depot_modele.py` : sur chaque fichier texte
+  suivi de `template/`, il refuse un `docker logs` qu'un tube suit sans `2>&1` ni `|&`. Il cherche
+  `docker`, ses options globales, puis `logs`, n'importe où sur la ligne, la lit par segments (les
+  citations, les substitutions, Jinja), suit une commande citée que lance `ssh` ou un shell par
+  `-c`, et lit une ligne finie par `\` jointe à la suivante, puis seule ; `docker compose logs`
+  reste hors de la règle, et un second test borne son temps. Sa docstring nomme ses limites
+  connues, sans que leur liste soit close : d'abord une commande construite à l'exécution (une
+  variable, une fonction, un alias), qu'aucune lecture du texte ne voit. La session a lu le § 5 de
+  la spec comme une recherche dans le texte, sans déclarer d'écart ; la relecture des corrections
+  le voulait déclaré (LE-92).
+- **La revue finale** a lu `609f70f..1910b1d` en cinq lentilles (la spec, le shell, le banc, le
+  relevé, les mesures), chaque constat contre-vérifié, puis par une lecture de complétude :
+  24 constats, aucun critique, un important (S-1, la règle de `2>&1`) et 23 mineurs. 13 sont
+  corrigés dans #148, 8 vont aux messages, 4 à la clôture et 3 restent tels quels, un constat
+  pouvant avoir deux lieux. La phrase « un déploiement en échec en fait deux », au § 5 de la spec,
+  contredisait ses § 3.1, § 3.2 et § 8 : le texte suit le comportement, sans écart déclaré
+  (LE-93). La relecture des corrections a pris quatre temps, une relecture puis trois relectures
+  ciblées : les deux premières trouvaient des formes que la règle de `2>&1` ne voyait pas, la
+  troisième seulement des phrases de sa docstring, la quatrième rien (LE-99). #148 compte 42
+  mutants, tous tués, et deux mutants équivalents restés vivants. Aucun job coupé ni avertissement
+  de durée dans le lot : sous Windows, le job `tests` a duré au plus 35 min 44 s, sous le seuil de
+  45 min, ce qui clôt LE-79 ; `mecanique`, au plus 11 min 14 s, sous 15 min.
+- **Le relevé**, sur `2f28161`, rend 1 : 75 dépôts examinés, 7 projets, tous lus, tous en
+  `v0.12.0`, et une PR ouverte d'un dépôt privé qui ajoute un plan. Sa ligne « fichiers gérés » ne
+  couvre ni `deploiement/` ni `tests/deploiement/`, où sont les quatre fichiers gérés du lot
+  (R-4) : la revue finale les a rendus avec les réponses d'`ancrage` et de `veille-emploi`,
+  identiques à la `v0.12.0` dans les deux projets, et a simulé leur mise à jour vers `1910b1d`,
+  sans conflit. La piste « Comparer les fichiers reçus à l'étiquette » s'étend aux gabarits.
+- **Le registre** gagne LE-91 à LE-99 ; LE-79, LE-82 et LE-89 sont closes. Aucune porte n'est
+  due : chaque leçon va sous un motif dont la porte est écrite, ou qui n'a pas son 3e constat.
+  LE-91 est le premier constat de « décision appliquée sans en chercher les effets » depuis la
+  porte du lot 17, un chemin d'exécution qu'« Effets cherchés » n'a pas nommé ; LE-95 ouvre un
+  motif neuf, « renvoi d'une tâche à l'autre perdu en route ».
+- **Vers les projets**, la `v0.13.0` part vers `ancrage` et `veille-emploi` seuls, après
+  l'étiquette, chacun avec son message ; les cinq autres la prendront à leur prochaine mise à jour,
+  sans effet. La copie commence au premier déploiement d'une version qui la porte : en staging dès
+  la fusion de la mise à jour, en prod à la prochaine étiquette de chaque projet, sans date. Les
+  copies de prod se constateront alors, par la session du projet (S-6). D'ici là, un retour
+  arrière par étiquette vers un commit d'avant la mise à jour lance l'ancien `deployer.sh`, qui ne
+  copie pas (LE-91).
+
 Prochain, au choix d'Edouard :
 - le second temps du travail sur la documentation, un lot « documentation » avec sa spec : l'« État »
   réduit du `CLAUDE.md` semé et le journal des versions du modèle ; dans le README, le refus d'une
@@ -539,8 +613,6 @@ Prochain, au choix d'Edouard :
 - le lot 7 (`creche-planner` aligné en cible `aucune`) ;
 - le workflow `publier`, qui ferait publier Edouard depuis son téléphone : sa piste a pour
   déclencheur un lot choisi par Edouard ;
-- #133, « Cible serveur : le journal d'une application survit à son déploiement », une issue
-  ouverte le 13/11 sur le signal de `veille-emploi`, hors du lot 17 ;
 - les constats que les portes du lot 15 laissent ouverts, dont un lot suivant pèse les motifs :
   LE-49 (un écart que son auteur ne reconnaît pas), LE-50 (le retrait des images, dans `serveur`),
   LE-54 et LE-61 (des textes que la section du plan ne couvre pas : une piste, un texte de clôture,
@@ -551,13 +623,19 @@ Prochain, au choix d'Edouard :
   lot, qui n'exerce pas le cas), né de la relecture de la clôture ;
 - ceux que le lot 17 laisse ouverts, de même : LE-83, avec LE-49 (un écart que son auteur ne
   reconnaît pas) ; LE-80 et LE-86 (un texte que « Mécanismes annoncés » ne couvre pas : la
-  troisième pièce d'une ligne de plan, le remède d'une revue de tâche) ; LE-82, LE-84 et LE-87 (un
-  comportement d'outil supposé, hors de ce que le plan ou le correctif nommait : un double installé
-  deux fois, un `gh` jamais connecté, quatre formes du rendu de GitHub) ; LE-81, LE-85, LE-88 et
-  LE-89 (un contrôle qui passe sans voir ce qu'il doit voir : une recherche trop étroite, des tests
-  que leur environnement rendait vains, des changements qu'aucun test ne tenait, un échec lu comme
-  un résultat) ; AM-5 (ce qu'une clôture livre de plus que ses gestes, avec sa piste) et AM-6 (le
-  garde et la simple lecture de la clé des hooks).
+  troisième pièce d'une ligne de plan, le remède d'une revue de tâche) ; LE-84 et LE-87 (un
+  comportement d'outil supposé, hors de ce que le plan nommait : un `gh` jamais connecté, quatre
+  formes du rendu de GitHub) ; LE-81, LE-85 et LE-88 (un contrôle qui passe sans voir ce qu'il doit
+  voir : une recherche trop étroite, des tests que leur environnement rendait vains, des
+  changements qu'aucun test ne tenait) ; AM-5 (ce qu'une clôture livre de plus que ses gestes, avec
+  sa piste) et AM-6 (le garde et la simple lecture de la clé des hooks) ;
+- ceux que le lot 18 laisse ouverts, de même : LE-92, avec LE-49 et LE-83 (un écart que son auteur
+  ne reconnaît pas : une liste du plan qui rend une promesse de la spec) ; LE-91 (un chemin
+  d'exécution qu'« Effets cherchés » n'a pas nommé, le premier constat du motif depuis sa porte) ;
+  LE-93 et LE-96, avec LE-86 et LE-90 (un texte que « Mécanismes annoncés » ne couvre pas : une
+  phrase de la spec qui résume un comportement, un Ruling écrit sans essayer le cas) ; LE-99, avec
+  LE-57, LE-84 et LE-87 (un cas limite inconnu : la grammaire du shell, lue par le texte) ; LE-97,
+  avec LE-88 (des gardes qu'aucun test ne tenait, revenues d'un lot à l'autre).
 
 Le cadrage est dans `docs/cadrage.md` ; ce que les lots ont appris, dans `docs/registre.md`.
 

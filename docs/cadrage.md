@@ -512,6 +512,34 @@
 >   - le déclencheur de la piste du commentaire jamais fermé n'est pas atteint : la lecture du
 >     texte de l'unité de clôture (#140) suit déjà sa première voie.
 
+> **Amendé le 2026-11-16, à la clôture du lot 18, de la même façon.** Le lot 18 n'était pas au §11 :
+> il vient de l'issue #133, ouverte le 13/11 sur le signal de `veille-emploi`, dont la ligne qui
+> aurait expliqué un défaut de la prod était partie avec un conteneur remplacé (PR #146 à #148). Il
+> ajoute une étape au §6.3, et un dossier à l'état de déploiement du §6.2, en cible `serveur`.
+> `exploitation.md`, semé, est amendé ; aucun fichier ne s'ajoute à ce que reçoit un projet (§4) :
+>
+> - **§6.2** : l'état de déploiement porte `journaux/`, en 700, les copies du journal du conteneur
+>   `app`, chacune en 600 ; les 5 plus récentes restent par environnement ;
+> - **§6.3** : avant chaque `up`, au déploiement d'un couple neuf, au retour arrière automatique
+>   et au `--retour`, `deployer.sh` copie par `docker logs --timestamps` le journal de chaque
+>   conteneur `app` du projet, en service ou arrêté, sous un nom qui porte l'heure UTC de la copie,
+>   la version du conteneur et son identifiant. La version se lit par un format qui n'extrait que
+>   la variable de version, jamais l'environnement du conteneur, qui porte des secrets. Une copie
+>   qui échoue est notée au journal du déploiement et n'arrête rien. La copie est faite par le
+>   `deployer.sh` de la version qui arrive : un retour par étiquette vers une version d'avant la
+>   `v0.13.0` ne copie pas, et le `down` de « Tout arrêter » retire le conteneur sans copie ;
+> - **§10** : l'épreuve des données (§10.3) prouve, sur le Docker du job, que la copie lit un
+>   journal déjà tourné de `json-file` et un conteneur arrêté : le moteur 29.4.2 du runner, en
+>   magasin classique, et non le 29.5.3 de la cible. Un test de ce dépôt refuse, dans `template/`,
+>   une commande qui filtre le journal d'un conteneur sans `2>&1` ; ses limites connues ne sont pas
+>   closes, dont une commande construite à l'exécution, qu'aucune lecture du texte ne voit ;
+> - **aucun écart à la spec du lot** : ses trois PR déclarent « Aucun. ». Deux passages de son §5
+>   ont été tranchés sans écart déclaré : « un déploiement en échec en fait deux », qui contredisait
+>   ses §3.1, §3.2 et §8, cède au comportement (LE-93) ; « toute commande `docker logs` » se lit
+>   comme une recherche dans le texte, quand la relecture des corrections voulait l'écart déclaré
+>   (LE-92) ;
+> - **le registre** gagne LE-91 à LE-99 ; LE-79, LE-82 et LE-89 se closent.
+
 Ce cadrage est la partie publique de la spec de conception du modèle, issue d'une séance de questions avec Edouard : 12 questions, puis 5 parties de design validées une à une. La partie qui nomme le serveur est privée et n'est pas reproduite ici.
 
 ---
