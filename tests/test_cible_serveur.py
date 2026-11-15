@@ -755,6 +755,21 @@ def test_exploitation_dit_le_menage(rendre, sauvegardes):
 
 
 @pytest.mark.parametrize("sauvegardes", [True, False])
+def test_exploitation_dit_les_copies_du_journal(rendre, sauvegardes):
+    texte = lire(rendre(**{**REPONSES_SERVEUR, "sauvegardes": sauvegardes}), "docs/exploitation.md")
+    plat = a_plat(texte)
+    for fragment in (
+        "journaux/",
+        "5 dernières copies",
+        "en fait deux",
+        "Aucune durée n'est garantie",
+        "2>&1 | grep",
+    ):
+        assert fragment in plat, fragment
+    assert "sans copie" in a_plat(section(texte, "Tout arrêter"))
+
+
+@pytest.mark.parametrize("sauvegardes", [True, False])
 def test_exploitation_dit_la_garde_des_donnees(rendre, sauvegardes):
     rendu = rendre(**{**REPONSES_SERVEUR, "sauvegardes": sauvegardes})
     runbook = lire(rendu, "docs/exploitation.md")
