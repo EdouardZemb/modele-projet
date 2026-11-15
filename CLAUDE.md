@@ -513,6 +513,17 @@ de la lecture des fermetures par `texte-pr` dans un dépôt privé : serveur#70,
 lot, qui ferme une issue, a eu `texte-pr` vert sur « ferme une issue : tête relue égale à la
 tête » (LE-69).
 
+Versions des projets au 15/11/2026, relevées par l'API : les sept projets nés du modèle sont en
+`v0.12.0` (serveur#73, veille-emploi-donnees#53, ancrage-donnees#217, veille-emploi#29,
+pupitre#40, ancrage#42, pupitre-donnees#22), chacun sans conflit ni fichier en trop, sa CI verte à
+la fusion. Le message de `serveur` est parti le premier, les six autres après sa fusion, chacun
+après une relecture de son projet : quatre avaient changé depuis le relevé de la clôture, et leur
+message a été repris. `pupitre` a aligné sa ligne de `CONVENTIONS.md` sur la phrase que proposait
+son message, qui omet trois cas de la règle (LE-90). Le plan du lot 3 de `veille-emploi`, dans sa
+PR 28, encore en brouillon, est le premier plan que la porte du lot 17 arrête : le `plan.py` de la
+`v0.12.0` le refuse par `--neuf`, faute d'« Effets cherchés » et des leçons du lot dans sa clôture,
+deux retouches que sa session ajoute avec la correction du plan.
+
 Prochain, au choix d'Edouard :
 - le second temps du travail sur la documentation, un lot « documentation » avec sa spec : l'« État »
   réduit du `CLAUDE.md` semé et le journal des versions du modèle ; dans le README, le refus d'une
