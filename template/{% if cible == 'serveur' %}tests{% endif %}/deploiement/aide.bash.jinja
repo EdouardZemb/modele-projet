@@ -400,6 +400,7 @@ aucune_ligne() {
     return 1
   fi
 }
+{%- if sauvegardes %}
 
 # --- Horloges des copies de journal et des instantanés (déploiement, sauvegarde) ---------------
 
@@ -407,16 +408,31 @@ aucune_ligne() {
 # relevé une fois par test : un test qui passe minuit garde son jour. Un jour figé vieillit, et la
 # purge de 30 jours, qui lit la vraie date, finit par retirer les instantanés du test
 # (modele-projet#136).
+{%- else %}
+
+# --- Horloge des copies de journal (déploiement) -----------------------------------------------
+
+# jour_de_l_horloge : le jour des horodatages de l'horloge du banc, la veille de la vraie date,
+# relevé une fois par test : un test qui passe minuit garde son jour.
+{%- endif %}
 jour_de_l_horloge() {
   local fichier="$BATS_TEST_TMPDIR/horloge-jour"
   [ -s "$fichier" ] || date -u -d yesterday +%Y%m%d >"$fichier"
   cat "$fichier"
 }
+{%- if sauvegardes %}
 
 # horloge_figee : l'horodatage d'une copie de journal, ou d'un instantané, tombe toujours à la même
 # seconde, <jour_de_l_horloge>T120000Z : deux copies du même conteneur, dans un même test, visent le
 # même nom. Les autres appels de `date` sont ceux de la vraie. Elle refuse un double de `date` déjà
 # posé : elle le prendrait pour la vraie `date`, et s'appellerait sans fin.
+{%- else %}
+
+# horloge_figee : l'horodatage d'une copie de journal tombe toujours à la même seconde,
+# <jour_de_l_horloge>T120000Z : deux copies du même conteneur, dans un même test, visent le même
+# nom. Les autres appels de `date` sont ceux de la vraie. Elle refuse un double de `date` déjà
+# posé : elle le prendrait pour la vraie `date`, et s'appellerait sans fin.
+{%- endif %}
 horloge_figee() {
   local reel jour
   if [ -e "$DOUBLES/date" ]; then
@@ -441,9 +457,14 @@ EOF
 # déploiements ou des sauvegardes qui se suivent en moins d'une seconde, comme ici avec des doubles,
 # viseraient sinon le même dossier, que la commande de l'image refuse d'écraser. Il tombe la veille
 # de la vraie date (jour_de_l_horloge), le compteur dans les secondes. Les autres appels de `date`
-# sont ceux de la vraie.
+# sont ceux de la vraie. Elle refuse, comme horloge_figee, un double de `date` déjà posé, le sien
+# compris : elle le prendrait pour la vraie `date`, et s'appellerait sans fin.
 horloge_qui_avance() {
   local reel jour
+  if [ -e "$DOUBLES/date" ]; then
+    echo "horloge_qui_avance : un double de date est déjà posé ($DOUBLES/date)" >&2
+    return 1
+  fi
   reel="$(command -v date)"
   jour="$(jour_de_l_horloge)"
   cat >"$DOUBLES/date" <<EOF

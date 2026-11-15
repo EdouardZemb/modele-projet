@@ -121,6 +121,10 @@
 #   DOUBLE_DOCKER_SAUVEGARDE_ATTENTE  `<sauvegarder>` dure autant de secondes avant de répondre
 {%- endif %}
 #   DOUBLE_DOCKER_UP_ECHEC           images (séparées par des espaces) dont le `compose up` échoue
+#                                    avant de remplacer le conteneur, comme une création que refuse
+#                                    le démon : l'ancien conteneur reste en service, avec son
+#                                    identifiant (aucun au premier déploiement). Un conteneur
+#                                    remplacé puis « unhealthy » passe par DOUBLE_CURL_SANTE_KO
 #   DOUBLE_DOCKER_SECRETS            noms de variables (séparés par des espaces) : `compose up` écrit
 #                                    dans secrets-recus, à côté de $APPELS, ceux que son
 #                                    environnement porte, non vides, un par ligne ; jamais une valeur
@@ -704,7 +708,7 @@ case "${1:-}" in
         fi
         case " ${DOUBLE_DOCKER_UP_ECHEC:-} " in
           *" $image "*)
-            echo "dependency failed to start: container app is unhealthy" >&2
+            echo "Error response from daemon: Minimum memory limit allowed is 6MB" >&2
             exit 1
             ;;
         esac

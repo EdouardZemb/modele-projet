@@ -2564,14 +2564,16 @@ stock_a_nettoyer() {
   [ "$(ligne_de " logs --timestamps $id")" -lt "$(ligne_de ' up -d ')" ]
 }
 
+# Aucun conteneur : rien n'est copié, sans ligne au journal, et journaux/ n'est pas créé.
 @test "journal_aucune_copie_au_premier_deploiement" {
   deployer prod "$NOUVELLE" 0.2.0
   [ "$status" -eq 0 ]
   # la question est posée, et aucun conteneur ne répond
   appels_de docker | grep -Fx "$(dc_de prod) ps --all --quiet app"
   aucune_ligne ' logs ' "$APPELS"
-  [ -z "$(find "$ETAT/journaux" -mindepth 1 2>/dev/null)" ]
+  [ ! -e "$ETAT/journaux" ]
   [[ "$output" != *"journal du conteneur"* ]]
+  [[ "$output" != *"non copié"* ]]
 }
 
 # Un premier déploiement en échec arrête sa version (`compose stop`) : le conteneur reste, avec son
@@ -2708,6 +2710,30 @@ stock_a_nettoyer() {
   [ "$(copies_de_journal prod | grep -c -- '-0\.1\.0-5ec0bd000000\.log$')" -eq 1 ]
   grep -Fx "2026-11-15T12:00:00.000000000Z journal de 5ec0bd000000 : sortie" \
     "$ETAT/journaux/$(copies_de_journal prod | grep -- '-5ec0bd000000\.log$')"
+}
+
+# Deux conteneurs, dont le journal du premier ne se lit pas : son échec est noté, et le second est
+# copié quand même, sans hériter de cet échec. L'échec vient d'abord : c'est l'ordre qui rendrait
+# visible un code d'échec reporté sur la copie suivante.
+@test "journal_deux_conteneurs_le_premier_en_echec" {
+  local second echec copie
+  second="5ec0bd$(printf '0%.0s' {1..58})"
+  deja_en_service "$ANCIENNE" 0.1.0
+  export DOUBLE_DOCKER_SECOND_CONTENEUR="$second"
+  # shellcheck disable=SC2016  # la condition se développe quand le double tourne, pas ici
+  echouer_si docker '[[ "$*" == "logs --timestamps "* && "$*" != *" 5ec0bd"* ]]'
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | grep -c ' non copié : docker logs en échec (code 1)$')" -eq 1 ]
+  [[ "$output" == *"journal du conteneur 5ec0bd000000 (0.1.0) copié : journaux/"* ]]
+  echec="$(printf '%s\n' "$output" | grep -n ' non copié : docker logs en échec' | cut -d: -f1)"
+  copie="$(printf '%s\n' "$output" | grep -n 'journal du conteneur 5ec0bd000000 (0.1.0) copié' \
+    | cut -d: -f1)"
+  [ "$echec" -lt "$copie" ]
+  [ "$(copies_de_journal prod | wc -l)" -eq 1 ]
+  [ "$(copies_de_journal prod | grep -c -- '-0\.1\.0-5ec0bd000000\.log$')" -eq 1 ]
+  grep -Fx "2026-11-15T12:00:00.000000000Z journal de 5ec0bd000000 : sortie" \
+    "$ETAT/journaux/$(copies_de_journal prod)"
 }
 
 # Un identifiant qui n'a pas la forme d'un conteneur ne nomme aucun fichier : son nom échapperait au
@@ -2856,11 +2882,13 @@ stock_a_nettoyer() {
 }
 
 # Le plafond : les 5 copies les plus récentes, d'après leur nom. Il ne compte ni ne retire un lien
-# ou un autre nom ; un .partiel laissé par une copie coupée part, sans compter comme une copie.
+# ou un autre nom ; un .partiel laissé par une copie coupée part, sans compter comme une copie. Le
+# dossier, posé ici en 755, est remis en 700 par la copie.
 @test "journal_plafond" {
   local j="$ETAT/journaux" id12=0123456789ab n ailleurs="$BATS_TEST_TMPDIR/ailleurs.log"
   deja_en_service "$ANCIENNE" 0.1.0
   mkdir -p "$j"
+  chmod 755 "$j"
   for n in 1 2 3 4 5 6; do
     echo "copie $n" >"$j/20200101T00000${n}Z-0.1.0-$id12.log"
   done
@@ -2884,6 +2912,7 @@ stock_a_nettoyer() {
   # la copie neuve, les quatre posées les plus récentes, le lien et notes.txt
   [ "$(copies_de_journal prod | grep -vc '^20200101T')" -eq 1 ]
   [ "$(find "$j" -mindepth 1 -maxdepth 1 | wc -l)" -eq 7 ]
+  [ "$(stat -c %a "$j")" = 700 ]
 }
 
 # Les échecs que les doubles ne savent pas faire, chacun joué sous `set -euo pipefail` : la liste
@@ -2979,3 +3008,33 @@ stock_a_nettoyer() {
   [[ "$output" == *"echouer_si : date a déjà son double d'échec ($DOUBLES/date-avant-echouer-si)"* ]]
   [ "$(timeout 5 date -u +%Y%m%dT%H%M%SZ)" = "$(jour_de_l_horloge)T120000Z" ]
 }
+
+# horloge_figee refuse un double de date déjà posé : elle le prendrait pour la vraie `date`, et
+# s'appellerait sans fin. Le premier reste en place, et les autres appels vont à la vraie `date`.
+@test "horloge_figee_refuse_un_second_double" {
+  horloge_figee
+  run horloge_figee
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"horloge_figee : un double de date est déjà posé ($DOUBLES/date)"* ]]
+  [ "$(timeout 5 date -u +%Y%m%dT%H%M%SZ)" = "$(jour_de_l_horloge)T120000Z" ]
+  [ "$(timeout 5 date -u -d @0 +%Y)" = 1970 ]
+}
+{%- if sauvegardes %}
+
+# horloge_qui_avance refuse de même un double de date déjà posé, le sien ou l'horloge figée.
+@test "horloge_qui_avance_refuse_un_second_double" {
+  horloge_qui_avance
+  run horloge_qui_avance
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"horloge_qui_avance : un double de date est déjà posé ($DOUBLES/date)"* ]]
+  [ "$(timeout 5 date -u +%Y%m%dT%H%M%SZ)" = "$(jour_de_l_horloge)T000001Z" ]
+  [ "$(timeout 5 date -u -d @0 +%Y)" = 1970 ]
+  rm "$DOUBLES/date"
+  horloge_figee
+  run horloge_qui_avance
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"horloge_qui_avance : un double de date est déjà posé ($DOUBLES/date)"* ]]
+  [ "$(timeout 5 date -u +%Y%m%dT%H%M%SZ)" = "$(jour_de_l_horloge)T120000Z" ]
+  [ "$(timeout 5 date -u -d @0 +%Y)" = 1970 ]
+}
+{%- endif %}

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# L'épreuve des données, sur un vrai Docker (lot 12, #64) : la chaîne à deux dépôts (M-0006, §§ 5
-# et 6), de deployer.sh à la santé de l'app.
+# L'épreuve des données, sur un vrai Docker (lot 12, #64 ; la copie du journal, lot 18, #133) : la
+# chaîne à deux dépôts (M-0006, §§ 5 et 6), de deployer.sh à la santé de l'app, et la copie du
+# journal de l'app avant le remplacement de son conteneur.
 #
 #   bash tests/modele/epreuve-donnees.sh <rendu>
 #
@@ -11,7 +12,11 @@
 # lancent deployer.sh contre des doubles ; ici, le vrai Docker montre ce que les doubles ne peuvent
 # pas : les montages que docker compose fait vraiment de l'instantané (leur source, leur lecture
 # seule), la recréation du conteneur, les commandes de vérification dans leur conteneur jetable, et
-# la santé que sert l'app.
+# la santé que sert l'app ; et, pour la copie du journal, un journal tourné par un plafond réduit,
+# dont la copie garde la ligne écrite avant la rotation (`docker logs` lit les fichiers tournés de
+# json-file), la copie d'un conteneur arrêté, que `docker compose ps --all` liste, le nom entier de
+# la copie, avec la version lue dans l'environnement du conteneur par FORMAT_VERSION, et `2>&1` : la
+# fausse app écrit ses lignes sur sa sortie d'erreur, que la copie doit garder.
 #
 # Préparation, tout dans un dossier de travail :
 #   - age, par apt s'il manque (le runner ne l'a pas), et sops, à la version épinglée, téléchargé de
