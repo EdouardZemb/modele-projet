@@ -761,9 +761,12 @@ def test_exploitation_dit_les_copies_du_journal(rendre, sauvegardes):
     for fragment in (
         "journal du conteneur en service",
         "15 Mo",
-        "journaux/",
-        "5 dernières copies",
-        "en fait deux",
+        "plafond du compose géré ; en staging, `essai-staging-app-1`",
+        "`ls ~/.local/state/essai/prod/journaux/` liste les 5 dernières copies",
+        "en échec, il en fait deux quand une version était en service",
+        "Un premier déploiement en échec n'en fait aucune",
+        "Chaque copie, ou la cause d'une copie manquée, est dite au journal du déploiement",
+        "celui de l'unité de la sonde",
         "Aucune durée n'est garantie",
         "2>&1 | grep",
     ):
@@ -1164,6 +1167,11 @@ def test_exploitation_dit_le_couple_et_les_deux_modes(rendre, mode, sauvegardes)
     commande = "Une commande de l'instance est `VERIFIER_CONFIG` ou `VERIFIER_CONTENU`"
     assert f"{commande}, déclarée dans `deploiement/projet.env`" in tourne
     assert "`~/.local/state/essai/prod/instantanes/`" in tourne
+    journaux = (
+        "| Copies du journal | `~/.local/state/essai/prod/journaux/` (les 5 dernières) |"
+        " `~/.local/state/essai/staging/journaux/` (les 5 dernières) |"
+    )
+    assert journaux in tourne
     assert "donne l'image, la version et le commit de données du couple en service" in tourne
     assert "`echec` nomme un couple, son image et son commit" in tourne
     # Un dépôt de code n'a ni domaine, ni sous-domaine, ni bloc de ports : le rendu ne donne pas les
