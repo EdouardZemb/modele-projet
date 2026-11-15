@@ -585,9 +585,9 @@ Aucune de ses PR ne déclare d'écart à la spec.
 - **Le relevé**, sur `2f28161`, rend 1 : 75 dépôts examinés, 7 projets, tous lus, tous en
   `v0.12.0`, et une PR ouverte d'un dépôt privé qui ajoute un plan. Sa ligne « fichiers gérés » ne
   couvre ni `deploiement/` ni `tests/deploiement/`, où sont les quatre fichiers gérés du lot
-  (R-4) : la revue finale les a rendus avec les réponses d'`ancrage` et de `veille-emploi`,
-  identiques à la `v0.12.0` dans les deux projets, et a simulé leur mise à jour vers `1910b1d`,
-  sans conflit. La piste « Comparer les fichiers reçus à l'étiquette » s'étend aux gabarits.
+  (R-4) : la préparation des messages les a rendus avec les réponses d'`ancrage` et de
+  `veille-emploi`, identiques à la `v0.12.0` dans les deux projets, et a simulé leur mise à jour
+  vers `2f28161` : seuls `.copier-answers.yml` et ces quatre fichiers changent, sans conflit. La piste « Comparer les fichiers reçus à l'étiquette » s'étend aux gabarits.
 - **Le registre** gagne LE-91 à LE-99 ; LE-79, LE-82 et LE-89 sont closes. Aucune porte n'est
   due : chaque leçon va sous un motif dont la porte est écrite, ou qui n'a pas son 3e constat.
   LE-91 est le premier constat de « décision appliquée sans en chercher les effets » depuis la
