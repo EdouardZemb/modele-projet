@@ -285,11 +285,14 @@ champ_du_montage() { awk -v p="$1" -v c="$2" '$1 == p { print $c }' <<<"$MONTAGE
 # nombre_de_copies : les fichiers .log de journaux/ ; copie_du_conteneur <conteneur> : le nom de la
 # copie de ce conteneur, d'après les 12 premiers caractères de son identifiant, vide sans elle ;
 # nom_de_copie <nom> <conteneur> : <horodatage>-<version>-<12 caractères>.log, la version du couple
-# 1 ; copie_dit <nom> <texte> : la copie porte ce texte.
+# 1 ; copie_dit <nom> <texte> : la copie porte ce texte. Sans journaux/, les deux premières
+# rendent 0 copie et un nom vide, sans arrêter l'épreuve : les `verifier` nomment le manque.
 nombre_de_copies() {
+  [ -d "$ETAT_PROD/journaux" ] || { echo 0; return 0; }
   find "$ETAT_PROD/journaux" -mindepth 1 -maxdepth 1 -type f -name '*.log' 2>/dev/null | wc -l
 }
 copie_du_conteneur() {
+  [ -d "$ETAT_PROD/journaux" ] || return 0
   find "$ETAT_PROD/journaux" -mindepth 1 -maxdepth 1 -type f -name "*-${1:0:12}.log" \
     -printf '%f\n' 2>/dev/null
 }

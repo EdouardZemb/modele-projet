@@ -307,7 +307,9 @@ purger_journaux() {
 # rien, sans ligne au journal. Le dossier est créé s'il manque et remis en 700 à chaque copie ; un
 # journaux qui est un lien, ou qui n'est pas un dossier, fait refuser la copie, comme un nom déjà
 # pris, le fichier ou son .partiel, présent ou en lien (une redirection suivrait le lien). Seul un
-# identifiant de 12 à 64 caractères hexadécimaux se copie : un autre nom échapperait au plafond.
+# identifiant de 12 à 64 caractères hexadécimaux se copie, et seul un nom qui suit MOTIF_COPIE
+# s'écrit (une horloge en échec donnerait un nom sans horodatage) : un autre nom échapperait au
+# plafond.
 # lancer est appelé comme condition d'un `if`, où `set -e` est suspendu : chaque étape teste donc
 # son code. Une copie qui échoue est notée au journal, son .partiel retiré, et la suivante est
 # tentée ; `set -u`, lui, reste fatal : chaque variable est posée avant d'être lue. Ne rend que 0,
@@ -338,6 +340,10 @@ copier_journaux() {
     court="${id:0:12}"
     version="$(version_du_conteneur "$id")"
     fichier="$(date -u +%Y%m%dT%H%M%SZ)-$version-$court.log"
+    if ! [[ "$fichier" =~ $MOTIF_COPIE ]]; then
+      journal "journal du conteneur $court non copié : nom hors de la forme des copies"
+      continue
+    fi
     chemin="$dossier/$fichier"
     if [ -e "$chemin" ] || [ -L "$chemin" ] || [ -e "$chemin.partiel" ] || [ -L "$chemin.partiel" ]; then
       journal "journal du conteneur $court non copié : journaux/$fichier existe déjà (ou son .partiel)"

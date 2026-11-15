@@ -221,18 +221,29 @@ creer_double_transparent() {
 
 # echouer_si <commande> <condition> : un double de <commande>, en tête du PATH, qui rend 1 quand la
 # condition, du code bash qui lit les arguments de l'appel dans "$@", est vraie, et passe sinon la
-# main à la commande d'avant : le double déjà posé, ou la vraie. Il note ses appels dans $APPELS,
-# comme creer_double : un double déjà posé y note les siens une seconde fois.
+# main à la commande d'avant, $DOUBLES/<commande>-avant-echouer-si : le double déjà posé, qui y est
+# déplacé, ou un relais vers la vraie. Il note ses appels dans $APPELS, comme creer_double : un
+# double déjà posé y note les siens une seconde fois. Il refuse d'être posé deux fois sur la même
+# commande : le second déplacerait le premier sur la commande d'avant, qui s'appellerait sans fin.
 echouer_si() {
-  local nom="${1:?commande}" condition="${2:?condition}" suivante
+  local nom="${1:?commande}" condition="${2:?condition}" suivante reel
+  suivante="$DOUBLES/$nom-avant-echouer-si"
+  if [ -e "$suivante" ] || [ -L "$suivante" ]; then
+    echo "echouer_si : $nom a déjà son double d'échec ($suivante)" >&2
+    return 1
+  fi
   if [ -e "$DOUBLES/$nom" ]; then
-    suivante="$DOUBLES/$nom-avant-echouer-si"
     mv "$DOUBLES/$nom" "$suivante"
   else
-    suivante="$(PATH="${PATH//"$DOUBLES":/}" command -v "$nom")" || {
+    reel="$(PATH="${PATH//"$DOUBLES":/}" command -v "$nom")" || {
       echo "commande réelle introuvable : $nom" >&2
       return 1
     }
+    cat >"$suivante" <<EOF
+#!/usr/bin/env bash
+exec '$reel' "\$@"
+EOF
+    chmod +x "$suivante"
   fi
   creer_double "$nom" "if $condition; then
   echo '$nom : échec voulu par le test' >&2

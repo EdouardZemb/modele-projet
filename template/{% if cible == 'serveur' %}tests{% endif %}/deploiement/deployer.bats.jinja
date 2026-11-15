@@ -2769,6 +2769,54 @@ stock_a_nettoyer() {
   aucune_ligne ' logs --timestamps ' "$APPELS"
 }
 
+# Un lien pendant au nom du .partiel : `[ -e ]` ne le voit pas, et la redirection créerait ce qu'il
+# désigne, hors de journaux/. La copie est refusée, et rien n'est créé.
+@test "journal_partiel_en_lien_pendant_refuse" {
+  local id nom absent="$BATS_TEST_TMPDIR/absent"
+  horloge_figee
+  deployer prod "$ANCIENNE" 0.1.0
+  [ "$status" -eq 0 ]
+  poser_donnees prod
+  id="$(id_en_service)"
+  nom="$(jour_de_l_horloge)T120000Z-0.1.0-${id:0:12}.log"
+  mkdir -p "$ETAT/journaux"
+  ln -s "$absent" "$ETAT/journaux/$nom.partiel"
+  : >"$APPELS"
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"journal du conteneur ${id:0:12} non copié : journaux/$nom existe déjà (ou son .partiel)"* ]]
+  [ ! -e "$absent" ]
+  [ ! -L "$absent" ]
+  [ -L "$ETAT/journaux/$nom.partiel" ]
+  [ -z "$(copies_de_journal prod)" ]
+  aucune_ligne ' logs --timestamps ' "$APPELS"
+  [[ "$(cat "$ETAT/deploye")" == "$NOUVELLE 0.2.0 "* ]]
+}
+
+# Un lien pendant au nom de la copie : le renommage remplacerait le lien. La copie est refusée, sans
+# .partiel, et le lien reste.
+@test "journal_nom_en_lien_pendant_refuse" {
+  local id nom absent="$BATS_TEST_TMPDIR/absent"
+  horloge_figee
+  deployer prod "$ANCIENNE" 0.1.0
+  [ "$status" -eq 0 ]
+  poser_donnees prod
+  id="$(id_en_service)"
+  nom="$(jour_de_l_horloge)T120000Z-0.1.0-${id:0:12}.log"
+  mkdir -p "$ETAT/journaux"
+  ln -s "$absent" "$ETAT/journaux/$nom"
+  : >"$APPELS"
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"journal du conteneur ${id:0:12} non copié : journaux/$nom existe déjà (ou son .partiel)"* ]]
+  [ ! -e "$absent" ]
+  [ ! -L "$absent" ]
+  [ -L "$ETAT/journaux/$nom" ]
+  [ -z "$(find "$ETAT/journaux" -name '*.partiel')" ]
+  aucune_ligne ' logs --timestamps ' "$APPELS"
+  [[ "$(cat "$ETAT/deploye")" == "$NOUVELLE 0.2.0 "* ]]
+}
+
 # `docker logs` écrit une partie, puis échoue (un disque plein, un démon qui redémarre) : rien n'est
 # publié, le .partiel est retiré, et le déploiement réussit, son code inchangé.
 @test "journal_logs_en_echec" {
@@ -2899,4 +2947,35 @@ stock_a_nettoyer() {
   [ "$status" -eq 0 ]
   [[ "$output" =~ $motif ]]
   [ "$(cat "$ETAT/deploye")" = "$SUIVANTE 0.3.0 -" ]
+}
+
+# Une horloge en échec donnerait un nom sans horodatage, hors de la forme des copies, que le plafond
+# ne retirerait jamais : rien n'est écrit, et le déploiement réussit, son code inchangé. Seul échoue
+# le `date` de la copie, qui suit la liste des conteneurs : celui d'un instantané, qui la précède,
+# garde la vraie horloge.
+@test "journal_nom_hors_de_la_forme" {
+  local motif='[^ ]+ journal du conteneur [0-9a-f]{12} non copié : nom hors de la forme des copies'
+  deja_en_service "$ANCIENNE" 0.1.0
+  # shellcheck disable=SC2016  # la condition se développe quand le double tourne, pas ici
+  echouer_si date '[[ "$*" == "-u +%Y%m%dT%H%M%SZ" ]] && grep -q " ps --all --quiet app$" "$APPELS"'
+  deployer prod "$NOUVELLE" 0.2.0
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | grep -Ecx "$motif")" -eq 1 ]
+  [[ "$output" != *" copié : journaux/"* ]]
+  [ -d "$ETAT/journaux" ]
+  [ -z "$(find "$ETAT/journaux" -mindepth 1)" ]
+  [ "$(cat "$ETAT/deploye")" = "$NOUVELLE 0.2.0 -" ]
+  [ "$(signaux)" = "$(signal 'déployé 0.2.0') $HC" ]
+}
+
+# echouer_si refuse un second double sur la même commande : il déplacerait le premier sur la
+# commande d'avant, qui s'appellerait sans fin. Le premier reste en place, et passe la main au
+# double d'avant lui, ici l'horloge figée.
+@test "echouer_si_refuse_un_second_double" {
+  horloge_figee
+  echouer_si date false
+  run echouer_si date false
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"echouer_si : date a déjà son double d'échec ($DOUBLES/date-avant-echouer-si)"* ]]
+  [ "$(timeout 5 date -u +%Y%m%dT%H%M%SZ)" = "$(jour_de_l_horloge)T120000Z" ]
 }
