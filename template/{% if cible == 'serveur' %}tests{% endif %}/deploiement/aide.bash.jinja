@@ -268,6 +268,13 @@ en_service() {
   echo "$2 $3" >"$etat/deploye"
 }
 
+# id_en_service : l'identifiant du conteneur app du double de docker, son fichier app-id, dans le
+# dossier de $APPELS. À lire après un appel au double : un conteneur posé sans `up` (en_service)
+# ne reçoit le sien qu'à la première question.
+id_en_service() {
+  cat "$(dirname "$APPELS")/app-id"
+}
+
 # poser_donnees <env> : un fichier dans le dossier de données de cet environnement, comme celui d'une
 # application qui a déjà servi. Avec les sauvegardes, deployer.sh refuse un dossier vide quand une
 # version est déployée : un test qui part de en_service, sans déploiement réel, doit donc le poser.
@@ -350,11 +357,9 @@ aucune_ligne() {
   fi
 }
 
-{%- if sauvegardes %}
+# --- Horloges des copies de journal et des instantanés (déploiement, sauvegarde) ---------------
 
-# --- Horloge des instantanés (déploiement, sauvegarde) ----------------------------------------
-
-# jour_de_l_horloge : le jour des horodatages de horloge_qui_avance, la veille de la vraie date,
+# jour_de_l_horloge : le jour des horodatages des horloges du banc, la veille de la vraie date,
 # relevé une fois par test : un test qui passe minuit garde son jour. Un jour figé vieillit, et la
 # purge de 30 jours, qui lit la vraie date, finit par retirer les instantanés du test
 # (modele-projet#136).
@@ -363,6 +368,30 @@ jour_de_l_horloge() {
   [ -s "$fichier" ] || date -u -d yesterday +%Y%m%d >"$fichier"
   cat "$fichier"
 }
+
+# horloge_figee : l'horodatage d'une copie de journal, ou d'un instantané, tombe toujours à la même
+# seconde, <jour_de_l_horloge>T120000Z : deux copies du même conteneur, dans un même test, visent le
+# même nom. Les autres appels de `date` sont ceux de la vraie. Elle refuse un double de `date` déjà
+# posé : elle le prendrait pour la vraie `date`, et s'appellerait sans fin.
+horloge_figee() {
+  local reel jour
+  if [ -e "$DOUBLES/date" ]; then
+    echo "horloge_figee : un double de date est déjà posé ($DOUBLES/date)" >&2
+    return 1
+  fi
+  reel="$(command -v date)"
+  jour="$(jour_de_l_horloge)"
+  cat >"$DOUBLES/date" <<EOF
+#!/usr/bin/env bash
+if [ "\$*" = '-u +%Y%m%dT%H%M%SZ' ]; then
+  printf '%sT120000Z\n' '$jour'
+else
+  exec '$reel' "\$@"
+fi
+EOF
+  chmod +x "$DOUBLES/date"
+}
+{%- if sauvegardes %}
 
 # horloge_qui_avance : l'horodatage d'un instantané (à la seconde) avance à chaque appel. Des
 # déploiements ou des sauvegardes qui se suivent en moins d'une seconde, comme ici avec des doubles,

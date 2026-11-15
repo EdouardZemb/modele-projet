@@ -1782,7 +1782,7 @@ $(verification contenu "$NOUVELLE" "$vise" "$service")" ]
   [ "$(appels_de docker | grep -c ' exec -T app ')" -eq 1 ]
 {%- endif %}
   [ "$(nombre_de_lancements)" -eq 1 ]
-  appels_de docker | grep -Fx "docker container inspect --format $FORMAT_MONTAGES c0ffee"
+  appels_de docker | grep -Fx "docker container inspect --format $FORMAT_MONTAGES $(id_en_service)"
   # le conteneur monte le nouvel instantané ; /config, que le projet ne déclare pas, ne l'est pas
   [ "$(montage_de /contenu)" = "false $vise/contenu" ]
   [ -z "$(montage_de /config)" ]
@@ -1821,7 +1821,7 @@ $(verification contenu "$NOUVELLE" "$vise" "$service")" ]
   [ "$status" -eq 0 ]
   # après le `up`, les montages du conteneur de l'application : chaque instantané visé, en lecture
   # seule, sur son point de montage ; et, en prod, une santé qui dit montee
-  [ "$(ligne_de ' up -d ')" -lt "$(ligne_de " container inspect --format $FORMAT_MONTAGES c0ffee")" ]
+  [ "$(ligne_de ' up -d ')" -lt "$(ligne_de " container inspect --format $FORMAT_MONTAGES $(id_en_service)")" ]
   [ "$(montage_de /config)" = "false $service/config" ]
   [ "$(montage_de /contenu)" = "false $service/contenu" ]
   poser_donnees prod
