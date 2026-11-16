@@ -512,6 +512,60 @@
 >   - le déclencheur de la piste du commentaire jamais fermé n'est pas atteint : la lecture du
 >     texte de l'unité de clôture (#140) suit déjà sa première voie.
 
+> **Amendé le 2026-11-16, à la clôture du lot 18, de la même façon.** Le lot 18 n'était pas au §11 :
+> il vient de l'issue #133, ouverte le 13/11 sur le signal de `veille-emploi`, dont la ligne qui
+> aurait expliqué un défaut de la prod était partie avec un conteneur remplacé (PR #146 à #148). Il
+> ajoute une étape au §6.3, et un dossier à l'état de déploiement du §6.2, en cible `serveur`.
+> `exploitation.md`, semé, est amendé ; aucun fichier ne s'ajoute à ce que reçoit un projet (§4) :
+>
+> - **§6.2** : l'état de déploiement porte `journaux/`, en 700, les copies du journal du conteneur
+>   `app`, chacune en 600 ; les 5 plus récentes restent par environnement ;
+> - **§6.3** : avant chaque `up`, au déploiement d'un couple neuf, au retour arrière automatique
+>   et au `--retour`, `deployer.sh` copie par `docker logs --timestamps` le journal de chaque
+>   conteneur `app` du projet, en service ou arrêté, sous un nom qui porte l'heure UTC de la copie,
+>   la version du conteneur et son identifiant. La version se lit par un format qui n'extrait que
+>   la variable de version, jamais l'environnement du conteneur, qui porte des secrets. Une copie
+>   qui échoue est notée au journal du déploiement et n'arrête rien. La copie est faite par le
+>   `deployer.sh` qui remplace le conteneur : sous la sonde, celui de la version visée ; pour
+>   `--retour`, celui du clone en service ; au retour arrière automatique, celui du passage qui
+>   échoue. Un retour par étiquette vers un commit d'avant la mise à jour du projet en `v0.13.0` ne
+>   copie donc pas, ni un `--retour` lancé d'un clone d'avant elle, et le `down` de « Tout arrêter »
+>   retire le conteneur sans copie ;
+> - **§10** : l'épreuve des données (§10.3) prouve, sur le Docker du job, que la copie lit un
+>   journal déjà tourné de `json-file` et un conteneur arrêté : le moteur 29.4.2 du runner, en
+>   magasin classique, et non le 29.5.3 de la cible. Un test de ce dépôt refuse, dans `template/`,
+>   une commande qui filtre le journal d'un conteneur sans `2>&1` ; ses limites connues ne sont pas
+>   closes, dont une commande construite à l'exécution, qu'aucune lecture du texte ne voit ;
+> - **aucun écart à la spec du lot** : ses trois PR déclarent « Aucun. ». Deux passages de la spec
+>   ont été tranchés sans écart déclaré : « un déploiement en échec en fait deux », qu'elle écrit au
+>   §3.1 et reprend au §5, et qui contredisait le premier déploiement en échec de ses §3.1, §3.2 et
+>   §8, cède au comportement (LE-93) ; « toute commande `docker logs` », au §5, se lit comme une
+>   recherche dans le texte, quand la relecture des corrections voulait l'écart déclaré (LE-92) ;
+> - **le registre** gagne LE-91 à LE-100 ; LE-79 et LE-82 se closent ;
+> - **huit choix du lot**, que ses PR n'ont pas comptés comme écarts, recueillis dans la section
+>   « À relire » de la PR de clôture, et acceptés par Edouard le 16/11 (« ok pour les défauts ») :
+>   - « toute commande `docker logs` », au §5, se lit comme une recherche dans le texte, sans
+>     écart déclaré (LE-92) ;
+>   - « un déploiement en échec en fait deux » cède au comportement, sans écart déclaré (LE-93) ;
+>   - la règle de `2>&1` lit la ligne par segments (les citations, les `$(…)`, Jinja masqué),
+>     selon des règles qu'aucune spec n'a pesées : une occurrence citée est l'argument d'une autre
+>     commande, sauf derrière `ssh` ou un shell par `-c`, et `|&` vaut `2>&1` (#148, LE-99) ;
+>   - `exploitation.md` dit aussi la deuxième copie de l'ancien conteneur quand le `up` ne l'a
+>     pas remplacé (aucune quand les deux tombent dans la même seconde : le nom est pris), et
+>     qu'un premier déploiement en échec ne copie pas son propre conteneur (#148) ;
+>   - le texte que les messages proposent à `ancrage` et à `veille-emploi` pour leur
+>     `exploitation.md` ajoute trois phrases à celui du modèle : un déploiement arrêté avant son
+>     `up` ne copie rien (une piste) ; seul le `deployer.sh` d'un commit qui porte la `v0.13.0`
+>     copie ; un retour par une étiquette posée sur un commit qui ne la porte pas ne copie donc
+>     rien (LE-91). Les sessions des projets n'ont pas accès au serveur : la constatation des
+>     copies est un geste 👤 d'Edouard, en lecture seule, qu'elles notent ;
+>   - LE-79 et LE-82 se closent, LE-89 reste ouverte (LE-100), LE-96 va sous « mécanisme décrit
+>     sans relire son code », et B-5, un message du double qu'aucun test ne lit, n'est pas porté ;
+>   - la revue finale a tourné par des agents, sans workflow ; trois de ses constats restent tels
+>     quels, dont la fenêtre entre le contrôle du nom d'une copie et son ouverture, une piste ;
+>   - la relecture des corrections a pris quatre temps, et la session a écrit la troisième ronde,
+>     trois phrases de docstring, sans code.
+
 Ce cadrage est la partie publique de la spec de conception du modèle, issue d'une séance de questions avec Edouard : 12 questions, puis 5 parties de design validées une à une. La partie qui nomme le serveur est privée et n'est pas reproduite ici.
 
 ---
