@@ -551,8 +551,8 @@
 >     selon des règles qu'aucune spec n'a pesées : une occurrence citée est l'argument d'une autre
 >     commande, sauf derrière `ssh` ou un shell par `-c`, et `|&` vaut `2>&1` (#148, LE-99) ;
 >   - `exploitation.md` dit aussi la deuxième copie de l'ancien conteneur quand le `up` ne l'a
->     pas remplacé, et qu'un premier déploiement en échec ne copie pas son propre conteneur
->     (#148) ;
+>     pas remplacé (aucune quand les deux tombent dans la même seconde : le nom est pris), et
+>     qu'un premier déploiement en échec ne copie pas son propre conteneur (#148) ;
 >   - le texte que les messages proposent à `ancrage` et à `veille-emploi` pour leur
 >     `exploitation.md` ajoute trois phrases à celui du modèle : un déploiement arrêté avant son
 >     `up` ne copie rien (une piste) ; seul le `deployer.sh` d'un commit qui porte la `v0.13.0`
