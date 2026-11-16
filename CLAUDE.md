@@ -530,7 +530,8 @@ fusionnée.
 Lot 18 fait le 16/11/2026 : le journal d'une application survit à son déploiement (#133),
 étiqueté `v0.13.0`. Il est né du signal de `veille-emploi`, qui a constaté le 13/11 que la ligne
 qui aurait expliqué un défaut de sa prod était partie avec un conteneur remplacé (PR #146 à #148).
-Aucune de ses PR ne déclare d'écart à la spec.
+Aucune de ses PR ne déclare d'écart à la spec. Edouard a accepté le 16/11 les huit choix de la
+section « À relire » de sa PR de clôture, dont deux lectures de la spec (LE-92, LE-93).
 - **La copie du journal** (#146). En cible `serveur`, `lancer`, seul geste de `deployer.sh` qui
   remplace le conteneur, copie d'abord le journal de chaque conteneur `app` du projet, en service
   ou arrêté (`dc ps --all --quiet app`) : au déploiement d'un couple neuf, au retour arrière

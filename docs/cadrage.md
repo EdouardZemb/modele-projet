@@ -541,7 +541,30 @@
 >   §3.1 et reprend au §5, et qui contredisait le premier déploiement en échec de ses §3.1, §3.2 et
 >   §8, cède au comportement (LE-93) ; « toute commande `docker logs` », au §5, se lit comme une
 >   recherche dans le texte, quand la relecture des corrections voulait l'écart déclaré (LE-92) ;
-> - **le registre** gagne LE-91 à LE-100 ; LE-79 et LE-82 se closent.
+> - **le registre** gagne LE-91 à LE-100 ; LE-79 et LE-82 se closent ;
+> - **huit choix du lot**, que ses PR n'ont pas comptés comme écarts, recueillis dans la section
+>   « À relire » de la PR de clôture, et acceptés par Edouard le 16/11 (« ok pour les défauts ») :
+>   - « toute commande `docker logs` », au §5, se lit comme une recherche dans le texte, sans
+>     écart déclaré (LE-92) ;
+>   - « un déploiement en échec en fait deux » cède au comportement, sans écart déclaré (LE-93) ;
+>   - la règle de `2>&1` lit la ligne par segments (les citations, les `$(…)`, Jinja masqué),
+>     selon des règles qu'aucune spec n'a pesées : une occurrence citée est l'argument d'une autre
+>     commande, sauf derrière `ssh` ou un shell par `-c`, et `|&` vaut `2>&1` (#148, LE-99) ;
+>   - `exploitation.md` dit aussi la deuxième copie de l'ancien conteneur quand le `up` ne l'a
+>     pas remplacé, et qu'un premier déploiement en échec ne copie pas son propre conteneur
+>     (#148) ;
+>   - le texte que les messages proposent à `ancrage` et à `veille-emploi` pour leur
+>     `exploitation.md` ajoute trois phrases à celui du modèle : un déploiement arrêté avant son
+>     `up` ne copie rien (une piste) ; seul le `deployer.sh` d'un commit qui porte la `v0.13.0`
+>     copie ; un retour par une étiquette posée sur un commit qui ne la porte pas ne copie donc
+>     rien (LE-91). Les sessions des projets n'ont pas accès au serveur : la constatation des
+>     copies est un geste 👤 d'Edouard, en lecture seule, qu'elles notent ;
+>   - LE-79 et LE-82 se closent, LE-89 reste ouverte (LE-100), LE-96 va sous « mécanisme décrit
+>     sans relire son code », et B-5, un message du double qu'aucun test ne lit, n'est pas porté ;
+>   - la revue finale a tourné par des agents, sans workflow ; trois de ses constats restent tels
+>     quels, dont la fenêtre entre le contrôle du nom d'une copie et son ouverture, une piste ;
+>   - la relecture des corrections a pris quatre temps, et la session a écrit la troisième ronde,
+>     trois phrases de docstring, sans code.
 
 Ce cadrage est la partie publique de la spec de conception du modèle, issue d'une séance de questions avec Edouard : 12 questions, puis 5 parties de design validées une à une. La partie qui nomme le serveur est privée et n'est pas reproduite ici.
 
