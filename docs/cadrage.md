@@ -526,19 +526,22 @@
 >   la version du conteneur et son identifiant. La version se lit par un format qui n'extrait que
 >   la variable de version, jamais l'environnement du conteneur, qui porte des secrets. Une copie
 >   qui échoue est notée au journal du déploiement et n'arrête rien. La copie est faite par le
->   `deployer.sh` de la version qui arrive : un retour par étiquette vers une version d'avant la
->   `v0.13.0` ne copie pas, et le `down` de « Tout arrêter » retire le conteneur sans copie ;
+>   `deployer.sh` qui remplace le conteneur : sous la sonde, celui de la version visée ; pour
+>   `--retour`, celui du clone en service ; au retour arrière automatique, celui du passage qui
+>   échoue. Un retour par étiquette vers un commit d'avant la mise à jour du projet en `v0.13.0` ne
+>   copie donc pas, ni un `--retour` lancé d'un clone d'avant elle, et le `down` de « Tout arrêter »
+>   retire le conteneur sans copie ;
 > - **§10** : l'épreuve des données (§10.3) prouve, sur le Docker du job, que la copie lit un
 >   journal déjà tourné de `json-file` et un conteneur arrêté : le moteur 29.4.2 du runner, en
 >   magasin classique, et non le 29.5.3 de la cible. Un test de ce dépôt refuse, dans `template/`,
 >   une commande qui filtre le journal d'un conteneur sans `2>&1` ; ses limites connues ne sont pas
 >   closes, dont une commande construite à l'exécution, qu'aucune lecture du texte ne voit ;
-> - **aucun écart à la spec du lot** : ses trois PR déclarent « Aucun. ». Deux passages de son §5
->   ont été tranchés sans écart déclaré : « un déploiement en échec en fait deux », qui contredisait
->   ses §3.1, §3.2 et §8, cède au comportement (LE-93) ; « toute commande `docker logs` » se lit
->   comme une recherche dans le texte, quand la relecture des corrections voulait l'écart déclaré
->   (LE-92) ;
-> - **le registre** gagne LE-91 à LE-99 ; LE-79, LE-82 et LE-89 se closent.
+> - **aucun écart à la spec du lot** : ses trois PR déclarent « Aucun. ». Deux passages de la spec
+>   ont été tranchés sans écart déclaré : « un déploiement en échec en fait deux », qu'elle écrit au
+>   §3.1 et reprend au §5, et qui contredisait le premier déploiement en échec de ses §3.1, §3.2 et
+>   §8, cède au comportement (LE-93) ; « toute commande `docker logs` », au §5, se lit comme une
+>   recherche dans le texte, quand la relecture des corrections voulait l'écart déclaré (LE-92) ;
+> - **le registre** gagne LE-91 à LE-100 ; LE-79 et LE-82 se closent.
 
 Ce cadrage est la partie publique de la spec de conception du modèle, issue d'une séance de questions avec Edouard : 12 questions, puis 5 parties de design validées une à une. La partie qui nomme le serveur est privée et n'est pas reproduite ici.
 
