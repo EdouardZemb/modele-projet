@@ -303,7 +303,9 @@ contenu_compose_env() {
     "{{ prefixe }}URL_PUBLIQUE=$url"
 {%- endif %}
   if [ "$nom_env" = staging ]; then
-    printf '{{ prefixe }}RELAIS=%s\n' "$(empreinte_du_relais)"
+    local empreinte
+    empreinte="$(empreinte_du_relais)" || return 1
+    printf '{{ prefixe }}RELAIS=%s\n' "$empreinte"
   fi
 }
 

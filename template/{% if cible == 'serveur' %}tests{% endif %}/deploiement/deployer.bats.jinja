@@ -2315,16 +2315,27 @@ staging_du_test() {
 # Le banc tourne sous testeur, propriétaire du script : `test -r` y est vrai pour un fichier en 600,
 # et seul le mode dit qu'il n'est pas lisible par tous, donc pas par l'utilisateur du conteneur. En
 # 004, lisible par tous mais pas par son propriétaire, c'est la lecture de l'empreinte qui échoue.
+# Un lien vers un fichier en 600 se lit lrwxrwxrwx : le mode lu est celui de sa cible, que Docker
+# monterait.
 @test "relais_non_lisible_par_tous_refuse" {
-  local mode
+  local mode script="$CLONE/scripts/modele/marque.py"
   staging_du_test
   en_service staging "$ANCIENNE" main
   poser_donnees staging
   cp "$ETAT/compose.env" "$BATS_TEST_TMPDIR/compose.env.avant"
   cp "$ETAT/deploye" "$BATS_TEST_TMPDIR/deploye.avant"
-  for mode in 600 640 004; do
+  cp "$script" "$BATS_TEST_TMPDIR/marque-origine.py"
+  for mode in 600 640 004 lien; do
     echo "cas : $mode"
-    chmod "$mode" "$CLONE/scripts/modele/marque.py"
+    if [ "$mode" = lien ]; then
+      cp "$BATS_TEST_TMPDIR/marque-origine.py" "$BATS_TEST_TMPDIR/marque-600.py"
+      chmod 600 "$BATS_TEST_TMPDIR/marque-600.py"
+      rm -f "$script"
+      ln -s "$BATS_TEST_TMPDIR/marque-600.py" "$script"
+      [ "$(stat -c %A "$script")" = lrwxrwxrwx ]
+    else
+      chmod "$mode" "$script"
+    fi
     : >"$APPELS"
     deployer staging "$NOUVELLE" main
     [ "$status" -eq 1 ]
@@ -2335,13 +2346,16 @@ staging_du_test() {
     [ ! -e "$ETAT/echec" ]
   done
   # lisible par tous, le même script se déploie
-  chmod 644 "$CLONE/scripts/modele/marque.py"
+  rm -f "$script"
+  cp "$BATS_TEST_TMPDIR/marque-origine.py" "$script"
+  chmod 644 "$script"
   deployer staging "$NOUVELLE" main
   [ "$status" -eq 0 ]
   [ "$(cat "$ETAT/deploye")" = "$NOUVELLE main -" ]
 }
 
-# --retour réécrit compose.env, la ligne du relais comprise.
+# --retour réécrit compose.env, la ligne du relais comprise : il ne la tient pas de
+# compose.env.precedent, dont le test la retire avant le retour.
 @test "relais_garde_au_retour" {
 {%- if sauvegardes %}
   horloge_qui_avance
@@ -2352,6 +2366,10 @@ staging_du_test() {
   poser_donnees staging
   deployer staging "$NOUVELLE" main
   [ "$status" -eq 0 ]
+  grep -q '^{{ prefixe }}RELAIS=' "$ETAT/compose.env.precedent"
+  grep -v '^{{ prefixe }}RELAIS=' "$ETAT/compose.env.precedent" >"$BATS_TEST_TMPDIR/precedent-sans-relais.env"
+  cp "$BATS_TEST_TMPDIR/precedent-sans-relais.env" "$ETAT/compose.env.precedent"
+  aucune_ligne 'RELAIS' "$ETAT/compose.env.precedent"
   : >"$APPELS"
   deployer staging --retour
   [ "$status" -eq 0 ]

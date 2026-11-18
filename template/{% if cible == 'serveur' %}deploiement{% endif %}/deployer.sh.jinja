@@ -929,12 +929,14 @@ main() {
   # empreinte va dans compose.env (étape 3), et `dc` n'ajoute compose.marque.yml que sur cette
   # ligne. Le conteneur le lit sous l'utilisateur 1000:1000 : le contrôle du mode, lisible par tous,
   # sert à tout compte qui déploie autre que celui-là. Sur la cible, ce compte a l'uid 1000, celui
-  # du conteneur, mais pas le runner de la CI (uid 1001) ; et `test -r` est vrai pour le
-  # propriétaire d'un fichier en 600 : seul le mode le voit. Le script se lit par l'entrée
-  # standard : `sha256sum` préfixe sa ligne par « \ » quand le nom porte « \ » ou un saut de ligne.
+  # du conteneur ; le runner de la CI, lui, a l'uid 1001. Et `test -r` est vrai pour le
+  # propriétaire d'un fichier en 600 : seul le mode le voit. Le mode se lit sur la cible d'un lien
+  # (`stat -L`), que Docker suit au montage : sans -L, un lien se lirait lrwxrwxrwx. Le script se
+  # lit par l'entrée standard : `sha256sum` préfixe sa ligne par « \ » quand le nom porte « \ » ou
+  # un saut de ligne.
   if [ "$NOM_ENV" = staging ]; then
     relais="${{ prefixe }}CLONE/scripts/modele/marque.py"
-    if [ -f "$relais" ] && mode_relais="$(stat -c %A -- "$relais")" && [ "${mode_relais:7:1}" = r ] \
+    if [ -f "$relais" ] && mode_relais="$(stat -L -c %A -- "$relais")" && [ "${mode_relais:7:1}" = r ] \
       && empreinte_relais="$(sha256sum <"$relais")"; then
       EMPREINTE_RELAIS="${empreinte_relais:0:64}"
     else
