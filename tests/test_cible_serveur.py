@@ -855,6 +855,7 @@ def test_secrets_exiges_rendus(rendre):
 # données d'un couple peuvent bloquer un déploiement, avec ou sans sauvegardes (lot 12).
 SECTIONS_EXPLOITATION = [
     "Ce qui tourne",
+    "La marque du staging",
     "La mise en service",
     "Mettre en ligne",
     "Revenir en arrière",
@@ -926,6 +927,58 @@ def test_exploitation_dit_les_copies_du_journal(rendre, sauvegardes):
     ):
         assert fragment in plat, fragment
     assert "sans copie" in a_plat(section(texte, "Tout arrêter"))
+
+
+def test_methode_dit_la_marque_du_staging():
+    texte = (RACINE / "template/docs/modele/methode.md").read_text(encoding="utf-8")
+    plat = a_plat(texte)
+    for fragment in (
+        "**La marque du staging.**",
+        "scripts/modele/marque.py",
+        "deploiement/compose.marque.yml",
+        "Un projet ne fournit rien",
+        "de 1024 px au plus",
+        "/.marque/",
+        "la santé du staging passe par lui",
+    ):
+        assert fragment in plat, fragment
+    # Le paragraphe neuf tient en 100 colonnes (d'autres lignes de la méthode, tableaux compris, non).
+    paragraphe = texte.split("**La marque du staging.**", 1)[1].split(chr(10) * 2, 1)[0]
+    assert [l for l in paragraphe.splitlines() if len(l) > 100] == []
+
+
+@pytest.mark.parametrize("sauvegardes", [True, False])
+def test_exploitation_dit_la_marque_du_staging(rendre, sauvegardes):
+    texte = lire(rendre(**{**REPONSES_SERVEUR, "sauvegardes": sauvegardes}), "docs/exploitation.md")
+    marque = a_plat(section(texte, "La marque du staging"))
+    for fragment in (
+        "La prod n'en porte jamais aucun",
+        "ESSAI_RELAIS",
+        "docker logs essai-staging-marque-1",
+        "effacer les données du site",
+        "la retirer, puis la réinstaller",
+        "répond 501",
+        "reçoit 400 en staging",
+        "n'est éprouvé par aucun test",
+    ):
+        assert fragment in marque, fragment
+    tableau = a_plat(section(texte, "Ce qui tourne"))
+    assert "| Marque | aucune | le relais `essai-staging-marque-1` (« La marque du staging ») |" in (
+        tableau
+    )
+    assert "staging/compose.env down --remove-orphans" in section(texte, "Tout arrêter")
+    # Le geste de l'environnement bloqué n'existe que dans le rendu qui a des sauvegardes.
+    debloquer = a_plat(section(texte, "Débloquer un déploiement"))
+    assert ("quand `compose.env` porte `ESSAI_RELAIS`, en staging" in debloquer) is sauvegardes
+    assert ("compose.marque.yml" in debloquer) is sauvegardes
+
+
+def test_adr_disent_le_relais_du_staging(rendre):
+    rendu = rendre(**REPONSES_SERVEUR)
+    for adr in ("M-0003-contrat-de-l-image.md", "M-0004-chaine-de-livraison.md"):
+        plat = a_plat(lire(rendu, f"docs/modele/decisions/{adr}"))
+        assert "en staging, le relais" in plat, adr
+        assert "compose.marque.yml" in plat, adr
 
 
 @pytest.mark.parametrize("sauvegardes", [True, False])

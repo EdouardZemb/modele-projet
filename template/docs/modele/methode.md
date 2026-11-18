@@ -448,6 +448,17 @@ toléré. Dans un dépôt de données, la porte dit que gitleaks seul relit l'hi
 Dans les deux modes, un projet qui ne déclare ni `VERIFIER_CONFIG` ni `VERIFIER_CONTENU` ne monte
 rien et se déploie comme avant (M-0003, § 6).
 
+**La marque du staging.** En cible `serveur`, le staging se reconnaît d'un coup d'œil, et la prod
+n'en porte jamais rien. Un relais du modèle, `scripts/modele/marque.py`, se place entre le tunnel
+et l'application, en staging seulement (`deploiement/compose.marque.yml`). Il pose trois marques :
+un bandeau orange « TEST » en haut de chaque page, fenêtres modales comprises ; « test » devant le
+titre de l'onglet et le nom du manifeste ; des icônes recolorées en orange. Un projet ne fournit
+rien : ses icônes sont lues dans son manifeste et dans les liens d'icône de sa page, recolorées si
+ce sont des PNG 8 bits non entrelacés de 1024 px au plus ou des SVG, et remplacées sinon par une
+icône « test » générique. Le relais répond lui-même sous `/.marque/`, un chemin que l'application
+ne reçoit jamais en staging, et la santé du staging passe par lui. Ses limites sont dans
+`docs/exploitation.md`, « La marque du staging ».
+
 Le secret `MOTIFS_INTERDITS` (la liste privée) est posé **deux fois** par dépôt : comme secret
 Actions et comme secret Dependabot (`gh secret set MOTIFS_INTERDITS --app dependabot`). Les
 exécutions lancées par Dependabot ne reçoivent pas les secrets Actions : sans le second, la

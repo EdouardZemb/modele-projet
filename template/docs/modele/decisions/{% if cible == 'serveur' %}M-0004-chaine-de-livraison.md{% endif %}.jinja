@@ -6,6 +6,9 @@
 - **Amendé** le 2026-10-29, avec le lot 12 : l'état déployé est un couple, une image et un commit
   de données ; la chaîne lit l'instance dans un second dépôt, ou, pour un projet d'avant M-0006,
   dans le sien, et la prod suit aussi une série d'étiquettes de données (§ 8)
+- **Amendé** le 2026-11-18, avec le lot 19 : en staging, le relais de la marque
+  (`compose.marque.yml`) tient l'alias du tunnel et le port de la boucle locale, et `app` ne les
+  porte qu'en prod (§ 5)
 - **Contexte amont** : la chaîne de livraison d'`ancrage` (son ADR-0006), généralisée par le
   modèle ; M-0002 (les étiquettes sont à Edouard) ; M-0003 (le contrat de l'image) ; M-0006 (le
   code et les données)
@@ -116,7 +119,7 @@ ramener l'autre moitié du couple quitté (M-0006, § 6).
 
 Un seul tunnel Cloudflare pour tout le parc, décrit dans le dépôt `serveur` ; le projet n'a pas de
 jeton de tunnel. Chaque environnement a son réseau Docker, `tunnel-<nom>-<env>`, déclaré `external`
-dans `compose.yml` ; l'app y porte l'alias `<nom>-<env>`, et les routes de Cloudflare visent
+dans `compose.yml` ; l'app y porte l'alias `<nom>-<env>` en prod ; en staging, le relais de la marque (`compose.marque.yml`, lot 19) le porte à sa place, et les routes de Cloudflare visent
 `http://<nom>-prod:<port_app>` et `http://<nom>-staging:<port_app>`. Un réseau par environnement, et
 non le réseau de l'hôte : le tunnel n'atteint que les apps, jamais les autres ports locaux de la
 machine.
