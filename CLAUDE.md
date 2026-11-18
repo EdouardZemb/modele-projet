@@ -607,6 +607,38 @@ section « À relire » de sa PR de clôture, dont deux lectures de la spec (LE-
   la première étiquette qui porte la mise à jour, un retour arrière par étiquette vers un commit
   d'avant elle lance encore l'ancien `deployer.sh`, qui ne copie pas (LE-91).
 
+Versions des projets au 17/11/2026, relevées par l'API : `ancrage` et `veille-emploi` sont en
+`v0.13.0` depuis le 17/11 (ancrage#54, veille-emploi#32). Chaque mise à jour ne change que
+`.copier-answers.yml`, les quatre fichiers gérés du lot et `docs/exploitation.md`, qui reçoit le
+texte proposé par son message ; la CI de chaque fusion est verte. Les cinq autres projets restent en
+`v0.12.0`, que la `v0.13.0`, sans effet hors de la cible `serveur`, ne fait pas monter. Les deux
+messages sont partis le 17/11, chacun après un relevé neuf de son projet : la branche principale
+d'`ancrage` avait avancé depuis leur préparation, et son message a été repris, ses lieux relus et sa
+simulation refaite sur l'étiquette. Les copies se constatent par le geste 👤 d'Edouard, en lecture
+seule, la session du projet notant ce qu'il rapporte (S-6).
+- **`ancrage`**, en staging le 17/11, après sa fusion : une copie en 600, dans un dossier en 700, la
+  ligne « journal du conteneur … copié » au journal de la sonde, et un premier horodatage antérieur
+  au déploiement. En prod le même jour, après son étiquette `v0.18.0` puis une étiquette de
+  données : deux déploiements, deux copies. La première est celle de l'ancien conteneur, en
+  `0.17.0`, faite par le nouveau `deployer.sh` ; la seconde, celle du conteneur qu'un commit de
+  données seul a remplacé. Le dossier des copies n'existait pas avant le premier.
+- **`veille-emploi`**, en staging, relevé le 18/11 par les commandes écrites avec le client `ssh`
+  de Windows : deux copies du 17/11, en 600, dans un dossier en 700, chacune au nom attendu et avec
+  sa ligne au journal de la sonde. La première est celle du conteneur qui servait avant la mise à
+  jour, faite par le nouveau `deployer.sh` au déploiement de sa fusion ; la seconde, celle du
+  conteneur que ce déploiement a démarré, remplacé par la fusion suivante (veille-emploi#33) : son
+  premier horodatage suit de 3 s la première copie. En prod, relevé le même jour, après son
+  étiquette `v0.4.0`, la première qui porte sa mise à jour : une copie, en 600, dans un dossier en
+  700, avec sa ligne au journal de la sonde. C'est celle du conteneur en `0.3.0`, dont elle porte
+  la version dans son nom, et non celle qu'on déploie ; son premier horodatage est celui du
+  déploiement de la `v0.3.0`, quatre jours plus tôt : elle couvre toute la vie du conteneur.
+- **Non constatés sur la cible** : la limite des 5 copies, un retour arrière, un conteneur arrêté
+  (S-5), et le contenu des copies, que personne n'a lu.
+- **Le geste lui-même** : les messages disaient de passer les commandes à `ssh` sous Git Bash comme
+  sous PowerShell 5.1. Lancée par `!`, une commande passe par le `ssh` de Git Bash, qui ne voit pas
+  l'agent de Windows : la première d'Edouard a été refusée. Le client de Windows, nommé en entier,
+  passe ; un complément l'a dit à `veille-emploi` avant sa constatation (LE-101).
+
 Prochain, au choix d'Edouard :
 - le second temps du travail sur la documentation, un lot « documentation » avec sa spec : l'« État »
   réduit du `CLAUDE.md` semé et le journal des versions du modèle ; dans le README, le refus d'une
@@ -644,11 +676,8 @@ Prochain, au choix d'Edouard :
   LE-57, LE-84 et LE-87 (un cas limite inconnu : la grammaire du shell, lue par le texte) ; LE-97
   et LE-100, avec LE-88 et LE-89 (un contrôle qui passe sans voir ce qu'il doit voir : des gardes
   qu'aucun test ne tenait, une horloge en échec lue comme un horodatage, deux mécanismes revenus
-  d'un lot à l'autre) ;
-- en attente, sans date : les premières copies de prod d'`ancrage` et de `veille-emploi`, après la
-  prochaine étiquette de chacun qui porte sa mise à jour en `v0.13.0`, constatées par le geste 👤
-  d'Edouard que donne son message, la session du projet notant ce qu'il rapporte (S-6) ; la PR
-  `docs` de la tâche 6 dit le staging constaté et la prod en attente.
+  d'un lot à l'autre) ; LE-101, avec LE-57, LE-84, LE-87 et LE-99 (un comportement d'outil supposé
+  dans un geste qu'un message donne à lancer : le `ssh` de Git Bash, sans l'agent de Windows).
 
 Le cadrage est dans `docs/cadrage.md` ; ce que les lots ont appris, dans `docs/registre.md`.
 
