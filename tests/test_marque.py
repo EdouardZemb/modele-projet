@@ -1561,6 +1561,10 @@ MAL_FORMES = (
     *("X-A: 1\r", "\rX-B: 2", "\r"),
     # un CR nu qu'il garde dans la valeur, un en-tête qu'il voit injecté
     *("X-A: 1\r 2", "X-A: 1\rX-B: 2"),
+    # des replis, qu'il garderait dans la valeur, dont un qui cache `Transfer-Encoding`
+    *("X-A: 1\r\n suite", "X-A: 1\n\tsuite", "X-A: 1\r\n Transfer-Encoding: chunked"),
+    # un octet nul dans un nom, puis dans une valeur
+    *("X\x00A: 1", "X-A: 1\x002"),
 )
 
 
@@ -1577,7 +1581,10 @@ def test_entetes_mal_formes_400(app, relais, capsys):
             assert c.fermee()
     assert app.requetes == []
     assert capsys.readouterr().err == ""
-    regle = "un CR ailleurs qu'avant le LF final d'une ligne d'en-tête est refusé"
+    regle = (
+        "une ligne d'en-tête porte un CR ailleurs qu'avant son LF final, porte un octet nul, ou"
+        " commence par une espace ou une tabulation (un repli)"
+    )
     assert regle in " ".join(marque.__doc__.split())
 
 
@@ -1585,15 +1592,15 @@ def test_entetes_bien_formes_admis(app, relais):
     with Connexion(relais.port) as c:
         c.envoyer(octets_requete("POST", "/sain", "X-A: 1", "Cookie: s=1; t=2", corps=b"abc"))
         assert c.reponse().statut == 200
-        # une valeur repliée : chaque CR précède le LF final de sa ligne
-        c.envoyer(octets_requete("POST", "/repliee", "X-A: 1", "  suite", corps=b"abc"))
+        # une espace et des tabulations au milieu d'une ligne, jamais en tête
+        c.envoyer(octets_requete("POST", "/milieu", "X-A:\t1 2\t3", corps=b"abc"))
         assert c.reponse().statut == 200
         c.envoyer(b"POST /lf HTTP/1.1\nHost: app.exemple\nX-A: 1\nContent-Length: 3\n\nabc")
         assert c.reponse().statut == 200
     recues = [(r.chemin, r.corps, r.tous("X-A")) for r in app.requetes]
     assert recues == [
         ("/sain", b"abc", ["1"]),
-        ("/repliee", b"abc", ["1\r\n  suite"]),
+        ("/milieu", b"abc", ["1 2\t3"]),
         ("/lf", b"abc", ["1"]),
     ]
 
