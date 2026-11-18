@@ -27,8 +27,16 @@ Leurs limites connues, que cette liste ne ferme pas :
   contient une de ces formes n'est pas distingué du reste de la page ;
 - un attribut `href` d'icône est lu entre guillemets ou sans, et ses entités HTML sont lues avant
   la résolution ;
-- `http.server` réécrit une cible qui commence par `//` (il en retire les barres de tête) avant que
-  le relais ne la lise : ce que l'application reçoit peut différer de ce que le client a écrit ;
+- `http.server` réécrit une cible qui commence par `//` avant que le relais ne la lise (`//x` devient
+  `/x`) : ce que l'application reçoit peut différer de ce que le client a écrit ;
+- un `href` d'icône qui porte une espace ou un caractère non ASCII (`/icône.png`) reçoit l'icône
+  générique : `chemin_admis` n'admet que les caractères imprimables ASCII, sans espace ;
+- WebSocket : le relais répond 501 ;
+- le retour automatique qui suit le premier déploiement du staging par un `deployer.sh` de la
+  `v0.14.0` recopie un `compose.env.precedent` sans `<PREFIXE>RELAIS` : il sert le staging sans
+  marque, jusqu'au déploiement suivant ;
+- le rendu du bandeau dans un navigateur n'est éprouvé par aucun test : c'est la constatation sur
+  l'appareil qui le prouve ;
 - un PNG de profondeur 16 ou de palette de 1 à 4 bits, entrelacé, un ICO ou un WebP reçoit l'icône
   générique ; les blocs annexes d'un PNG sont retirés (gamma, profil de couleur, texte).
 """
@@ -275,7 +283,7 @@ def _recolorer_png(donnees: bytes) -> bytes | None:
                 alpha = b"\xff" * nombre
     else:
         r, v, b = bytes(pixels[0::canaux]), bytes(pixels[1::canaux]), bytes(pixels[2::canaux])
-        lum = bytes((54 * x + 183 * y + 19 * z) >> 8 for x, y, z in zip(r, v, b))
+        lum = bytes(map(luminance, r, v, b))
         alpha = bytes(pixels[3::4]) if type_couleur == 6 else None
         if type_couleur == 2 and len(trns) >= 6:
             if trns[0] == 0 and trns[2] == 0 and trns[4] == 0:
@@ -404,7 +412,7 @@ def lien_icone(cible: str, base: str, hote: str | None) -> str:
 
 _LINK = re.compile(rb"""<link(?=[\s/>])(?:[^>"']|"[^"]*"|'[^']*')*>""")
 _ATTRIBUT_LINK = re.compile(
-    rb"""([^\s"'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?"""
+    rb"""([^\s"'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'<>]+)))?"""
 )
 _TITRE = re.compile(rb"<title(?=[\s/>])[^>]*>")
 _FAVICON = b'<link rel="icon" href="/.marque/icone?de=/favicon.ico">'

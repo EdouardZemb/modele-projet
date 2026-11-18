@@ -9,6 +9,8 @@ du module : un mutant de la constante doit faire échouer le test.
 import base64
 import importlib.machinery
 import importlib.util
+import json
+import random
 import struct
 import tracemalloc
 import zlib
@@ -69,6 +71,7 @@ def png(
     filtres=None,
     palette=None,
     trns=None,
+    taille_idat=None,
 ):
     """Un PNG : `pixels` porte les échantillons de toutes les lignes, filtrés ligne à ligne."""
     long_ligne = len(pixels) // hauteur
@@ -85,7 +88,11 @@ def png(
         sortie += bloc(b"PLTE", palette)
     if trns is not None:
         sortie += bloc(b"tRNS", trns)
-    return sortie + bloc(b"IDAT", zlib.compress(bytes(brut), 6)) + bloc(b"IEND", b"")
+    comprime = zlib.compress(bytes(brut), 6)
+    pas = taille_idat or len(comprime)
+    for debut in range(0, len(comprime), pas):
+        sortie += bloc(b"IDAT", comprime[debut : debut + pas])
+    return sortie + bloc(b"IEND", b"")
 
 
 def lire(donnees):
@@ -156,6 +163,9 @@ def test_rampe_aux_trois_arrets():
         valeurs = [c[canal] for c in suite]
         assert valeurs == sorted(valeurs)
     assert marque.luminance(255, 255, 255) == 255
+    assert marque.luminance(255, 0, 0) == 53
+    assert marque.luminance(0, 255, 0) == 182
+    assert marque.luminance(0, 0, 255) == 18
     assert marque.luminance(0, 0, 0) == 0
 
 
@@ -234,7 +244,14 @@ def test_png_bombe_generique():
     donnees = (
         SIGNATURE + bloc(b"IHDR", entete) + bloc(b"IDAT", bombe) + bloc(b"IEND", b"")
     )
-    assert marque.recolorer_png(donnees) is None
+    tracemalloc.start()
+    try:
+        assert marque.recolorer_png(donnees) is None
+        _, pic = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    # la décompression est bornée : le surplus de la bombe n'est jamais décompressé
+    assert pic < 1024 * 1024
     court = SIGNATURE + bloc(b"IHDR", entete) + bloc(b"IDAT", zlib.compress(b"\x00" * 5)) + bloc(
         b"IEND", b""
     )
@@ -242,8 +259,9 @@ def test_png_bombe_generique():
 
 
 def test_png_1024_admis():
-    pixels = bytes(range(256)) * (1024 * 1024 * 4 // 256)
-    donnees = png(1024, 1024, 6, pixels)
+    # un bruit déterministe, incompressible : l'IDAT pèse environ 4 Mio, en blocs de 64 Kio
+    pixels = random.Random(0).randbytes(1024 * 1024 * 4)
+    donnees = png(1024, 1024, 6, pixels, taille_idat=64 * 1024)
     tracemalloc.start()
     try:
         sortie = marque.recolorer_png(donnees)
@@ -275,6 +293,23 @@ def test_svg_enveloppe():
     assert marque.envelopper_svg(b"<svg/>" + b" " * (4194304 - 5)) is None
 
 
+def test_svg_gabarit_entier():
+    original = b'<svg viewBox="0 0 2 3"/>'
+    attendu = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2 3"><defs>'
+        '<filter id="m" color-interpolation-filters="sRGB">'
+        '<feColorMatrix type="matrix" values="0.2109 0.7148 0.0742 0 0 0.2109 0.7148 0.0742 0 0 '
+        '0.2109 0.7148 0.0742 0 0 0 0 0 1 0"/>'
+        '<feComponentTransfer><feFuncR type="table" tableValues="0.3608 0.9098 1"/>'
+        '<feFuncG type="table" tableValues="0.1020 0.3490 0.8902"/>'
+        '<feFuncB type="table" tableValues="0 0.0471 0.7608"/></feComponentTransfer></filter></defs>'
+        '<image href="data:image/svg+xml;base64,'
+        + base64.b64encode(original).decode()
+        + '" x="0" y="0" width="2" height="3" filter="url(#m)"/></svg>'
+    )
+    assert marque.envelopper_svg(original) == attendu.encode()
+
+
 def test_icone_generique():
     largeur, hauteur, type_couleur, pixels, _ = lire(marque.icone_generique())
     assert (largeur, hauteur, type_couleur) == (512, 512, 2)
@@ -282,6 +317,22 @@ def test_icone_generique():
 
 
 # --- la feuille ---------------------------------------------------------------------------------
+
+
+def test_feuille_texte_entier():
+    decl = (
+        'content: "TEST"; position: fixed; top: 0; left: 0; right: 0; box-sizing: content-box; '
+        "height: 20px; padding-top: env(safe-area-inset-top, 0px); background: #e8590c; "
+        "color: #ffffff; font: 700 12px/20px system-ui, sans-serif; letter-spacing: 0.2em; "
+        "text-align: center; pointer-events: none; z-index: 2147483647;"
+    )
+    attendu = (
+        "/* La marque du staging, posée par le relais du modèle (scripts/modele/marque.py). */\n"
+        f"html::before {chr(123)} {decl} {chr(125)}\n"
+        f"dialog[open]::before {chr(123)} {decl} {chr(125)}\n"
+        f":popover-open::before {chr(123)} {decl} {chr(125)}\n"
+    )
+    assert marque.FEUILLE.decode("utf-8") == attendu
 
 
 def test_feuille_trois_regles():
@@ -375,6 +426,9 @@ def test_liens_icone_reecrits():
     assert b"autre.exemple" not in sortie
     # des liens d'icône sont là : le favicon par défaut n'est pas ajouté
     assert b"favicon.ico" not in sortie
+    # une valeur sans guillemets garde `=`, `?` et l'accent grave, que HTML admet
+    nu = marque.retoucher_page(b"<head><link rel=icon href=/a.png?v=1></head>", "/", None)
+    assert b'<link rel=icon href="/.marque/icone?de=/a.png%3Fv%3D1">' in nu
 
 
 def test_lien_icone():
@@ -407,11 +461,11 @@ def test_manifeste_noms_prefixes():
     assert b'"short_name": "test V"' in sortie
     assert b'"src": "/.marque/icone?de=/m/i.png"' in sortie
     assert b'"src": 5' in sortie
-    import json
-
     assert json.loads(sortie)["name"] == "test · Veille"
     sans = marque.retoucher_manifeste(b'{"display": "standalone"}', "/manifest.json", None)
     assert b'"name": "test"' in sans
+    entier = marque.retoucher_manifeste(b'{"name": 5}', "/manifest.json", None)
+    assert json.loads(entier) == {"name": "test"}
     court = marque.retoucher_manifeste(b'{"short_name": "V"}', "/manifest.json", None)
     assert b'"short_name": "test V"' in court and b'"name"' not in court
 
