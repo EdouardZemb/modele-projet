@@ -1,12 +1,20 @@
-"""Le relais qui marque le staging : ses retouches (bibliothèque standard seule, Python 3.10).
+"""Le relais qui marque le staging (bibliothèque standard seule, Python 3.10).
 
-Placé devant l'application en staging, le relais pose trois marques sur ce qu'elle sert : un
-bandeau « TEST » (la feuille `FEUILLE`), le préfixe « test » du titre et du nom de l'application
-installée, et une icône recolorée (une rampe orange sur la luminance de chaque pixel). Ce fichier
-porte les constantes et les retouches, sur des octets : aucune ne demande rien au réseau.
+Placé devant l'application en staging, le relais transmet chaque requête et chaque réponse, en
+HTTP/1.1 des deux côtés, et pose trois marques sur ce qu'elle sert : un bandeau « TEST » (la
+feuille `FEUILLE`), le préfixe « test » du titre et du nom de l'application installée, et une icône
+recolorée (une rampe orange sur la luminance de chaque pixel). Il répond lui-même sous `/.marque/`
+(`sante`, `marque.css`, `icone`), et ne demande jamais rien qu'à son amont.
+
+Son environnement : `MARQUE_ENV`, qui doit valoir `staging` (sinon le code 64) ; `MARQUE_AMONT`,
+l'application, `http://<hôte>:<port>` ; `MARQUE_PORT`, son port d'écoute, de 1 à 65535 ;
+`MARQUE_HOTE`, son adresse d'écoute, `HOTE_ECOUTE` par défaut. Son journal, sur la sortie d'erreur,
+n'écrit jamais un chemin, une requête, un en-tête ni une adresse : une ligne à son démarrage, une à
+son refus, et une par incident (l'application injoignable, une page trop grande, un manifeste
+illisible, une icône remplacée par la générique et sa raison, un incident interne).
 
 Les retouches de la page et du manifeste sont une recherche dans le texte, pas une lecture du HTML.
-Leurs limites connues, que cette liste ne ferme pas :
+Les limites connues du relais, que cette liste ne ferme pas :
 
 - une page servie par un service worker ne porte les marques qu'une fois actif un service worker
   installé après l'arrivée du relais ; hors ligne, elle garde le bandeau seulement si
@@ -29,6 +37,13 @@ Leurs limites connues, que cette liste ne ferme pas :
   la résolution ;
 - `http.server` réécrit une cible qui commence par `//` avant que le relais ne la lise (`//x` devient
   `/x`) : ce que l'application reçoit peut différer de ce que le client a écrit ;
+- une ligne de requête ou un en-tête qu'`http.server` refuse lui-même, dont la ligne qu'une espace
+  dans le chemin coupe en quatre mots, reçoit son 400, 414 ou 431, et la connexion se ferme, sans
+  lecture du corps ; le relais refuse lui-même par 400, corps lu et connexion gardée, une cible qui
+  ne commence pas par une seule `/` (la forme absolue comprise) ou qui porte un octet hors de
+  0x21-0x7E ;
+- une réponse 1xx de l'application autre que 100 (103 Early Hints) est prise par `http.client` pour
+  la réponse finale : le relais la transmet seule, et la réponse qui la suit se perd ;
 - un `href` d'icône qui porte une espace ou un caractère non ASCII (`/icône.png`) reçoit l'icône
   générique : `chemin_admis` n'admet que les caractères imprimables ASCII, sans espace ;
 - WebSocket : le relais répond 501 ;
@@ -38,18 +53,28 @@ Leurs limites connues, que cette liste ne ferme pas :
 - le rendu du bandeau dans un navigateur n'est éprouvé par aucun test : c'est la constatation sur
   l'appareil qui le prouve ;
 - un PNG de profondeur 16 ou de palette de 1 à 4 bits, entrelacé, un ICO ou un WebP reçoit l'icône
-  générique ; les blocs annexes d'un PNG sont retirés (gamma, profil de couleur, texte).
+  générique ; les blocs annexes d'un PNG sont retirés (gamma, profil de couleur, texte) ;
+- un PNG se reconnaît à sa signature, un SVG à son type, `image/svg+xml` : un SVG servi sous un
+  autre type reçoit l'icône générique.
 """
 
 import base64
 import functools
+import hashlib
 import html
+import http.client
 import itertools
 import json
+import os
 import re
+import socketserver
 import struct
+import sys
+import threading
 import zlib
-from urllib.parse import quote, urljoin, urlsplit
+from collections import OrderedDict
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import quote, unquote, urljoin, urlsplit
 
 # --- les valeurs fixées par la spec -------------------------------------------------------------
 
@@ -516,4 +541,565 @@ def retoucher_manifeste(corps: bytes, chemin: str, hote: str | None) -> bytes | 
         return json.dumps(manifeste, ensure_ascii=False).encode("utf-8")
     except UnicodeEncodeError:
         return None
+
+
+# --- le serveur ---------------------------------------------------------------------------------
+
+BLOC = 64 * 1024
+
+# Les en-têtes d'un seul saut, retirés dans les deux sens, avec ceux que nomme `Connection` et tous
+# les `Proxy-*`.
+_UN_SAUT = frozenset(("connection", "keep-alive", "te", "trailer", "transfer-encoding", "upgrade"))
+# Les conditionnels d'un `GET` ou d'un `HEAD` : une copie en cache d'avant le relais reviendrait en
+# 304, sans marque.
+_CONDITIONNELS = frozenset(("if-none-match", "if-modified-since"))
+# Ce que la demande d'une icône ne transmet pas : elle veut l'icône entière, sans compression.
+_HORS_ICONE = _CONDITIONNELS | frozenset(
+    ("if-match", "if-unmodified-since", "if-range", "range")
+    + ("accept-encoding", "expect", "content-length")
+)
+_ERREURS_AMONT = (OSError, http.client.HTTPException)
+_SANS_CACHE = (("Cache-Control", "no-cache"),)
+_LONGUEUR = re.compile(r"[0-9]{1,18}\Z")
+_PORT = re.compile(r"[0-9]{1,5}\Z")
+_TAILLE_MORCEAU = re.compile(rb"([0-9A-Fa-f]{1,16})[ \t]*(?:;[^\r\n]*)?\r?\n\Z")
+_CHAMPS_DE_FIN = 100
+
+
+class _MalFormee(Exception):
+    """Le cadrage du corps de la requête est illisible : on ne sait plus où elle finit."""
+
+
+def journal(message: str) -> None:
+    """Une ligne du journal, sur la sortie d'erreur. Jamais un chemin, une requête, un en-tête ni
+    une adresse : un jeton peut passer dans un chemin."""
+    sys.stderr.write(f"marque : {message}\n")
+    sys.stderr.flush()
+
+
+def _sauf(entetes: list[tuple[str, str]], *noms: str) -> list[tuple[str, str]]:
+    return [(nom, valeur) for nom, valeur in entetes if nom.lower() not in noms]
+
+
+def _sans_un_saut(entetes: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Les en-têtes, doublons compris et dans leur ordre, sans ceux d'un seul saut."""
+    nommes = {
+        jeton.strip().lower()
+        for nom, valeur in entetes
+        if nom.lower() == "connection"
+        for jeton in valeur.split(",")
+    }
+    return [
+        (nom, valeur)
+        for nom, valeur in entetes
+        if nom.lower() not in _UN_SAUT
+        and nom.lower() not in nommes
+        and not nom.lower().startswith("proxy-")
+    ]
+
+
+def _cible_admise(cible: str) -> bool:
+    """Une seule `/` de tête, puis des octets de 0x21 à 0x7E : ni espace, ni caractère de contrôle,
+    ni caractère non ASCII, ni forme absolue, qui échapperait au chemin réservé."""
+    return (
+        cible.startswith("/")
+        and not cible.startswith("//")
+        and all("!" <= c <= "~" for c in cible)
+    )
+
+
+def _amont(amont: str) -> tuple[str, int]:
+    """L'hôte et le port de `http://<hôte>:<port>`, ou `ValueError`."""
+    morceaux = urlsplit(amont)
+    port = morceaux.port
+    if (
+        morceaux.scheme != "http"
+        or not morceaux.hostname
+        or port is None
+        or port < 1
+        or morceaux.username is not None
+        or morceaux.path not in ("", "/")
+        or morceaux.query
+        or morceaux.fragment
+    ):
+        raise ValueError("amont : http://<hôte>:<port> attendu")
+    return morceaux.hostname, port
+
+
+def _lire_borne(reponse: http.client.HTTPResponse, n: int) -> bytes:
+    """Au plus `n` octets du corps ; `IncompleteRead` si l'application coupe avant sa longueur."""
+    corps = reponse.read(n)
+    if reponse.length and len(corps) < n:
+        raise http.client.IncompleteRead(corps, reponse.length)
+    return corps
+
+
+def _trop_grande(sorte: str, corps: bytes) -> bool:
+    if sorte == "svg":
+        return len(corps) > ICONE_MAX
+    if corps[12:16] == b"IHDR" and len(corps) >= 24:
+        largeur, hauteur = struct.unpack(">II", corps[16:24])
+        return largeur > COTE_MAX or hauteur > COTE_MAX
+    return False
+
+
+class _Serveur(ThreadingHTTPServer):
+    """Le serveur du relais : son amont, ses délais, et l'état que partagent ses connexions."""
+
+    def __init__(
+        self, adresse: tuple[str, int], amont: tuple[str, int], delai_inactif: float,
+        delai_amont: float,
+    ) -> None:
+        self.amont = amont
+        self.delai_inactif = delai_inactif
+        self.delai_amont = delai_amont
+        self.lectures = threading.BoundedSemaphore(LECTURES_ICONE)
+        self.recoloration = threading.Lock()
+        self._verrou_cache = threading.Lock()
+        self._cache: OrderedDict[tuple[bytes, str], bytes] = OrderedDict()
+        self._octets = 0
+        super().__init__(adresse, Relais)
+
+    def server_bind(self) -> None:
+        # Celui d'`HTTPServer` demande le nom de l'adresse d'écoute (`socket.getfqdn`), une
+        # résolution inverse : le relais ne demande jamais rien qu'à son amont.
+        socketserver.TCPServer.server_bind(self)
+        self.server_name = str(self.server_address[0])
+        self.server_port = self.server_address[1]
+
+    def handle_error(self, request, client_address) -> None:
+        # Celui de `socketserver` écrirait l'adresse du client et la trace de l'exception.
+        journal("incident interne, connexion fermée")
+
+    def icone_gardee(self, cle: tuple[bytes, str]) -> bytes | None:
+        with self._verrou_cache:
+            icone = self._cache.get(cle)
+            if icone is not None:
+                self._cache.move_to_end(cle)
+            return icone
+
+    def garder_icone(self, cle: tuple[bytes, str], icone: bytes) -> None:
+        """Garde l'icône ; au-delà des plafonds, la plus ancienne sort d'abord."""
+        with self._verrou_cache:
+            if cle in self._cache:
+                return
+            self._cache[cle] = icone
+            self._octets += len(icone)
+            while len(self._cache) > ICONES_GARDEES or self._octets > CACHE_OCTETS:
+                _, sortie = self._cache.popitem(last=False)
+                self._octets -= len(sortie)
+
+
+class Relais(BaseHTTPRequestHandler):
+    """Une connexion du client : chaque requête passe à l'application, sauf sous `/.marque/`."""
+
+    protocol_version = "HTTP/1.1"
+
+    def setup(self) -> None:
+        self.timeout = self.server.delai_inactif
+        super().setup()
+
+    def handle(self) -> None:
+        try:
+            super().handle()
+        except ConnectionError:
+            # Le client est parti, pendant une réponse ou entre deux requêtes : la connexion se
+            # ferme, sans ligne. Un délai de lecture du client est pris par `handle_one_request`.
+            self.close_connection = True
+
+    def log_message(self, *args) -> None:
+        """Rien : le journal de `http.server` porte la ligne de requête et l'adresse du client."""
+
+    def __getattr__(self, nom: str):
+        # Toute méthode passe, et non les seules que `http.server` connaît.
+        if nom.startswith("do_"):
+            return self._servir
+        raise AttributeError(nom)
+
+    # --- la requête ---------------------------------------------------------------------------
+
+    def _servir(self) -> None:
+        self._repondu = False
+        try:
+            blocs, par_morceaux = self._corps()
+            if not _cible_admise(self.path):
+                self._vider(blocs)
+                self._repondre(400, "cible refusée\n".encode())
+            elif self._demande_upgrade():
+                self._vider(blocs)
+                self._repondre(501, b"upgrade non transmis\n")
+            elif self.path.startswith(CHEMIN_RESERVE):
+                self._vider(blocs)
+                self._reserve()
+            else:
+                self._transmettre(blocs, par_morceaux)
+        except _MalFormee:
+            self.close_connection = True
+            if not self._repondu:
+                self._repondre(400, "corps mal cadré\n".encode(), fermer=True)
+
+    def _corps(self):
+        """Les blocs du corps de la requête, lus à la demande, et s'il vient par morceaux."""
+        codages = self.headers.get_all("Transfer-Encoding")
+        if codages:
+            if ",".join(codages).strip().lower() != "chunked":
+                raise _MalFormee
+            return self._morceaux(), True
+        longueurs = {valeur.strip() for valeur in self.headers.get_all("Content-Length") or ()}
+        if len(longueurs) > 1 or not all(_LONGUEUR.match(valeur) for valeur in longueurs):
+            raise _MalFormee
+        return self._longueur(int(longueurs.pop()) if longueurs else 0), False
+
+    def _longueur(self, restant: int):
+        while restant:
+            bloc = self.rfile.read1(min(restant, BLOC))
+            if not bloc:
+                raise ConnectionAbortedError("client parti au milieu du corps")
+            restant -= len(bloc)
+            yield bloc
+
+    def _morceaux(self):
+        while True:
+            ligne = self.rfile.readline(1024)
+            trouvee = _TAILLE_MORCEAU.match(ligne)
+            if not trouvee:
+                if not ligne:
+                    raise ConnectionAbortedError("client parti au milieu du corps")
+                raise _MalFormee
+            restant = int(trouvee.group(1), 16)
+            if restant == 0:
+                break
+            yield from self._longueur(restant)
+            if self.rfile.readline(3) not in (b"\r\n", b"\n"):
+                raise _MalFormee
+        for _ in range(_CHAMPS_DE_FIN):
+            ligne = self.rfile.readline(65537)
+            if ligne in (b"\r\n", b"\n"):
+                return
+            if not ligne:
+                raise ConnectionAbortedError("client parti au milieu du corps")
+        raise _MalFormee
+
+    @staticmethod
+    def _vider(blocs) -> None:
+        for _ in blocs:
+            pass
+
+    def _demande_upgrade(self) -> bool:
+        jetons = {
+            jeton.strip().lower()
+            for valeur in self.headers.get_all("Connection") or ()
+            for jeton in valeur.split(",")
+        }
+        return "upgrade" in jetons and "Upgrade" in self.headers
+
+    def _repondre(
+        self, code: int, corps: bytes, type_contenu: str = "text/plain; charset=utf-8",
+        entetes: tuple[tuple[str, str], ...] = (), fermer: bool = False,
+    ) -> None:
+        """Une réponse du relais lui-même, avec sa longueur : la connexion sert encore."""
+        self.send_response(code)
+        self.send_header("Content-Type", type_contenu)
+        self.send_header("Content-Length", str(len(corps)))
+        for nom, valeur in entetes:
+            self.send_header(nom, valeur)
+        if fermer:
+            self.send_header("Connection", "close")
+        self.end_headers()
+        self._repondu = True
+        if self.command != "HEAD":
+            self.wfile.write(corps)
+
+    def _injoignable(self) -> None:
+        journal("application injoignable")
+        self._repondre(502, b"application injoignable\n")
+
+    # --- le chemin réservé --------------------------------------------------------------------
+
+    def _reserve(self) -> None:
+        chemin, _, requete = self.path.partition("?")
+        if chemin == "/.marque/sante":
+            self._repondre(200, b'{"statut":"ok"}', "application/json", _SANS_CACHE)
+        elif chemin == "/.marque/marque.css":
+            self._repondre(200, FEUILLE, "text/css; charset=utf-8", _SANS_CACHE)
+        elif chemin == "/.marque/icone":
+            self._icone(requete)
+        else:
+            self._repondre(404, b"inconnu sous /.marque/\n")
+
+    def _generique(self, raison: str) -> None:
+        journal(f"icône remplacée par la générique : {raison}")
+        self._repondre(200, icone_generique(), "image/png", _SANS_CACHE)
+
+    def _icone(self, requete: str) -> None:
+        de = None
+        for morceau in requete.split("&"):
+            nom, _, valeur = morceau.partition("=")
+            if nom == "de":
+                de = unquote(valeur)
+                break
+        if de is None:
+            self._generique("autre origine")
+            return
+        if not chemin_admis(de):
+            self._generique("chemin refusé")
+            return
+        try:
+            with self.server.lectures:
+                statut, type_contenu, corps = self._lire_icone(de)
+        except ValueError:
+            self._repondre(400, "en-tête refusé\n".encode())
+            return
+        except _ERREURS_AMONT:
+            self._injoignable()
+            return
+        if corps is None:
+            # L'application a coupé après ses en-têtes : la connexion se ferme, sans 502 ni ligne.
+            self.close_connection = True
+            return
+        if statut != 200:
+            self._generique(f"réponse {statut}")
+            return
+        if len(corps) > LECTURE_ICONE_MAX:
+            self._generique("taille")
+            return
+        if corps.startswith(_SIGNATURE):
+            sorte = "png"
+        elif (type_contenu or "").split(";")[0].strip().lower() == "image/svg+xml":
+            sorte = "svg"
+        else:
+            self._generique("format")
+            return
+        if _trop_grande(sorte, corps):
+            self._generique("taille")
+            return
+        cle = (hashlib.sha256(corps).digest(), sorte)
+        icone = self.server.icone_gardee(cle)
+        if icone is None:
+            with self.server.recoloration:
+                icone = self.server.icone_gardee(cle)
+                if icone is None:
+                    icone = recolorer_png(corps) if sorte == "png" else envelopper_svg(corps)
+                    if icone is not None:
+                        self.server.garder_icone(cle, icone)
+        if icone is None:
+            self._generique("format")
+            return
+        type_icone = "image/png" if sorte == "png" else "image/svg+xml"
+        self._repondre(200, icone, type_icone, _SANS_CACHE)
+
+    def _lire_icone(self, de: str) -> tuple[int, str | None, bytes | None]:
+        """Le statut, le type et au plus `LECTURE_ICONE_MAX + 1` octets de l'icône `de`, le corps
+        `None` si l'application coupe après ses en-têtes."""
+        conn = http.client.HTTPConnection(*self.server.amont, timeout=self.server.delai_amont)
+        try:
+            conn.putrequest("GET", de, skip_host=True, skip_accept_encoding=True)
+            for nom, valeur in _sans_un_saut(self.headers.items()):
+                if nom.lower() not in _HORS_ICONE:
+                    conn.putheader(nom, valeur)
+            conn.endheaders()
+            reponse = conn.getresponse()
+            if reponse.status != 200:
+                return reponse.status, None, b""
+            try:
+                corps = _lire_borne(reponse, LECTURE_ICONE_MAX + 1)
+            except _ERREURS_AMONT:
+                return 200, None, None
+            return 200, reponse.getheader("Content-Type"), corps
+        finally:
+            conn.close()
+
+    # --- la transmission ----------------------------------------------------------------------
+
+    def _vers_l_amont(self, par_morceaux: bool) -> list[tuple[str, str]]:
+        retires = {"accept-encoding", "expect"}
+        if self.command in ("GET", "HEAD"):
+            retires |= _CONDITIONNELS
+        if par_morceaux:
+            retires.add("content-length")
+        return [
+            (nom, valeur)
+            for nom, valeur in _sans_un_saut(self.headers.items())
+            if nom.lower() not in retires
+        ]
+
+    @staticmethod
+    def _amont_suit(fonction, *args) -> bool:
+        try:
+            fonction(*args)
+        except _ERREURS_AMONT:
+            return False
+        return True
+
+    def _transmettre(self, blocs, par_morceaux: bool) -> None:
+        conn = http.client.HTTPConnection(*self.server.amont, timeout=self.server.delai_amont)
+        try:
+            try:
+                conn.putrequest(self.command, self.path, skip_host=True, skip_accept_encoding=True)
+                for nom, valeur in self._vers_l_amont(par_morceaux):
+                    conn.putheader(nom, valeur)
+                if par_morceaux:
+                    conn.putheader("Transfer-Encoding", "chunked")
+            except ValueError:
+                # un en-tête que `http.client` ne sait pas envoyer
+                self._vider(blocs)
+                self._repondre(400, "en-tête refusé\n".encode())
+                return
+            # L'amont qui tombe ne coupe pas la lecture du client : le corps est lu en entier.
+            suit = self._amont_suit(conn.endheaders)
+            for bloc in blocs:
+                if suit:
+                    envoi = b"%x\r\n%s\r\n" % (len(bloc), bloc) if par_morceaux else bloc
+                    suit = self._amont_suit(conn.send, envoi)
+            if suit and par_morceaux:
+                suit = self._amont_suit(conn.send, b"0\r\n\r\n")
+            if not suit:
+                self._injoignable()
+                return
+            try:
+                reponse = conn.getresponse()
+            except _ERREURS_AMONT:
+                self._injoignable()
+                return
+            self._relayer(reponse)
+        finally:
+            conn.close()
+
+    def _relayer(self, reponse: http.client.HTTPResponse) -> None:
+        entetes = _sans_un_saut(reponse.getheaders())
+        type_contenu = reponse.getheader("Content-Type")
+        codage = (reponse.getheader("Content-Encoding") or "identity").strip().lower()
+        page = est_page(type_contenu)
+        marquable = (
+            reponse.status == 200
+            and codage == "identity"
+            and (page or est_manifeste(self.path, type_contenu))
+        )
+        if self.command == "HEAD" or reponse.status in (204, 304) or reponse.status < 200:
+            if self.command == "HEAD" and marquable:
+                # le `GET` serait retouché : sa longueur ne serait pas celle-ci
+                entetes = _sauf(entetes, "content-length")
+            self._entetes(reponse, entetes)
+        elif self.command == "GET" and marquable:
+            self._marquer(reponse, entetes, page)
+        else:
+            self._flux(reponse, entetes)
+
+    def _entetes(self, reponse, entetes, ajouts=()) -> None:
+        # `send_response_only` : `send_response` ajouterait un second `Server` et un second `Date`.
+        self.send_response_only(reponse.status, reponse.reason)
+        for nom, valeur in (*entetes, *ajouts):
+            self.send_header(nom, valeur)
+        self.end_headers()
+        self._repondu = True
+
+    def _marquer(self, reponse, entetes, page: bool) -> None:
+        try:
+            corps = _lire_borne(reponse, PLAFOND_PAGE + 1)
+        except _ERREURS_AMONT:
+            # L'application a coupé après ses en-têtes : la connexion se ferme, sans 502 ni ligne.
+            self.close_connection = True
+            return
+        if len(corps) > PLAFOND_PAGE:
+            if page:
+                journal("page trop grande, transmise sans marque")
+            else:
+                journal("manifeste illisible, transmis sans marque")
+            self._flux(reponse, entetes, debut=corps)
+            return
+        hote = self.headers.get("Host")
+        if page:
+            neuf = retoucher_page(corps, self.path, hote)
+        else:
+            neuf = retoucher_manifeste(corps, self.path, hote)
+        if neuf is None:
+            journal("manifeste illisible, transmis sans marque")
+            neuf = corps
+        else:
+            entetes = [*_sauf(entetes, "etag", "last-modified", "cache-control"), *_SANS_CACHE]
+        longueur = (("Content-Length", str(len(neuf))),)
+        self._entetes(reponse, _sauf(entetes, "content-length"), longueur)
+        self.wfile.write(neuf)
+
+    def _flux(self, reponse, entetes, debut: bytes = b"") -> None:
+        """La réponse au fil de sa lecture, avec sa longueur ou par morceaux vers un client
+        HTTP/1.1. Vers un client HTTP/1.0, une réponse sans longueur finit avec la connexion."""
+        connue = reponse.length is not None and not reponse.chunked
+        morceaux = not connue and self.request_version >= "HTTP/1.1"
+        entetes = _sauf(entetes, "content-length")
+        if connue:
+            ajouts = (("Content-Length", str(len(debut) + reponse.length)),)
+        elif morceaux:
+            ajouts = (("Transfer-Encoding", "chunked"),)
+        else:
+            ajouts = ()
+            self.close_connection = True
+        self._entetes(reponse, entetes, ajouts)
+        if debut:
+            self._ecrire(debut, morceaux)
+        while True:
+            try:
+                bloc = reponse.read1(BLOC)
+            except _ERREURS_AMONT:
+                # Les en-têtes sont partis : la connexion se ferme, sans ligne.
+                self.close_connection = True
+                return
+            if not bloc:
+                break
+            self._ecrire(bloc, morceaux)
+        if reponse.length:
+            # l'application a coupé avant la longueur annoncée
+            self.close_connection = True
+        elif morceaux:
+            self.wfile.write(b"0\r\n\r\n")
+
+    def _ecrire(self, bloc: bytes, morceaux: bool) -> None:
+        self.wfile.write(b"%x\r\n%s\r\n" % (len(bloc), bloc) if morceaux else bloc)
+
+
+def creer_serveur(
+    hote: str, port: int, amont: str, delai_inactif: float = DELAI_INACTIF,
+    delai_amont: float = DELAI_AMONT,
+) -> ThreadingHTTPServer:
+    """Le relais à l'écoute sur `hote`:`port`, devant l'application `amont`, `http://<hôte>:<port>`.
+
+    `delai_inactif` ferme une connexion du client muette ; `delai_amont` borne chaque attente de
+    l'application. `ValueError` si `amont` n'a pas cette forme."""
+    return _Serveur((hote, port), _amont(amont), delai_inactif, delai_amont)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Lance le relais d'après son environnement ; `argv` n'est pas lu."""
+    # Sous Windows, la sortie d'erreur d'un Python lancé par un tube est en cp1252.
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    env = os.environ.get("MARQUE_ENV")
+    if env != "staging":
+        etat = "MARQUE_ENV absente" if env is None else f"MARQUE_ENV={env}"
+        journal(f"refus hors du staging ({etat})")
+        return 64
+    port = os.environ.get("MARQUE_PORT", "")
+    if not _PORT.match(port) or not 1 <= int(port) <= 65535:
+        journal("refus : MARQUE_PORT n'est pas un port de 1 à 65535")
+        return 64
+    amont = os.environ.get("MARQUE_AMONT", "")
+    try:
+        _amont(amont)
+    except ValueError:
+        journal("refus : MARQUE_AMONT n'a pas la forme http://<hôte>:<port>")
+        return 64
+    try:
+        serveur = creer_serveur(os.environ.get("MARQUE_HOTE", HOTE_ECOUTE), int(port), amont)
+    except OSError:
+        journal(f"écoute impossible sur le port {int(port)}")
+        return 1
+    journal(f"relais du staging prêt sur le port {int(port)}")
+    try:
+        serveur.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
 
