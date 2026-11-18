@@ -1,0 +1,511 @@
+"""Le relais qui marque le staging : ses retouches (bibliothèque standard seule, Python 3.10).
+
+Placé devant l'application en staging, le relais pose trois marques sur ce qu'elle sert : un
+bandeau « TEST » (la feuille `FEUILLE`), le préfixe « test » du titre et du nom de l'application
+installée, et une icône recolorée (une rampe orange sur la luminance de chaque pixel). Ce fichier
+porte les constantes et les retouches, sur des octets : aucune ne demande rien au réseau.
+
+Les retouches de la page et du manifeste sont une recherche dans le texte, pas une lecture du HTML.
+Leurs limites connues, que cette liste ne ferme pas :
+
+- une page servie par un service worker ne porte les marques qu'une fois actif un service worker
+  installé après l'arrivée du relais ; hors ligne, elle garde le bandeau seulement si
+  `/.marque/marque.css` est dans le cache ;
+- un titre changé par un script fait perdre « test » à l'onglet, le bandeau reste ;
+- les icônes des notifications, écrites dans le code d'un service worker, restent celles de la prod ;
+- une icône d'une autre origine est remplacée par l'icône générique ;
+- une application de staging déjà installée ne change d'icône et de nom que lorsque Chrome
+  rafraîchit son WebAPK : on la réinstalle ;
+- un fragment HTML chargé par un script reçoit lui aussi le lien de la feuille ;
+- un `::before` propre à l'application sur une fenêtre modale ou un `popover` ouvert est remplacé
+  par la bande ;
+- seules quatre formes se cherchent, `</head>`, `<body`, `<title>` et `<link ... rel=...icon...>`,
+  et seulement dans l'en-tête : une forme écrite autrement (`</head >`, un `<title>` après
+  `<body`) n'est pas vue ;
+- les commentaires `<!-- ... -->` se lisent à la lettre : `<!-->` et `<!--->`, que HTML ferme tout de
+  suite, ouvrent ici un commentaire qui cache la suite ; un CDATA, un `<script>` ou un `<style>` qui
+  contient une de ces formes n'est pas distingué du reste de la page ;
+- un attribut `href` d'icône est lu entre guillemets ou sans, et ses entités HTML sont lues avant
+  la résolution ;
+- `http.server` réécrit une cible qui commence par `//` (il en retire les barres de tête) avant que
+  le relais ne la lise : ce que l'application reçoit peut différer de ce que le client a écrit ;
+- un PNG de profondeur 16 ou de palette de 1 à 4 bits, entrelacé, un ICO ou un WebP reçoit l'icône
+  générique ; les blocs annexes d'un PNG sont retirés (gamma, profil de couleur, texte).
+"""
+
+import base64
+import functools
+import html
+import itertools
+import json
+import re
+import struct
+import zlib
+from urllib.parse import quote, urljoin, urlsplit
+
+# --- les valeurs fixées par la spec -------------------------------------------------------------
+
+# La rampe : (luminance, (R, V, B)) à 0, 128 et 255.
+RAMPE = ((0, (0x5C, 0x1A, 0x00)), (128, (0xE8, 0x59, 0x0C)), (255, (0xFF, 0xE3, 0xC2)))
+ORANGE = (0xE8, 0x59, 0x0C)
+
+PREFIXE_TITRE = b"test &middot; "
+PREFIXE_NOM = "test · "
+PREFIXE_NOM_COURT = "test "
+
+LIEN_FEUILLE = b'<link rel="stylesheet" href="/.marque/marque.css">'
+CHEMIN_RESERVE = "/.marque/"
+
+PLAFOND_PAGE = 5 * 1024 * 1024
+COTE_MAX = 1024
+# Les pixels d'un PNG, octets de filtre exclus, ou les octets d'un SVG.
+ICONE_MAX = 4 * 1024 * 1024
+# Ce que le relais lit d'une icône de l'application : au-delà, l'icône générique.
+LECTURE_ICONE_MAX = 5 * 1024 * 1024
+
+ICONES_GARDEES = 32
+CACHE_OCTETS = 16 * 1024 * 1024
+LECTURES_ICONE = 2
+
+DELAI_AMONT = 120
+DELAI_INACTIF = 75
+
+# L'adresse d'écoute par défaut : le port publié et l'alias du tunnel arrivent sur l'interface du
+# conteneur.
+HOTE_ECOUTE = "0.0.0.0"
+
+_DECLARATIONS = (
+    'content: "TEST"; position: fixed; top: 0; left: 0; right: 0; box-sizing: content-box; '
+    "height: 20px; padding-top: env(safe-area-inset-top, 0px); background: #e8590c; "
+    "color: #ffffff; font: 700 12px/20px system-ui, sans-serif; letter-spacing: 0.2em; "
+    "text-align: center; pointer-events: none; z-index: 2147483647;"
+)
+
+# Trois règles séparées : un navigateur qui ne connaît pas `:popover-open` rejetterait toute une
+# liste de sélecteurs.
+FEUILLE = (
+    "/* La marque du staging, posée par le relais du modèle (scripts/modele/marque.py). */\n"
+    + "".join(
+        selecteur + " { " + _DECLARATIONS + " }\n"
+        for selecteur in ("html::before", "dialog[open]::before", ":popover-open::before")
+    )
+).encode("utf-8")
+
+
+# --- la rampe -----------------------------------------------------------------------------------
+
+
+def luminance(r: int, g: int, b: int) -> int:
+    return (54 * r + 183 * g + 19 * b) >> 8
+
+
+def couleur_de(l: int) -> tuple[int, int, int]:
+    """La couleur de la rampe pour une luminance de 0 à 255."""
+    for (l0, c0), (l1, c1) in itertools.pairwise(RAMPE):
+        if l <= l1:
+            return tuple(  # type: ignore[return-value]
+                round(a + (b - a) * (l - l0) / (l1 - l0)) for a, b in zip(c0, c1)
+            )
+    return RAMPE[-1][1]
+
+
+@functools.cache
+def _tables() -> tuple[bytes, bytes, bytes]:
+    """Les trois tables 256 -> 256 de la rampe, une par canal."""
+    couleurs = [couleur_de(i) for i in range(256)]
+    return tuple(bytes(c[k] for c in couleurs) for k in range(3))  # type: ignore[return-value]
+
+
+# --- le PNG -------------------------------------------------------------------------------------
+
+_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+_CANAUX = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}
+
+
+def _bloc(nom: bytes, donnees: bytes) -> bytes:
+    crc = zlib.crc32(nom + donnees) & 0xFFFFFFFF
+    return struct.pack(">I", len(donnees)) + nom + donnees + struct.pack(">I", crc)
+
+
+def _lire_blocs(donnees: bytes) -> dict[bytes, list[bytes]] | None:
+    """Les blocs d'un PNG par nom, ou `None` s'il est tronqué, mal formé ou sans `IEND`."""
+    if not donnees.startswith(_SIGNATURE):
+        return None
+    blocs: dict[bytes, list[bytes]] = {}
+    pos = len(_SIGNATURE)
+    fin = len(donnees)
+    premier = True
+    while pos + 12 <= fin:
+        (taille,) = struct.unpack_from(">I", donnees, pos)
+        nom = donnees[pos + 4 : pos + 8]
+        debut = pos + 8
+        if debut + taille + 4 > fin:
+            return None
+        corps = donnees[debut : debut + taille]
+        (crc,) = struct.unpack_from(">I", donnees, debut + taille)
+        if zlib.crc32(nom + corps) & 0xFFFFFFFF != crc:
+            return None
+        if premier and nom != b"IHDR":
+            return None
+        premier = False
+        blocs.setdefault(nom, []).append(corps)
+        if nom == b"IEND":
+            return blocs
+        pos = debut + taille + 4
+    return None
+
+
+def _defiltrer(brut: bytes, largeur: int, hauteur: int, canaux: int) -> bytearray | None:
+    """Les pixels d'un PNG non entrelacé de profondeur 8, octets de filtre retirés."""
+    long_ligne = largeur * canaux
+    pas = long_ligne + 1
+    pixels = bytearray(long_ligne * hauteur)
+    precedente = bytearray(long_ligne)
+    for y in range(hauteur):
+        filtre = brut[y * pas]
+        ligne = bytearray(brut[y * pas + 1 : (y + 1) * pas])
+        if filtre == 0:
+            pass
+        elif filtre == 1:
+            for i in range(canaux, long_ligne):
+                ligne[i] = (ligne[i] + ligne[i - canaux]) & 255
+        elif filtre == 2:
+            for i in range(long_ligne):
+                ligne[i] = (ligne[i] + precedente[i]) & 255
+        elif filtre == 3:
+            for i in range(long_ligne):
+                gauche = ligne[i - canaux] if i >= canaux else 0
+                ligne[i] = (ligne[i] + ((gauche + precedente[i]) >> 1)) & 255
+        elif filtre == 4:
+            for i in range(long_ligne):
+                a = ligne[i - canaux] if i >= canaux else 0
+                b = precedente[i]
+                c = precedente[i - canaux] if i >= canaux else 0
+                pa = abs(b - c)
+                pb = abs(a - c)
+                pc = abs(a + b - 2 * c)
+                if pa <= pb and pa <= pc:
+                    p = a
+                elif pb <= pc:
+                    p = b
+                else:
+                    p = c
+                ligne[i] = (ligne[i] + p) & 255
+        else:
+            return None
+        pixels[y * long_ligne : (y + 1) * long_ligne] = ligne
+        precedente = ligne
+    return pixels
+
+
+def _png(largeur: int, hauteur: int, type_couleur: int, blocs_avant: bytes, image: bytes) -> bytes:
+    """Un PNG de profondeur 8 : `image` est l'image sans octets de filtre."""
+    long_ligne = len(image) // hauteur
+    brut = bytearray(hauteur * (long_ligne + 1))
+    for y in range(hauteur):
+        debut = y * (long_ligne + 1) + 1
+        brut[debut : debut + long_ligne] = image[y * long_ligne : (y + 1) * long_ligne]
+    entete = struct.pack(">IIBBBBB", largeur, hauteur, 8, type_couleur, 0, 0, 0)
+    return (
+        _SIGNATURE
+        + _bloc(b"IHDR", entete)
+        + blocs_avant
+        + _bloc(b"IDAT", zlib.compress(bytes(brut), 6))
+        + _bloc(b"IEND", b"")
+    )
+
+
+def recolorer_png(donnees: bytes) -> bytes | None:
+    """Le PNG recoloré, ou `None` s'il n'est pas de ceux que le relais admet."""
+    try:
+        return _recolorer_png(donnees)
+    except (zlib.error, struct.error, ValueError, IndexError):
+        return None
+
+
+def _recolorer_png(donnees: bytes) -> bytes | None:
+    blocs = _lire_blocs(donnees)
+    if blocs is None or len(blocs.get(b"IHDR", [])) != 1 or len(blocs[b"IHDR"][0]) != 13:
+        return None
+    largeur, hauteur, profondeur, type_couleur, compression, filtrage, entrelace = struct.unpack(
+        ">IIBBBBB", blocs[b"IHDR"][0]
+    )
+    if profondeur != 8 or type_couleur not in _CANAUX or compression or filtrage or entrelace:
+        return None
+    if not (1 <= largeur <= COTE_MAX and 1 <= hauteur <= COTE_MAX):
+        return None
+    canaux = _CANAUX[type_couleur]
+    if largeur * hauteur * canaux > ICONE_MAX:
+        return None
+    attendu = hauteur * (largeur * canaux + 1)
+    decompresseur = zlib.decompressobj()
+    brut = decompresseur.decompress(b"".join(blocs.get(b"IDAT", [])), attendu + 1)
+    if len(brut) != attendu or decompresseur.unconsumed_tail or not decompresseur.eof:
+        return None
+    if decompresseur.unused_data:
+        return None
+    pixels = _defiltrer(brut, largeur, hauteur, canaux)
+    if pixels is None:
+        return None
+    rouge, vert, bleu = _tables()
+    trns = blocs.get(b"tRNS", [b""])[0]
+    nombre = largeur * hauteur
+
+    if type_couleur == 3:
+        palette = blocs.get(b"PLTE", [b""])[0]
+        if not palette or len(palette) % 3 or len(palette) > 768:
+            return None
+        neuve = bytearray(len(palette))
+        for i in range(0, len(palette), 3):
+            c = couleur_de(luminance(palette[i], palette[i + 1], palette[i + 2]))
+            neuve[i : i + 3] = bytes(c)
+        avant = _bloc(b"PLTE", bytes(neuve))
+        if trns:
+            avant += _bloc(b"tRNS", trns)
+        return _png(largeur, hauteur, 3, avant, bytes(pixels))
+
+    if type_couleur in (0, 4):
+        gris = bytes(pixels[0::canaux])
+        lum = gris
+        alpha = bytes(pixels[1::2]) if type_couleur == 4 else None
+        if type_couleur == 0 and len(trns) >= 2:
+            if trns[0] == 0:
+                alpha = bytes(0 if g == trns[1] else 255 for g in gris)
+            else:
+                alpha = b"\xff" * nombre
+    else:
+        r, v, b = bytes(pixels[0::canaux]), bytes(pixels[1::canaux]), bytes(pixels[2::canaux])
+        lum = bytes((54 * x + 183 * y + 19 * z) >> 8 for x, y, z in zip(r, v, b))
+        alpha = bytes(pixels[3::4]) if type_couleur == 6 else None
+        if type_couleur == 2 and len(trns) >= 6:
+            if trns[0] == 0 and trns[2] == 0 and trns[4] == 0:
+                cle_rvb = (trns[1], trns[3], trns[5])
+                alpha = bytes(0 if t == cle_rvb else 255 for t in zip(r, v, b))
+            else:
+                alpha = b"\xff" * nombre
+
+    sortie_canaux = 3 if alpha is None else 4
+    image = bytearray(nombre * sortie_canaux)
+    image[0::sortie_canaux] = lum.translate(rouge)
+    image[1::sortie_canaux] = lum.translate(vert)
+    image[2::sortie_canaux] = lum.translate(bleu)
+    if alpha is not None:
+        image[3::4] = alpha
+    return _png(largeur, hauteur, 2 if alpha is None else 6, b"", bytes(image))
+
+
+@functools.cache
+def icone_generique() -> bytes:
+    """Un PNG de 512 x 512, tout orange, calculé une fois."""
+    return _png(512, 512, 2, b"", bytes(ORANGE) * (512 * 512))
+
+
+# --- le SVG -------------------------------------------------------------------------------------
+
+_NOMBRE = r"[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?"
+_NOMBRE_SEUL = re.compile(_NOMBRE.encode() + rb"\Z")
+_BALISE_SVG = re.compile(rb"""<svg(?![\w:-])(?:[^>"']|"[^"]*"|'[^']*')*>""", re.IGNORECASE)
+_ATTRIBUT = re.compile(
+    rb"""(?<![\w:.-])(viewBox|width|height)\s*=\s*(?:"([^"]*)"|'([^']*)')""", re.IGNORECASE
+)
+_COMMENTAIRE = re.compile(rb"<!--.*?(?:-->|\Z)", re.DOTALL)
+
+_ENVELOPPE = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="{v}"><defs>'
+    '<filter id="m" color-interpolation-filters="sRGB">'
+    '<feColorMatrix type="matrix" values="0.2109 0.7148 0.0742 0 0 0.2109 0.7148 0.0742 0 0 '
+    '0.2109 0.7148 0.0742 0 0 0 0 0 1 0"/>'
+    '<feComponentTransfer><feFuncR type="table" tableValues="0.3608 0.9098 1"/>'
+    '<feFuncG type="table" tableValues="0.1020 0.3490 0.8902"/>'
+    '<feFuncB type="table" tableValues="0 0.0471 0.7608"/></feComponentTransfer></filter></defs>'
+    '<image href="data:image/svg+xml;base64,{b}" x="{x}" y="{y}" width="{w}" height="{h}" '
+    'filter="url(#m)"/></svg>'
+)
+
+
+def _nombres(texte: bytes, combien: int) -> list[str] | None:
+    morceaux = [m for m in re.split(rb"[\s,]+", texte.strip()) if m]
+    if len(morceaux) != combien or not all(_NOMBRE_SEUL.match(m) for m in morceaux):
+        return None
+    return [m.decode("ascii") for m in morceaux]
+
+
+def _cadre(donnees: bytes) -> list[str]:
+    """Les quatre nombres du `viewBox` de la balise racine, ou de `width` et `height`."""
+    visible = _COMMENTAIRE.sub(lambda m: b" " * len(m.group()), donnees)
+    balise = _BALISE_SVG.search(visible)
+    valeurs: dict[bytes, bytes] = {}
+    if balise:
+        for m in _ATTRIBUT.finditer(balise.group()):
+            valeurs.setdefault(m.group(1).lower(), m.group(2) if m.group(2) is not None else m.group(3))
+    vue = _nombres(valeurs[b"viewbox"], 4) if b"viewbox" in valeurs else None
+    if vue:
+        return vue
+    taille = []
+    for nom in (b"width", b"height"):
+        brut = valeurs.get(nom, b"").strip()
+        if brut.lower().endswith(b"px"):
+            brut = brut[:-2]
+        nombres = _nombres(brut, 1)
+        taille.append(nombres[0] if nombres and float(nombres[0]) > 0 else None)
+    if all(taille):
+        return ["0", "0", *taille]  # type: ignore[list-item]
+    return ["0", "0", "100", "100"]
+
+
+def envelopper_svg(donnees: bytes) -> bytes | None:
+    """L'enveloppe SVG qui embarque l'original sous le filtre de la rampe."""
+    if len(donnees) > ICONE_MAX:
+        return None
+    x, y, w, h = _cadre(donnees)
+    sortie = _ENVELOPPE.format(
+        v=f"{x} {y} {w} {h}",
+        b=base64.b64encode(donnees).decode("ascii"),
+        x=x,
+        y=y,
+        w=w,
+        h=h,
+    )
+    return sortie.encode("ascii")
+
+
+# --- les liens d'icône --------------------------------------------------------------------------
+
+_ICONE_GENERIQUE = "/.marque/icone"
+
+
+def chemin_admis(de: str) -> bool:
+    """Un chemin de l'application : une seule `/` de tête, des caractères imprimables sans espace."""
+    if not 1 <= len(de) <= 1024 or not de.startswith("/") or de.startswith("//"):
+        return False
+    return all("!" <= c <= "~" and c != "\\" for c in de)
+
+
+def lien_icone(cible: str, base: str, hote: str | None) -> str:
+    """Le lien de l'icône recolorée pour `cible`, lue sur la page ou le manifeste `base`."""
+    try:
+        jointe = urlsplit(urljoin(base, cible.strip()))
+    except ValueError:
+        return _ICONE_GENERIQUE
+    if (jointe.scheme or jointe.netloc) and (
+        jointe.scheme not in ("", "http", "https")
+        or hote is None
+        or "@" in jointe.netloc
+        or jointe.netloc.lower() != hote.lower()
+    ):
+        return _ICONE_GENERIQUE
+    de = jointe.path + ("?" + jointe.query if jointe.query else "")
+    if not chemin_admis(de):
+        return _ICONE_GENERIQUE
+    return _ICONE_GENERIQUE + "?de=" + quote(de, safe="/")
+
+
+# --- la page ------------------------------------------------------------------------------------
+
+_LINK = re.compile(rb"""<link(?=[\s/>])(?:[^>"']|"[^"]*"|'[^']*')*>""")
+_ATTRIBUT_LINK = re.compile(
+    rb"""([^\s"'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?"""
+)
+_TITRE = re.compile(rb"<title(?=[\s/>])[^>]*>")
+_FAVICON = b'<link rel="icon" href="/.marque/icone?de=/favicon.ico">'
+
+
+def est_page(type_contenu: str | None) -> bool:
+    return (type_contenu or "").split(";")[0].strip().lower() == "text/html"
+
+
+def est_manifeste(chemin: str, type_contenu: str | None) -> bool:
+    sans_requete = chemin.split("?")[0]
+    type_seul = (type_contenu or "").split(";")[0].strip().lower()
+    return (
+        sans_requete.endswith(".webmanifest")
+        or sans_requete == "/manifest.json"
+        or type_seul == "application/manifest+json"
+    )
+
+
+def _balise_icone(balise: bytes) -> tuple[bool, tuple[int, int, bytes, bool] | None]:
+    """Si un `<link>` est une icône, et la place de la valeur de son `href` dans la balise."""
+    rel = ""
+    href = None
+    for m in _ATTRIBUT_LINK.finditer(balise, len(b"<link")):
+        nom = m.group(1).lower()
+        for k in (2, 3, 4):
+            if m.group(k) is not None:
+                valeur, debut, fin = m.group(k), m.start(k), m.end(k)
+                break
+        else:
+            continue
+        if nom == b"rel" and not rel:
+            rel = valeur.decode("latin-1").lower()
+        elif nom == b"href" and href is None:
+            href = (debut, fin, valeur, m.group(4) is not None)
+    mots = rel.split()
+    icone = "icon" in mots or any(mot.startswith("apple-touch-icon") for mot in mots)
+    return icone, href
+
+
+def retoucher_page(corps: bytes, chemin: str, hote: str | None) -> bytes:
+    """La page avec la feuille, le préfixe du titre et les liens d'icône."""
+    # Les formes se cherchent hors des commentaires : leur texte est masqué, de même longueur.
+    visible = _COMMENTAIRE.sub(lambda m: b" " * len(m.group()), corps).lower()
+    fin = visible.find(b"</head>")
+    if fin < 0:
+        fin = visible.find(b"<body")
+    if fin < 0:
+        fin = len(corps)
+    modifs: list[tuple[int, int, bytes]] = []
+    titre = _TITRE.search(visible, 0, fin)
+    if titre:
+        modifs.append((titre.end(), titre.end(), PREFIXE_TITRE))
+    liens = 0
+    for m in _LINK.finditer(visible, 0, fin):
+        balise = corps[m.start() : m.end()]
+        icone, href = _balise_icone(balise)
+        if not icone:
+            continue
+        liens += 1
+        if href is None:
+            continue
+        debut, fin_valeur, valeur, sans_guillemets = href
+        neuf = lien_icone(html.unescape(valeur.decode("utf-8", "replace")), chemin, hote).encode(
+            "ascii"
+        )
+        if sans_guillemets:
+            neuf = b'"' + neuf + b'"'
+        modifs.append((m.start() + debut, m.start() + fin_valeur, neuf))
+    modifs.append((fin, fin, LIEN_FEUILLE + (b"" if liens else _FAVICON)))
+    sortie = corps
+    for debut, bout, texte in sorted(modifs, key=lambda t: t[0], reverse=True):
+        sortie = sortie[:debut] + texte + sortie[bout:]
+    return sortie
+
+
+# --- le manifeste -------------------------------------------------------------------------------
+
+
+def retoucher_manifeste(corps: bytes, chemin: str, hote: str | None) -> bytes | None:
+    """Le manifeste marqué, ou `None` s'il est illisible."""
+    try:
+        manifeste = json.loads(corps.decode("utf-8-sig"))
+    except (UnicodeDecodeError, ValueError, RecursionError):
+        return None
+    if not isinstance(manifeste, dict):
+        return None
+    nom, court = manifeste.get("name"), manifeste.get("short_name")
+    if isinstance(nom, str):
+        manifeste["name"] = PREFIXE_NOM + nom
+    if isinstance(court, str):
+        manifeste["short_name"] = PREFIXE_NOM_COURT + court
+    if not isinstance(nom, str) and not isinstance(court, str):
+        manifeste["name"] = "test"
+    icones = manifeste.get("icons")
+    if isinstance(icones, list):
+        for icone in icones:
+            if isinstance(icone, dict) and isinstance(icone.get("src"), str):
+                icone["src"] = lien_icone(icone["src"], chemin, hote)
+    try:
+        return json.dumps(manifeste, ensure_ascii=False).encode("utf-8")
+    except UnicodeEncodeError:
+        return None
+
