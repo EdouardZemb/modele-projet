@@ -43,16 +43,22 @@ Les limites connues du relais, que cette liste ne ferme pas :
   ne commence pas par une seule `/` (la forme absolue comprise) ou qui porte un octet hors de
   0x21-0x7E, et une méthode qu'`http.client` ne sait pas envoyer (un octet de contrôle, un
   caractère non ASCII) ;
-- un en-tête qu'`email.feedparser` lit mal (une ligne sans deux-points, un nom suivi d'une espace,
-  un CR seul dans une valeur) lui fait perdre tous ceux qui le suivent, `Content-Length` compris :
-  le corps passerait pour une seconde requête. Le relais refuse la requête par 400, sans lire le
-  corps, et ferme la connexion ;
-- un corps au cadrage illisible (un `Transfer-Encoding` autre que `chunked`, des `Content-Length`
-  contradictoires ou qui ne sont pas des nombres, un morceau mal formé, plus de 100 champs de fin)
-  reçoit 400, et la connexion se ferme. Le relais lit jusqu'à deux blocs du corps (64 Kio au plus
-  chacun) avant d'ouvrir la connexion vers l'application : une erreur de cadrage dans ces deux
-  blocs, ou à la fin d'un corps d'un seul bloc, ne lui fait rien parvenir ; plus loin,
-  l'application reçoit le début de la requête, puis la fermeture ;
+- `email.feedparser`, qui lit les en-têtes pour `http.server`, perd tous ceux qui suivent une ligne
+  qu'il lit mal (une ligne sans deux-points, un nom suivi d'une espace), `Content-Length` compris,
+  et prend un CR pour une fin de ligne : le corps passerait pour une seconde requête, ou un
+  en-tête serait injecté. Le relais refuse par 400, sans lire le corps, et ferme la connexion,
+  une requête dont il note un défaut des en-têtes ; un CR ailleurs qu'avant le LF final d'une
+  ligne d'en-tête est refusé de même ;
+- un corps au cadrage illisible (un `Transfer-Encoding` autre que `chunked`, ou accompagné d'un
+  `Content-Length`, des `Content-Length` contradictoires ou qui ne sont pas des nombres, un morceau
+  mal formé, plus de 100 champs de fin) reçoit 400, et la connexion se ferme. Le relais lit
+  jusqu'à deux blocs du corps (64 Kio au plus chacun) avant d'ouvrir la connexion vers
+  l'application : une erreur de cadrage dans ces deux blocs, ou à la fin d'un corps d'un seul
+  bloc, ne lui fait rien parvenir ; plus loin, l'application reçoit le début de la requête, puis la
+  fermeture ;
+- le corps d'une requête est toujours lu en entier avant la réponse : un client qui envoie un corps
+  par morceaux et attend la réponse avant de le finir reste bloqué jusqu'au délai d'inactivité de
+  75 s, qui ferme la connexion ;
 - une réponse 1xx de l'application autre que 100 (103 Early Hints) est prise par `http.client` pour
   la réponse finale : le relais la transmet seule, la réponse qui la suit se perd, et le client
   attend la réponse finale jusqu'au délai d'inactivité de 75 s, qui ferme la connexion ;
@@ -586,6 +592,28 @@ class _MalFormee(Exception):
     """Le cadrage du corps de la requête est illisible : on ne sait plus où elle finit."""
 
 
+class _Lignes:
+    """Le fichier du client, le temps que `http.client.parse_headers` lise les en-têtes, ce qu'il
+    fait par `readline` seul : note une ligne qui porte un CR ailleurs que juste avant son LF
+    final, qu'`email.feedparser` prendrait pour une fin de ligne."""
+
+    def __init__(self, fichier) -> None:
+        self.fichier = fichier
+        self.cr_nu = False
+
+    def readline(self, taille: int = -1) -> bytes:
+        ligne = self.fichier.readline(taille)
+        if ligne.endswith(b"\r\n"):
+            reste = ligne[:-2]
+        elif ligne.endswith(b"\n"):
+            reste = ligne[:-1]
+        else:
+            reste = ligne
+        if b"\r" in reste:
+            self.cr_nu = True
+        return ligne
+
+
 def journal(message: str) -> None:
     """Une ligne du journal, sur la sortie d'erreur. Jamais un chemin, une requête, un en-tête ni
     une adresse : un jeton peut passer dans un chemin."""
@@ -728,6 +756,17 @@ class Relais(BaseHTTPRequestHandler):
     def log_message(self, *args) -> None:
         """Rien : le journal de `http.server` porte la ligne de requête et l'adresse du client."""
 
+    def parse_request(self) -> bool:
+        # `_Lignes` voit les lignes brutes des en-têtes, puis `self.rfile` redevient le fichier du
+        # client, intact : le corps se lit sans lui.
+        lignes = _Lignes(self.rfile)
+        self.rfile = lignes
+        try:
+            return super().parse_request()
+        finally:
+            self.rfile = lignes.fichier
+            self._cr_nu = lignes.cr_nu
+
     def __getattr__(self, nom: str):
         # Toute méthode passe, et non les seules que `http.server` connaît.
         if nom.startswith("do_"):
@@ -738,10 +777,11 @@ class Relais(BaseHTTPRequestHandler):
 
     def _servir(self) -> None:
         self._repondu = False
-        if self.headers.defects:
+        if self.headers.defects or self._cr_nu:
             # `email.feedparser` a perdu les en-têtes qui suivent une ligne mal formée,
-            # `Content-Length` et `Transfer-Encoding` compris : le corps passerait pour une seconde
-            # requête. Il n'est pas lu, et la connexion se ferme.
+            # `Content-Length` et `Transfer-Encoding` compris, ou a lu un CR nu comme une fin de
+            # ligne : le corps passerait pour une seconde requête, ou un en-tête serait injecté.
+            # Il n'est pas lu, et la connexion se ferme.
             self._repondre(400, "en-têtes mal formés\n".encode(), fermer=True)
             return
         try:
@@ -767,6 +807,9 @@ class Relais(BaseHTTPRequestHandler):
         codages = self.headers.get_all("Transfer-Encoding")
         if codages:
             if ",".join(codages).strip().lower() != "chunked":
+                raise _MalFormee
+            if "Content-Length" in self.headers:
+                # Un frontal qui lirait `Content-Length` verrait une autre fin de requête.
                 raise _MalFormee
             return self._morceaux(), True
         longueurs = {valeur.strip() for valeur in self.headers.get_all("Content-Length") or ()}
@@ -943,12 +986,11 @@ class Relais(BaseHTTPRequestHandler):
 
     # --- la transmission ----------------------------------------------------------------------
 
-    def _vers_l_amont(self, par_morceaux: bool) -> list[tuple[str, str]]:
+    def _vers_l_amont(self) -> list[tuple[str, str]]:
+        # `Content-Length` ne vient jamais avec `Transfer-Encoding` : `_corps` les refuse ensemble.
         retires = {"accept-encoding", "expect"}
         if self.command in ("GET", "HEAD"):
             retires |= _CONDITIONNELS
-        if par_morceaux:
-            retires.add("content-length")
         return [
             (nom, valeur)
             for nom, valeur in _sans_un_saut(self.headers.items())
@@ -968,7 +1010,7 @@ class Relais(BaseHTTPRequestHandler):
         try:
             try:
                 conn.putrequest(self.command, self.path, skip_host=True, skip_accept_encoding=True)
-                for nom, valeur in self._vers_l_amont(par_morceaux):
+                for nom, valeur in self._vers_l_amont():
                     conn.putheader(nom, valeur)
                 if par_morceaux:
                     conn.putheader("Transfer-Encoding", "chunked")

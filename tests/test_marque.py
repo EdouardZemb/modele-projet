@@ -449,6 +449,9 @@ def test_lien_icone():
     assert marque.lien_icone("https://h/i.png", "/", None) == "/.marque/icone"
     assert marque.lien_icone("data:image/png;base64,AAAA", "/", "h") == "/.marque/icone"
     assert marque.lien_icone("/a b.png", "/", "h") == "/.marque/icone"
+    # le relais ne demande jamais à l'application un chemin qui est le sien
+    assert marque.lien_icone("/.marque/icone?de=/i.png", "/", "h") == "/.marque/icone"
+    assert marque.lien_icone("https://h/.marque/sante", "/", "h") == "/.marque/icone"
 
 
 def test_page_sans_lien_recoit_favicon():
@@ -1410,8 +1413,7 @@ def test_expect_100_continue(app, relais):
 def test_corps_par_morceaux_transmis(app, relais):
     envoi = morceaux(b"premier ", b"second ", b"x" * 100000)
     with Connexion(relais.port) as c:
-        cadre = ("Transfer-Encoding: chunked", "Content-Length: 3")
-        c.envoyer(octets_requete("POST", "/envoi", *cadre) + envoi)
+        c.envoyer(octets_requete("POST", "/envoi", "Transfer-Encoding: chunked") + envoi)
         assert c.reponse().statut == 200
     (requete,) = app.requetes
     assert requete.corps == b"premier second " + b"x" * 100000
@@ -1516,7 +1518,10 @@ def aucune_connexion(ecoute):
 
 
 MORCEAUX = ("Transfer-Encoding: chunked",)
+# qui lirait `Content-Length` y verrait une seconde requête, que `Transfer-Encoding` cache
+DESYNCHRONISE = b"0\r\n\r\n" + octets_requete("GET", "/cachee")
 CADRAGES_REFUSES = (
+    ((*MORCEAUX, f"Content-Length: {len(DESYNCHRONISE)}"), DESYNCHRONISE),
     (("Transfer-Encoding: gzip",), morceaux(b"abc")),
     (("Content-Length: 3", "Content-Length: 4"), b"abcd"),
     (("Content-Length: abc",), b"abc"),
@@ -1549,11 +1554,21 @@ def test_cent_champs_de_fin_admis(app, relais):
     assert [(r.chemin, r.corps) for r in app.requetes] == [("/envoi", b"abc"), ("/suite", b"")]
 
 
+MAL_FORMES = (
+    # des défauts qu'`email.feedparser` note
+    *("X-A 1", "X-A : 1", "X-A: 1\rB"),
+    # des CR qu'il prend, sans défaut, pour une fin de ligne : il perd ce qui les suit
+    *("X-A: 1\r", "\rX-B: 2", "\r"),
+    # un CR nu qu'il garde dans la valeur, un en-tête qu'il voit injecté
+    *("X-A: 1\r 2", "X-A: 1\rX-B: 2"),
+)
+
+
 def test_entetes_mal_formes_400(app, relais, capsys):
     # perdus, `Content-Length` et ce qui le suit feraient du corps une seconde requête
     cachee = octets_requete("GET", "/cachee")
     longueur = f"Content-Length: {len(cachee)}"
-    for ligne in ("X-A 1", "X-A : 1", "X-A: 1\rB"):
+    for ligne in MAL_FORMES:
         with Connexion(relais.port) as c:
             c.envoyer(octets_requete("POST", "/a", ligne, longueur, JETON, corps=cachee))
             rep = c.reponse()
@@ -1562,6 +1577,25 @@ def test_entetes_mal_formes_400(app, relais, capsys):
             assert c.fermee()
     assert app.requetes == []
     assert capsys.readouterr().err == ""
+    regle = "un CR ailleurs qu'avant le LF final d'une ligne d'en-tête est refusé"
+    assert regle in " ".join(marque.__doc__.split())
+
+
+def test_entetes_bien_formes_admis(app, relais):
+    with Connexion(relais.port) as c:
+        c.envoyer(octets_requete("POST", "/sain", "X-A: 1", "Cookie: s=1; t=2", corps=b"abc"))
+        assert c.reponse().statut == 200
+        # une valeur repliée : chaque CR précède le LF final de sa ligne
+        c.envoyer(octets_requete("POST", "/repliee", "X-A: 1", "  suite", corps=b"abc"))
+        assert c.reponse().statut == 200
+        c.envoyer(b"POST /lf HTTP/1.1\nHost: app.exemple\nX-A: 1\nContent-Length: 3\n\nabc")
+        assert c.reponse().statut == 200
+    recues = [(r.chemin, r.corps, r.tous("X-A")) for r in app.requetes]
+    assert recues == [
+        ("/sain", b"abc", ["1"]),
+        ("/repliee", b"abc", ["1\r\n  suite"]),
+        ("/lf", b"abc", ["1"]),
+    ]
 
 
 def test_double_barre_reecrite(app, relais):
