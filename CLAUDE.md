@@ -627,8 +627,11 @@ seule, la session du projet notant ce qu'il rapporte (S-6).
   sa ligne au journal de la sonde. La première est celle du conteneur qui servait avant la mise à
   jour, faite par le nouveau `deployer.sh` au déploiement de sa fusion ; la seconde, celle du
   conteneur que ce déploiement a démarré, remplacé par la fusion suivante (veille-emploi#33) : son
-  premier horodatage suit de 3 s la première copie. En prod, à l'étiquette `v0.4.0`, préparée et
-  non posée au 18/11, sans date.
+  premier horodatage suit de 3 s la première copie. En prod, relevé le même jour, après son
+  étiquette `v0.4.0`, la première qui porte sa mise à jour : une copie, en 600, dans un dossier en
+  700, avec sa ligne au journal de la sonde. C'est celle du conteneur en `0.3.0`, dont elle porte
+  la version dans son nom, et non celle qu'on déploie ; son premier horodatage est celui du
+  déploiement de la `v0.3.0`, quatre jours plus tôt : elle couvre toute la vie du conteneur.
 - **Non constatés sur la cible** : la limite des 5 copies, un retour arrière, un conteneur arrêté
   (S-5), et le contenu des copies, que personne n'a lu.
 - **Le geste lui-même** : les messages disaient de passer les commandes à `ssh` sous Git Bash comme
@@ -674,10 +677,7 @@ Prochain, au choix d'Edouard :
   et LE-100, avec LE-88 et LE-89 (un contrôle qui passe sans voir ce qu'il doit voir : des gardes
   qu'aucun test ne tenait, une horloge en échec lue comme un horodatage, deux mécanismes revenus
   d'un lot à l'autre) ; LE-101, avec LE-57, LE-84, LE-87 et LE-99 (un comportement d'outil supposé
-  dans un geste qu'un message donne à lancer : le `ssh` de Git Bash, sans l'agent de Windows) ;
-- en attente, sans date : la première copie de prod de `veille-emploi`, après sa prochaine
-  étiquette qui porte sa mise à jour en `v0.13.0`, constatée par le geste 👤 d'Edouard que donne
-  son message, écrit avec le client `ssh` de Windows, sa session notant ce qu'il rapporte (S-6).
+  dans un geste qu'un message donne à lancer : le `ssh` de Git Bash, sans l'agent de Windows).
 
 Le cadrage est dans `docs/cadrage.md` ; ce que les lots ont appris, dans `docs/registre.md`.
 
