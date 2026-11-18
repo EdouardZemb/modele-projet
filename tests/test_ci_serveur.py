@@ -5,11 +5,13 @@ import json
 import os
 import re
 import socket
+import struct
 import subprocess
 import sys
 import time
 import urllib.error
 import urllib.request
+import zlib
 
 import yaml
 from conftest import RACINE, REPONSES_SERVEUR, git, trouver_bash
@@ -777,6 +779,76 @@ def test_fausse_app_sante(tmp_path):
         assert app.sante() == (503, {"statut": "ko"})
         code, _ = obtenir(app.adresse("/ailleurs"))
         assert code == 404
+
+
+def obtenir_avec_type(adresse):
+    """Le code, le type de contenu et le corps d'une réponse de la fausse app."""
+    try:
+        with urllib.request.urlopen(adresse, timeout=2) as reponse:
+            return reponse.status, reponse.headers.get("Content-Type"), reponse.read()
+    except urllib.error.HTTPError as erreur:
+        return erreur.code, erreur.headers.get("Content-Type"), erreur.read()
+
+
+def blocs_png(donnees):
+    """Les blocs d'un PNG, (nom, corps), chacun vérifié par son CRC, de IHDR à IEND."""
+    assert donnees[:8] == b"\x89PNG\r\n\x1a\n"
+    blocs = []
+    pos = 8
+    while pos < len(donnees):
+        (taille,) = struct.unpack_from(">I", donnees, pos)
+        nom, corps = donnees[pos + 4 : pos + 8], donnees[pos + 8 : pos + 8 + taille]
+        assert len(corps) == taille, nom
+        (crc,) = struct.unpack_from(">I", donnees, pos + 8 + taille)
+        assert zlib.crc32(nom + corps) & 0xFFFFFFFF == crc, nom
+        blocs.append((nom, corps))
+        pos += 12 + taille
+    assert pos == len(donnees)
+    assert blocs[0][0] == b"IHDR" and blocs[-1] == (b"IEND", b"")
+    return blocs
+
+
+def test_fausse_app_sert_page_manifeste_icone(tmp_path):
+    """Lot 19 : la fausse app sert aussi ce que le relais du staging marque, une page, son manifeste
+    et son icône, pour que l'épreuve des données les lise par le relais, puis en prod sans lui. La
+    page porte son titre, le lien du manifeste et celui de l'icône ; le manifeste, servi en
+    `application/manifest+json`, nomme l'icône ; l'icône est un PNG de 16 × 16 en RVBA, tout
+    `#0b7f8f`, opaque. Tout autre chemin rend 404, et la santé ne change pas."""
+    with AppLancee(env_de_l_app(tmp_path)) as app:
+        code, type_contenu, corps = obtenir_avec_type(app.adresse("/"))
+        assert code == 200
+        assert type_contenu == "text/html; charset=utf-8"
+        page = corps.decode("utf-8")
+        for fragment in (
+            "<title>fausse app</title>",
+            '<link rel="manifest" href="/manifest.webmanifest">',
+            '<link rel="icon" href="/icone.png">',
+        ):
+            assert fragment in page, fragment
+        assert page.index("<title>") < page.index("</head>") < page.index("<body")
+
+        code, type_contenu, corps = obtenir_avec_type(app.adresse("/manifest.webmanifest"))
+        assert code == 200
+        assert type_contenu == "application/manifest+json"
+        assert json.loads(corps) == {
+            "name": "fausse app",
+            "short_name": "fausse",
+            "icons": [{"src": "/icone.png", "sizes": "16x16", "type": "image/png"}],
+        }
+
+        code, type_contenu, corps = obtenir_avec_type(app.adresse("/icone.png"))
+        assert code == 200
+        assert type_contenu == "image/png"
+        blocs = blocs_png(corps)
+        # 16 × 16, profondeur 8, RVBA (type 6), sans compression ni filtrage autres, ni entrelacé
+        assert struct.unpack(">IIBBBBB", blocs[0][1]) == (16, 16, 8, 6, 0, 0, 0)
+        pixels = zlib.decompress(b"".join(c for nom, c in blocs if nom == b"IDAT"))
+        # chaque ligne : son octet de filtre (0), puis 16 pixels #0b7f8f opaques
+        assert pixels == (b"\x00" + bytes.fromhex("0b7f8fff") * 16) * 16
+
+        for chemin in ("/index.html", "/manifest.json", "/favicon.ico", "/icone.png/", "/api"):
+            assert obtenir(app.adresse(chemin))[0] == 404, chemin
+        assert app.sante()[0] == 200
 
 
 def test_fausse_app_configuration_montee(tmp_path):

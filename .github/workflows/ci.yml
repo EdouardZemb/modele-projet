@@ -151,8 +151,9 @@ jobs:
 
   # La fausse app (tests/modele/fausse-app/) dans un projet `serveur` rendu, par l'action
   # modele-image-construire du rendu, en vrai Docker : construction, santé, révision, sauvegarde,
-  # vérification, l'exemple de l'instance (spec §10.3) ; puis deux épreuves sur le Docker du job :
-  # le ménage des images, et la chaîne à deux dépôts, de deployer.sh à la santé (M-0006, §§ 5-6).
+  # vérification, l'exemple de l'instance (spec §10.3) ; puis deux épreuves sur le Docker du job,
+  # sous le Compose de la cible, 2.26.1 (lot 19) : le ménage des images, et la chaîne à deux dépôts,
+  # de deployer.sh à la santé (M-0006, §§ 5-6), le relais qui marque le staging compris.
   fausse-app:
     name: fausse-app
     runs-on: ubuntu-latest
@@ -197,6 +198,48 @@ jobs:
               exit 1
               ;;
           esac
+      # Lot 19 : la cible a Compose 2.26.1, dans une construction de sa distribution, le runner une
+      # version plus récente. Comme menage-cible pour le moteur (LE-41), les épreuves tournent sous
+      # la version de la cible, celle du binaire amont, que tests/modele/docker-cible.env déclare
+      # avec son empreinte : installer_compose.py le télécharge de sa publication, vérifie
+      # l'empreinte, puis l'écrit dans /usr/local/lib/docker/cli-plugins, que le client de Docker
+      # lit avant le dossier du paquet, même sous un DOCKER_CONFIG posé, comme celui de charger_env.
+      # La version se vérifie sans puis avec un DOCKER_CONFIG vide, et s'écrit au résumé du job.
+      # Chaque échec est dit, sans rien devoir à `bash -e` (test_compose_cible).
+      - name: Le Compose de la cible
+        run: |
+          . tests/modele/docker-cible.env || {
+            echo "::error::tests/modele/docker-cible.env illisible"
+            exit 1
+          }
+          for cle in COMPOSE_CIBLE COMPOSE_CIBLE_EMPREINTE; do
+            if [ -z "${!cle:-}" ]; then
+              echo "::error::$cle absent de tests/modele/docker-cible.env"
+              exit 1
+            fi
+          done
+          sudo python3 -I tests/modele/installer_compose.py \
+            --source "https://github.com/docker/compose/releases/download/v$COMPOSE_CIBLE/docker-compose-linux-x86_64" \
+            --empreinte "$COMPOSE_CIBLE_EMPREINTE" \
+            --destination /usr/local/lib/docker/cli-plugins/docker-compose \
+            || { echo "::error::Compose $COMPOSE_CIBLE non installé"; exit 1; }
+          version=$(docker compose version --short) \
+            || { echo "::error::version de docker compose illisible"; exit 1; }
+          if [ "$version" != "$COMPOSE_CIBLE" ]; then
+            echo "::error::docker compose est en $version, la cible en $COMPOSE_CIBLE (tests/modele/docker-cible.env)"
+            exit 1
+          fi
+          vide=$(mktemp -d) || { echo "::error::DOCKER_CONFIG vide impossible (mktemp -d)"; exit 1; }
+          version_vide=$(DOCKER_CONFIG="$vide" docker compose version --short) \
+            || { echo "::error::version de docker compose illisible sous un DOCKER_CONFIG vide"; exit 1; }
+          rm -rf -- "$vide"
+          if [ "$version_vide" != "$COMPOSE_CIBLE" ]; then
+            echo "::error::sous un DOCKER_CONFIG vide, docker compose est en $version_vide, la cible en $COMPOSE_CIBLE"
+            exit 1
+          fi
+          ligne="Compose $version, la cible $COMPOSE_CIBLE (relevé du ${COMPOSE_CIBLE_RELEVE:-?}), de même sous un DOCKER_CONFIG vide"
+          echo "$ligne"
+          echo "$ligne" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
@@ -226,7 +269,7 @@ jobs:
         if: always()
         run: >-
           docker rm -f -v epreuve-registre epreuve-conteneur epreuve-donnees-registre
-          fausse-app-app-1 fausse-app-staging-app-1 || true
+          fausse-app-app-1 fausse-app-staging-app-1 fausse-app-staging-marque-1 || true
       - name: Supprimer le conteneur
         if: always()
         run: docker rm -f -v fausse-app

@@ -11,6 +11,10 @@ rend {statut, environnement, version, revision, configuration} : statut `ok` tan
 révision viennent de FAUSSE_APP_ENV, FAUSSE_APP_VERSION et FAUSSE_APP_REVISION ; le Dockerfile
 pose la révision, depuis l'argument de construction REVISION.
 
+Elle sert aussi ce que le relais du staging marque (lot 19) : une page, `/` (son titre, le lien de
+son manifeste et celui de son icône), son manifeste, `/manifest.webmanifest`, et son icône,
+`/icone.png`, un PNG de 16 x 16 tout #0b7f8f, écrit par zlib. Tout autre chemin rend 404.
+
 Ses données, au premier démarrage : sur un /donnees absent ou vide, l'app sème ce que le Dockerfile
 sème dans l'image (SEMIS), comme une vraie app crée son stockage. Sur le serveur, /donnees est un
 dossier de l'hôte, vide au premier déploiement, monté par-dessus celui de l'image. Un /donnees qui
@@ -31,7 +35,9 @@ FAUSSE_APP_DONNEES, FAUSSE_APP_CONFIG et FAUSSE_APP_CONTENU remplacent /donnees,
 
 import json
 import os
+import struct
 import sys
+import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -46,6 +52,55 @@ SEMIS = {
     "MARQUE": "fausse-app\n",
     "notes/premiere.txt": "une note\n",
     ".cachee": "un fichier caché\n",
+}
+
+
+def bloc_png(nom, donnees):
+    """Un bloc PNG : sa longueur, son nom, ses données et son CRC, calculé sur le nom et les
+    données."""
+    crc = zlib.crc32(nom + donnees) & 0xFFFFFFFF
+    return struct.pack(">I", len(donnees)) + nom + donnees + struct.pack(">I", crc)
+
+
+def icone(cote=16, couleur=(0x0B, 0x7F, 0x8F)):
+    """Un PNG de `cote` x `cote`, profondeur 8, en RVBA (type 6), tout `couleur`, opaque : chaque
+    ligne, son octet de filtre (0), puis ses pixels."""
+    ligne = b"\x00" + bytes((*couleur, 0xFF)) * cote
+    entete = struct.pack(">IIBBBBB", cote, cote, 8, 6, 0, 0, 0)
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + bloc_png(b"IHDR", entete)
+        + bloc_png(b"IDAT", zlib.compress(ligne * cote, 9))
+        + bloc_png(b"IEND", b"")
+    )
+
+
+# Ce que le relais du staging marque : la page, le manifeste et l'icône, chacun avec son type.
+PAGE = (
+    b"<!doctype html>\n"
+    b'<html lang="fr">\n'
+    b"<head>\n"
+    b'<meta charset="utf-8">\n'
+    b"<title>fausse app</title>\n"
+    b'<link rel="manifest" href="/manifest.webmanifest">\n'
+    b'<link rel="icon" href="/icone.png">\n'
+    b"</head>\n"
+    b"<body>\n"
+    b"<p>fausse app</p>\n"
+    b"</body>\n"
+    b"</html>\n"
+)
+MANIFESTE = json.dumps(
+    {
+        "name": "fausse app",
+        "short_name": "fausse",
+        "icons": [{"src": "/icone.png", "sizes": "16x16", "type": "image/png"}],
+    }
+).encode("utf-8")
+RESSOURCES = {
+    "/": ("text/html; charset=utf-8", PAGE),
+    "/manifest.webmanifest": ("application/manifest+json", MANIFESTE),
+    "/icone.png": ("image/png", icone()),
 }
 
 
@@ -127,13 +182,17 @@ class Gestionnaire(BaseHTTPRequestHandler):
     configuration = "exemple"
 
     def do_GET(self):
-        if self.path != CHEMIN_SANTE:
+        if self.path == CHEMIN_SANTE:
+            code, document = sante(self.configuration)
+            self.repondre(code, "application/json", json.dumps(document).encode("utf-8"))
+        elif self.path in RESSOURCES:
+            self.repondre(200, *RESSOURCES[self.path])
+        else:
             self.send_error(404)
-            return
-        code, document = sante(self.configuration)
-        corps = json.dumps(document).encode("utf-8")
+
+    def repondre(self, code, type_contenu, corps):
         self.send_response(code)
-        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Type", type_contenu)
         self.send_header("Content-Length", str(len(corps)))
         self.end_headers()
         self.wfile.write(corps)
