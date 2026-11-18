@@ -20,8 +20,10 @@
 # fausse app écrit ses lignes sur sa sortie d'erreur, que la copie doit garder ; et, pour le relais
 # du staging, ce que fait Compose : `!reset` et `!override`, qui retirent à app son port et son
 # alias, l'ordre que donne depends_on, --remove-orphans, le chemin relatif d'un montage dans un
-# fichier ajouté par -f, et l'étiquette qui recrée le relais quand son script change. Le job
-# fausse-app installe avant l'épreuve le Compose de la cible, 2.26.1, celui du binaire amont
+# fichier ajouté par -f, et l'étiquette qui recrée le relais quand son script change. Compose
+# recrée le relais dès qu'il recrée app, dont il dépend, que l'étiquette ait changé ou non :
+# l'étiquette ne sert que quand app n'est pas recréé, et une étape isolée le prouve (6.3 ter).
+# Le job fausse-app installe avant l'épreuve le Compose de la cible, 2.26.1, celui du binaire amont
 # (tests/modele/docker-cible.env) : la ligne qui ouvre l'épreuve dit la version qu'elle a trouvée.
 #
 # Préparation, tout dans un dossier de travail :
@@ -76,16 +78,25 @@
 #      6.2 un échec forcé, depuis le staging sans marque : une image dérivée, poussée au registre
 #          local, dont l'étiquette de révision diffère de ce qu'annonce sa santé. Son `up` passe le
 #          port et l'alias au relais sans erreur de port (depends_on), la santé lue par le relais
-#          échoue, et le retour d'echouer recopie le compose.env sans marque : app reprend le port
-#          et l'alias, et --remove-orphans retire le relais ;
+#          échoue, et le journal en dit la cause : la révision attendue, celle de l'image dérivée,
+#          et celle de la dernière réponse, celle de l'image du couple ; le retour d'echouer
+#          recopie le compose.env sans marque : app reprend le port et l'alias, et
+#          --remove-orphans retire le relais ;
 #      6.3 un déploiement réussi, marqué, d'un couple neuf (le commit 4) : le relais tient le port
 #          et l'alias ; la page porte la feuille et le titre préfixé, le manifeste ses noms
 #          préfixés et ses icônes vers /.marque/icone, l'icône rendue est un PNG valide de 16 x 16
-#          dont aucun pixel ne vaut #0b7f8f, et la santé, lue par ce port, dit le couple. Puis le
-#          script du relais de la copie change, et le déploiement d'un couple neuf (le commit 5)
-#          recrée le relais, dont l'étiquette modele.marque.empreinte porte la nouvelle empreinte ;
-#      6.4 un second échec forcé, depuis le staging marqué : le retour garde le relais, qui tient
-#          le port et l'alias ;
+#          dont aucun pixel ne vaut #0b7f8f, et la santé, lue par ce port, dit le couple. Puis
+#          (6.3 bis) le script du relais de la copie change, et le déploiement d'un couple neuf (le
+#          commit 5) écrit la nouvelle empreinte, que porte l'étiquette modele.marque.empreinte du
+#          relais ; ce déploiement recrée app, et avec lui le relais, que l'étiquette ait changé ou
+#          non. Enfin (6.3 ter), l'étiquette seule : un `up` sur les fichiers de `dc`, sans aucun
+#          changement, laisse app et le relais en place (le témoin) ; le script change de nouveau,
+#          seule la ligne FAUSSE_APP_RELAIS de compose.env suit, et le même `up` recrée le relais,
+#          sous la nouvelle empreinte, sans recréer app ; puis le script et compose.env de 6.3 bis
+#          reviennent, et un dernier `up` recrée le relais sous l'empreinte de 6.3 bis, toujours
+#          sans recréer app : 6.4 part de cet état ;
+#      6.4 un second échec forcé, depuis le staging marqué, la cause dite de même : le retour
+#          garde le relais, qui tient le port et l'alias ;
 #      6.5 « Tout arrêter » : le `down` du staging, sur compose.yml et compose.projet.yml, avec
 #          --remove-orphans, retire aussi le relais.
 #      À chaque étape, l'épreuve dit qui tient le port et l'alias : /.marque/sante rend 200 par le
@@ -110,8 +121,9 @@
 # Code de sortie : 0 si tout est comme attendu, 1 sinon, en disant quoi ; 64 usage. À la fin,
 # l'épreuve retire ses conteneurs, le relais compris, ses réseaux, son registre, l'étiquette
 # qu'elle a posée sur l'image, l'image dérivée qu'elle a construite et son dossier de travail, et
-# rien d'autre : l'image du relais, que compose tire, reste, comme celle du registre. En cas
-# d'échec, elle montre d'abord le journal de ses conteneurs.
+# rien d'autre : l'image du relais, que compose tire, reste, comme celle du registre, et le cache
+# de construction de l'image dérivée aussi. En cas d'échec, elle montre d'abord le journal de ses
+# conteneurs.
 set -Eeuo pipefail
 
 USAGE="usage : bash tests/modele/epreuve-donnees.sh <rendu>"
@@ -427,8 +439,20 @@ retire() { ! docker container inspect "$1" >/dev/null 2>&1; }
 # empreinte_du_relais : l'empreinte SHA-256 du script du relais de la copie du code, celle que
 # deployer.sh écrit dans compose.env en staging.
 empreinte_du_relais() { sha256sum <"$CODE_CLONE/scripts/modele/marque.py" | cut -c1-64; }
-# relais_de <état> : la valeur de FAUSSE_APP_RELAIS dans le compose.env de cet état, vide sans elle.
-relais_de() { sed -n 's/^FAUSSE_APP_RELAIS=//p' "$1/compose.env" 2>/dev/null || true; }
+# relais_vaut <état> <valeur> : le compose.env de cet état existe, et sa ligne FAUSSE_APP_RELAIS
+# vaut <valeur> ; une valeur vide : il n'a pas cette ligne. Un compose.env absent échoue, quelle
+# que soit la valeur attendue ; un écart dit la valeur lue.
+relais_vaut() {
+  local lue
+  if [ ! -f "$1/compose.env" ]; then
+    echo "       $1/compose.env absent" >&2
+    return 1
+  fi
+  lue="$(sed -n 's/^FAUSSE_APP_RELAIS=//p' "$1/compose.env")"
+  [ "$lue" = "$2" ] && return 0
+  echo "       FAUSSE_APP_RELAIS de $1/compose.env : ${lue:-absente}" >&2
+  return 1
+}
 # etiquette_du_relais <conteneur> : son étiquette modele.marque.empreinte.
 etiquette_du_relais() {
   docker container inspect --format '{{index .Config.Labels "modele.marque.empreinte"}}' "$1" \
@@ -619,12 +643,14 @@ if (quoi == "toutes" and egaux != len(pixels)) or (quoi == "aucune" and egaux):
 PY
 }
 
-# compose_sans_marque <n> <arguments…> : docker compose sur le staging, sous le DOCKER_CONFIG de
-# l'épreuve, avec les fichiers que `dc` prenait avant le lot 19, d'après compose.env, sans
-# compose.marque.yml ; son code dans CODE, sa sortie dans journal-<n>, puis répétée.
-compose_sans_marque() {
-  local n="$1"
-  shift
+# compose_staging <comme-dc|sans-marque> <n> <arguments…> : docker compose sur le staging, sous le
+# DOCKER_CONFIG de l'épreuve, avec les fichiers que prend `dc` d'après compose.env : comme-dc,
+# compose.marque.yml en dernier quand compose.env porte FAUSSE_APP_RELAIS ; sans-marque, ceux que
+# `dc` prenait avant le lot 19, sans compose.marque.yml. Son code dans CODE, sa sortie dans
+# journal-<n>, puis répétée.
+compose_staging() {
+  local mode="$1" n="$2"
+  shift 2
   local -a fichiers=(-f "$CODE_CLONE/deploiement/compose.yml"
     -f "$CODE_CLONE/deploiement/compose.projet.yml")
   if grep -q '^FAUSSE_APP_CONFIG=' "$ETAT_STAGING/compose.env"; then
@@ -633,11 +659,27 @@ compose_sans_marque() {
   if grep -q '^FAUSSE_APP_CONTENU=' "$ETAT_STAGING/compose.env"; then
     fichiers+=(-f "$CODE_CLONE/deploiement/compose.contenu.yml")
   fi
+  if [ "$mode" = comme-dc ] && grep -q '^FAUSSE_APP_RELAIS=' "$ETAT_STAGING/compose.env"; then
+    fichiers+=(-f "$CODE_CLONE/deploiement/compose.marque.yml")
+  fi
   CODE=0
   DOCKER_CONFIG="$TRAVAIL/docker" docker compose -p fausse-app-staging "${fichiers[@]}" \
     --env-file "$ETAT_STAGING/compose.env" "$@" >"$TRAVAIL/journal-$n" 2>&1 || CODE=$?
   echo "--- $n : docker compose ${fichiers[*]##*/} $* : code $CODE"
   sed 's/^/    /' "$TRAVAIL/journal-$n"
+}
+# sante_attendait <n> <révision attendue> <révision lue> : la dernière ligne « santé non conforme »
+# de journal-<n> attend la première révision, et sa dernière réponse, du JSON lu par jq, porte la
+# seconde : la cause de l'échec, et non une autre différence.
+sante_attendait() {
+  local ligne attendu reponse
+  [ -n "$2" ] && [ -n "$3" ] || return 1
+  ligne="$(grep -F -- 'santé non conforme après' "$TRAVAIL/journal-$1" | tail -n 1)"
+  [[ "$ligne" == *' ; dernière réponse : '* ]] || return 1
+  attendu="${ligne%% ; dernière réponse : *}"
+  reponse="${ligne#* ; dernière réponse : }"
+  [[ "$attendu" == *"révision $2,"* || "$attendu" == *"révision $2)"* ]] &&
+    [ "$(jq -r '.revision' <<<"$reponse" 2>/dev/null)" = "$3" ]
 }
 # journal_avant <n> <texte> <texte> : le journal-<n> dit le premier texte avant le second.
 journal_avant() {
@@ -904,7 +946,7 @@ verifier "la racine de l'état est restée un lien" lien_en_place
 EMPREINTE1="$(empreinte_du_relais)"
 echo "       empreinte du script du relais : $EMPREINTE1"
 verifier "compose.env du staging porte FAUSSE_APP_RELAIS, l'empreinte du script de la copie" \
-  egaux "$(relais_de "$ETAT_STAGING")" "$EMPREINTE1"
+  relais_vaut "$ETAT_STAGING" "$EMPREINTE1"
 constater_tenants staging relais
 fin_du_point 6.1
 # Le compose.env que la v0.13.0 aurait écrit : le même, sans la ligne du relais ; puis le `up` de
@@ -913,9 +955,9 @@ fin_du_point 6.1
 SANS_RELAIS="$(grep -v '^FAUSSE_APP_RELAIS=' "$ETAT_STAGING/compose.env")" || SANS_RELAIS=""
 exiger "compose.env garde ses autres lignes sans celle du relais" differents "$SANS_RELAIS" ""
 printf '%s\n' "$SANS_RELAIS" >"$ETAT_STAGING/compose.env"
-compose_sans_marque 6.1 up -d --wait --wait-timeout 120 --remove-orphans
+compose_staging sans-marque 6.1 up -d --wait --wait-timeout 120 --remove-orphans
 exiger "code 0" code_vaut 0
-verifier "compose.env ne porte plus FAUSSE_APP_RELAIS" egaux "$(relais_de "$ETAT_STAGING")" ""
+verifier "compose.env ne porte plus FAUSSE_APP_RELAIS" relais_vaut "$ETAT_STAGING" ""
 constater_tenants staging app
 verifier "santé : ok, servie par app" sante_dit "$PORT_STAGING" \
   '.statut == "ok" and .environnement == "staging" and .version == "main"'
@@ -949,6 +991,8 @@ deployer 6.2 staging "$IMAGE_DERIVEE" main --commit-donnees "$TETE"
 exiger "code 1" code_vaut 1
 verifier "le journal dit l'échec par la santé" journal_dit 6.2 \
   "échec du déploiement de main (santé non conforme)"
+verifier "… sa cause : la révision attendue, de l'image dérivée ; celle lue, de l'image du couple" \
+  sante_attendait 6.2 "$AUTRE_REVISION" "$REVISION"
 verifier "… et non par le up de l'aller" journal_tait 6.2 "docker compose up en échec"
 verifier "aucun conflit de port" journal_tait 6.2 "port is already allocated"
 verifier "aucune adresse déjà prise" journal_tait 6.2 "address already in use"
@@ -962,7 +1006,7 @@ verifier "echec porte le couple de l'image dérivée" \
 verifier "deploye porte encore le couple d'avant" \
   fichier_vaut "$ETAT_STAGING/deploye" "$IMAGE main $TETE"
 verifier "compose.env, recopié du précédent, ne porte pas FAUSSE_APP_RELAIS" \
-  egaux "$(relais_de "$ETAT_STAGING")" ""
+  relais_vaut "$ETAT_STAGING" ""
 constater_tenants staging app
 APP62="$(conteneur_app fausse-app-staging)"
 exiger "un conteneur app en staging" un_seul "$APP62"
@@ -981,7 +1025,7 @@ deployer 6.3 staging "$IMAGE" main --commit-donnees "$C4"
 exiger "code 0" code_vaut 0
 verifier "deploye du staging porte le couple neuf" fichier_vaut "$ETAT_STAGING/deploye" "$IMAGE main $C4"
 verifier "compose.env porte FAUSSE_APP_RELAIS, l'empreinte du script de la copie" \
-  egaux "$(relais_de "$ETAT_STAGING")" "$EMPREINTE1"
+  relais_vaut "$ETAT_STAGING" "$EMPREINTE1"
 verifier "la santé, lue par le relais, a été conforme au déploiement" journal_dit 6.3 "santé conforme"
 constater_tenants staging relais
 MARQUE63="$(conteneur_marque fausse-app-staging)"
@@ -1020,8 +1064,9 @@ verifier "santé, lue par le relais : version main, révision de l'image, config
   '.statut == "ok" and .environnement == "staging" and .configuration == "exemple" and .version == "main" and .revision == $revision'
 fin_du_point 6.3
 echo "== 6.3 bis. le script du relais change"
-# Une étiquette changée change la configuration du service : le `up` suivant recrée le relais, qui
-# sinon garderait l'ancien script.
+# Le déploiement d'un couple neuf écrit la nouvelle empreinte dans compose.env, et l'étiquette du
+# relais la porte. Il recrée app, et Compose recrée alors le relais, qui en dépend, que l'étiquette
+# ait changé ou non : cette étape ne prouve pas l'étiquette, que 6.3 ter éprouve seule.
 printf '# épreuve : le script du relais change\n' >>"$CODE_CLONE/scripts/modele/marque.py"
 EMPREINTE2="$(empreinte_du_relais)"
 echo "       empreinte du script du relais : $EMPREINTE2"
@@ -1031,7 +1076,7 @@ C5="$COMMIT"
 deployer 6.3bis staging "$IMAGE" main --commit-donnees "$C5"
 exiger "code 0" code_vaut 0
 verifier "deploye du staging porte le couple neuf" fichier_vaut "$ETAT_STAGING/deploye" "$IMAGE main $C5"
-verifier "compose.env porte la nouvelle empreinte" egaux "$(relais_de "$ETAT_STAGING")" "$EMPREINTE2"
+verifier "compose.env porte la nouvelle empreinte" relais_vaut "$ETAT_STAGING" "$EMPREINTE2"
 MARQUE63B="$(conteneur_marque fausse-app-staging)"
 exiger "un conteneur marque en staging" un_seul "$MARQUE63B"
 verifier "son étiquette modele.marque.empreinte vaut la nouvelle empreinte" \
@@ -1043,19 +1088,89 @@ verifier "son titre est toujours préfixé" contient "$TRAVAIL/page-staging" \
   '<title>test &middot; fausse app</title>'
 fin_du_point 6.3
 
+POINT="6.3 ter"
+echo "== 6.3 ter. l'étiquette seule recrée le relais"
+# 6.3 bis recrée app, donc le relais : il ne prouve pas l'étiquette. Ici, app n'est jamais recréé.
+# D'abord le témoin : le `up` de `dc`, sur ses fichiers d'après compose.env, compose.marque.yml
+# compris, sans aucun changement, laisse app et le relais en place ; une recréation viendrait alors
+# d'ailleurs que l'étiquette. Puis le script change de nouveau, seule la ligne FAUSSE_APP_RELAIS de
+# compose.env suit, et le même `up` recrée le relais, sous la nouvelle empreinte, sans recréer app :
+# sans l'étiquette, rien ne changerait dans la configuration du relais, qui garderait l'ancien
+# script, lu à son démarrage. Enfin le script et compose.env de 6.3 bis reviennent, et un dernier
+# `up` remet le relais sous leur empreinte, celle que 6.4 attend, toujours sans recréer app.
+APP_TEMOIN="$(conteneur_app fausse-app-staging)"
+MARQUE_TEMOIN="$(conteneur_marque fausse-app-staging)"
+exiger "un conteneur app en staging, en marche" un_seul_en_marche "$APP_TEMOIN"
+exiger "un conteneur marque en staging, en marche" un_seul_en_marche "$MARQUE_TEMOIN"
+compose_staging comme-dc 6.3ter-temoin up -d --wait --wait-timeout 120 --remove-orphans
+exiger "témoin : code 0" code_vaut 0
+verifier "témoin : app reste en marche, sans être recréé" journal_dit 6.3ter-temoin \
+  "Container fausse-app-staging-app-1  Running"
+verifier "témoin : le relais aussi : le up a pris compose.marque.yml" journal_dit 6.3ter-temoin \
+  "Container fausse-app-staging-marque-1  Running"
+verifier "témoin : le journal ne recrée rien" journal_tait 6.3ter-temoin "Recreate"
+verifier "témoin : app garde son identifiant" \
+  egaux "$(conteneur_app fausse-app-staging)" "$APP_TEMOIN"
+verifier "témoin : le relais garde son identifiant" \
+  egaux "$(conteneur_marque fausse-app-staging)" "$MARQUE_TEMOIN"
+fin_du_point "$POINT"
+cp "$ETAT_STAGING/compose.env" "$TRAVAIL/compose.env-6.3bis"
+cp "$CODE_CLONE/scripts/modele/marque.py" "$TRAVAIL/marque.py-6.3bis"
+printf '# épreuve : le script du relais change de nouveau\n' >>"$CODE_CLONE/scripts/modele/marque.py"
+EMPREINTE3="$(empreinte_du_relais)"
+echo "       empreinte du script du relais : $EMPREINTE3"
+exiger "l'empreinte du script a changé de nouveau" differents "$EMPREINTE3" "$EMPREINTE2"
+AVEC_EMPREINTE3="$(sed "s/^FAUSSE_APP_RELAIS=.*/FAUSSE_APP_RELAIS=$EMPREINTE3/" "$TRAVAIL/compose.env-6.3bis")"
+printf '%s\n' "$AVEC_EMPREINTE3" >"$ETAT_STAGING/compose.env"
+exiger "compose.env porte la nouvelle empreinte" relais_vaut "$ETAT_STAGING" "$EMPREINTE3"
+verifier "… et ses autres lignes n'ont pas changé" egaux \
+  "$(grep -v '^FAUSSE_APP_RELAIS=' "$ETAT_STAGING/compose.env")" \
+  "$(grep -v '^FAUSSE_APP_RELAIS=' "$TRAVAIL/compose.env-6.3bis")"
+compose_staging comme-dc 6.3ter up -d --wait --wait-timeout 120 --remove-orphans
+exiger "code 0" code_vaut 0
+verifier "le journal recrée le relais" journal_dit 6.3ter \
+  "Container fausse-app-staging-marque-1  Recreated"
+verifier "… et ne recrée pas app" journal_tait 6.3ter "Container fausse-app-staging-app-1  Recreate"
+verifier "app garde l'identifiant du témoin" egaux "$(conteneur_app fausse-app-staging)" "$APP_TEMOIN"
+MARQUE63T="$(conteneur_marque fausse-app-staging)"
+exiger "un conteneur marque en staging, en marche" un_seul_en_marche "$MARQUE63T"
+verifier "le relais est recréé : son identifiant est neuf" differents "$MARQUE63T" "$MARQUE_TEMOIN"
+verifier "son étiquette modele.marque.empreinte vaut la nouvelle empreinte" \
+  egaux "$(etiquette_du_relais "$MARQUE63T")" "$EMPREINTE3"
+constater_tenants staging relais
+fin_du_point "$POINT"
+echo "       remise en état : le script du relais et compose.env de 6.3 bis"
+cp "$TRAVAIL/marque.py-6.3bis" "$CODE_CLONE/scripts/modele/marque.py"
+cp "$TRAVAIL/compose.env-6.3bis" "$ETAT_STAGING/compose.env"
+exiger "le script a de nouveau l'empreinte de 6.3 bis" egaux "$(empreinte_du_relais)" "$EMPREINTE2"
+exiger "compose.env porte de nouveau l'empreinte de 6.3 bis" relais_vaut "$ETAT_STAGING" "$EMPREINTE2"
+compose_staging comme-dc 6.3ter-retour up -d --wait --wait-timeout 120 --remove-orphans
+exiger "code 0" code_vaut 0
+verifier "app garde toujours l'identifiant du témoin" \
+  egaux "$(conteneur_app fausse-app-staging)" "$APP_TEMOIN"
+MARQUE63R="$(conteneur_marque fausse-app-staging)"
+exiger "un conteneur marque en staging, en marche" un_seul_en_marche "$MARQUE63R"
+verifier "le relais est recréé de nouveau" differents "$MARQUE63R" "$MARQUE63T"
+verifier "son étiquette vaut de nouveau l'empreinte de 6.3 bis" \
+  egaux "$(etiquette_du_relais "$MARQUE63R")" "$EMPREINTE2"
+constater_tenants staging relais
+fin_du_point "$POINT"
+
 POINT=6.4
 echo "== 6.4 un second échec forcé, depuis le staging marqué"
 deployer 6.4 staging "$IMAGE_DERIVEE" main --commit-donnees "$C5"
 exiger "code 1" code_vaut 1
 verifier "le journal dit l'échec par la santé" journal_dit 6.4 \
   "échec du déploiement de main (santé non conforme)"
+verifier "… sa cause : la révision attendue, de l'image dérivée ; celle lue, de l'image du couple" \
+  sante_attendait 6.4 "$AUTRE_REVISION" "$REVISION"
 verifier "… et non par le up de l'aller" journal_tait 6.4 "docker compose up en échec"
 verifier "le retour a réussi" journal_dit 6.4 "retour à main réussi"
 verifier "echec porte le couple de l'image dérivée" \
   fichier_vaut "$ETAT_STAGING/echec" "$IMAGE_DERIVEE $C5"
 verifier "deploye porte encore le couple d'avant" fichier_vaut "$ETAT_STAGING/deploye" "$IMAGE main $C5"
 verifier "compose.env, recopié du précédent, porte l'empreinte du script" \
-  egaux "$(relais_de "$ETAT_STAGING")" "$EMPREINTE2"
+  relais_vaut "$ETAT_STAGING" "$EMPREINTE2"
 constater_tenants staging relais
 MARQUE64="$(conteneur_marque fausse-app-staging)"
 exiger "un conteneur marque en staging" un_seul "$MARQUE64"
@@ -1097,7 +1212,7 @@ fin_du_point 6.5
 POINT=7
 echo "== 7. la prod, jamais marquée"
 verifier "aucun conteneur marque dans le projet fausse-app" egaux "$(conteneur_marque fausse-app)" ""
-verifier "compose.env de la prod ne porte pas FAUSSE_APP_RELAIS" egaux "$(relais_de "$ETAT_PROD")" ""
+verifier "compose.env de la prod ne porte pas FAUSSE_APP_RELAIS" relais_vaut "$ETAT_PROD" ""
 constater_tenants prod app
 verifier "la page de la prod se lit par le port $PORT_PROD" lire "$PORT_PROD" / "$TRAVAIL/page-prod"
 montrer "$TRAVAIL/page-prod"
