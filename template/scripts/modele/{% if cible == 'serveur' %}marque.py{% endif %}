@@ -41,11 +41,24 @@ Les limites connues du relais, que cette liste ne ferme pas :
   dans le chemin coupe en quatre mots, reçoit son 400, 414 ou 431, et la connexion se ferme, sans
   lecture du corps ; le relais refuse lui-même par 400, corps lu et connexion gardée, une cible qui
   ne commence pas par une seule `/` (la forme absolue comprise) ou qui porte un octet hors de
-  0x21-0x7E ;
+  0x21-0x7E, et une méthode qu'`http.client` ne sait pas envoyer (un octet de contrôle, un
+  caractère non ASCII) ;
+- un en-tête qu'`email.feedparser` lit mal (une ligne sans deux-points, un nom suivi d'une espace,
+  un CR seul dans une valeur) lui fait perdre tous ceux qui le suivent, `Content-Length` compris :
+  le corps passerait pour une seconde requête. Le relais refuse la requête par 400, sans lire le
+  corps, et ferme la connexion ;
+- un corps au cadrage illisible (un `Transfer-Encoding` autre que `chunked`, des `Content-Length`
+  contradictoires ou qui ne sont pas des nombres, un morceau mal formé, plus de 100 champs de fin)
+  reçoit 400, et la connexion se ferme. Le relais lit jusqu'à deux blocs du corps (64 Kio au plus
+  chacun) avant d'ouvrir la connexion vers l'application : une erreur de cadrage dans ces deux
+  blocs, ou à la fin d'un corps d'un seul bloc, ne lui fait rien parvenir ; plus loin,
+  l'application reçoit le début de la requête, puis la fermeture ;
 - une réponse 1xx de l'application autre que 100 (103 Early Hints) est prise par `http.client` pour
-  la réponse finale : le relais la transmet seule, et la réponse qui la suit se perd ;
+  la réponse finale : le relais la transmet seule, la réponse qui la suit se perd, et le client
+  attend la réponse finale jusqu'au délai d'inactivité de 75 s, qui ferme la connexion ;
 - un `href` d'icône qui porte une espace ou un caractère non ASCII (`/icône.png`) reçoit l'icône
-  générique : `chemin_admis` n'admet que les caractères imprimables ASCII, sans espace ;
+  générique : `chemin_admis` n'admet que les caractères imprimables ASCII, sans espace, hors du
+  chemin réservé `/.marque/` ;
 - WebSocket : le relais répond 501 ;
 - le retour automatique qui suit le premier déploiement du staging par un `deployer.sh` de la
   `v0.14.0` recopie un `compose.env.precedent` sans `<PREFIXE>RELAIS` : il sert le staging sans
@@ -408,8 +421,11 @@ _ICONE_GENERIQUE = "/.marque/icone"
 
 
 def chemin_admis(de: str) -> bool:
-    """Un chemin de l'application : une seule `/` de tête, des caractères imprimables sans espace."""
+    """Un chemin de l'application : une seule `/` de tête, des caractères imprimables sans espace,
+    hors du chemin réservé, qui n'est jamais le sien."""
     if not 1 <= len(de) <= 1024 or not de.startswith("/") or de.startswith("//"):
+        return False
+    if de.startswith(CHEMIN_RESERVE):
         return False
     return all("!" <= c <= "~" and c != "\\" for c in de)
 
@@ -694,6 +710,8 @@ class Relais(BaseHTTPRequestHandler):
     """Une connexion du client : chaque requête passe à l'application, sauf sous `/.marque/`."""
 
     protocol_version = "HTTP/1.1"
+    # `TCP_NODELAY` : une réponse écrite en plusieurs fois part sans attendre l'accusé du client.
+    disable_nagle_algorithm = True
 
     def setup(self) -> None:
         self.timeout = self.server.delai_inactif
@@ -720,6 +738,12 @@ class Relais(BaseHTTPRequestHandler):
 
     def _servir(self) -> None:
         self._repondu = False
+        if self.headers.defects:
+            # `email.feedparser` a perdu les en-têtes qui suivent une ligne mal formée,
+            # `Content-Length` et `Transfer-Encoding` compris : le corps passerait pour une seconde
+            # requête. Il n'est pas lu, et la connexion se ferme.
+            self._repondre(400, "en-têtes mal formés\n".encode(), fermer=True)
+            return
         try:
             blocs, par_morceaux = self._corps()
             if not _cible_admise(self.path):
@@ -772,7 +796,8 @@ class Relais(BaseHTTPRequestHandler):
             yield from self._longueur(restant)
             if self.rfile.readline(3) not in (b"\r\n", b"\n"):
                 raise _MalFormee
-        for _ in range(_CHAMPS_DE_FIN):
+        # au plus `_CHAMPS_DE_FIN` champs de fin, puis la ligne vide
+        for _ in range(_CHAMPS_DE_FIN + 1):
             ligne = self.rfile.readline(65537)
             if ligne in (b"\r\n", b"\n"):
                 return
@@ -845,34 +870,43 @@ class Relais(BaseHTTPRequestHandler):
             self._generique("chemin refusé")
             return
         try:
+            # Une place de lecture tient de la lecture du corps à la fin de sa recoloration : au
+            # plus `LECTURES_ICONE` corps d'icône sont en mémoire à la fois. Le corps ne vit que
+            # dans `_icone_lue`, et la réponse part après lui, la place rendue.
             with self.server.lectures:
-                statut, type_contenu, corps = self._lire_icone(de)
-        except ValueError:
-            self._repondre(400, "en-tête refusé\n".encode())
-            return
+                issue = self._icone_lue(de)
         except _ERREURS_AMONT:
             self._injoignable()
             return
-        if corps is None:
+        if issue is None:
             # L'application a coupé après ses en-têtes : la connexion se ferme, sans 502 ni ligne.
             self.close_connection = True
             return
+        icone, type_ou_raison = issue
+        if icone is None:
+            self._generique(type_ou_raison)
+            return
+        self._repondre(200, icone, type_ou_raison, _SANS_CACHE)
+
+    def _icone_lue(self, de: str) -> tuple[bytes | None, str] | None:
+        """L'icône recolorée de `de` et son type, ou `None` et la raison de l'icône générique ;
+        `None` si l'application coupe après ses en-têtes. Une icône déjà gardée rend sa place
+        dès la lecture, sans attendre la recoloration d'une autre."""
+        statut, type_contenu, corps = self._lire_icone(de)
+        if corps is None:
+            return None
         if statut != 200:
-            self._generique(f"réponse {statut}")
-            return
+            return None, f"réponse {statut}"
         if len(corps) > LECTURE_ICONE_MAX:
-            self._generique("taille")
-            return
+            return None, "taille"
         if corps.startswith(_SIGNATURE):
             sorte = "png"
         elif (type_contenu or "").split(";")[0].strip().lower() == "image/svg+xml":
             sorte = "svg"
         else:
-            self._generique("format")
-            return
+            return None, "format"
         if _trop_grande(sorte, corps):
-            self._generique("taille")
-            return
+            return None, "taille"
         cle = (hashlib.sha256(corps).digest(), sorte)
         icone = self.server.icone_gardee(cle)
         if icone is None:
@@ -883,10 +917,8 @@ class Relais(BaseHTTPRequestHandler):
                     if icone is not None:
                         self.server.garder_icone(cle, icone)
         if icone is None:
-            self._generique("format")
-            return
-        type_icone = "image/png" if sorte == "png" else "image/svg+xml"
-        self._repondre(200, icone, type_icone, _SANS_CACHE)
+            return None, "format"
+        return icone, "image/png" if sorte == "png" else "image/svg+xml"
 
     def _lire_icone(self, de: str) -> tuple[int, str | None, bytes | None]:
         """Le statut, le type et au plus `LECTURE_ICONE_MAX + 1` octets de l'icône `de`, le corps
@@ -941,13 +973,20 @@ class Relais(BaseHTTPRequestHandler):
                 if par_morceaux:
                     conn.putheader("Transfer-Encoding", "chunked")
             except ValueError:
-                # un en-tête que `http.client` ne sait pas envoyer
+                # Une méthode que `http.client` ne sait pas envoyer : un octet de contrôle, un
+                # caractère non ASCII. Pour les en-têtes, la garde n'est que défensive : aucun
+                # en-tête lu par `http.server` ne la déclenche, ceux qu'`email.feedparser` lit
+                # mal étant refusés plus tôt.
                 self._vider(blocs)
-                self._repondre(400, "en-tête refusé\n".encode())
+                self._repondre(400, "méthode refusée\n".encode())
                 return
+            # Rien ne part avant deux blocs du corps, ou sa fin : un corps mal cadré qui tient en
+            # un bloc ne fait rien parvenir à l'application. La connexion s'ouvre à `endheaders`.
+            blocs = iter(blocs)
+            lus = list(itertools.islice(blocs, 2))
             # L'amont qui tombe ne coupe pas la lecture du client : le corps est lu en entier.
             suit = self._amont_suit(conn.endheaders)
-            for bloc in blocs:
+            for bloc in itertools.chain(lus, blocs):
                 if suit:
                     envoi = b"%x\r\n%s\r\n" % (len(bloc), bloc) if par_morceaux else bloc
                     suit = self._amont_suit(conn.send, envoi)

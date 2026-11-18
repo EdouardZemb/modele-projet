@@ -510,13 +510,18 @@ def test_est_manifeste():
 
 
 # Les `de` refusés : `test_de_refuse_sans_requete` les demande aussi au relais.
-REFUSES = ("", "a", "//x", "http://x/", "/a\\b", "/a b", "/a\x01", "/é", "/" + "a" * 1024)
+REFUSES = (
+    *("", "a", "//x", "http://x/", "/a\\b", "/a b", "/a\x01", "/é", "/" + "a" * 1024),
+    *("/.marque/", "/.marque/icone?de=/i.png", "/.marque/sante"),
+)
 
 
 def test_chemin_admis():
     assert marque.chemin_admis("/a")
     assert marque.chemin_admis("/a?b=c")
     assert marque.chemin_admis("/" + "a" * 1023)
+    assert marque.chemin_admis("/.marque")
+    assert marque.chemin_admis("/.marques/i.png")
     for refuse in REFUSES:
         assert not marque.chemin_admis(refuse), refuse
 
@@ -1088,10 +1093,12 @@ def test_cache_borne(app, lancer_relais, monkeypatch):
 
     app.repondre = repondre
 
-    # 32 icônes au plus : après 33, la première est sortie, la dernière reste
+    # 32 icônes au plus : après 33, la première est sortie, la deuxième reste
     relais = lancer_relais()
     for k in range(33):
         assert icone(relais, f"/i{k}.png").corps == vraie_png(petit_png(k))
+    assert appels.count("png") == 33
+    icone(relais, "/i1.png")
     assert appels.count("png") == 33
     icone(relais, "/i0.png")
     assert appels.count("png") == 34
@@ -1106,6 +1113,9 @@ def test_cache_borne(app, lancer_relais, monkeypatch):
         icone(relais, f"/s{k}.svg")
     assert appels.count("svg") == 4
     icone(relais, "/s0.svg")
+    assert appels.count("svg") == 5
+    # s0 a fait sortir s1 : s2 et s3 restent
+    icone(relais, "/s2.svg")
     assert appels.count("svg") == 5
     icone(relais, "/s3.svg")
     assert appels.count("svg") == 5
@@ -1167,6 +1177,44 @@ def test_une_recoloration_a_la_fois(app, relais, monkeypatch):
     for fil in fils:
         fil.join(10)
     assert etat == {"en_cours": 0, "max": 1, "appels": 2}
+
+
+def test_lecture_tenue_jusqu_a_la_recoloration(app, relais, monkeypatch):
+    commencee = threading.Event()
+    finir = app.evenement()
+    vraie = marque.recolorer_png
+
+    def lente(donnees):
+        commencee.set()
+        finir.wait(10)
+        return vraie(donnees)
+
+    monkeypatch.setattr(marque, "recolorer_png", lente)
+    condition = threading.Condition()
+
+    def repondre(r):
+        with condition:
+            condition.notify_all()
+        return reponse_brute(200, petit_png(int(r.chemin[2:-4])), "Content-Type: image/png")
+
+    app.repondre = repondre
+    fils = [threading.Thread(target=icone, args=(relais, f"/i{k}.png")) for k in range(3)]
+    try:
+        fils[0].start()
+        assert commencee.wait(10)
+        fils[1].start()
+        with condition:
+            assert condition.wait_for(lambda: len(app.requetes) >= 2, timeout=10)
+        # i0 se recolore, i1 attend le verrou : leurs deux places sont tenues, i2 attend la sienne
+        fils[2].start()
+        with condition:
+            assert not condition.wait_for(lambda: len(app.requetes) >= 3, timeout=0.5)
+    finally:
+        finir.set()
+        for fil in fils:
+            if fil.ident is not None:
+                fil.join(10)
+    assert [r.chemin for r in app.requetes] == ["/i0.png", "/i1.png", "/i2.png"]
 
 
 def test_sante_pendant_une_recoloration(app, relais, monkeypatch):
@@ -1434,6 +1482,88 @@ def test_chemin_refuse_400(app, relais):
     assert app.requetes == []
 
 
+def test_methode_refusee(app, relais):
+    # `http.server` admet ces méthodes, que `http.client` ne sait pas envoyer
+    for methode in ("GET\x01", "GÉT"):
+        with Connexion(relais.port) as c:
+            c.envoyer(octets_requete(methode, "/a", corps=b"abc"))
+            rep = c.reponse()
+            assert (rep.statut, rep.corps) == (400, "méthode refusée\n".encode()), methode
+            assert rep.tous("Connection") == []
+            # le corps a été lu : la requête suivante passe
+            c.envoyer(octets_requete("GET", "/suite"))
+            assert c.reponse().corps == b"ok"
+    assert [(r.methode, r.chemin) for r in app.requetes] == [("GET", "/suite")] * 2
+
+
+@pytest.fixture
+def ecoute():
+    """Une application muette : la socket d'écoute que le relais joindrait, jamais acceptée."""
+    with socket.create_server(("127.0.0.1", 0)) as s:
+        yield s
+
+
+def aucune_connexion(ecoute):
+    """Vrai si le relais n'a ouvert aucune connexion vers `ecoute` : ouverte avant sa réponse au
+    client, elle attendrait dans la file d'écoute."""
+    ecoute.setblocking(False)
+    try:
+        connexion, _ = ecoute.accept()
+    except BlockingIOError:
+        return True
+    connexion.close()
+    return False
+
+
+MORCEAUX = ("Transfer-Encoding: chunked",)
+CADRAGES_REFUSES = (
+    (("Transfer-Encoding: gzip",), morceaux(b"abc")),
+    (("Content-Length: 3", "Content-Length: 4"), b"abcd"),
+    (("Content-Length: abc",), b"abc"),
+    (MORCEAUX, b"zz\r\nabc\r\n0\r\n\r\n"),
+    (MORCEAUX, b"3\r\nabcX\r\n0\r\n\r\n"),
+    (MORCEAUX, b"3\r\nabc\r\n0\r\n" + b"X-Fin: 1\r\n" * 101 + b"\r\n"),
+)
+
+
+def test_corps_mal_cadre_400(lancer_relais, ecoute, capsys):
+    relais = lancer_relais(amont=f"http://127.0.0.1:{ecoute.getsockname()[1]}", delai_amont=1)
+    for entetes, corps in CADRAGES_REFUSES:
+        with Connexion(relais.port) as c:
+            c.envoyer(octets_requete("POST", "/envoi", *entetes, corps=corps))
+            rep = c.reponse()
+            assert (rep.statut, rep.corps) == (400, "corps mal cadré\n".encode()), corps
+            assert rep.un("Connection") == "close"
+            assert c.fermee()
+        assert aucune_connexion(ecoute), corps
+    assert capsys.readouterr().err == ""
+
+
+def test_cent_champs_de_fin_admis(app, relais):
+    corps = b"3\r\nabc\r\n0\r\n" + b"X-Fin: 1\r\n" * 100 + b"\r\n"
+    with Connexion(relais.port) as c:
+        c.envoyer(octets_requete("POST", "/envoi", *MORCEAUX, corps=corps))
+        assert c.reponse().statut == 200
+        c.envoyer(octets_requete("GET", "/suite"))
+        assert c.reponse().corps == b"ok"
+    assert [(r.chemin, r.corps) for r in app.requetes] == [("/envoi", b"abc"), ("/suite", b"")]
+
+
+def test_entetes_mal_formes_400(app, relais, capsys):
+    # perdus, `Content-Length` et ce qui le suit feraient du corps une seconde requête
+    cachee = octets_requete("GET", "/cachee")
+    longueur = f"Content-Length: {len(cachee)}"
+    for ligne in ("X-A 1", "X-A : 1", "X-A: 1\rB"):
+        with Connexion(relais.port) as c:
+            c.envoyer(octets_requete("POST", "/a", ligne, longueur, JETON, corps=cachee))
+            rep = c.reponse()
+            assert (rep.statut, rep.corps) == (400, "en-têtes mal formés\n".encode()), ligne
+            assert rep.un("Connection") == "close"
+            assert c.fermee()
+    assert app.requetes == []
+    assert capsys.readouterr().err == ""
+
+
 def test_double_barre_reecrite(app, relais):
     obtenir(relais, "//x/y")
     assert [r.chemin for r in app.requetes] == ["/x/y"]
@@ -1688,6 +1818,28 @@ def test_refus_hors_du_staging(app):
         (ligne,) = r.stderr.decode("utf-8").splitlines()
         assert ligne.startswith("marque : refus : ") and nom in ligne
         assert "hors du staging" not in ligne
+
+
+def test_ecoute_par_defaut_sur_toutes_les_adresses(monkeypatch, capsys):
+    recus = []
+
+    class Faux:
+        def serve_forever(self):
+            raise KeyboardInterrupt
+
+    def faux_serveur(hote, port, amont):
+        recus.append((hote, port, amont))
+        return Faux()
+
+    monkeypatch.setattr(marque, "creer_serveur", faux_serveur)
+    monkeypatch.delenv("MARQUE_HOTE", raising=False)
+    monkeypatch.setenv("MARQUE_ENV", "staging")
+    monkeypatch.setenv("MARQUE_PORT", "8080")
+    monkeypatch.setenv("MARQUE_AMONT", "http://app.exemple:3000")
+    assert marque.main() == 0
+    # la valeur écrite, et non `HOTE_ECOUTE`, qu'un mutant changerait avec elle
+    assert recus == [("0.0.0.0", 8080, "http://app.exemple:3000")]
+    assert capsys.readouterr().err == "marque : relais du staging prêt sur le port 8080\n"
 
 
 def test_demarrage_en_staging(app):
