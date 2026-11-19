@@ -643,8 +643,9 @@ Lot 19 fait le 19/11/2026 : distinguer d'un coup d'œil le staging de la prod (#
 `v0.14.0`. Il vient d'une idée d'Edouard du 21/10, devenue l'issue #151 le 18/11 : en cible
 `serveur`, un relais du modèle, placé devant le staging seul, y pose trois marques, un bandeau
 orange « TEST », « test » devant le titre et le nom de l'application installée, des icônes
-recolorées, et la prod n'en porte jamais aucune (PR #152 et #153). Ses deux PR déclarent onze
-écarts à la spec, tous accordés par Edouard : quatre le 18/11, avec le plan, sept le 19/11.
+recolorées, et la prod n'en porte jamais aucune (PR #152, #153 et [[PR précaution]]). Les PR #152
+et #153 déclarent onze écarts à la spec, tous accordés par Edouard : quatre le 18/11, avec le
+plan, sept le 19/11.
 - **Le relais** (#152). `scripts/modele/marque.py`, géré, rendu en cible `serveur` seulement, en
   bibliothèque standard de Python, transmet tout à `app`, sauf trois retouches : la page (le lien de
   la feuille du bandeau, le titre), le manifeste (`name`, `short_name`, ses icônes vers
@@ -704,16 +705,25 @@ recolorées, et la prod n'en porte jamais aucune (PR #152 et #153). Ses deux PR 
   trois importants (S-1, quatre écarts que #152 taisait ; S-2, deux écarts mal décrits ; C-2, une
   mesure des fichiers gérés que le plan n'écrivait pas) et 38 mineurs. Les contre-vérifications
   n'ont réfuté aucun des 30 constats des lentilles ; elles ont ramené R-1 et B-1 d'important à
-  mineur, et laissé B-6 plausible. Les corrections ont rejoint les deux PR, au lieu d'une
-  troisième : celles du relais dans #152 (`d928bda` à `5298c55`), relues en trois rondes jusqu'à
-  une relecture sans demande, celles des textes dans #153, en deux rondes. La CI de #152 a refusé
-  `5298c55` : le `ruff` du projet rendu voyait ce que le `ruff check .` du modèle ne lit pas, et
-  `e675bbe` l'a corrigé (LE-108). Puis la relecture fraîche des messages a trouvé la limite du
-  service worker fausse pour un précache, et le gabarit est corrigé avant l'étiquette (M-1, M-2,
-  LE-104). Deux lignes du plan prêtaient à l'épreuve, au banc et au test du rendu ce qu'ils ne
-  font pas : le geste qui arrête l'`app` d'un environnement bloqué et le cas limite de
-  `create_host_path: false` ne sont prouvés que par deux essais de la lentille du branchement, sous
-  Compose 2.26.1 amont, hors de la CI (B-7, C-9, LE-106).
+  mineur, et laissé B-6 plausible. Les corrections ont rejoint les deux PR, au lieu d'une PR de
+  corrections : celles du relais dans #152 (`d928bda` à `5298c55`), relues en trois rondes,
+  celles des textes dans #153, en deux ; chaque fois, la session elle-même, et non un relecteur
+  neuf, a relu la dernière ronde, sans rien demander. La CI de #152 a refusé `5298c55` : le `ruff`
+  du projet rendu voyait ce que le `ruff check .` du modèle ne lit pas, et `e675bbe`, que la
+  session a écrit, l'a corrigé ; il n'est tenu que par la CI et un mutant (LE-108). Puis la
+  relecture fraîche des messages a trouvé la limite du service worker fausse pour un précache, et
+  le gabarit est corrigé avant l'étiquette (M-1, M-2, LE-104). Deux lignes du plan prêtaient à
+  l'épreuve, au banc et au test du rendu ce qu'ils ne font pas : le geste qui arrête l'`app` d'un
+  environnement bloqué et le cas limite de `create_host_path: false` ne sont prouvés que par deux
+  essais de la lentille du branchement, sous Compose 2.26.1 amont, hors de la CI (B-7, C-9,
+  LE-106).
+- **La précaution de l'effacement** ([[PR précaution]]), une PR `fix` décidée après la revue
+  finale. La relecture fraîche des messages a vu que l'effacement des données du site du staging,
+  que la limite du service worker d'`exploitation.md` donnait sans précaution, peut effacer aussi
+  celles de la prod, sous le même domaine (M-3). La limite dit désormais de faire d'abord
+  synchroniser ce que la prod garde hors ligne, et de ne pas confirmer si l'écran d'effacement
+  nomme le domaine commun ou la prod. La portée réelle de l'effacement sous Chrome pour Android
+  n'est pas éprouvée : la constatation d'`ancrage` la dira (LE-113, une piste).
 - **Les durées** : aucun job coupé ni avertissement de durée dans les cinq exécutions de `ci.yml`
   des deux PR, une tentative chacune, ni aux push de leurs fusions, `b499b36` et `3442607`. Sous
   Windows, le job `tests` a duré au plus 37 min 44 s (#153), sous le seuil de 45 min ;
@@ -727,26 +737,27 @@ recolorées, et la prod n'en porte jamais aucune (PR #152 et #153). Ses deux PR 
   messages a simulé la mise à jour des deux projets vers `3442607`, depuis leurs têtes du 19/11 ;
   seuls `.copier-answers.yml` et les 12 fichiers gérés du lot changent, sans conflit, et
   `docs/exploitation.md`, semé, reste inchangé.
-- **Le registre** gagne LE-102 à LE-112 ; LE-107 se clôt dans le lot. Aucune porte n'est due :
+- **Le registre** gagne LE-102 à LE-113 ; LE-107 se clôt dans le lot. Aucune porte n'est due :
   chaque leçon va sous un motif dont la porte est écrite, ou qui n'a pas son 3e constat. Cinq
   rejoignent « mécanisme décrit sans relire son code », qui compte désormais quinze constats : des
   phrases et une décision de la spec qui résument mal un comportement, dont la limite du service
   worker, passée dans un gabarit (LE-102 à LE-104), la troisième pièce de trois lignes du plan
   (LE-106), un remède écrit dans une consigne sans essai (LE-109). LE-105 rejoint « écart à la spec
-  mal pesé », LE-108 et LE-112 « contrôle passé à vide », LE-111 « comportement d'un outil
-  supposé », et LE-107 « renvoi d'une tâche à l'autre perdu en route », dont c'est le 2e constat ;
-  LE-110, la sortie d'une suite coupée par `| tail` avant d'être lue, ouvre un motif neuf. Les
-  critères de sortie de LE-97 et de LE-100, qui visaient ce lot, ne sont pas tenus.
+  mal pesé », LE-108 et LE-112 « contrôle passé à vide », LE-111 et LE-113 « comportement d'un
+  outil supposé », et LE-107 « renvoi d'une tâche à l'autre perdu en route », dont c'est le 2e
+  constat ; LE-110, la sortie d'une suite coupée par `| tail` avant d'être lue, ouvre un motif
+  neuf. Les critères de sortie de LE-97 et de LE-100, qui visaient ce lot, ne sont pas tenus.
 - **Vers les projets**, la `v0.14.0` part vers `ancrage` et `veille-emploi` seuls, après
   l'étiquette, chacun avec son message ; les cinq autres la prendront à leur prochaine mise à jour,
   sans effet. La marque paraît en staging au premier déploiement qui suit la fusion de la mise à
   jour, jamais en prod. Edouard la constate sur son Android, dans un onglet puis installée, et
-  constate son absence en prod ; chez `ancrage`, il efface d'abord les données du site du staging,
-  dont le précache garde le manifeste d'avant le relais. La session du projet note ce qu'il
-  rapporte, sans lire le serveur. Le premier déploiement marqué tire l'image du relais de Docker
-  Hub : un tirage en échec met le couple en échec, et la sonde ne le retente pas (une piste). Si ce
-  déploiement échoue pour une autre cause, le retour automatique sert le staging sans marque,
-  jusqu'au déploiement suivant.
+  constate son absence en prod ; chez `ancrage`, dont le précache garde le manifeste d'avant le
+  relais, il efface les données du site du staging, après avoir fait synchroniser ce que la prod
+  garde hors ligne, et s'arrête si l'écran d'effacement nomme le domaine commun ou la prod
+  ([[PR précaution]], LE-113). La session du projet note ce qu'il rapporte, sans lire le serveur.
+  Le premier déploiement marqué tire l'image du relais de Docker Hub : un tirage en échec met le
+  couple en échec, et la sonde ne le retente pas (une piste). Si ce déploiement échoue pour une
+  autre cause, le retour automatique sert le staging sans marque, jusqu'au déploiement suivant.
 - **Les « À relire » de la clôture** : [[À RELIRE : le nombre de choix, et l'accord d'Edouard]].
 
 Prochain, au choix d'Edouard :
@@ -797,9 +808,11 @@ Prochain, au choix d'Edouard :
   auteur ne reconnaît pas : quatre écarts tus, deux mal décrits) ; LE-108, avec LE-58 et LE-75 (un
   contrôle local plus étroit que celui de la CI : le `ruff` du projet rendu) ; LE-112, avec LE-88
   et LE-97 (des valeurs et des gardes qu'aucun test ne tenait, revenues au lot suivant) ; LE-111,
-  avec LE-57, LE-87 et LE-99 (un cas limite inconnu : le chemin réservé et les balises HTML, lus
-  par le texte) ; LE-110, le premier constat d'un motif neuf (la sortie d'un contrôle coupée avant
-  d'être lue).
+  avec LE-57, LE-84, LE-87 et LE-99 (un cas limite inconnu : le chemin réservé et les balises
+  HTML, lus par le texte) ; LE-113, avec LE-101 (un comportement d'outil supposé dans un geste
+  qu'un texte donne à lancer : l'effacement des données du site du staging, sous le domaine de la
+  prod) ; LE-110, le premier constat d'un motif neuf (la sortie d'un contrôle coupée avant d'être
+  lue).
 
 Le cadrage est dans `docs/cadrage.md` ; ce que les lots ont appris, dans `docs/registre.md`.
 
