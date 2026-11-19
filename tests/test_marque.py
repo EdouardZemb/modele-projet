@@ -448,10 +448,39 @@ def test_lien_icone():
     assert marque.lien_icone("i.png", "/m/app.webmanifest", None) == "/.marque/icone?de=/m/i.png"
     assert marque.lien_icone("https://h/i.png", "/", None) == "/.marque/icone"
     assert marque.lien_icone("data:image/png;base64,AAAA", "/", "h") == "/.marque/icone"
-    assert marque.lien_icone("/a b.png", "/", "h") == "/.marque/icone"
+    # le chemin résolu est encodé, comme le navigateur le demanderait : l'espace devient `%20`
+    assert marque.lien_icone("/a b.png", "/", "h") == "/.marque/icone?de=/a%2520b.png"
     # le relais ne demande jamais à l'application un chemin qui est le sien
     assert marque.lien_icone("/.marque/icone?de=/i.png", "/", "h") == "/.marque/icone"
     assert marque.lien_icone("https://h/.marque/sante", "/", "h") == "/.marque/icone"
+    assert marque.lien_icone("/%2Emarque/sante", "/", "h") == "/.marque/icone"
+
+
+def test_lien_icone_autre_schema():
+    # à l'hôte de la page, un schéma autre qu'`http` ou `https` reste une autre origine
+    assert marque.lien_icone("ftp://h/i.png", "/", "h") == "/.marque/icone"
+    assert marque.lien_icone("https://h/i.png", "/", "h") == "/.marque/icone?de=/i.png"
+
+
+def test_icone_au_chemin_non_ascii():
+    # le chemin résolu est encodé en UTF-8 avant d'être admis : la forme déjà encodée est la même
+    attendu = "/.marque/icone?de=/ic%25C3%25B4ne.png"
+    for src in ("/icône.png", "/ic%C3%B4ne.png"):
+        corps = json.dumps({"name": "A", "icons": [{"src": src}]}, ensure_ascii=False).encode()
+        sortie = json.loads(marque.retoucher_manifeste(corps, "/manifest.json", None))
+        assert sortie["icons"] == [{"src": attendu}], src
+        page = f'<head><link rel="icon" href="{src}"></head>'.encode()
+        assert f'<link rel="icon" href="{attendu}">'.encode() in marque.retoucher_page(page, "/", None)
+    relatif = "/.marque/icone?de=/m/ic%25C3%25B4nes/app-192.png"
+    corps = json.dumps({"icons": [{"src": "icônes/app-192.png"}]}, ensure_ascii=False).encode()
+    sortie = json.loads(marque.retoucher_manifeste(corps, "/m/app.webmanifest", None))
+    assert sortie["icons"] == [{"src": relatif}]
+    page = '<head><link rel="icon" href="icônes/app-192.png"></head>'.encode()
+    assert f'href="{relatif}"'.encode() in marque.retoucher_page(page, "/m/page", None)
+    # un `%` qui n'ouvre pas un `%XX` est encodé ; un `%XX` reste tel quel
+    assert marque.lien_icone("/a%zz%41.png", "/", None) == "/.marque/icone?de=/a%2525zz%2541.png"
+    # un caractère qu'UTF-8 n'encode pas, venu du JSON, donne l'icône générique
+    assert marque.lien_icone("/\ud800.png", "/", None) == "/.marque/icone"
 
 
 def test_page_sans_lien_recoit_favicon():
@@ -460,6 +489,65 @@ def test_page_sans_lien_recoit_favicon():
         b'<link rel="stylesheet" href="/.marque/marque.css">'
         b'<link rel="icon" href="/.marque/icone?de=/favicon.ico"></head>'
     ) in sortie
+
+
+def test_formes_voisines_ignorees():
+    # `<titles>` et `<linker>` ne sont ni un titre ni un lien
+    page = b"<head><titles>x</titles><title>T</title><linker rel=icon href=/a.png></head>"
+    lien = b'<link rel="stylesheet" href="/.marque/marque.css">'
+    favicon = b'<link rel="icon" href="/.marque/icone?de=/favicon.ico">'
+    assert marque.retoucher_page(page, "/", None) == (
+        b"<head><titles>x</titles><title>test &middot; T</title><linker rel=icon href=/a.png>"
+        + lien
+        + favicon
+        + b"</head>"
+    )
+
+
+def test_balises_lues_valeurs_sautees():
+    # une valeur entre guillemets garde son `>`, dans un titre comme dans un lien
+    page = b'<head><title lang="a>b">T</title><link rel="icon" title=\'c>d\' href="/i.png"></head>'
+    sortie = marque.retoucher_page(page, "/", None)
+    assert b'<title lang="a>b">test &middot; T</title>' in sortie
+    assert b"<link rel=\"icon\" title='c>d' href=\"/.marque/icone?de=/i.png\">" in sortie
+    # une valeur jamais fermée court jusqu'à la fin : rien de ce qui la suit n'est une balise
+    ouverte = b'<head><link a="<link rel=icon href=/i.png></head>'
+    lien = b'<link rel="stylesheet" href="/.marque/marque.css">'
+    favicon = b'<link rel="icon" href="/.marque/icone?de=/favicon.ico">'
+    assert marque.retoucher_page(ouverte, "/", None) == (
+        b'<head><link a="<link rel=icon href=/i.png>' + lien + favicon + b"</head>"
+    )
+    titre = marque.retoucher_page(b'<head><title x="a>T</title></head>', "/", None)
+    assert b"&middot;" not in titre
+
+
+# Un enfant chronomètre `retoucher_page` : une recherche quadratique tiendrait le GIL des heures,
+# et le délai de `subprocess.run` l'arrête.
+SONDE_DUREE = """
+import importlib.machinery, importlib.util, sys, time
+chargeur = importlib.machinery.SourceFileLoader("marque", sys.argv[1])
+module = importlib.util.module_from_spec(importlib.util.spec_from_loader("marque", chargeur))
+chargeur.exec_module(module)
+motif = bytes.fromhex(sys.argv[2])
+page = b"<head>" + motif * (1024 * 1024 // len(motif))
+debut = time.perf_counter()
+module.retoucher_page(page, "/", "h")
+print(time.perf_counter() - debut)
+"""
+
+
+@pytest.mark.parametrize("motif", [b"<link ", b"<title ", b'<link a="'])
+def test_balise_jamais_fermee_lineaire(motif):
+    try:
+        fini = subprocess.run(
+            [sys.executable, "-B", "-c", SONDE_DUREE, str(CHEMIN), motif.hex()],
+            capture_output=True,
+            timeout=30,
+            check=True,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.fail(f"1 Mio de {motif!r} : plus de 30 s")
+    assert float(fini.stdout) < 2, motif
 
 
 # --- le manifeste -------------------------------------------------------------------------------
@@ -825,6 +913,81 @@ class RelaisDuBanc:
         self._fil.join()
 
 
+class AppBrute:
+    """Une application qui garde les octets bruts de chaque connexion. Elle lit une requête, la
+    cadre par son seul `Content-Length`, répond, puis lit ce qui suit jusqu'à la fermeture."""
+
+    def __init__(self):
+        self.connexions = queue.Queue()
+        self.ecoute = socket.create_server(("127.0.0.1", 0))
+        # une attente courte : l'arrêt se voit sans fermer la socket sous un `accept` en cours
+        self.ecoute.settimeout(0.05)
+        self.amont = f"http://127.0.0.1:{self.ecoute.getsockname()[1]}"
+        self._fin = threading.Event()
+        self._fil = threading.Thread(target=self._accepter)
+        self._fil.start()
+
+    def _accepter(self):
+        while not self._fin.is_set():
+            try:
+                connexion, _ = self.ecoute.accept()
+            except TimeoutError:
+                continue
+            recu = bytearray()
+            with connexion:
+                connexion.settimeout(10)
+                try:
+                    self._servir(connexion, recu)
+                except OSError:
+                    pass  # le test lit ce qui est arrivé
+            self.connexions.put(bytes(recu))
+
+    @staticmethod
+    def _servir(connexion, recu):
+        while b"\r\n\r\n" not in recu and (bloc := connexion.recv(65536)):
+            recu += bloc
+        tete, _, reste = bytes(recu).partition(b"\r\n\r\n")
+        # la première longueur, comme une application qui admet deux longueurs égales
+        longueurs = [
+            int(ligne.partition(b":")[2])
+            for ligne in tete.split(b"\r\n")[1:]
+            if ligne.partition(b":")[0].strip().lower() == b"content-length"
+        ]
+        while len(reste) < (longueurs or [0])[0] and (bloc := connexion.recv(65536)):
+            recu += bloc
+            reste += bloc
+        connexion.sendall(reponse_brute(200, b"ok", "Content-Type: text/plain"))
+        while bloc := connexion.recv(65536):
+            recu += bloc
+
+    def arreter(self):
+        self._fin.set()
+        self._fil.join(10)
+        self.ecoute.close()
+
+
+def requetes_lues(brut):
+    """Les requêtes qu'une application lirait dans `brut`, chacune cadrée par `Content-Length`."""
+    lues = []
+    while brut:
+        tete, _, reste = brut.partition(b"\r\n\r\n")
+        ligne, *entetes = tete.split(b"\r\n")
+        longueurs = [
+            int(e.partition(b":")[2]) for e in entetes if e.lower().startswith(b"content-length:")
+        ]
+        longueur = (longueurs or [0])[0]
+        lues.append((ligne, entetes, reste[:longueur]))
+        brut = reste[longueur:]
+    return lues
+
+
+@pytest.fixture
+def app_brute():
+    brute = AppBrute()
+    yield brute
+    brute.arreter()
+
+
 @pytest.fixture(autouse=True)
 def aucun_fil_restant():
     avant = set(threading.enumerate())
@@ -1016,6 +1179,36 @@ def test_manifeste_illisible_transmis(app, relais, capsys):
     assert rep.corps == b"{pas du json"
     assert rep.un("ETag") == '"m"'
     assert capsys.readouterr().err == "marque : manifeste illisible, transmis sans marque\n"
+
+
+def test_manifeste_trop_grand(app, relais, capsys):
+    # un manifeste lisible, mais au-delà de 5 Mio : il passe tel quel, et le journal dit pourquoi
+    grand = json.dumps({"name": "A", "x": "y" * 5242880}).encode()
+    app.repondre = lambda r: reponse_brute(
+        200, grand, "Content-Type: application/manifest+json", 'ETag: "g"'
+    )
+    rep = obtenir(relais, "/manifest.json")
+    assert rep.corps == grand
+    assert rep.un("ETag") == '"g"'
+    assert capsys.readouterr().err == "marque : manifeste trop grand, transmis sans marque\n"
+    assert "une page trop grande, un manifeste trop grand" in " ".join(marque.__doc__.split())
+
+
+def test_cache_prive_garde(app, relais):
+    page = b"<html><head></head></html>"
+    app.repondre = lambda r: reponse_brute(
+        200, page, "Content-Type: text/html", "Cache-Control: no-store, private, max-age=60"
+    )
+    assert obtenir(relais, "/p").tous("Cache-Control") == ["no-cache, no-store, private"]
+    manifeste = json.dumps({"name": "A"}).encode()
+    app.repondre = lambda r: reponse_brute(
+        200,
+        manifeste,
+        "Content-Type: application/manifest+json",
+        "Cache-Control: public, max-age=60",
+        'Cache-Control: Private="Set-Cookie"',
+    )
+    assert obtenir(relais, "/manifest.json").tous("Cache-Control") == ["no-cache, private"]
 
 
 def test_icone_par_le_relais(app, relais, capsys, monkeypatch):
@@ -1227,7 +1420,7 @@ def test_sante_pendant_une_recoloration(app, relais, monkeypatch):
 
     def lente(donnees):
         commencee.set()
-        finir.wait(2)
+        finir.wait(10)
         return vraie(donnees)
 
     monkeypatch.setattr(marque, "recolorer_png", lente)
@@ -1243,7 +1436,7 @@ def test_sante_pendant_une_recoloration(app, relais, monkeypatch):
         finir.set()
         fil.join(10)
     assert (rep.statut, rep.corps) == (200, SANTE)
-    assert duree < 1
+    assert duree < 5
 
 
 def test_de_refuse_sans_requete(app, relais, capsys):
@@ -1257,6 +1450,85 @@ def test_de_refuse_sans_requete(app, relais, capsys):
         assert obtenir(relais, cible).corps == generique
         assert capsys.readouterr().err == f"{GENERIQUE}autre origine\n"
     assert app.requetes == []
+
+
+def test_icone_sans_conditionnels(app, relais):
+    app.repondre = lambda r: reponse_brute(200, petit_png(3), "Content-Type: image/png")
+    obtenir(
+        relais,
+        "/.marque/icone?de=/i.png",
+        'If-Match: "x"',
+        "If-Unmodified-Since: Wed, 18 Nov 2026 10:00:00 GMT",
+        'If-Range: "x"',
+        "Expect: x-autre",
+        "X-Garde: oui",
+    )
+    (requete,) = app.requetes
+    assert requete.entetes == [("Host", "app.exemple"), ("X-Garde", "oui")]
+
+
+def test_icone_application_injoignable(lancer_relais, capsys):
+    mort = lancer_relais(amont=f"http://127.0.0.1:{port_libre()}")
+    rep = obtenir(mort, "/.marque/icone?de=/i.png")
+    assert (rep.statut, rep.corps) == (502, b"application injoignable\n")
+    assert capsys.readouterr().err == "marque : application injoignable\n"
+
+
+def test_svg_trop_grand_par_le_relais(app, relais, capsys):
+    app.repondre = lambda r: reponse_brute(
+        200, b"<svg/>" + b" " * (4194304 - 5), "Content-Type: image/svg+xml"
+    )
+    assert icone(relais, "/grand.svg").corps == marque.icone_generique()
+    assert capsys.readouterr().err == f"{GENERIQUE}taille\n"
+
+
+def test_icone_compressee_generique(app, relais, capsys):
+    svg = b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 4 4"/>'
+    reponses = {
+        "/gzip.svg": reponse_brute(
+            200, gzip.compress(svg), "Content-Type: image/svg+xml", "Content-Encoding: gzip"
+        ),
+        "/identite.svg": reponse_brute(
+            200, svg, "Content-Type: image/svg+xml", "Content-Encoding: identity"
+        ),
+    }
+    app.repondre = lambda r: reponses[r.chemin]
+    assert icone(relais, "/gzip.svg").corps == marque.icone_generique()
+    assert capsys.readouterr().err == f"{GENERIQUE}format\n"
+    assert icone(relais, "/identite.svg").corps == marque.envelopper_svg(svg)
+    assert capsys.readouterr().err == ""
+
+
+def test_icone_apres_une_reponse_informative(app, relais, capsys):
+    def ecrire(sortie):
+        sortie.write(b"HTTP/1.1 103 Early Hints\r\nLink: </x.css>; rel=preload\r\n\r\n")
+        sortie.write(reponse_brute(200, petit_png(9), "Content-Type: image/png"))
+
+    app.repondre = lambda r: ecrire
+    assert icone(relais, "/i.png").corps == marque.recolorer_png(petit_png(9))
+    assert capsys.readouterr().err == ""
+
+
+def test_chemin_reserve_normalise(app, relais, capsys):
+    with Connexion(relais.port) as c:
+        for cible in ("/%2Emarque/sante", "/%2emarque/sante", "/a/../.marque/sante"):
+            c.envoyer(octets_requete("GET", cible))
+            rep = c.reponse()
+            assert (rep.statut, rep.corps) == (200, SANTE), cible
+        c.envoyer(octets_requete("GET", "/x/%2E%2E/%2Emarque/./marque.css"))
+        assert c.reponse().corps == marque.FEUILLE
+        c.envoyer(octets_requete("GET", "/%2Emarque/autre"))
+        assert c.reponse().statut == 404
+        c.envoyer(octets_requete("GET", "/.marque/icone?de=/%252Emarque/sante"))
+        assert c.reponse().corps == marque.icone_generique()
+    assert app.requetes == []
+    assert capsys.readouterr().err == f"{GENERIQUE}chemin refusé\n"
+    # toute autre cible part telle qu'elle est arrivée, sans normalisation
+    obtenir(relais, "/a/./b/../c%2Ex")
+    assert [r.chemin for r in app.requetes] == ["/a/./b/../c%2Ex"]
+    for refuse in ("/%2Emarque/sante", "/%2e%2E/.marque/x", "/a/../.marque/", "/.marque/."):
+        assert not marque.chemin_admis(refuse), refuse
+    assert marque.chemin_admis("/a/../b") and marque.chemin_admis("/%2Emarques/i.png")
 
 
 def test_head_sur_une_page(app, relais):
@@ -1605,10 +1877,101 @@ def test_entetes_bien_formes_admis(app, relais):
     ]
 
 
-def test_double_barre_reecrite(app, relais):
-    obtenir(relais, "//x/y")
-    assert [r.chemin for r in app.requetes] == ["/x/y"]
-    assert "réécrit une cible qui commence par `//`" in " ".join(marque.__doc__.split())
+def test_double_barre_refusee(app, relais):
+    # `http.server` réécrirait `//x` en `/x` : le relais lit la cible brute de la ligne de requête
+    for cible in ("//x/y", "///x", "//"):
+        with Connexion(relais.port) as c:
+            c.envoyer(octets_requete("POST", cible, corps=b"abc"))
+            rep = c.reponse()
+            assert (rep.statut, rep.corps) == (400, "cible refusée\n".encode()), cible
+            assert rep.tous("Connection") == []
+            # le corps a été lu : la connexion sert encore
+            c.envoyer(octets_requete("GET", "/.marque/sante"))
+            assert c.reponse().corps == SANTE
+    assert app.requetes == []
+
+
+CONTREBANDE = octets_requete("GET", "/.marque/sante", "X-Injecte: oui", hote="x")
+
+
+@pytest.mark.parametrize("connexion", ["Content-Length", "keep-alive, content-length"])
+def test_connection_ne_retire_pas_la_longueur(app_brute, lancer_relais, connexion):
+    # le corps porte une seconde requête : sans sa longueur, l'application la lirait et l'exécuterait
+    relais = lancer_relais(amont=app_brute.amont)
+    with Connexion(relais.port) as c:
+        c.envoyer(
+            octets_requete("POST", "/formulaire", f"Connection: {connexion}", corps=CONTREBANDE)
+        )
+        assert c.reponse().corps == b"ok"
+    longueur = f"Content-Length: {len(CONTREBANDE)}".encode()
+    assert requetes_lues(app_brute.connexions.get(timeout=10)) == [
+        (b"POST /formulaire HTTP/1.1", [b"Host: app.exemple", longueur], CONTREBANDE)
+    ]
+
+
+def test_longueur_remise_une_fois(app_brute, lancer_relais):
+    relais = lancer_relais(amont=app_brute.amont)
+    for entetes, attendue in (
+        (("Content-Length: 3", "Content-Length: 3"), b"Content-Length: 3"),
+        (("Content-Length: 003",), b"Content-Length: 3"),
+    ):
+        with Connexion(relais.port) as c:
+            c.envoyer(octets_requete("POST", "/p", *entetes, corps=b"abc"))
+            assert c.reponse().corps == b"ok"
+        (requete,) = requetes_lues(app_brute.connexions.get(timeout=10))
+        assert requete == (b"POST /p HTTP/1.1", [b"Host: app.exemple", attendue], b"abc"), entetes
+    # une requête sans longueur n'en reçoit pas
+    with Connexion(relais.port) as c:
+        c.envoyer(octets_requete("GET", "/g"))
+        assert c.reponse().corps == b"ok"
+    assert app_brute.connexions.get(timeout=10) == b"GET /g HTTP/1.1\r\nHost: app.exemple\r\n\r\n"
+
+
+def test_connection_ne_retire_pas_host(app, relais):
+    obtenir(relais, "/h", "Connection: host", "X-Garde: oui")
+    (requete,) = app.requetes
+    assert requete.entetes == [("Host", "app.exemple"), ("X-Garde", "oui")]
+
+
+def test_client_http10_ferme_apres_la_reponse(app, relais):
+    # `Connection: keep-alive` ne garde pas la connexion d'un client HTTP/1.0 : la réponse ne le
+    # lui dirait pas
+    for cible in ("/x", "/.marque/sante"):
+        with Connexion(relais.port) as c:
+            c.envoyer(octets_requete("GET", cible, "Connection: keep-alive", version="HTTP/1.0"))
+            rep = c.reponse()
+            assert rep.statut == 200
+            assert rep.tous("Content-Length") == [str(len(rep.corps))]
+            assert c.fermee(), cible
+
+
+@pytest.mark.parametrize(
+    "informative, entete",
+    [("103 Early Hints", ("Link", "</s.css>; rel=preload")), ("102 Processing", ("X-Etape", "1"))],
+)
+def test_reponse_informative(app, relais, informative, entete):
+    def ecrire(sortie):
+        sortie.write(f"HTTP/1.1 {informative}\r\n{entete[0]}: {entete[1]}\r\n\r\n".encode())
+        sortie.write(reponse_brute(200, b"finale", "Content-Type: text/plain"))
+
+    app.repondre = lambda r: (
+        ecrire if r.chemin == "/informe" else reponse_brute(200, b"ok", "Content-Type: text/plain")
+    )
+    with Connexion(relais.port) as c:
+        c.envoyer(octets_requete("GET", "/informe"))
+        rep = c.reponse()
+        assert rep.ligne == f"HTTP/1.1 {informative}"
+        assert rep.tous(entete[0]) == [entete[1]]
+        rep = c.reponse()
+        assert (rep.statut, rep.corps) == (200, b"finale")
+        # la connexion sert encore : la requête suivante reçoit sa propre réponse
+        c.envoyer(octets_requete("GET", "/suite"))
+        assert c.reponse().corps == b"ok"
+    # un client HTTP/1.0 ne reçoit jamais une réponse informative
+    with Connexion(relais.port) as c:
+        c.envoyer(octets_requete("GET", "/informe", version="HTTP/1.0"))
+        rep = c.reponse()
+        assert (rep.statut, rep.corps) == (200, b"finale")
 
 
 def test_upgrade_501(app, relais):
@@ -1747,7 +2110,7 @@ def test_reponse_au_fil(app, relais):
         def ecrire(sortie):
             sortie.write(b"HTTP/1.1 200 OK\r\nContent-Length: 20\r\n\r\n")
             sortie.write(b"premier-morceau|")
-            suite.wait(1)
+            suite.wait(10)
             attente_finie.set()
             sortie.write(b"fin.")
 

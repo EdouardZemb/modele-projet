@@ -4,14 +4,17 @@ Placé devant l'application en staging, le relais transmet chaque requête et ch
 HTTP/1.1 des deux côtés, et pose trois marques sur ce qu'elle sert : un bandeau « TEST » (la
 feuille `FEUILLE`), le préfixe « test » du titre et du nom de l'application installée, et une icône
 recolorée (une rampe orange sur la luminance de chaque pixel). Il répond lui-même sous `/.marque/`
-(`sante`, `marque.css`, `icone`), et ne demande jamais rien qu'à son amont.
+(`sante`, `marque.css`, `icone`), et ne demande jamais rien qu'à son amont. Une cible est sous
+`/.marque/` telle qu'elle arrive, ou une fois normalisée : `%2E` et `%2e` décodés, puis ses
+segments `.` et `..` retirés. Toute autre cible part telle qu'elle est arrivée.
 
 Son environnement : `MARQUE_ENV`, qui doit valoir `staging` (sinon le code 64) ; `MARQUE_AMONT`,
 l'application, `http://<hôte>:<port>` ; `MARQUE_PORT`, son port d'écoute, de 1 à 65535 ;
 `MARQUE_HOTE`, son adresse d'écoute, `HOTE_ECOUTE` par défaut. Son journal, sur la sortie d'erreur,
 n'écrit jamais un chemin, une requête, un en-tête ni une adresse : une ligne à son démarrage, une à
-son refus, et une par incident (l'application injoignable, une page trop grande, un manifeste
-illisible, une icône remplacée par la générique et sa raison, un incident interne).
+son refus, et une par incident (l'application injoignable, une page trop grande, un manifeste trop
+grand, un manifeste illisible, une icône remplacée par la générique et sa raison, un incident
+interne).
 
 Les retouches de la page et du manifeste sont une recherche dans le texte, pas une lecture du HTML.
 Les limites connues du relais, que cette liste ne ferme pas :
@@ -19,30 +22,47 @@ Les limites connues du relais, que cette liste ne ferme pas :
 - une page servie par un service worker ne porte les marques qu'une fois actif un service worker
   installé après l'arrivée du relais ; hors ligne, elle garde le bandeau seulement si
   `/.marque/marque.css` est dans le cache ;
+- une copie d'une page ou d'un manifeste mise en cache avant le relais, et encore fraîche dans le
+  cache du navigateur (un `max-age`, ou la fraîcheur heuristique d'un `Last-Modified` sans
+  `Cache-Control`), se montre sans passer par lui, donc sans marque, jusqu'à son expiration ;
+- une politique de sécurité du contenu dont `style-src` n'admet pas `'self'` bloque la feuille, et
+  donc le bandeau ;
 - un titre changé par un script fait perdre « test » à l'onglet, le bandeau reste ;
 - les icônes des notifications, écrites dans le code d'un service worker, restent celles de la prod ;
 - une icône d'une autre origine est remplacée par l'icône générique ;
+- les icônes de `shortcuts` et de `screenshots`, dans le manifeste, gardent leurs couleurs : seules
+  celles d'`icons` sont retouchées ;
 - une application de staging déjà installée ne change d'icône et de nom que lorsque Chrome
   rafraîchit son WebAPK : on la réinstalle ;
 - un fragment HTML chargé par un script reçoit lui aussi le lien de la feuille ;
+- une page en UTF-16 ou en UTF-32 n'est pas reconnue : ni titre ni bandeau, et le lien ajouté à la
+  fin s'y lit comme du texte ;
 - un `::before` propre à l'application sur une fenêtre modale ou un `popover` ouvert est remplacé
   par la bande ;
 - seules quatre formes se cherchent, `</head>`, `<body`, `<title>` et `<link ... rel=...icon...>`,
   et seulement dans l'en-tête : une forme écrite autrement (`</head >`, un `<title>` après
   `<body`) n'est pas vue ;
+- un `<link>` ou un `<title>` dont la balise, ou une valeur entre guillemets, ne se ferme jamais
+  court jusqu'à la fin, comme pour le tokeniseur HTML : aucune balise de la même sorte qui le suit
+  n'est lue ; les deux recherches sont distinctes, et un `<link>` ouvert ne cache pas un `<title>` ;
 - les commentaires `<!-- ... -->` se lisent à la lettre : `<!-->` et `<!--->`, que HTML ferme tout de
   suite, ouvrent ici un commentaire qui cache la suite ; un CDATA, un `<script>` ou un `<style>` qui
   contient une de ces formes n'est pas distingué du reste de la page ;
 - un attribut `href` d'icône est lu entre guillemets ou sans, et ses entités HTML sont lues avant
-  la résolution ;
-- `http.server` réécrit une cible qui commence par `//` avant que le relais ne la lise (`//x` devient
-  `/x`) : ce que l'application reçoit peut différer de ce que le client a écrit ;
+  la résolution ; `<base href>` n'est pas lu : un lien d'icône relatif se résout d'après le chemin
+  de la page ;
+- le chemin d'un lien d'icône est encodé en UTF-8, sauf les caractères non réservés, `/` et les
+  `%XX` déjà là : là où le navigateur garde un `+`, un `(` ou un `:`, ou lit une barre oblique
+  inverse comme `/`, l'application reçoit `%2B`, `%28`, `%3A` ou `%5C` ; sa requête (`?…`) passe
+  telle quelle, et un caractère non ASCII, une espace ou un caractère de contrôle y donne l'icône
+  générique ; un `href` se lit en UTF-8, quel que soit le jeu de caractères de la page ;
 - une ligne de requête ou un en-tête qu'`http.server` refuse lui-même, dont la ligne qu'une espace
   dans le chemin coupe en quatre mots, reçoit son 400, 414 ou 431, et la connexion se ferme, sans
   lecture du corps ; le relais refuse lui-même par 400, corps lu et connexion gardée, une cible qui
-  ne commence pas par une seule `/` (la forme absolue comprise) ou qui porte un octet hors de
-  0x21-0x7E, et une méthode qu'`http.client` ne sait pas envoyer (un octet de contrôle, un
-  caractère non ASCII) ;
+  ne commence pas par une seule `/` (la forme absolue comprise, et `//…`, lue sur la ligne de
+  requête brute, qu'`http.server` réécrirait en `/…`) ou qui porte un octet hors de 0x21-0x7E, et
+  une méthode qu'`http.client` ne sait pas envoyer (un octet de 0x00 à 0x1F, un caractère non
+  ASCII) ; une méthode qui porte 0x7F passe, et l'application en juge ;
 - `email.feedparser`, qui lit les en-têtes pour `http.server`, perd tous ceux qui suivent une ligne
   qu'il lit mal (une ligne sans deux-points, un nom suivi d'une espace), `Content-Length` compris,
   prend un CR pour une fin de ligne, et garde dans la valeur un repli ou un octet nul : le corps
@@ -52,24 +72,24 @@ Les limites connues du relais, que cette liste ne ferme pas :
   ou commence par une espace ou une tabulation (un repli) ;
 - un corps au cadrage illisible (un `Transfer-Encoding` autre que `chunked`, ou accompagné d'un
   `Content-Length`, des `Content-Length` contradictoires ou qui ne sont pas des nombres, un morceau
-  mal formé, plus de 100 champs de fin) reçoit 400, et la connexion se ferme. Le relais lit
-  jusqu'à deux blocs du corps (64 Kio au plus chacun) avant d'ouvrir la connexion vers
-  l'application : une erreur de cadrage dans ces deux blocs, ou à la fin d'un corps d'un seul
-  bloc, ne lui fait rien parvenir ; plus loin, l'application reçoit le début de la requête, puis la
-  fermeture ;
+  mal formé, plus de 100 champs de fin) reçoit 400, et la connexion se ferme. Un défaut lu avant le
+  corps, ou dans ses premières lectures, ne fait rien parvenir à l'application ; plus loin, elle a
+  déjà reçu la ligne de requête, les en-têtes et le début du corps, puis la fermeture ;
+- une page ou un manifeste que le relais peut retoucher est lu entier, 5 Mio au plus, avant tout
+  envoi : une page que l'application diffuse au fil n'arrive au client qu'entière, ou par ses
+  5 premiers Mio d'un coup, le reste suivant au fil ;
 - le corps d'une requête que le relais transmet est lu en entier avant la réponse : un client qui
   envoie un corps par morceaux et attend la réponse avant de le finir reste bloqué jusqu'au délai
   d'inactivité de 75 s, qui ferme la connexion ;
-- une réponse 1xx de l'application autre que 100 (103 Early Hints) est prise par `http.client` pour
-  la réponse finale : le relais la transmet seule, la réponse qui la suit se perd, et le client
-  attend la réponse finale jusqu'au délai d'inactivité de 75 s, qui ferme la connexion ;
-- un `href` d'icône qui porte une espace ou un caractère non ASCII (`/icône.png`) reçoit l'icône
-  générique : `chemin_admis` n'admet que les caractères imprimables ASCII, sans espace, hors du
-  chemin réservé `/.marque/` ;
+- une réponse que l'application envoie avant d'avoir lu le corps, puis suivie d'une fermeture (un
+  413 précoce, un 401 avant l'envoi), peut se perdre : le client reçoit alors 502, et le journal
+  dit l'application injoignable ;
+- un manifeste de 5 Mio fait de petits objets peut dépasser, une fois lu, la mémoire du conteneur,
+  128 Mio : le relais est alors tué, puis relancé ;
 - WebSocket : le relais répond 501 ;
-- le retour automatique qui suit le premier déploiement du staging par un `deployer.sh` de la
-  `v0.14.0` recopie un `compose.env.precedent` sans `<PREFIXE>RELAIS` : il sert le staging sans
-  marque, jusqu'au déploiement suivant ;
+- si le premier déploiement du staging par un `deployer.sh` de la `v0.14.0` du modèle échoue, le
+  retour automatique recopie un `compose.env.precedent` sans `<PREFIXE>RELAIS` : il sert le staging
+  sans marque, jusqu'au déploiement suivant ;
 - le rendu du bandeau dans un navigateur n'est éprouvé par aucun test : c'est la constatation sur
   l'appareil qui le prouve ;
 - un PNG de profondeur 16 ou de palette de 1 à 4 bits, entrelacé, un ICO ou un WebP reçoit l'icône
@@ -425,16 +445,55 @@ def envelopper_svg(donnees: bytes) -> bytes | None:
 # --- les liens d'icône --------------------------------------------------------------------------
 
 _ICONE_GENERIQUE = "/.marque/icone"
+_POINT_ENCODE = re.compile(r"%2[Ee]")
+_POURCENT = re.compile(r"(%[0-9A-Fa-f]{2})")
+
+
+def _sans_points(chemin: str) -> str:
+    """Le chemin absolu `chemin` sans ses segments `.` et `..` (RFC 3986, § 5.2.4)."""
+    segments = chemin.split("/")[1:]
+    sortie: list[str] = []
+    for k, segment in enumerate(segments):
+        if segment == "..":
+            if sortie:
+                sortie.pop()
+        elif segment != ".":
+            sortie.append(segment)
+            continue
+        # un `.` ou un `..` final laisse le chemin fini par `/`
+        if k == len(segments) - 1:
+            sortie.append("")
+    return "/" + "/".join(sortie)
+
+
+def chemin_normal(cible: str) -> str:
+    """Le chemin de la cible absolue `cible`, sans sa requête, `%2E` et `%2e` décodés (eux seuls),
+    puis ses segments `.` et `..` retirés."""
+    return _sans_points(_POINT_ENCODE.sub(".", cible.partition("?")[0]))
+
+
+def sous_le_chemin_reserve(cible: str) -> bool:
+    """Si la cible absolue `cible` est sous `/.marque/`, telle qu'elle est ou normalisée."""
+    return cible.startswith(CHEMIN_RESERVE) or chemin_normal(cible).startswith(CHEMIN_RESERVE)
 
 
 def chemin_admis(de: str) -> bool:
     """Un chemin de l'application : une seule `/` de tête, des caractères imprimables sans espace,
-    hors du chemin réservé, qui n'est jamais le sien."""
+    hors du chemin réservé, qui n'est jamais le sien, même normalisé."""
     if not 1 <= len(de) <= 1024 or not de.startswith("/") or de.startswith("//"):
         return False
-    if de.startswith(CHEMIN_RESERVE):
+    if sous_le_chemin_reserve(de):
         return False
     return all("!" <= c <= "~" and c != "\\" for c in de)
+
+
+def _encoder(chemin: str) -> str:
+    """Le chemin encodé en UTF-8, sauf les caractères non réservés, `/` et les `%XX` déjà là ;
+    `UnicodeEncodeError` pour un caractère qu'UTF-8 n'encode pas."""
+    return "".join(
+        morceau if k % 2 else quote(morceau, safe="/")
+        for k, morceau in enumerate(_POURCENT.split(chemin))
+    )
 
 
 def lien_icone(cible: str, base: str, hote: str | None) -> str:
@@ -450,7 +509,13 @@ def lien_icone(cible: str, base: str, hote: str | None) -> str:
         or jointe.netloc.lower() != hote.lower()
     ):
         return _ICONE_GENERIQUE
-    de = jointe.path + ("?" + jointe.query if jointe.query else "")
+    # Le chemin résolu est encodé, comme le navigateur le demanderait : `/icône.png` devient
+    # `/ic%C3%B4ne.png`. La requête passe telle quelle.
+    try:
+        chemin = _encoder(jointe.path)
+    except UnicodeEncodeError:
+        return _ICONE_GENERIQUE
+    de = chemin + ("?" + jointe.query if jointe.query else "")
     if not chemin_admis(de):
         return _ICONE_GENERIQUE
     return _ICONE_GENERIQUE + "?de=" + quote(de, safe="/")
@@ -458,12 +523,42 @@ def lien_icone(cible: str, base: str, hote: str | None) -> str:
 
 # --- la page ------------------------------------------------------------------------------------
 
-_LINK = re.compile(rb"""<link(?=[\s/>])(?:[^>"']|"[^"]*"|'[^']*')*>""")
+# Le début d'un `<link>` ou d'un `<title>`, et non d'un `<linker>` ou d'un `<titles>`.
+_DEBUT_LINK = re.compile(rb"<link(?=[\s/>])")
+_DEBUT_TITRE = re.compile(rb"<title(?=[\s/>])")
+_SIGNE = re.compile(rb"""[>"']""")
 _ATTRIBUT_LINK = re.compile(
     rb"""([^\s"'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'<>]+)))?"""
 )
-_TITRE = re.compile(rb"<title(?=[\s/>])[^>]*>")
 _FAVICON = b'<link rel="icon" href="/.marque/icone?de=/favicon.ico">'
+
+
+def _fin_de_balise(texte: bytes, pos: int, fin: int) -> int:
+    """La place qui suit le `>` d'une balise ouverte avant `pos`, les valeurs entre guillemets
+    sautées, ou -1 si la balise, ou l'une de ses valeurs, ne se ferme pas avant `fin`."""
+    while True:
+        signe = _SIGNE.search(texte, pos, fin)
+        if signe is None:
+            return -1
+        if signe.group() == b">":
+            return signe.end()
+        ferme = texte.find(signe.group(), signe.end(), fin)
+        if ferme < 0:
+            return -1
+        pos = ferme + 1
+
+
+def _balises(debut: re.Pattern, texte: bytes, fin: int):
+    """Le début et la fin de chaque balise que `debut` ouvre avant `fin`, en un seul passage. Une
+    balise ou une valeur jamais fermée court jusqu'à la fin, comme pour le tokeniseur HTML : la
+    recherche s'y arrête, sans elle."""
+    pos = 0
+    while (ouverte := debut.search(texte, pos, fin)) is not None:
+        bout = _fin_de_balise(texte, ouverte.end(), fin)
+        if bout < 0:
+            return
+        yield ouverte.start(), bout
+        pos = bout
 
 
 def est_page(type_contenu: str | None) -> bool:
@@ -511,12 +606,12 @@ def retoucher_page(corps: bytes, chemin: str, hote: str | None) -> bytes:
     if fin < 0:
         fin = len(corps)
     modifs: list[tuple[int, int, bytes]] = []
-    titre = _TITRE.search(visible, 0, fin)
+    titre = next(_balises(_DEBUT_TITRE, visible, fin), None)
     if titre:
-        modifs.append((titre.end(), titre.end(), PREFIXE_TITRE))
+        modifs.append((titre[1], titre[1], PREFIXE_TITRE))
     liens = 0
-    for m in _LINK.finditer(visible, 0, fin):
-        balise = corps[m.start() : m.end()]
+    for ouverte, bout in _balises(_DEBUT_LINK, visible, fin):
+        balise = corps[ouverte:bout]
         icone, href = _balise_icone(balise)
         if not icone:
             continue
@@ -529,7 +624,7 @@ def retoucher_page(corps: bytes, chemin: str, hote: str | None) -> bytes:
         )
         if sans_guillemets:
             neuf = b'"' + neuf + b'"'
-        modifs.append((m.start() + debut, m.start() + fin_valeur, neuf))
+        modifs.append((ouverte + debut, ouverte + fin_valeur, neuf))
     modifs.append((fin, fin, LIEN_FEUILLE + (b"" if liens else _FAVICON)))
     sortie = corps
     for debut, bout, texte in sorted(modifs, key=lambda t: t[0], reverse=True):
@@ -583,6 +678,9 @@ _HORS_ICONE = _CONDITIONNELS | frozenset(
 )
 _ERREURS_AMONT = (OSError, http.client.HTTPException)
 _SANS_CACHE = (("Cache-Control", "no-cache"),)
+# Les directives de l'application qu'une réponse retouchée garde, à côté de `no-cache`.
+_DIRECTIVES_GARDEES = ("no-store", "private")
+_ENTRE_GUILLEMETS = re.compile(r'"(?:[^"\\]|\\.)*"')
 _LONGUEUR = re.compile(r"[0-9]{1,18}\Z")
 _PORT = re.compile(r"[0-9]{1,5}\Z")
 _TAILLE_MORCEAU = re.compile(rb"([0-9A-Fa-f]{1,16})[ \t]*(?:;[^\r\n]*)?\r?\n\Z")
@@ -591,6 +689,30 @@ _CHAMPS_DE_FIN = 100
 
 class _MalFormee(Exception):
     """Le cadrage du corps de la requête est illisible : on ne sait plus où elle finit."""
+
+
+class _ClientParti(Exception):
+    """Le client est parti pendant qu'une réponse informative lui était écrite. Ce n'est pas une
+    `OSError`, que la lecture de l'application prendrait pour une application injoignable."""
+
+
+class _Reponse(http.client.HTTPResponse):
+    """Une réponse de l'application, qui lit sur le même fichier tamponné ses réponses
+    informatives (de 102 à 199, sauf 101), jusqu'à la réponse finale, et les passe à `informer`.
+    `http.client` saute lui-même le 100, et prendrait toute autre réponse 1xx pour la finale."""
+
+    def __init__(self, sock, *args, informer=None, **kwargs) -> None:
+        super().__init__(sock, *args, **kwargs)
+        self._informer = informer
+
+    def _read_status(self):
+        while True:
+            version, statut, raison = super()._read_status()
+            if not 102 <= statut < 200:
+                return version, statut, raison
+            entetes = http.client.parse_headers(self.fp)
+            if self._informer is not None:
+                self._informer(statut, raison.strip(), entetes.items())
 
 
 class _Lignes:
@@ -641,6 +763,8 @@ def _sans_un_saut(entetes: list[tuple[str, str]]) -> list[tuple[str, str]]:
         if nom.lower() == "connection"
         for jeton in valeur.split(",")
     }
+    # `Host` passe tel qu'il arrive, même nommé par `Connection`.
+    nommes.discard("host")
     return [
         (nom, valeur)
         for nom, valeur in entetes
@@ -684,6 +808,19 @@ def _lire_borne(reponse: http.client.HTTPResponse, n: int) -> bytes:
     if reponse.length and len(corps) < n:
         raise http.client.IncompleteRead(corps, reponse.length)
     return corps
+
+
+def _cache_retouche(entetes: list[tuple[str, str]]) -> tuple[str, str]:
+    """Le `Cache-Control` d'une réponse retouchée : `no-cache`, puis `no-store` et `private` si
+    l'application les pose, sous leur forme simple. `max-age`, `public` et les autres partent."""
+    noms = {
+        morceau.partition("=")[0].strip().lower()
+        for nom, valeur in entetes
+        if nom.lower() == "cache-control"
+        for morceau in _ENTRE_GUILLEMETS.sub('""', valeur).split(",")
+    }
+    gardees = [directive for directive in _DIRECTIVES_GARDEES if directive in noms]
+    return ("Cache-Control", ", ".join(("no-cache", *gardees)))
 
 
 def _trop_grande(sorte: str, corps: bytes) -> bool:
@@ -756,7 +893,7 @@ class Relais(BaseHTTPRequestHandler):
     def handle(self) -> None:
         try:
             super().handle()
-        except ConnectionError:
+        except (ConnectionError, _ClientParti):
             # Le client est parti, pendant une réponse ou entre deux requêtes : la connexion se
             # ferme, sans ligne. Un délai de lecture du client est pris par `handle_one_request`.
             self.close_connection = True
@@ -770,10 +907,19 @@ class Relais(BaseHTTPRequestHandler):
         lignes = _Lignes(self.rfile)
         self.rfile = lignes
         try:
-            return super().parse_request()
+            admise = super().parse_request()
         finally:
             self.rfile = lignes.fichier
             self._ligne_refusee = lignes.refusee
+        if admise:
+            # `http.server` réécrit une cible qui commence par `//` en `/…` (gh-87389) : le relais
+            # reprend la cible brute de la ligne de requête, que `http.server` a coupée de même.
+            self.path = self.requestline.split()[1]
+            # Un client HTTP/1.0 n'apprendrait pas que la connexion reste ouverte : elle se ferme
+            # après la réponse, même s'il demande `keep-alive`.
+            if self.request_version < "HTTP/1.1":
+                self.close_connection = True
+        return admise
 
     def __getattr__(self, nom: str):
         # Toute méthode passe, et non les seules que `http.server` connaît.
@@ -785,6 +931,8 @@ class Relais(BaseHTTPRequestHandler):
 
     def _servir(self) -> None:
         self._repondu = False
+        # La longueur que `_corps` a lue, que `_transmettre` remet seule ; `None` sans longueur.
+        self._longueur_lue = None
         if self.headers.defects or self._ligne_refusee:
             # `email.feedparser` a perdu les en-têtes qui suivent une ligne mal formée,
             # `Content-Length` et `Transfer-Encoding` compris, a lu un CR nu comme une fin de
@@ -800,7 +948,7 @@ class Relais(BaseHTTPRequestHandler):
             elif self._demande_upgrade():
                 self._vider(blocs)
                 self._repondre(501, b"upgrade non transmis\n")
-            elif self.path.startswith(CHEMIN_RESERVE):
+            elif sous_le_chemin_reserve(self.path):
                 self._vider(blocs)
                 self._reserve()
             else:
@@ -823,7 +971,8 @@ class Relais(BaseHTTPRequestHandler):
         longueurs = {valeur.strip() for valeur in self.headers.get_all("Content-Length") or ()}
         if len(longueurs) > 1 or not all(_LONGUEUR.match(valeur) for valeur in longueurs):
             raise _MalFormee
-        return self._longueur(int(longueurs.pop()) if longueurs else 0), False
+        self._longueur_lue = int(longueurs.pop()) if longueurs else None
+        return self._longueur(self._longueur_lue or 0), False
 
     def _longueur(self, restant: int):
         while restant:
@@ -893,7 +1042,8 @@ class Relais(BaseHTTPRequestHandler):
     # --- le chemin réservé --------------------------------------------------------------------
 
     def _reserve(self) -> None:
-        chemin, _, requete = self.path.partition("?")
+        # le chemin normalisé : `/%2Emarque/sante` est la santé ; la requête, telle qu'elle arrive
+        chemin, requete = chemin_normal(self.path), self.path.partition("?")[2]
         if chemin == "/.marque/sante":
             self._repondre(200, b'{"statut":"ok"}', "application/json", _SANS_CACHE)
         elif chemin == "/.marque/marque.css":
@@ -943,13 +1093,16 @@ class Relais(BaseHTTPRequestHandler):
         """L'icône recolorée de `de` et son type, ou `None` et la raison de l'icône générique ;
         `None` si l'application coupe après ses en-têtes. Une icône déjà gardée rend sa place
         dès la lecture, sans attendre la recoloration d'une autre."""
-        statut, type_contenu, corps = self._lire_icone(de)
+        statut, type_contenu, codage, corps = self._lire_icone(de)
         if corps is None:
             return None
         if statut != 200:
             return None, f"réponse {statut}"
         if len(corps) > LECTURE_ICONE_MAX:
             return None, "taille"
+        if codage != "identity":
+            # un corps compressé n'est ni un PNG ni un SVG : enveloppé, il donnerait une icône vide
+            return None, "format"
         if corps.startswith(_SIGNATURE):
             sorte = "png"
         elif (type_contenu or "").split(";")[0].strip().lower() == "image/svg+xml":
@@ -971,10 +1124,11 @@ class Relais(BaseHTTPRequestHandler):
             return None, "format"
         return icone, "image/png" if sorte == "png" else "image/svg+xml"
 
-    def _lire_icone(self, de: str) -> tuple[int, str | None, bytes | None]:
-        """Le statut, le type et au plus `LECTURE_ICONE_MAX + 1` octets de l'icône `de`, le corps
-        `None` si l'application coupe après ses en-têtes."""
-        conn = http.client.HTTPConnection(*self.server.amont, timeout=self.server.delai_amont)
+    def _lire_icone(self, de: str) -> tuple[int, str | None, str, bytes | None]:
+        """Le statut, le type, le codage et au plus `LECTURE_ICONE_MAX + 1` octets de l'icône
+        `de`, le corps `None` si l'application coupe après ses en-têtes. Une réponse informative
+        de l'application est sautée, sans rien en dire au client."""
+        conn = self._vers_l_application()
         try:
             conn.putrequest("GET", de, skip_host=True, skip_accept_encoding=True)
             for nom, valeur in _sans_un_saut(self.headers.items()):
@@ -983,20 +1137,40 @@ class Relais(BaseHTTPRequestHandler):
             conn.endheaders()
             reponse = conn.getresponse()
             if reponse.status != 200:
-                return reponse.status, None, b""
+                return reponse.status, None, "identity", b""
             try:
                 corps = _lire_borne(reponse, LECTURE_ICONE_MAX + 1)
             except _ERREURS_AMONT:
-                return 200, None, None
-            return 200, reponse.getheader("Content-Type"), corps
+                return 200, None, "identity", None
+            codage = (reponse.getheader("Content-Encoding") or "identity").strip().lower()
+            return 200, reponse.getheader("Content-Type"), codage, corps
         finally:
             conn.close()
 
     # --- la transmission ----------------------------------------------------------------------
 
+    def _vers_l_application(self, informer=None) -> http.client.HTTPConnection:
+        """Une connexion neuve vers l'application, dont les réponses informatives vont à
+        `informer`, ou sont sautées."""
+        conn = http.client.HTTPConnection(*self.server.amont, timeout=self.server.delai_amont)
+        conn.response_class = functools.partial(_Reponse, informer=informer)
+        return conn
+
+    def _informer(self, statut: int, raison: str, entetes) -> None:
+        """Une réponse informative de l'application, transmise sans corps au client HTTP/1.1."""
+        self.send_response_only(statut, raison)
+        for nom, valeur in _sans_un_saut(list(entetes)):
+            self.send_header(nom, valeur)
+        try:
+            self.end_headers()
+        except OSError as erreur:
+            raise _ClientParti from erreur
+
     def _vers_l_amont(self) -> list[tuple[str, str]]:
-        # `Content-Length` ne vient jamais avec `Transfer-Encoding` : `_corps` les refuse ensemble.
-        retires = {"accept-encoding", "expect"}
+        # `Content-Length` part toujours : `_transmettre` remet seule la longueur que `_corps` a
+        # lue, et un `Connection` qui le nomme ne retire jamais le cadrage. Il ne vient jamais
+        # avec `Transfer-Encoding` : `_corps` les refuse ensemble.
+        retires = {"accept-encoding", "expect", "content-length"}
         if self.command in ("GET", "HEAD"):
             retires |= _CONDITIONNELS
         return [
@@ -1014,7 +1188,9 @@ class Relais(BaseHTTPRequestHandler):
         return True
 
     def _transmettre(self, blocs, par_morceaux: bool) -> None:
-        conn = http.client.HTTPConnection(*self.server.amont, timeout=self.server.delai_amont)
+        # Une réponse informative passe à un client HTTP/1.1, jamais à un client HTTP/1.0.
+        http11 = self.request_version >= "HTTP/1.1"
+        conn = self._vers_l_application(self._informer if http11 else None)
         try:
             try:
                 conn.putrequest(self.command, self.path, skip_host=True, skip_accept_encoding=True)
@@ -1022,8 +1198,10 @@ class Relais(BaseHTTPRequestHandler):
                     conn.putheader(nom, valeur)
                 if par_morceaux:
                     conn.putheader("Transfer-Encoding", "chunked")
+                elif self._longueur_lue is not None:
+                    conn.putheader("Content-Length", str(self._longueur_lue))
             except ValueError:
-                # Une méthode que `http.client` ne sait pas envoyer : un octet de contrôle, un
+                # Une méthode que `http.client` ne sait pas envoyer : un octet de 0x00 à 0x1F, un
                 # caractère non ASCII. Pour les en-têtes, la garde n'est que défensive : aucun
                 # en-tête lu par `http.server` ne la déclenche, ceux qu'`email.feedparser` lit
                 # mal étant refusés plus tôt.
@@ -1093,7 +1271,7 @@ class Relais(BaseHTTPRequestHandler):
             if page:
                 journal("page trop grande, transmise sans marque")
             else:
-                journal("manifeste illisible, transmis sans marque")
+                journal("manifeste trop grand, transmis sans marque")
             self._flux(reponse, entetes, debut=corps)
             return
         hote = self.headers.get("Host")
@@ -1105,7 +1283,9 @@ class Relais(BaseHTTPRequestHandler):
             journal("manifeste illisible, transmis sans marque")
             neuf = corps
         else:
-            entetes = [*_sauf(entetes, "etag", "last-modified", "cache-control"), *_SANS_CACHE]
+            # `no-cache`, sans perdre le `no-store` ni le `private` de l'application
+            cache = _cache_retouche(entetes)
+            entetes = [*_sauf(entetes, "etag", "last-modified", "cache-control"), cache]
         longueur = (("Content-Length", str(len(neuf))),)
         self._entetes(reponse, _sauf(entetes, "content-length"), longueur)
         self.wfile.write(neuf)
