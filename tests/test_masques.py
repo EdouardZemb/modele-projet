@@ -494,6 +494,7 @@ REMEDE_DEPLOIEMENT = remede_attendu(
     "!/deploiement/compose.yml",
     "!/deploiement/compose.config.yml",
     "!/deploiement/compose.contenu.yml",
+    "!/deploiement/compose.marque.yml",
     "!/deploiement/compose.projet.yml",
     "!/deploiement/projet.env",
     "!/deploiement/ci/",

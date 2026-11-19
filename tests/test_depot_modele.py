@@ -1,11 +1,15 @@
 """Le dépôt modèle applique ses propres garde-fous, à sa racine."""
 
+import functools
 import hashlib
+import http.server
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
+import threading
 
 import documentation
 import pytest
@@ -321,7 +325,13 @@ def test_mecanique_et_fausse_app_dans_la_ci_du_depot_modele():
     (menage,) = [e for e in etapes if "epreuve-registre" in e.get("run", "")]
     assert menage["if"] == "always()"
     assert "docker rm -f -v epreuve-registre epreuve-conteneur" in menage["run"]
-    for nom in ("epreuve-donnees-registre", "fausse-app-app-1", "fausse-app-staging-app-1"):
+    # le relais du staging (lot 19), que l'épreuve des données lance au point 6
+    for nom in (
+        "epreuve-donnees-registre",
+        "fausse-app-app-1",
+        "fausse-app-staging-app-1",
+        "fausse-app-staging-marque-1",
+    ):
         assert nom in menage["run"], nom
     assert etapes.index(epreuve) < etapes.index(menage)
     assert etapes.index(donnees) < etapes.index(menage)
@@ -359,11 +369,23 @@ def test_menage_cible():
     `docker exec` ne transmet pas l'environnement du job : sans `-e GITHUB_ACTIONS=true`,
     l'épreuve n'arrêterait pas sur un magasin containerd, elle avertirait."""
     cible = lire_docker_cible()
-    assert set(cible) == {"DOCKER_CIBLE", "DOCKER_CIBLE_MAGASIN", "DOCKER_CIBLE_RELEVE"}
+    assert set(cible) == {
+        "DOCKER_CIBLE",
+        "DOCKER_CIBLE_MAGASIN",
+        "DOCKER_CIBLE_RELEVE",
+        "COMPOSE_CIBLE",
+        "COMPOSE_CIBLE_EMPREINTE",
+        "COMPOSE_CIBLE_RELEVE",
+    }
     assert re.fullmatch(r"\d+\.\d+\.\d+", cible["DOCKER_CIBLE"]), cible
     # Le job n'éprouve que le magasin classique : le `daemon.json` le pose, la vérification l'exige.
     assert cible["DOCKER_CIBLE_MAGASIN"] == "classique"
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", cible["DOCKER_CIBLE_RELEVE"]), cible
+    # Le Compose de la cible (lot 19), que le job `fausse-app` installe : la version amont de la
+    # construction de sa distribution, l'empreinte du binaire de sa publication, la date du relevé.
+    assert cible["COMPOSE_CIBLE"] == "2.26.1"
+    assert re.fullmatch(r"[0-9a-f]{64}", cible["COMPOSE_CIBLE_EMPREINTE"]), cible
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", cible["COMPOSE_CIBLE_RELEVE"]), cible
 
     jobs = yaml.safe_load(CI.read_text(encoding="utf-8"))["jobs"]
     job = jobs["menage-cible"]
@@ -724,6 +746,301 @@ def test_daemon_classique_refuse_sans_toucher_au_fichier(tmp_path, cas, avant, f
 
 def test_daemon_classique_sans_chemin():
     r = lancer_daemon_classique()
+    assert r.returncode == 64, r.stdout + r.stderr
+    assert "usage" in r.stderr
+
+
+COMPOSE_CIBLE_ETAPE = "Le Compose de la cible"
+INSTALLER_COMPOSE = RACINE / "tests/modele/installer_compose.py"
+ADRESSE_COMPOSE = "https://github.com/docker/compose/releases/download/v{}/docker-compose-linux-x86_64"
+CLI_PLUGINS = "/usr/local/lib/docker/cli-plugins/docker-compose"
+
+# Les doubles de l'étape du Compose de la cible. `sudo` note sa commande, puis la lance, sous
+# SOUS_SUDO ; `python3` n'accepte que l'installeur, sous `sudo`, et échoue quand ECHEC vaut
+# `installation` ; `mktemp` échoue quand ECHEC vaut `mktemp`. `docker` ne répond qu'à
+# `compose version --short` : VERSION_SANS sans DOCKER_CONFIG, VERSION_VIDE sous un DOCKER_CONFIG
+# qui est un dossier vide, et refuse tout autre DOCKER_CONFIG ; la lecture que nomme ECHEC (`sans`
+# ou `vide`) échoue sans rien rendre, comme un client sans le greffon.
+FAUX_COMPOSE = """sudo() {
+  echo "$*" >> "$JOURNAL_SUDO"
+  SOUS_SUDO=1 "$@"
+}
+python3() {
+  [ "${SOUS_SUDO:-}" = 1 ] || { echo "python3 inattendu hors de sudo : $*" >&2; return 99; }
+  case "$1 $2" in
+    "-I tests/modele/installer_compose.py") ;;
+    *) echo "python3 inattendu : $*" >&2; return 99 ;;
+  esac
+  if [ "${ECHEC:-}" = installation ]; then
+    echo "installer_compose : empreinte fausse ; rien n'est écrit" >&2
+    return 1
+  fi
+}
+mktemp() {
+  if [ "${ECHEC:-}" = mktemp ]; then
+    echo "mktemp: failed to create directory" >&2
+    return 1
+  fi
+  command mktemp "$@"
+}
+docker() {
+  local lecture valeur
+  [ "$*" = "compose version --short" ] || { echo "docker inattendu : $*" >&2; return 99; }
+  if [ -z "${DOCKER_CONFIG+posee}" ]; then
+    lecture=sans valeur=$VERSION_SANS
+  elif [ -d "$DOCKER_CONFIG" ] && [ -z "$(ls -A "$DOCKER_CONFIG")" ]; then
+    lecture=vide valeur=$VERSION_VIDE
+  else
+    echo "docker inattendu : DOCKER_CONFIG=$DOCKER_CONFIG n'est pas un dossier vide" >&2
+    return 99
+  fi
+  if [ "$lecture" = "${ECHEC:-}" ]; then
+    echo "docker: 'compose' is not a docker command." >&2
+    return 1
+  fi
+  echo "$valeur"
+}
+"""
+
+
+def test_compose_cible(tmp_path):
+    """Lot 19 : la cible a Compose 2.26.1, dans une construction de sa distribution, et le runner
+    une version plus récente. Comme `menage-cible` pour le moteur (LE-41), le job `fausse-app` fait
+    tourner ses épreuves sous la version de la cible, celle du binaire amont : son étape, avant les
+    épreuves, lit `COMPOSE_CIBLE` et `COMPOSE_CIBLE_EMPREINTE` dans `tests/modele/docker-cible.env`,
+    installe le binaire de la publication par `sudo python3 -I tests/modele/installer_compose.py`
+    dans `/usr/local/lib/docker/cli-plugins`, que le client lit avant le dossier du paquet, même
+    sous un `DOCKER_CONFIG` posé, comme celui de `charger_env`. Elle vérifie que
+    `docker compose version --short` rend la version de la cible sans puis avec un `DOCKER_CONFIG`
+    vide, et l'écrit au résumé du job. Lancée comme le runner (`bash -e {0}`), puis sans `-e`, les
+    doubles en tête : chaque échec refuse et le dit par `::error::`, sans rien devoir à `-e`."""
+    workflow = yaml.safe_load(CI.read_text(encoding="utf-8"))
+    job = workflow["jobs"]["fausse-app"]
+    etapes = job["steps"]
+    (etape,) = [e for e in etapes if e.get("name") == COMPOSE_CIBLE_ETAPE]
+    assert "shell" not in etape
+    assert "defaults" not in job
+    assert "defaults" not in workflow
+    sans_echappatoire(job, COMPOSE_CIBLE_ETAPE)
+    # Après le magasin du runner, avant la construction et les deux épreuves, qui prennent Compose.
+    (magasin,) = [e for e in etapes if e.get("name") == MAGASIN_RUNNER]
+    (construire,) = [e for e in etapes if "modele-image" in e.get("uses", "")]
+    epreuves = [e for e in etapes if "tests/modele/epreuve-" in e.get("run", "")]
+    assert len(epreuves) == 2
+    assert etapes.index(magasin) < etapes.index(etape) < etapes.index(construire)
+    assert all(etapes.index(etape) < etapes.index(e) for e in epreuves)
+
+    script = tmp_path / "compose.sh"
+    script.write_text(FAUX_COMPOSE + etape["run"], encoding="utf-8", newline="\n")
+    cible = lire_docker_cible()
+    c, empreinte = cible["COMPOSE_CIBLE"], cible["COMPOSE_CIBLE_EMPREINTE"]
+
+    def fichier_de_cible(nom, texte):
+        dossier = tmp_path / nom
+        (dossier / "tests/modele").mkdir(parents=True)
+        (dossier / "tests/modele/docker-cible.env").write_text(
+            texte, encoding="utf-8", newline="\n"
+        )
+        return dossier
+
+    sans_version = fichier_de_cible(
+        "sans-version", f"COMPOSE_CIBLE_EMPREINTE={empreinte}\nCOMPOSE_CIBLE_RELEVE=2026-11-18\n"
+    )
+    sans_empreinte = fichier_de_cible(
+        "sans-empreinte", f"COMPOSE_CIBLE={c}\nCOMPOSE_CIBLE_RELEVE=2026-11-18\n"
+    )
+    sans_fichier = tmp_path / "sans-fichier"
+    sans_fichier.mkdir()
+    autre = "2.40.3"
+    # (cas, dossier, version sans DOCKER_CONFIG, version sous un DOCKER_CONFIG vide, lecture en
+    # échec, fragment du refus, ou None) ; chaque branche de refus a son cas.
+    table = (
+        ("la cible", RACINE, c, c, "", None),
+        ("installation en échec", RACINE, c, c, "installation", f"Compose {c} non installé"),
+        ("une autre version", RACINE, autre, c, "", f"docker compose est en {autre}, la cible"),
+        (
+            "une autre version sous un DOCKER_CONFIG vide",
+            RACINE,
+            c,
+            autre,
+            "",
+            f"sous un DOCKER_CONFIG vide, docker compose est en {autre}",
+        ),
+        ("version illisible", RACINE, c, c, "sans", "version de docker compose illisible"),
+        (
+            "version illisible sous un DOCKER_CONFIG vide",
+            RACINE,
+            c,
+            c,
+            "vide",
+            "illisible sous un DOCKER_CONFIG vide",
+        ),
+        ("mktemp en échec", RACINE, c, c, "mktemp", "DOCKER_CONFIG vide impossible"),
+        ("sans le fichier", sans_fichier, c, c, "", "docker-cible.env illisible"),
+        ("sans COMPOSE_CIBLE", sans_version, c, c, "", "COMPOSE_CIBLE absent"),
+        ("sans l'empreinte", sans_empreinte, c, c, "", "COMPOSE_CIBLE_EMPREINTE absent"),
+    )
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if not k.startswith(("COMPOSE_CIBLE", "DOCKER_CIBLE"))
+        and k not in ("DOCKER_CONFIG", "GITHUB_STEP_SUMMARY")
+    }
+    commande = (
+        f"python3 -I tests/modele/installer_compose.py --source {ADRESSE_COMPOSE.format(c)} "
+        f"--empreinte {empreinte} --destination {CLI_PLUGINS}"
+    )
+    for options in (["-e"], []):
+        for numero, (nom, dossier, sans, vide, echec, refus) in enumerate(table):
+            cas = (nom, options)
+            journal = tmp_path / f"sudo-{len(options)}-{numero}.log"
+            resume = tmp_path / f"resume-{len(options)}-{numero}.md"
+            r = subprocess.run(
+                [trouver_bash(), *options, str(script)],
+                cwd=dossier,
+                env={
+                    **env,
+                    "JOURNAL_SUDO": str(journal),
+                    "GITHUB_STEP_SUMMARY": str(resume),
+                    "VERSION_SANS": sans,
+                    "VERSION_VIDE": vide,
+                    "ECHEC": echec,
+                },
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                check=False,
+            )
+            assert "inattendu" not in r.stderr, (cas, r.stderr)
+            if refus is None:
+                assert r.returncode == 0, (cas, r.stdout + r.stderr)
+                assert "::error::" not in r.stdout, (cas, r.stdout)
+                # l'installeur, sous sudo, vers le dossier des greffons, avec l'empreinte du fichier
+                assert journal.read_text(encoding="utf-8").splitlines() == [commande], cas
+                # la version au résumé du job, que la PR relit
+                assert f"Compose {c}, la cible {c}" in resume.read_text(encoding="utf-8"), cas
+            else:
+                assert r.returncode == 1, (cas, r.stdout + r.stderr)
+                erreurs = [ligne for ligne in r.stdout.splitlines() if "::error::" in ligne]
+                assert any(refus in ligne for ligne in erreurs), (cas, r.stdout)
+                assert not resume.exists(), cas
+
+
+def lancer_installer_compose(*arguments):
+    """Comme le job le lance, sous `-I` ; `-X utf8` pour Windows, où `-I` écrirait en cp1252.
+    Sous POSIX, un umask de 077 : le script pose lui-même le 755 du binaire et des dossiers."""
+    return subprocess.run(
+        [sys.executable, "-X", "utf8", "-I", str(INSTALLER_COMPOSE), *arguments],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+        **({"umask": 0o077} if os.name == "posix" else {}),
+    )
+
+
+def test_installer_compose(tmp_path):
+    """Le binaire de la source s'écrit à la destination, en 755, par un fichier temporaire renommé,
+    dans un dossier créé au besoin, en 755 : `/usr/local/lib/docker/cli-plugins` peut manquer sur
+    le runner. Une empreinte fausse rend 1 et n'écrit rien, pas même le dossier ; une source
+    absente aussi."""
+    binaire = b"\x7fELF un faux docker-compose\n" * 4096
+    source = tmp_path / "docker-compose-linux-x86_64"
+    source.write_bytes(binaire)
+    empreinte = hashlib.sha256(binaire).hexdigest()
+    racine = tmp_path / "usr"
+    destination = racine / "local/lib/docker/cli-plugins/docker-compose"
+
+    def installer(depuis, attendue):
+        return lancer_installer_compose(
+            "--source", str(depuis), "--empreinte", attendue, "--destination", str(destination)
+        )
+
+    fausse = hashlib.sha256(b"un autre binaire").hexdigest()
+    r = installer(source, fausse)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert f"{empreinte}, attendue {fausse}" in r.stderr, r.stderr
+    assert "rien n'est écrit" in r.stderr, r.stderr
+    assert not racine.exists()
+
+    r = installer(tmp_path / "absente", empreinte)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "source illisible" in r.stderr, r.stderr
+    assert not racine.exists()
+
+    r = installer(source, empreinte)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert destination.read_bytes() == binaire
+    # le fichier temporaire, renommé, ne reste pas
+    assert [p.name for p in destination.parent.iterdir()] == ["docker-compose"]
+    if os.name == "posix":
+        assert stat.S_IMODE(destination.stat().st_mode) == 0o755
+        dossier = destination.parent
+        while dossier != tmp_path:
+            assert stat.S_IMODE(dossier.stat().st_mode) == 0o755, dossier
+            dossier = dossier.parent
+
+    # un binaire déjà là est remplacé
+    destination.write_bytes(b"un ancien docker-compose")
+    r = installer(source, empreinte)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert destination.read_bytes() == binaire
+    assert [p.name for p in destination.parent.iterdir()] == ["docker-compose"]
+
+
+def test_installer_compose_par_http(tmp_path):
+    """Le job donne une adresse : le script la lit par `urllib`. Ici, une publication servie sur la
+    boucle locale ; une adresse absente (404) rend 1 et n'écrit rien."""
+    binaire = b"\x7fELF un faux docker-compose servi\n" * 2048
+    publication = tmp_path / "publication"
+    publication.mkdir()
+    (publication / "docker-compose-linux-x86_64").write_bytes(binaire)
+    empreinte = hashlib.sha256(binaire).hexdigest()
+    destination = tmp_path / "cli-plugins/docker-compose"
+
+    class Silencieux(http.server.SimpleHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+    gestionnaire = functools.partial(Silencieux, directory=str(publication))
+    serveur = http.server.ThreadingHTTPServer(("127.0.0.1", 0), gestionnaire)
+    fil = threading.Thread(target=serveur.serve_forever, daemon=True)
+    fil.start()
+    try:
+        base = f"http://127.0.0.1:{serveur.server_port}"
+        r = lancer_installer_compose(
+            "--source", f"{base}/absent", "--empreinte", empreinte,
+            "--destination", str(destination),
+        )
+        assert r.returncode == 1, r.stdout + r.stderr
+        assert "source illisible" in r.stderr, r.stderr
+        assert not destination.parent.exists()
+        r = lancer_installer_compose(
+            "--source", f"{base}/docker-compose-linux-x86_64", "--empreinte", empreinte,
+            "--destination", str(destination),
+        )
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert destination.read_bytes() == binaire
+    finally:
+        serveur.shutdown()
+        serveur.server_close()
+        fil.join(timeout=10)
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        [],
+        ["--source", "binaire", "--empreinte", "0" * 64],
+        ["--source", "binaire", "--empreinte", "A" * 64, "--destination", "x"],
+        ["--source", "binaire", "--empreinte", "0" * 63, "--destination", "x"],
+        ["--source", "binaire", "--empreinte", "0" * 64, "--destination", "x", "en-trop"],
+    ],
+)
+def test_installer_compose_usage(arguments):
+    """Un argument manquant, en trop, ou une empreinte qui n'a pas 64 caractères hexadécimaux en
+    minuscules : 64, et rien n'est lu ni écrit."""
+    r = lancer_installer_compose(*arguments)
     assert r.returncode == 64, r.stdout + r.stderr
     assert "usage" in r.stderr
 

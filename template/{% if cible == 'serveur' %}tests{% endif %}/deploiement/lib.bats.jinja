@@ -278,7 +278,8 @@ lire_les_chemins='charger_env prod; charger_secrets prod
 
 # Les montages de l'instantané (M-0006, § 5) ne sont décrits que pour ce que compose.env monte :
 # compose.config.yml pour {{ prefixe }}CONFIG, compose.contenu.yml pour {{ prefixe }}CONTENU, après les
-# fichiers du projet.
+# fichiers du projet. Le relais de la marque du staging (lot 19), compose.marque.yml, vient en
+# dernier, sur la seule ligne {{ prefixe }}RELAIS, quel que soit l'ordre des lignes de compose.env.
 @test "dc : les fichiers de montage suivent compose.env" {
   creer_double docker
   local etat="${{ prefixe }}RACINE_ETAT/prod" fichiers cas lignes attendus
@@ -290,7 +291,10 @@ lire_les_chemins='charger_env prod; charger_secrets prod
     "{{ prefixe }}IMAGE=x,{{ prefixe }}CONFIG=/i/config|-f $CLONE/deploiement/compose.config.yml" \
     "{{ prefixe }}CONTENU=/i/contenu,{{ prefixe }}IMAGE=x|-f $CLONE/deploiement/compose.contenu.yml" \
     "{{ prefixe }}CONTENU=/i/contenu,{{ prefixe }}CONFIG=/i/config|-f $CLONE/deploiement/compose.config.yml -f $CLONE/deploiement/compose.contenu.yml" \
-    "{{ prefixe }}CONFIGURATION=x,{{ prefixe }}CONTENUS=x,#{{ prefixe }}CONFIG=/i/config|"; do
+    "{{ prefixe }}CONFIGURATION=x,{{ prefixe }}CONTENUS=x,#{{ prefixe }}CONFIG=/i/config|" \
+    "{{ prefixe }}IMAGE=x,{{ prefixe }}RELAIS=x|-f $CLONE/deploiement/compose.marque.yml" \
+    "{{ prefixe }}RELAIS=x,{{ prefixe }}CONTENU=/i/contenu,{{ prefixe }}CONFIG=/i/config|-f $CLONE/deploiement/compose.config.yml -f $CLONE/deploiement/compose.contenu.yml -f $CLONE/deploiement/compose.marque.yml" \
+    "{{ prefixe }}IMAGE=x,#{{ prefixe }}RELAIS=x,{{ prefixe }}RELAISX=x|"; do
     IFS=',' read -r -a lignes <<<"${cas%%|*}"
     printf '%s\n' "${lignes[@]}" >"$etat/compose.env"
     attendus="$fichiers"
@@ -984,6 +988,8 @@ messages_du_journal() {
 }
 {%- endif %}
 
+# L'empreinte du relais du staging (lot 19) aussi : posée dans le shell, elle remplacerait celle de
+# compose.env dans l'étiquette du service, et le relais ne suivrait plus son script.
 @test "refuser_image_heritee_refuse_image_et_version_du_shell" {
   avec_lib 'refuser_image_heritee; echo ok'
   [ "$status" -eq 0 ]
@@ -993,6 +999,13 @@ messages_du_journal() {
   {{ prefixe }}VERSION="" avec_lib 'refuser_image_heritee'
   [ "$status" -eq 1 ]
   [[ "$output" == *"{{ prefixe }}VERSION est posée dans l'environnement"* ]]
+  {{ prefixe }}RELAIS=x avec_lib 'refuser_image_heritee; echo pas de refus'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"{{ prefixe }}RELAIS est posée dans l'environnement : elle prendrait le pas sur compose.env"* ]]
+  [[ "$output" != *"pas de refus"* ]]
+  {{ prefixe }}RELAIS="" avec_lib 'refuser_image_heritee'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"{{ prefixe }}RELAIS est posée dans l'environnement"* ]]
 }
 
 # Les montages de l'instantané aussi : compose prend {{ prefixe }}CONFIG et {{ prefixe }}CONTENU du shell avant

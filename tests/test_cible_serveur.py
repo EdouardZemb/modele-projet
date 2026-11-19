@@ -352,6 +352,11 @@ def test_en_tete_du_compose_decrit_l_appel_de_dc(rendre):
     # Lot 12 : les montages de l'instantané, que `dc` ajoute d'après compose.env.
     assert "`dc` ajoute après eux -f <clone>/deploiement/compose.config.yml" in entete, entete
     assert "-f <clone>/deploiement/compose.contenu.yml" in entete, entete
+    # Lot 19 : le relais de la marque du staging, sur la seule ligne que le staging écrit.
+    assert (
+        "quand compose.env porte ESSAI_RELAIS (en staging seulement),"
+        " -f <clone>/deploiement/compose.marque.yml : le relais de la marque du staging"
+    ) in entete, entete
 
 
 # Lot 12 (M-0006, § 5) : les montages de l'instantané, gérés, chacun en lecture seule sur son point
@@ -367,6 +372,147 @@ def test_compose_de_montage(rendre, reponses):
     copier_yml = yaml.safe_load((RACINE / "copier.yml").read_text(encoding="utf-8"))
     for nom in ("config", "contenu"):
         assert f"deploiement/compose.{nom}.yml" not in copier_yml["_skip_if_exists"]
+
+
+class ChargeurCompose(yaml.SafeLoader):
+    """Le YAML de Compose : `!reset` et `!override` (Compose 2.24.4) se lisent en
+    `(étiquette, valeur)`, pour que le test voie l'étiquette, et pas seulement la valeur."""
+
+
+def _etiquetee(chargeur, noeud):
+    if isinstance(noeud, yaml.SequenceNode):
+        valeur = chargeur.construct_sequence(noeud, deep=True)
+    elif isinstance(noeud, yaml.MappingNode):
+        valeur = chargeur.construct_mapping(noeud, deep=True)
+    else:
+        valeur = chargeur.construct_scalar(noeud)
+    return (noeud.tag, valeur)
+
+
+for _etiquette in ("!reset", "!override"):
+    ChargeurCompose.add_constructor(_etiquette, _etiquetee)
+
+
+# Lot 19 (§ 3.1, § 3.6, § 3.8) : le relais de la marque du staging, entre le tunnel et `app`. `dc`
+# n'ajoute ce fichier, géré, que quand compose.env porte ESSAI_RELAIS. Chaque clé se lit sur l'arbre
+# YAML, et non sur le texte. Le préfixe est celui des réponses de test ; le port, celui de
+# l'application, par défaut (3000) ou un autre (8123), pour qu'un port écrit en dur se voie.
+@pytest.mark.parametrize("port", [None, 8123], ids=["port-par-defaut", "port-8123"])
+def test_compose_marque_rendu(rendre, port):
+    reponses = {**REPONSES_SERVEUR} if port is None else {**REPONSES_SERVEUR, "port_app": port}
+    port = port or 3000
+    rendu = rendre(**reponses)
+    texte = lire(rendu, "deploiement/compose.marque.yml")
+    doc = yaml.load(texte, Loader=ChargeurCompose)
+    assert list(doc) == ["services"]
+    assert list(doc["services"]) == ["app", "marque"]
+    # `app` perd son port publié et le réseau du tunnel, son alias avec lui.
+    assert doc["services"]["app"] == {
+        "ports": ("!reset", []),
+        "networks": ("!override", {"default": {}}),
+    }
+    marque = doc["services"]["marque"]
+    # Ces clés, exactement : ni `privileged`, ni `network_mode`, ni rien d'autre.
+    assert set(marque) == {
+        "image",
+        "command",
+        "init",
+        "environment",
+        "labels",
+        "volumes",
+        "depends_on",
+        "ports",
+        "networks",
+        "healthcheck",
+        "read_only",
+        "tmpfs",
+        "cap_drop",
+        "security_opt",
+        "user",
+        "mem_limit",
+        "restart",
+        "logging",
+    }
+    assert marque["image"] == (
+        "python:3.12-alpine@sha256:c5ba3deef00c7758561a0f03c26f44f10589263d40e732b8748e0d1f38f6dd89"
+    )
+    assert marque["command"] == ["python", "-B", "-I", "/marque/marque.py"]
+    assert marque["init"] is True
+    assert marque["environment"] == {
+        "MARQUE_ENV": "${ESSAI_ENV:?}",
+        "MARQUE_AMONT": f"http://app:{port}",
+        "MARQUE_PORT": f"{port}",
+    }
+    # L'empreinte du script : un script changé recrée le relais au `up` suivant.
+    assert marque["labels"] == {"modele.marque.empreinte": "${ESSAI_RELAIS:?}"}
+    assert marque["volumes"] == [
+        {
+            "type": "bind",
+            "source": "../scripts/modele/marque.py",
+            "target": "/marque/marque.py",
+            "read_only": True,
+            "bind": {"create_host_path": False},
+        }
+    ]
+    assert marque["depends_on"] == ["app"]
+    assert marque["ports"] == [f"127.0.0.1:${{ESSAI_PORT:?}}:{port}"]
+    assert marque["networks"] == {"default": {}, "tunnel": {"aliases": ["essai-${ESSAI_ENV}"]}}
+    assert marque["healthcheck"] == {
+        "test": [
+            "CMD",
+            "python",
+            "-c",
+            (
+                "import urllib.request; urllib.request.urlopen("
+                f"'http://127.0.0.1:{port}/.marque/sante', timeout=3)"
+            ),
+        ],
+        "interval": "5s",
+        "timeout": "3s",
+        "retries": 3,
+        "start_period": "10s",
+        "start_interval": "1s",
+    }
+    # Les protections d'`app` (compose.yml), et 128 Mo de mémoire.
+    assert marque["read_only"] is True
+    assert marque["tmpfs"] == ["/tmp"]
+    assert marque["cap_drop"] == ["ALL"]
+    assert marque["security_opt"] == ["no-new-privileges:true"]
+    assert marque["user"] == "1000:1000"
+    assert marque["mem_limit"] == "128m"
+    assert marque["restart"] == "unless-stopped"
+    assert marque["logging"] == {
+        "driver": "json-file",
+        "options": {"max-size": "5m", "max-file": "3"},
+    }
+    app = yaml.safe_load(lire(rendu, "deploiement/compose.yml"))["services"]["app"]
+    for cle in ("read_only", "tmpfs", "cap_drop", "security_opt", "user", "restart", "logging"):
+        assert marque[cle] == app[cle], cle
+    copier_yml = yaml.safe_load((RACINE / "copier.yml").read_text(encoding="utf-8"))
+    assert "deploiement/compose.marque.yml" not in copier_yml["_skip_if_exists"]
+    # Sous un autre port, le défaut ne paraît nulle part.
+    if port != 3000:
+        assert "3000" not in texte
+
+
+# Lot 19 (§ 3.8) : l'image du relais est épinglée par l'empreinte de son index.
+def test_image_du_relais_epinglee(rendre):
+    texte = lire(rendre(**REPONSES_SERVEUR), "deploiement/compose.marque.yml")
+    images = re.findall(r"^\s*image: (.*)$", texte, flags=re.MULTILINE)
+    assert len(images) == 1, images
+    assert re.fullmatch(r"python:3\.12-alpine@sha256:[0-9a-f]{64}", images[0]), images[0]
+
+
+# Lot 19 (§ 3.8) : le relais, sans Jinja, n'est rendu qu'en cible `serveur`, tel quel.
+def test_relais_rendu_en_cible_serveur_seulement(rendre):
+    modele = RACINE / "template/scripts/modele/{% if cible == 'serveur' %}marque.py{% endif %}"
+    for reponses in (REPONSES_SERVEUR, REPONSES_SERVEUR_CODE):
+        rendu = rendre(**reponses)
+        assert (rendu / "scripts/modele/marque.py").read_bytes() == modele.read_bytes()
+    for reponses in ({}, REPONSES_DONNEES_SERVEUR):
+        rendu = rendre(**reponses)
+        assert not (rendu / "scripts/modele/marque.py").exists()
+        assert not (rendu / "deploiement/compose.marque.yml").exists()
 
 
 # Lot 12 (M-0006, § 6) : les chemins de l'instance sont définis dans lib.sh seulement, d'après le
