@@ -49,8 +49,8 @@ Les limites connues du relais, que cette liste ne ferme pas :
 - les commentaires `<!-- ... -->` se lisent à la lettre : `<!-->` et `<!--->`, que HTML ferme tout de
   suite, ouvrent ici un commentaire qui cache la suite ; un CDATA, un `<script>` ou un `<style>` qui
   contient une de ces formes n'est pas distingué du reste de la page ;
-- un attribut `href` d'icône est lu entre guillemets ou sans, et ses entités HTML sont lues avant
-  la résolution ; `<base href>` n'est pas lu : un lien d'icône relatif se résout d'après le chemin
+- un attribut `href` d'icône est lu entre guillemets ou sans (jusqu'à un blanc ou `>`, guillemets
+  compris, comme pour le tokeniseur HTML), et ses entités HTML sont lues avant la résolution ; `<base href>` n'est pas lu : un lien d'icône relatif se résout d'après le chemin
   de la page ;
 - le chemin et la requête d'un lien d'icône sont encodés comme le navigateur les demande (WHATWG) :
   le non ASCII en UTF-8, l'espace, les contrôles et quelques signes (`^` compris dans le chemin, et
@@ -552,8 +552,10 @@ _NOM = re.compile(rb"[^\s/>][^\s/>=]*")
 _BLANCS = re.compile(rb"\s*")
 _SANS_GUILLEMETS = re.compile(rb"[^\s>]*")
 _GUILLEMET = re.compile(rb"""["']""")
+# Un attribut d'un `<link>` ; une valeur sans guillemets court, comme pour le tokeniseur HTML,
+# jusqu'à un blanc ou `>`, guillemets et `<` compris.
 _ATTRIBUT_LINK = re.compile(
-    rb"""([^\s"'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'<>]+)))?"""
+    rb"""([^\s"'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?"""
 )
 _FAVICON = b'<link rel="icon" href="/.marque/icone?de=/favicon.ico">'
 

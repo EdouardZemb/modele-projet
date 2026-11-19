@@ -585,6 +585,17 @@ def test_guillemet_hors_d_une_valeur():
     )
 
 
+def test_href_sans_guillemets_lu_comme_le_tokeniseur(app, relais):
+    # une valeur sans guillemets court jusqu'à un blanc ou `>`, guillemets compris
+    sortie = marque.retoucher_page(b"<head><link rel=icon href=/O'R.png></head>", "/", None)
+    assert b'<link rel=icon href="/.marque/icone?de=/O%27R.png">' in sortie
+    # l'apostrophe, un sous-délimiteur, reste telle quelle dans le chemin demandé
+    app.repondre = lambda r: reponse_brute(200, petit_png(5), "Content-Type: image/png")
+    lien = sortie.split(b'href="')[1].split(b'"')[0].decode()
+    assert obtenir(relais, lien).corps == marque.recolorer_png(petit_png(5))
+    assert [r.chemin for r in app.requetes] == ["/O'R.png"]
+
+
 # Un enfant chronomètre `retoucher_page` : une recherche quadratique tiendrait le GIL des heures,
 # et le délai de `subprocess.run` l'arrête.
 SONDE_DUREE = """
@@ -1604,6 +1615,17 @@ def test_icone_apres_une_reponse_informative(app, relais, capsys):
     app.repondre = lambda r: ecrire
     assert icone(relais, "/i.png").corps == marque.recolorer_png(petit_png(9))
     assert capsys.readouterr().err == ""
+
+
+def test_icone_apres_un_101(app, relais, capsys):
+    # un 101 n'est pas une icône : la générique, avec la raison que dit `_icone_lue`
+    app.repondre = lambda r: (
+        b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: x\r\nConnection: Upgrade\r\n\r\n"
+    )
+    rep = icone(relais, "/i.png")
+    assert (rep.statut, rep.corps) == (200, marque.icone_generique())
+    assert capsys.readouterr().err == f"{GENERIQUE}réponse 101\n"
+    assert [r.chemin for r in app.requetes] == ["/i.png"]
 
 
 def test_chemin_reserve_normalise(app, relais, capsys):
