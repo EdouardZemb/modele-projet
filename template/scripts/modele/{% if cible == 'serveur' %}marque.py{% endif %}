@@ -693,7 +693,8 @@ def retoucher_page(corps: bytes, chemin: str, hote: str | None) -> bytes:
     # titre lu dans la valeur d'un lien, est laissée.
     morceaux: list[bytes] = []
     place = 0
-    for debut, bout, texte in sorted(reversed(modifs), key=lambda t: t[0]):
+    ordre = sorted(range(len(modifs)), key=lambda i: (modifs[i][0], -i))
+    for debut, bout, texte in (modifs[i] for i in ordre):
         if debut < place:
             continue
         morceaux += (corps[place:debut], texte)
