@@ -724,19 +724,19 @@ plan, sept le 19/11.
   synchroniser ce que la prod garde hors ligne, et de ne pas confirmer si l'écran d'effacement
   nomme le domaine commun ou la prod. La portée réelle de l'effacement sous Chrome pour Android
   n'est pas éprouvée : la constatation d'`ancrage` la dira (LE-113, une piste).
-- **Les durées** : aucun job coupé ni avertissement de durée dans les cinq exécutions de `ci.yml`
-  des deux PR, une tentative chacune, ni aux push de leurs fusions, `b499b36` et `3442607`. Sous
-  Windows, le job `tests` a duré au plus 37 min 44 s (#153), sous le seuil de 45 min ;
-  `mecanique`, au plus 11 min 30 s sur les PR et 11 min 33 s au push de `b499b36`, sous 15 min ;
-  `fausse-app`, qui n'a pas l'étape « Durée du job », de 3 min 45 s à 4 min 32 s par ses
+- **Les durées** : aucun job coupé ni avertissement de durée dans les six exécutions de `ci.yml`
+  des trois PR, une tentative chacune, ni aux push de leurs fusions, `b499b36`, `3442607` et
+  `6b65791`. Sous Windows, le job `tests` a duré au plus 37 min 44 s (#153), sous le seuil de
+  45 min ; `mecanique`, au plus 11 min 30 s sur les PR et 11 min 33 s au push de `b499b36`, sous
+  15 min ; `fausse-app`, qui n'a pas l'étape « Durée du job », de 3 min 45 s à 4 min 32 s par ses
   horodatages, contre 1 min 19 s au push de `7ece86d`, avant le lot, sous son délai de 15 min.
   Seule `5298c55` a été rouge, sur `tests`, sous les deux systèmes (LE-108).
-- **Le relevé de la clôture**, sur `3442607`, le 19/11, rend 0 : 76 dépôts examinés, 7 projets,
+- **Le relevé de la clôture**, sur `6b65791`, le 19/11, rend 0 : 76 dépôts examinés, 7 projets,
   7 lus, 0 non relevé, 0 à lire ; `ancrage` et `veille-emploi` sont en `v0.13.0`. Sa ligne
   « fichiers gérés » ne compare que 2 des 12 fichiers gérés du lot (LE-107) : la préparation des
   messages a simulé la mise à jour des deux projets vers `3442607`, depuis leurs têtes du 19/11 ;
   seuls `.copier-answers.yml` et les 12 fichiers gérés du lot changent, sans conflit, et
-  `docs/exploitation.md`, semé, reste inchangé.
+  `docs/exploitation.md`, semé, reste inchangé ; #154 ne change que ce fichier semé et son test.
 - **Le registre** gagne LE-102 à LE-113 ; LE-107 se clôt dans le lot. Aucune porte n'est due :
   chaque leçon va sous un motif dont la porte est écrite, ou qui n'a pas son 3e constat. Cinq
   rejoignent « mécanisme décrit sans relire son code », qui compte désormais quinze constats : des
