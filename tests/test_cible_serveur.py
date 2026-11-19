@@ -961,9 +961,13 @@ def test_exploitation_dit_la_marque_du_staging(rendre, sauvegardes):
         "La prod n'en porte jamais aucun",
         "ESSAI_RELAIS",
         "docker logs essai-staging-marque-1",
-        ("garde sa page en cache : effacer les données du site. Accepter la mise à jour qu'elle"
-        " propose ne suffit pas toujours : un précache ne retélécharge que ce dont la révision"
-        " change, souvent pas le manifeste ni les icônes"),
+        ("garde sa page en cache : effacer les données du site du staging. Accepter la mise à jour"
+        " qu'elle propose ne suffit pas toujours : un précache ne retélécharge que ce dont la"
+        " révision change, souvent pas le manifeste ni les icônes"),
+        # K-1 : l'effacement peut toucher la prod, sous le même domaine.
+        ("Chrome peut effacer avec elles celles de la prod, sous le même domaine : faire d'abord"
+        " synchroniser ce que la prod garde hors ligne, et ne pas confirmer si l'écran"
+        " d'effacement nomme le domaine commun ou la prod"),
         "la retirer, puis la réinstaller",
         "répond 501",
         "reçoit 400 en staging",
