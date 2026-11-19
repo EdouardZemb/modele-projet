@@ -981,8 +981,10 @@ def test_exploitation_dit_la_marque_du_staging(rendre, sauvegardes):
         "L'image du relais, `python:3.12-alpine`, vient de Docker Hub",
         ("si ce tirage échoue, le `up` échoue, le couple est mis en échec et la sonde ne le"
         " retente pas. Le couple se rejoue à la main (« Débloquer un déploiement », « Un couple en"
-        " échec ne se rejoue qu'à la main »), ou la fusion suivante, un couple neuf, retire l'image"),
-        "une cible qui ne commence pas par une seule `/`, `//…` compris) reçoit 400 en staging",
+        " échec ne se rejoue qu'à la main »), ou la fusion suivante fait un couple neuf, que la sonde"
+        " déploie : son `up` tire de nouveau l'image, et efface la marque d'échec s'il réussit"),
+        ("une cible qui ne commence pas par une seule `/`, `//…` compris, ou qui porte un octet hors"
+        " de 0x21-0x7E : une espace, un contrôle, un caractère non ASCII) reçoit 400 en staging"),
         "Le ménage des images ne la retire jamais",
         # B-1 : ce que le relais retire au projet.
         ("`compose.marque.yml` retire à `app` tout port et tout réseau que `compose.projet.yml` lui"
@@ -1057,7 +1059,8 @@ def test_compose_dit_ce_que_le_relais_retire_a_app(rendre):
     # les commentaires d'en-tête, sans leur « # » de tête de ligne
     entete = a_plat(" ".join(l.lstrip("# ") for l in texte.split("services:", 1)[0].splitlines()))
     assert (
-        "qui retire alors à `app` son port publié et tout réseau autre que `default`, le tunnel et son alias compris"
+        "qui retire alors à `app` son port publié et tout réseau autre que `default`, le tunnel et"
+        " son alias compris"
     ) in entete
 
 
