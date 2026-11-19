@@ -967,7 +967,8 @@ def test_exploitation_dit_la_marque_du_staging(rendre, sauvegardes):
         "reçoit 400 en staging",
         "n'est éprouvé par aucun test",
         # C-6 : la politique de sécurité du contenu et le cache d'avant le relais.
-        ("une politique de sécurité du contenu sans `'self'` dans `style-src` bloque la feuille du"
+        ("une politique de sécurité du contenu qui n'admet pas une feuille de la même origine"
+        " (`'self'`, dans `style-src` ou, à défaut, dans `default-src`) bloque la feuille du"
         " bandeau, sans un mot"),
         ("une page ou un manifeste mis en cache avant le relais, et encore frais, se montre sans"
         " marque jusqu'à son expiration"),
@@ -979,17 +980,22 @@ def test_exploitation_dit_la_marque_du_staging(rendre, sauvegardes):
         # S-6 et B-2 : l'image du relais, Docker Hub, le couple en échec, le ménage.
         "L'image du relais, `python:3.12-alpine`, vient de Docker Hub",
         ("si ce tirage échoue, le `up` échoue, le couple est mis en échec et la sonde ne le"
-        " retente pas : « Revenir en arrière » dit le geste qui le rejoue"),
+        " retente pas. Le couple se rejoue à la main (« Débloquer un déploiement », « Un couple en"
+        " échec ne se rejoue qu'à la main »), ou la fusion suivante, un couple neuf, retire l'image"),
+        "une cible qui ne commence pas par une seule `/`, `//…` compris) reçoit 400 en staging",
         "Le ménage des images ne la retire jamais",
         # B-1 : ce que le relais retire au projet.
         ("`compose.marque.yml` retire à `app` tout port et tout réseau que `compose.projet.yml` lui"
         " ajoute, alias compris"),
         "un service `marque` de `compose.projet.yml` se fond avec le relais",
         # B-4 : le journal du relais.
-        ("Son journal part à chaque déploiement qui recrée le relais, et la copie du journal du lot 18"
-        " ne garde que celui d'`app`"),
+        ("Le relais est recréé avec `app`, à chaque déploiement d'un couple neuf et à chaque retour :"
+        " il perd alors ce journal, et les copies du journal (« Copies du journal », dans « Ce qui"
+        " tourne ») ne gardent que celui d'`app`"),
     ):
         assert fragment in marque, fragment
+    # T-1 : le fichier est semé, il ne renvoie à aucun lot du modèle.
+    assert "lot 18" not in marque
     tableau = a_plat(section(texte, "Ce qui tourne"))
     assert "| Marque | aucune | le relais `essai-staging-marque-1` (« La marque du staging ») |" in (
         tableau
@@ -1037,6 +1043,8 @@ def test_adr_disent_le_relais_du_staging(rendre):
     ) in m4
     # S-8 : la boucle locale est dans M-0003, et les routes ne suivent pas le seul staging.
     assert "(§ 5 ; la boucle locale, M-0003 § 1)" in m4
+    # T-2 : l'amendement nomme le § 3, l'image du relais jamais retirée par le ménage.
+    assert "et le ménage ne retire jamais l'image du relais (§ 3)" in m4
     assert (
         "l'app y porte l'alias `<nom>-<env>` en prod. En staging, le relais de la marque"
         " (`compose.marque.yml`, lot 19) le porte à sa place. Les routes de Cloudflare visent"
@@ -1049,7 +1057,7 @@ def test_compose_dit_ce_que_le_relais_retire_a_app(rendre):
     # les commentaires d'en-tête, sans leur « # » de tête de ligne
     entete = a_plat(" ".join(l.lstrip("# ") for l in texte.split("services:", 1)[0].splitlines()))
     assert (
-        "qui retire alors à `app` son port publié et ses réseaux, alias du tunnel compris"
+        "qui retire alors à `app` son port publié et tout réseau autre que `default`, le tunnel et son alias compris"
     ) in entete
 
 

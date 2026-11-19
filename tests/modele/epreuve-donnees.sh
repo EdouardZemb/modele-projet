@@ -19,11 +19,11 @@
 # la copie, avec la version lue dans l'environnement du conteneur par FORMAT_VERSION, et `2>&1` : la
 # fausse app écrit ses lignes sur sa sortie d'erreur, que la copie doit garder ; et, pour le relais
 # du staging, ce que fait Compose : `!reset` et `!override`, qui retirent à app son port et son
-# alias, l'ordre des démarrages que donne depends_on, --remove-orphans, le chemin relatif d'un
-# montage dans un fichier ajouté par -f, et l'étiquette qui recrée le relais quand son script
-# change. Compose
-# recrée le relais dès qu'il recrée app, dont il dépend, que l'étiquette ait changé ou non :
-# l'étiquette ne sert que quand app n'est pas recréé, et une étape isolée le prouve (6.3 ter).
+# alias, depends_on, qui ne règle que l'ordre des démarrages (aucune étape ne le vérifie),
+# --remove-orphans, le chemin relatif d'un montage dans un fichier ajouté par -f, et l'étiquette
+# qui recrée le relais quand son script change. Compose recrée le relais dès qu'il recrée app, dont
+# il dépend, que l'étiquette ait changé ou non : l'étiquette ne sert que quand app n'est pas
+# recréé, et une étape isolée le prouve (6.3 ter).
 # Le job fausse-app installe avant l'épreuve le Compose de la cible, 2.26.1, celui du binaire amont
 # (tests/modele/docker-cible.env) : la ligne qui ouvre l'épreuve dit la version qu'elle a trouvée.
 #
@@ -80,8 +80,8 @@
 #          local, dont l'étiquette de révision diffère de ce qu'annonce sa santé. Son `up` passe le
 #          port et l'alias au relais sans erreur de port (Compose crée tous les conteneurs, retire
 #          l'ancien `app`, puis démarre ; depends_on ne règle que l'ordre), la santé lue par le
-#          relais échoue, et le journal en dit la cause : la révision attendue, celle de l'image dérivée,
-#          et celle de la dernière réponse, celle de l'image du couple ; le retour d'echouer
+#          relais échoue, et le journal en dit la cause : la révision attendue, celle de l'image
+#          dérivée, et celle de la dernière réponse, celle de l'image du couple ; le retour d'echouer
 #          recopie le compose.env sans marque : app reprend le port et l'alias, et
 #          --remove-orphans retire le relais ;
 #      6.3 un déploiement réussi, marqué, d'un couple neuf (le commit 4) : le relais tient le port
