@@ -855,6 +855,7 @@ def test_secrets_exiges_rendus(rendre):
 # données d'un couple peuvent bloquer un déploiement, avec ou sans sauvegardes (lot 12).
 SECTIONS_EXPLOITATION = [
     "Ce qui tourne",
+    "La marque du staging",
     "La mise en service",
     "Mettre en ligne",
     "Revenir en arrière",
@@ -926,6 +927,143 @@ def test_exploitation_dit_les_copies_du_journal(rendre, sauvegardes):
     ):
         assert fragment in plat, fragment
     assert "sans copie" in a_plat(section(texte, "Tout arrêter"))
+
+
+def test_methode_dit_la_marque_du_staging():
+    texte = (RACINE / "template/docs/modele/methode.md").read_text(encoding="utf-8")
+    plat = a_plat(texte)
+    for fragment in (
+        "**La marque du staging.**",
+        "scripts/modele/marque.py",
+        "deploiement/compose.marque.yml",
+        "Un projet ne fournit rien",
+        "de 1024 px au plus",
+        ("Une politique de sécurité du contenu qui n'admet pas une feuille de la même origine"
+        " (`style-src 'self'`) bloque le bandeau, sans un mot : celle du projet doit l'admettre"),
+        "/.marque/",
+        "la santé du staging passe par lui",
+        # B-1 : ce que le relais retire au projet, et le nom réservé.
+        ("`compose.marque.yml` retire à `app` tout port et tout réseau que le projet lui ajoute,"
+        " alias compris, et un service `marque` du projet se fond avec le relais : le nom `marque`"
+        " est donc réservé"),
+    ):
+        assert fragment in plat, fragment
+    # Le paragraphe neuf tient en 100 colonnes (d'autres lignes de la méthode, tableaux compris, non).
+    paragraphe = texte.split("**La marque du staging.**", 1)[1].split(chr(10) * 2, 1)[0]
+    assert [l for l in paragraphe.splitlines() if len(l) > 100] == []
+
+
+@pytest.mark.parametrize("sauvegardes", [True, False])
+def test_exploitation_dit_la_marque_du_staging(rendre, sauvegardes):
+    texte = lire(rendre(**{**REPONSES_SERVEUR, "sauvegardes": sauvegardes}), "docs/exploitation.md")
+    marque = a_plat(section(texte, "La marque du staging"))
+    for fragment in (
+        "La prod n'en porte jamais aucun",
+        "ESSAI_RELAIS",
+        "docker logs essai-staging-marque-1",
+        ("garde sa page en cache : effacer les données du site. Accepter la mise à jour qu'elle"
+        " propose ne suffit pas toujours : un précache ne retélécharge que ce dont la révision"
+        " change, souvent pas le manifeste ni les icônes"),
+        "la retirer, puis la réinstaller",
+        "répond 501",
+        "reçoit 400 en staging",
+        "n'est éprouvé par aucun test",
+        # C-6 : la politique de sécurité du contenu et le cache d'avant le relais.
+        ("une politique de sécurité du contenu qui n'admet pas une feuille de la même origine"
+        " (`'self'`, dans `style-src` ou, à défaut, dans `default-src`) bloque la feuille du"
+        " bandeau, sans un mot"),
+        ("une page ou un manifeste mis en cache avant le relais, et encore frais, se montre sans"
+        " marque jusqu'à son expiration"),
+        # S-4 : les autres limites sont dans la docstring du relais.
+        "les autres limites, plus techniques, sont dans la docstring de `scripts/modele/marque.py`",
+        # S-5 : la version et l'échec que désigne le retour automatique.
+        ("si le premier déploiement du staging par le `deployer.sh` de la `v0.14.0` du modèle"
+        " échoue, le retour automatique qui le suit sert le staging sans marque"),
+        # S-6 et B-2 : l'image du relais, Docker Hub, le couple en échec, le ménage.
+        "L'image du relais, `python:3.12-alpine`, vient de Docker Hub",
+        ("si ce tirage échoue, le `up` échoue, le couple est mis en échec et la sonde ne le"
+        " retente pas. Le couple se rejoue à la main (« Débloquer un déploiement », « Un couple en"
+        " échec ne se rejoue qu'à la main »), ou la fusion suivante fait un couple neuf, que la sonde"
+        " déploie : son `up` tire de nouveau l'image, et efface la marque d'échec s'il réussit"),
+        ("une cible qui ne commence pas par une seule `/`, `//…` compris, ou qui porte un octet hors"
+        " de 0x21-0x7E : une espace, un contrôle, un caractère non ASCII) reçoit 400 en staging"),
+        "Le ménage des images ne la retire jamais",
+        # B-1 : ce que le relais retire au projet.
+        ("`compose.marque.yml` retire à `app` tout port et tout réseau que `compose.projet.yml` lui"
+        " ajoute, alias compris"),
+        "un service `marque` de `compose.projet.yml` se fond avec le relais",
+        # B-4 : le journal du relais.
+        ("Le relais est recréé avec `app`, à chaque déploiement d'un couple neuf et à chaque retour :"
+        " il perd alors ce journal, et les copies du journal (« Copies du journal », dans « Ce qui"
+        " tourne ») ne gardent que celui d'`app`"),
+    ):
+        assert fragment in marque, fragment
+    # T-1 : le fichier est semé, il ne renvoie à aucun lot du modèle.
+    assert "lot 18" not in marque
+    tableau = a_plat(section(texte, "Ce qui tourne"))
+    assert "| Marque | aucune | le relais `essai-staging-marque-1` (« La marque du staging ») |" in (
+        tableau
+    )
+    assert "staging/compose.env down --remove-orphans" in section(texte, "Tout arrêter")
+    # Le geste de l'environnement bloqué n'existe que dans le rendu qui a des sauvegardes.
+    debloquer = a_plat(section(texte, "Débloquer un déploiement"))
+    assert ("quand `compose.env` porte `ESSAI_RELAIS`, en staging" in debloquer) is sauvegardes
+    assert ("compose.marque.yml" in debloquer) is sauvegardes
+    # S-3 et B-5 : le refus du script du relais, après le verrou, `--retour` compris, et le geste.
+    for fragment in (
+        ("En staging, après le verrou et sans rien changer, `deployer.sh` refuse tout déploiement,"
+        " `--retour` compris, quand `scripts/modele/marque.py` est absent, illisible ou non lisible"
+        " par tous"),
+        "chmod a+r ~/essai-staging/scripts/modele/marque.py",
+        "git -C ~/essai-staging checkout -- scripts/modele/marque.py",
+    ):
+        assert fragment in debloquer, fragment
+    retour = a_plat(section(texte, "Revenir en arrière"))
+    assert (
+        "refuse comme tout déploiement du staging quand `scripts/modele/marque.py` est absent ou"
+        " non lisible par tous (« Débloquer un déploiement »)"
+    ) in retour
+    # S-9 : « la marque » d'un couple en échec n'est pas celle du staging.
+    assert "qui efface la marque d'échec s'il réussit" in retour
+    assert "👤 un déploiement qui efface la marque d'échec s'il réussit" in debloquer
+
+
+def test_adr_disent_le_relais_du_staging(rendre):
+    rendu = rendre(**REPONSES_SERVEUR)
+    for adr in ("M-0003-contrat-de-l-image.md", "M-0004-chaine-de-livraison.md"):
+        plat = a_plat(lire(rendu, f"docs/modele/decisions/{adr}"))
+        assert "en staging, le relais" in plat, adr
+        assert "compose.marque.yml" in plat, adr
+    m3 = a_plat(lire(rendu, "docs/modele/decisions/M-0003-contrat-de-l-image.md"))
+    assert (
+        "et le tunnel commun l'atteint par le réseau du projet. En staging, le relais de la marque"
+        " (`compose.marque.yml`, lot 19) fait l'un et l'autre à la place d'`app`"
+    ) in m3
+    m4 = a_plat(lire(rendu, "docs/modele/decisions/M-0004-chaine-de-livraison.md"))
+    # S-6 : l'exception à « le serveur ne garde que les images utiles ».
+    assert (
+        "**Le serveur ne garde que les images utiles**, l'image du relais de la marque exceptée"
+        " (`python:3.12-alpine`, tirée de Docker Hub, que le ménage ne retire jamais)"
+    ) in m4
+    # S-8 : la boucle locale est dans M-0003, et les routes ne suivent pas le seul staging.
+    assert "(§ 5 ; la boucle locale, M-0003 § 1)" in m4
+    # T-2 : l'amendement nomme le § 3, l'image du relais jamais retirée par le ménage.
+    assert "et le ménage ne retire jamais l'image du relais (§ 3)" in m4
+    assert (
+        "l'app y porte l'alias `<nom>-<env>` en prod. En staging, le relais de la marque"
+        " (`compose.marque.yml`, lot 19) le porte à sa place. Les routes de Cloudflare visent"
+    ) in m4
+
+
+# Lot 19 (S-7) : l'en-tête de compose.yml dit ce que compose.marque.yml retire à `app` en staging.
+def test_compose_dit_ce_que_le_relais_retire_a_app(rendre):
+    texte = lire(rendre(**REPONSES_SERVEUR), "deploiement/compose.yml")
+    # les commentaires d'en-tête, sans leur « # » de tête de ligne
+    entete = a_plat(" ".join(l.lstrip("# ") for l in texte.split("services:", 1)[0].splitlines()))
+    assert (
+        "qui retire alors à `app` son port publié et tout réseau autre que `default`, le tunnel et"
+        " son alias compris"
+    ) in entete
 
 
 @pytest.mark.parametrize("sauvegardes", [True, False])
