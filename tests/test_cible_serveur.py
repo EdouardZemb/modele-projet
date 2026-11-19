@@ -938,6 +938,8 @@ def test_methode_dit_la_marque_du_staging():
         "deploiement/compose.marque.yml",
         "Un projet ne fournit rien",
         "de 1024 px au plus",
+        ("Une politique de sécurité du contenu qui n'admet pas une feuille de la même origine"
+        " (`style-src 'self'`) bloque le bandeau, sans un mot : celle du projet doit l'admettre"),
         "/.marque/",
         "la santé du staging passe par lui",
         # B-1 : ce que le relais retire au projet, et le nom réservé.
@@ -964,6 +966,11 @@ def test_exploitation_dit_la_marque_du_staging(rendre, sauvegardes):
         "répond 501",
         "reçoit 400 en staging",
         "n'est éprouvé par aucun test",
+        # C-6 : la politique de sécurité du contenu et le cache d'avant le relais.
+        ("une politique de sécurité du contenu sans `'self'` dans `style-src` bloque la feuille du"
+        " bandeau, sans un mot"),
+        ("une page ou un manifeste mis en cache avant le relais, et encore frais, se montre sans"
+        " marque jusqu'à son expiration"),
         # S-4 : les autres limites sont dans la docstring du relais.
         "les autres limites, plus techniques, sont dans la docstring de `scripts/modele/marque.py`",
         # S-5 : la version et l'échec que désigne le retour automatique.
