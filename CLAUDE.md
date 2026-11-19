@@ -639,6 +639,111 @@ seule, la session du projet notant ce qu'il rapporte (S-6).
   l'agent de Windows : la première d'Edouard a été refusée. Le client de Windows, nommé en entier,
   passe ; un complément l'a dit à `veille-emploi` avant sa constatation (LE-101).
 
+Lot 19 fait le 19/11/2026 : distinguer d'un coup d'œil le staging de la prod (#151), étiqueté
+`v0.14.0`. Il vient d'une idée d'Edouard du 21/10, devenue l'issue #151 le 18/11 : en cible
+`serveur`, un relais du modèle, placé devant le staging seul, y pose trois marques, un bandeau
+orange « TEST », « test » devant le titre et le nom de l'application installée, des icônes
+recolorées, et la prod n'en porte jamais aucune (PR #152 et #153). Ses deux PR déclarent onze
+écarts à la spec, tous accordés par Edouard : quatre le 18/11, avec le plan, sept le 19/11.
+- **Le relais** (#152). `scripts/modele/marque.py`, géré, rendu en cible `serveur` seulement, en
+  bibliothèque standard de Python, transmet tout à `app`, sauf trois retouches : la page (le lien de
+  la feuille du bandeau, le titre), le manifeste (`name`, `short_name`, ses icônes vers
+  `/.marque/icone?de=`) et les icônes PNG ou SVG, recolorées sur une rampe orange, l'icône générique
+  pour ce qu'il ne sait pas lire. Il répond lui-même sous `/.marque/` (la feuille, l'icône, sa
+  santé) : aucune cible sous ce chemin ne parvient à l'application, telle qu'elle arrive, décodée ou
+  normalisée. Son journal n'écrit jamais un chemin, une requête, un en-tête ni une adresse. Il ne
+  passe jamais une requête pour deux : un cadrage de corps illisible ou des en-têtes mal formés
+  rendent 400 et ferment la connexion. Ses bornes : la page et le manifeste à 5 Mio, une icône à
+  4 Mio de pixels et 5 Mio lus, deux icônes en mémoire, une recoloration à la fois, un cache de
+  32 icônes et 16 Mio. Sa docstring nomme ses limites connues, sans que leur liste soit close ;
+  `tests/test_marque.py` porte 107 tests.
+- **Le branchement** (#152). `deploiement/compose.marque.yml`, géré : le service `marque` prend à
+  `app` le port de la boucle locale et l'alias du tunnel (`ports: !reset []`,
+  `networks: !override`), sur `python:3.12-alpine` épinglée par empreinte, avec `init: true` et
+  `mem_limit: 128m`, le script monté en lecture seule (`create_host_path: false`). `dc` ne l'ajoute,
+  en dernier, que quand `compose.env` porte `<PREFIXE>RELAIS`, l'empreinte du script, que
+  `deployer.sh` n'écrit qu'en staging, `--retour` compris. Juste après le verrou, `deployer.sh`
+  refuse en staging un script absent, illisible ou non lisible par tous, sans rien changer ;
+  `refuser_image_heritee` refuse la ligne posée dans le shell. La santé du staging passe par le
+  relais. `!reset` et `!override` demandent Compose 2.24.4 : la cible a `2.26.1-4`, et le geste 👤
+  d'Edouard, en lecture seule, y a rendu le 18/11 la même configuration que Compose 2.26.1 amont.
+- **Le banc et l'épreuve** (#152). Six tests `relais_*` dans `deployer.bats`, dont « jamais en
+  prod » et le retour depuis un précédent sans la ligne ; trois cas de `dc` et le refus du shell
+  dans `lib.bats`. Le job `fausse-app` installe Compose 2.26.1, celui de la cible, d'après sa
+  version et son empreinte (`tests/modele/installer_compose.py`, `tests/modele/docker-cible.env`),
+  puis le point 6 de l'épreuve des données passe par les chemins des projets déjà nés, en cinq
+  étapes : le staging sans marque ; un échec forcé, dont le retour revient sans marque ; un
+  déploiement marqué (la page, le manifeste, l'icône recolorée, la santé, puis un script changé qui
+  recrée le relais) ; un second échec, qui garde le relais ; « Tout arrêter ». En prod ensuite,
+  aucun relais. C'est prouvé sur le moteur 29.4.2 du runner, sous le binaire amont : sur la cible,
+  la construction `2.26.1-4` n'est éprouvée que sur sa configuration, et `docker-init` jamais
+  (B-6, C-10, une piste).
+- **Les textes** (#153). `methode.md`, géré, gagne « La marque du staging » : les trois marques, ce
+  que le relais lit des icônes du projet, `/.marque/`, ce que `compose.marque.yml` retire à `app` en
+  staging, tout port et tout réseau que le projet lui ajoute, le nom `marque` réservé, et la
+  politique de sécurité du contenu, qui doit admettre une feuille de la même origine.
+  `exploitation.md`, semé, gagne sa section, ses limites en liste non close, la ligne « Marque » du
+  tableau, le refus du script dans « Débloquer un déploiement », `--remove-orphans` au `down` du
+  staging de « Tout arrêter », et « la marque d'échec » là où « la marque » prêtait à confusion.
+  M-0003 et M-0004 sont amendés : en staging, le relais tient le port et l'alias, et le ménage ne
+  retire jamais son image. Un projet déjà né reçoit `methode.md` et les ADR par sa mise à jour,
+  `exploitation.md` par son message.
+- **Les écarts à la spec.** #152 en déclare dix, #153 un. Quatre lectures du plan (P11), accordées
+  le 18/11 : le plafond de 4 Mio compte les pixels ; le 400 couvre aussi un octet de la cible hors
+  de 0x21-0x7E et une cible qui ne commence pas par une seule `/` ; l'ordre de l'épreuve (LE-103) ;
+  la lecture d'une icône bornée à 5 Mio. Sept accordés le 19/11 : un cadrage de corps illisible,
+  des en-têtes mal formés et une méthode qu'`http.client` refuse rendent 400, nés de l'exécution ;
+  l'alias lu depuis le réseau du tunnel, et non par `docker network inspect`, qui ne montre pas les
+  alias ; un manifeste de plus de 5 Mio passé sans marque, et une réponse précoce suivie d'une
+  fermeture, qui rend 502, de la revue finale (LE-105) ; dans #153, la limite du service worker :
+  accepter la mise à jour ne suffit pas toujours, un précache ne retéléchargeant que ce dont la
+  révision change (LE-104).
+- **La revue finale** a lu `7ece86d..0851c4c` en cinq lentilles (la spec et les textes, le
+  relais, le branchement et l'épreuve, par des agents, chaque constat contre-vérifié ; le relevé et
+  les mesures, par la session), puis par une lecture de complétude : 41 constats, aucun critique,
+  trois importants (S-1, quatre écarts que #152 taisait ; S-2, deux écarts mal décrits ; C-2, une
+  mesure des fichiers gérés que le plan n'écrivait pas) et 38 mineurs. Les contre-vérifications
+  n'ont réfuté aucun des 30 constats des lentilles ; elles ont ramené R-1 et B-1 d'important à
+  mineur, et laissé B-6 plausible. Les corrections ont rejoint les deux PR, au lieu d'une
+  troisième : celles du relais dans #152 (`d928bda` à `5298c55`), relues en trois rondes jusqu'à
+  une relecture sans demande, celles des textes dans #153, en deux rondes. La CI de #152 a refusé
+  `5298c55` : le `ruff` du projet rendu voyait ce que le `ruff check .` du modèle ne lit pas, et
+  `e675bbe` l'a corrigé (LE-108). Puis la relecture fraîche des messages a trouvé la limite du
+  service worker fausse pour un précache, et le gabarit est corrigé avant l'étiquette (M-1, M-2,
+  LE-104). Deux lignes du plan prêtaient à l'épreuve, au banc et au test du rendu ce qu'ils ne
+  font pas : le geste qui arrête l'`app` d'un environnement bloqué et le cas limite de
+  `create_host_path: false` ne sont prouvés que par deux essais de la lentille du branchement, sous
+  Compose 2.26.1 amont, hors de la CI (B-7, C-9, LE-106).
+- **Les durées** : aucun job coupé ni avertissement de durée dans les cinq exécutions de `ci.yml`
+  des deux PR, une tentative chacune, ni aux push de leurs fusions, `b499b36` et `3442607`. Sous
+  Windows, le job `tests` a duré au plus 37 min 44 s (#153), sous le seuil de 45 min ;
+  `mecanique`, au plus 11 min 30 s sur les PR et 11 min 33 s au push de `b499b36`, sous 15 min ;
+  `fausse-app`, qui n'a pas l'étape « Durée du job », de 3 min 45 s à 4 min 32 s par ses
+  horodatages, contre 1 min 19 s au push de `7ece86d`, avant le lot, sous son délai de 15 min.
+  Seule `5298c55` a été rouge, sur `tests`, sous les deux systèmes (LE-108).
+- **Le relevé de la clôture** : [[RELEVÉ : …]]
+- **Le registre** gagne LE-102 à LE-112 ; LE-107 se clôt dans le lot. Aucune porte n'est due :
+  chaque leçon va sous un motif dont la porte est écrite, ou qui n'a pas son 3e constat. Cinq
+  rejoignent « mécanisme décrit sans relire son code », qui compte désormais quinze constats : des
+  phrases et une décision de la spec qui résument mal un comportement, dont la limite du service
+  worker, passée dans un gabarit (LE-102 à LE-104), la troisième pièce de trois lignes du plan
+  (LE-106), un remède écrit dans une consigne sans essai (LE-109). LE-105 rejoint « écart à la spec
+  mal pesé », LE-108 et LE-112 « contrôle passé à vide », LE-111 « comportement d'un outil
+  supposé », et LE-107 « renvoi d'une tâche à l'autre perdu en route », dont c'est le 2e constat ;
+  LE-110, la sortie d'une suite coupée par `| tail` avant d'être lue, ouvre un motif neuf. Les
+  critères de sortie de LE-97 et de LE-100, qui visaient ce lot, ne sont pas tenus.
+- **Vers les projets**, la `v0.14.0` part vers `ancrage` et `veille-emploi` seuls, après
+  l'étiquette, chacun avec son message ; les cinq autres la prendront à leur prochaine mise à jour,
+  sans effet. La marque paraît en staging au premier déploiement qui suit la fusion de la mise à
+  jour, jamais en prod. Edouard la constate sur son Android, dans un onglet puis installée, et
+  constate son absence en prod ; chez `ancrage`, il efface d'abord les données du site du staging,
+  dont le précache garde le manifeste d'avant le relais. La session du projet note ce qu'il
+  rapporte, sans lire le serveur. Le premier déploiement marqué tire l'image du relais de Docker
+  Hub : un tirage en échec met le couple en échec, et la sonde ne le retente pas (une piste). Si ce
+  déploiement échoue pour une autre cause, le retour automatique sert le staging sans marque,
+  jusqu'au déploiement suivant.
+- **Les « À relire » de la clôture** : [[À RELIRE : le nombre de choix, et l'accord d'Edouard]].
+
 Prochain, au choix d'Edouard :
 - le second temps du travail sur la documentation, un lot « documentation » avec sa spec : l'« État »
   réduit du `CLAUDE.md` semé et le journal des versions du modèle ; dans le README, le refus d'une
@@ -677,7 +782,19 @@ Prochain, au choix d'Edouard :
   et LE-100, avec LE-88 et LE-89 (un contrôle qui passe sans voir ce qu'il doit voir : des gardes
   qu'aucun test ne tenait, une horloge en échec lue comme un horodatage, deux mécanismes revenus
   d'un lot à l'autre) ; LE-101, avec LE-57, LE-84, LE-87 et LE-99 (un comportement d'outil supposé
-  dans un geste qu'un message donne à lancer : le `ssh` de Git Bash, sans l'agent de Windows).
+  dans un geste qu'un message donne à lancer : le `ssh` de Git Bash, sans l'agent de Windows) ;
+- ceux que le lot 19 laisse ouverts, de même : LE-102, LE-103 et LE-104, avec LE-86, LE-90 et
+  LE-93 (un texte que « Mécanismes annoncés » ne couvre pas : des phrases de la spec qui résument
+  un comportement, dont la limite du service worker passée dans un gabarit, et l'ordre de son
+  épreuve) ; LE-106, avec LE-80 (la troisième pièce d'une ligne de plan : deux tests et le relevé
+  auxquels le plan prêtait ce qu'ils ne font pas) ; LE-109, avec LE-86 et LE-96 (un remède écrit
+  dans une consigne sans essayer le cas) ; LE-105, avec LE-49, LE-83 et LE-92 (un écart que son
+  auteur ne reconnaît pas : quatre écarts tus, deux mal décrits) ; LE-108, avec LE-58 et LE-75 (un
+  contrôle local plus étroit que celui de la CI : le `ruff` du projet rendu) ; LE-112, avec LE-88
+  et LE-97 (des valeurs et des gardes qu'aucun test ne tenait, revenues au lot suivant) ; LE-111,
+  avec LE-57, LE-87 et LE-99 (un cas limite inconnu : le chemin réservé et les balises HTML, lus
+  par le texte) ; LE-110, le premier constat d'un motif neuf (la sortie d'un contrôle coupée avant
+  d'être lue).
 
 Le cadrage est dans `docs/cadrage.md` ; ce que les lots ont appris, dans `docs/registre.md`.
 
