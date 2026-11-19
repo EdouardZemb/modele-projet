@@ -5,8 +5,9 @@ HTTP/1.1 des deux côtés, et pose trois marques sur ce qu'elle sert : un bandea
 feuille `FEUILLE`), le préfixe « test » du titre et du nom de l'application installée, et une icône
 recolorée (une rampe orange sur la luminance de chaque pixel). Il répond lui-même sous `/.marque/`
 (`sante`, `marque.css`, `icone`), et ne demande jamais rien qu'à son amont. Une cible est sous
-`/.marque/` telle qu'elle arrive, ou une fois normalisée : `%2E`, `%2e`, `%2F` et `%2f` décodés,
-puis ses segments `.` et `..` retirés. Toute autre cible part telle qu'elle est arrivée.
+`/.marque/` telle qu'elle arrive, une fois décodée (`%2E`, `%2e`, `%2F` et `%2f`, eux seuls), ou
+une fois décodée puis normalisée (ses segments `.` et `..` retirés). Toute autre cible part telle
+qu'elle est arrivée.
 
 Son environnement : `MARQUE_ENV`, qui doit valoir `staging` (sinon le code 64) ; `MARQUE_AMONT`,
 l'application, `http://<hôte>:<port>` ; `MARQUE_PORT`, son port d'écoute, de 1 à 65535 ;
@@ -50,21 +51,22 @@ Les limites connues du relais, que cette liste ne ferme pas :
   suite, ouvrent ici un commentaire qui cache la suite ; un CDATA, un `<script>` ou un `<style>` qui
   contient une de ces formes n'est pas distingué du reste de la page ;
 - un attribut `href` d'icône est lu entre guillemets ou sans (jusqu'à un blanc ou `>`, guillemets
-  compris, comme pour le tokeniseur HTML), et ses entités HTML sont lues avant la résolution ; `<base href>` n'est pas lu : un lien d'icône relatif se résout d'après le chemin
-  de la page ;
+  compris, comme pour le tokeniseur HTML), et ses entités HTML sont lues avant la résolution ;
+  `<base href>` n'est pas lu : un lien d'icône relatif se résout d'après le chemin de la page ;
 - le chemin et la requête d'un lien d'icône sont encodés comme le navigateur les demande (WHATWG) :
   le non ASCII en UTF-8, l'espace, les contrôles et quelques signes (`^` compris dans le chemin, et
   non dans la requête), le reste tel quel, `%` compris ; une apostrophe de la requête, que WHATWG
-  encode pour `http` et `https`, passe telle quelle ; une barre oblique inverse, que le navigateur lit comme `/`, donne l'icône générique ; un
-  `href` se lit en UTF-8, quel que soit le jeu de caractères de la page ;
+  encode pour `http` et `https`, passe telle quelle ; une barre oblique inverse, que le navigateur
+  lit comme `/`, donne l'icône générique ; un `href` se lit en UTF-8, quel que soit le jeu de
+  caractères de la page ;
 - une ligne de requête ou un en-tête qu'`http.server` refuse lui-même, dont la ligne qu'une espace
   dans le chemin coupe en quatre mots, reçoit son 400, 414 ou 431, et la connexion se ferme, sans
   lecture du corps ; le relais refuse lui-même par 400, corps lu et connexion gardée (en HTTP/1.1 :
-  un client HTTP/1.0 voit la connexion se fermer après chaque réponse), une cible qui
-  ne commence pas par une seule `/` (la forme absolue comprise, et `//…`, lue sur la ligne de
-  requête brute, qu'`http.server` réécrirait en `/…`) ou qui porte un octet hors de 0x21-0x7E, et
-  une méthode qu'`http.client` ne sait pas envoyer (un octet de 0x00 à 0x1F, un caractère non
-  ASCII) ; une méthode qui porte 0x7F passe, et l'application en juge ;
+  un client HTTP/1.0 voit la connexion se fermer après chaque réponse), une cible qui ne commence
+  pas par une seule `/` (la forme absolue comprise, et `//…`, lue sur la ligne de requête brute,
+  qu'`http.server` réécrirait en `/…`) ou qui porte un octet hors de 0x21-0x7E, et une méthode
+  qu'`http.client` ne sait pas envoyer (un octet de 0x00 à 0x1F, un caractère non ASCII) ; une
+  méthode qui porte 0x7F passe, et l'application en juge ;
 - `email.feedparser`, qui lit les en-têtes pour `http.server`, perd tous ceux qui suivent une ligne
   qu'il lit mal (une ligne sans deux-points, un nom suivi d'une espace), `Content-Length` compris,
   prend un CR pour une fin de ligne, et garde dans la valeur un repli ou un octet nul : le corps
@@ -87,7 +89,8 @@ Les limites connues du relais, que cette liste ne ferme pas :
   413 précoce, un 401 avant l'envoi), peut se perdre : le client reçoit alors 502, et le journal
   dit l'application injoignable ;
 - un manifeste de 5 Mio fait de petits objets peut dépasser, une fois lu, la mémoire du conteneur,
-  128 Mio : le relais est alors tué, puis relancé ;
+  128 Mio, comme une page de 5 Mio faite de liens d'icône, une fois retouchée : le relais est alors
+  tué, puis relancé ;
 - WebSocket : le relais répond 501 ; un 101 que l'application envoie sans qu'on le lui demande
   n'est pas transmis : le client reçoit 502, et le journal dit l'application injoignable ;
 - si le premier déploiement du staging par un `deployer.sh` de la `v0.14.0` du modèle échoue, le
@@ -469,19 +472,27 @@ def _sans_points(chemin: str) -> str:
     return "/" + "/".join(sortie)
 
 
-def chemin_normal(cible: str) -> str:
-    """Le chemin de la cible absolue `cible`, sans sa requête, `%2E`, `%2e`, `%2F` et `%2f` décodés
-    (eux seuls), puis ses segments `.` et `..` retirés. Il ne sert qu'à reconnaître le chemin
-    réservé : la cible transmise reste telle qu'elle est arrivée."""
-    chemin = _POINT_OU_BARRE_ENCODES.sub(
+def _chemin_decode(cible: str) -> str:
+    """Le chemin de la cible absolue `cible`, sans sa requête, `%2E`, `%2e`, `%2F` et `%2f`
+    décodés (eux seuls), comme l'application le lit."""
+    return _POINT_OU_BARRE_ENCODES.sub(
         lambda m: "." if m.group(1) in "Ee" else "/", cible.partition("?")[0]
     )
-    return _sans_points(chemin)
+
+
+def chemin_normal(cible: str) -> str:
+    """Le chemin décodé de la cible absolue `cible`, puis ses segments `.` et `..` retirés. Il ne
+    sert qu'à reconnaître le chemin réservé : la cible transmise reste telle qu'elle est arrivée."""
+    return _sans_points(_chemin_decode(cible))
 
 
 def sous_le_chemin_reserve(cible: str) -> bool:
-    """Si la cible absolue `cible` est sous `/.marque/`, telle qu'elle est ou normalisée."""
-    return cible.startswith(CHEMIN_RESERVE) or chemin_normal(cible).startswith(CHEMIN_RESERVE)
+    """Si la cible absolue `cible` est sous `/.marque/` : telle qu'elle est, décodée, ou décodée
+    puis normalisée."""
+    decode = _chemin_decode(cible)
+    return any(
+        forme.startswith(CHEMIN_RESERVE) for forme in (cible, decode, _sans_points(decode))
+    )
 
 
 def chemin_admis(de: str) -> bool:

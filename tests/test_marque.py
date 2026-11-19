@@ -603,19 +603,21 @@ import importlib.machinery, importlib.util, sys, time
 chargeur = importlib.machinery.SourceFileLoader("marque", sys.argv[1])
 module = importlib.util.module_from_spec(importlib.util.spec_from_loader("marque", chargeur))
 chargeur.exec_module(module)
-motif = bytes.fromhex(sys.argv[2])
-page = b"<head>" + motif * (1024 * 1024 // len(motif))
+motif, avant, apres = (bytes.fromhex(x) for x in sys.argv[2:5])
+page = avant + motif * (1024 * 1024 // len(motif)) + apres
 debut = time.perf_counter()
 module.retoucher_page(page, "/", "h")
 print(time.perf_counter() - debut)
 """
 
 
-def duree_de_la_retouche(motif):
-    """La durée de `retoucher_page` sur 1 Mio de `motif`, mesurée dans un enfant."""
+def duree_de_la_retouche(motif, avant=b"<head>", apres=b""):
+    """La durée de `retoucher_page` sur `avant`, 1 Mio de `motif` et `apres`, mesurée dans un
+    enfant."""
     try:
         fini = subprocess.run(
-            [sys.executable, "-B", "-c", SONDE_DUREE, str(CHEMIN), motif.hex()],
+            [sys.executable, "-B", "-c", SONDE_DUREE, str(CHEMIN)]
+            + [x.hex() for x in (motif, avant, apres)],
             capture_output=True,
             timeout=30,
             check=True,
@@ -633,6 +635,14 @@ def test_balise_jamais_fermee_lineaire(motif):
 def test_liens_d_icone_fermes_lineaires():
     # chaque lien est retouché, et la page n'est construite qu'une fois
     assert duree_de_la_retouche(b"<link rel=icon href=/i.png>") < 2
+
+
+def test_balise_aux_valeurs_lineaire():
+    # Une seule balise d'1 Mio : un guillemet précède son premier `>`, et chacun de ses attributs
+    # (un nom `="`, une valeur `=`) est lu par la boucle de `_fin_de_balise`, pas par le raccourci.
+    balise = b'<link ="="="">'
+    assert marque._fin_de_balise(balise, len(b"<link"), len(balise)) == len(balise)
+    assert duree_de_la_retouche(b'="', avant=b"<head><link ", apres=b'">') < 2
 
 
 def test_retouches_qui_se_touchent():
@@ -1667,6 +1677,20 @@ def test_barre_encodee_sous_le_chemin_reserve(app, relais, capsys):
     # le décodage ne sert qu'à ce test : toute autre cible part telle qu'elle est arrivée
     obtenir(relais, "/a%2Fb/%2F%2e")
     assert [r.chemin for r in app.requetes] == ["/a%2Fb/%2F%2e"]
+
+
+def test_forme_decodee_sous_le_chemin_reserve(app, relais, capsys):
+    # décodée sans être normalisée, la cible est sous `/.marque/`, comme l'application la lirait :
+    # elle reste au relais, comme `/.marque/../x`
+    with Connexion(relais.port) as c:
+        for cible in ("/.marque%2F..%2Fx", "/%2Emarque/../x"):
+            c.envoyer(octets_requete("GET", cible))
+            assert c.reponse().statut == 404, cible
+        c.envoyer(octets_requete("GET", "/.marque/icone?de=/.marque%252F..%252Fx"))
+        assert c.reponse().corps == marque.icone_generique()
+    assert app.requetes == []
+    assert capsys.readouterr().err == f"{GENERIQUE}chemin refusé\n"
+    assert marque.lien_icone("/.marque%2F..%2Fx", "/", "h") == "/.marque/icone"
 
 
 def test_point_final_sous_le_chemin_reserve(app, relais):
