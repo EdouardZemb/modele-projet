@@ -51,11 +51,11 @@ Les limites connues du relais, que cette liste ne ferme pas :
 - un attribut `href` d'icône est lu entre guillemets ou sans, et ses entités HTML sont lues avant
   la résolution ; `<base href>` n'est pas lu : un lien d'icône relatif se résout d'après le chemin
   de la page ;
-- le chemin d'un lien d'icône est encodé en UTF-8, sauf les caractères non réservés, `/` et les
-  `%XX` déjà là : là où le navigateur garde un `+`, un `(` ou un `:`, ou lit une barre oblique
-  inverse comme `/`, l'application reçoit `%2B`, `%28`, `%3A` ou `%5C` ; sa requête (`?…`) passe
-  telle quelle, et un caractère non ASCII, une espace ou un caractère de contrôle y donne l'icône
-  générique ; un `href` se lit en UTF-8, quel que soit le jeu de caractères de la page ;
+- le chemin et la requête d'un lien d'icône sont encodés comme le navigateur les demande (WHATWG) :
+  le non ASCII en UTF-8, l'espace, les contrôles et quelques signes, le reste tel quel, `%`
+  compris ; une apostrophe de la requête, que WHATWG encode pour `http` et `https`, passe telle
+  quelle ; une barre oblique inverse, que le navigateur lit comme `/`, donne l'icône générique ; un
+  `href` se lit en UTF-8, quel que soit le jeu de caractères de la page ;
 - une ligne de requête ou un en-tête qu'`http.server` refuse lui-même, dont la ligne qu'une espace
   dans le chemin coupe en quatre mots, reçoit son 400, 414 ou 431, et la connexion se ferme, sans
   lecture du corps ; le relais refuse lui-même par 400, corps lu et connexion gardée, une cible qui
@@ -446,7 +446,6 @@ def envelopper_svg(donnees: bytes) -> bytes | None:
 
 _ICONE_GENERIQUE = "/.marque/icone"
 _POINT_ENCODE = re.compile(r"%2[Ee]")
-_POURCENT = re.compile(r"(%[0-9A-Fa-f]{2})")
 
 
 def _sans_points(chemin: str) -> str:
@@ -487,13 +486,17 @@ def chemin_admis(de: str) -> bool:
     return all("!" <= c <= "~" and c != "\\" for c in de)
 
 
-def _encoder(chemin: str) -> str:
-    """Le chemin encodé en UTF-8, sauf les caractères non réservés, `/` et les `%XX` déjà là ;
-    `UnicodeEncodeError` pour un caractère qu'UTF-8 n'encode pas."""
-    return "".join(
-        morceau if k % 2 else quote(morceau, safe="/")
-        for k, morceau in enumerate(_POURCENT.split(chemin))
-    )
+def _gardes(encodes: str) -> str:
+    """L'ASCII imprimable, sans les caractères `encodes` : ce que le navigateur laisse tel quel."""
+    return "".join(chr(c) for c in range(0x21, 0x7F) if chr(c) not in encodes)
+
+
+# Ce que le navigateur encode, d'après WHATWG : les contrôles C0, DEL, l'espace et le non ASCII (en
+# UTF-8), puis, dans le chemin (« path percent-encode set »), `"`, `#`, `<`, `>`, `?`, l'accent
+# grave, `{` et `}`, et, dans la requête (« query percent-encode set »), `"`, `#`, `<` et `>`. Tout
+# le reste passe tel quel, `%` compris, qu'il ouvre un `%XX` ou non.
+_GARDES_CHEMIN = _gardes('"#<>?`{}')
+_GARDES_REQUETE = _gardes('"#<>')
 
 
 def lien_icone(cible: str, base: str, hote: str | None) -> str:
@@ -509,13 +512,19 @@ def lien_icone(cible: str, base: str, hote: str | None) -> str:
         or jointe.netloc.lower() != hote.lower()
     ):
         return _ICONE_GENERIQUE
-    # Le chemin résolu est encodé, comme le navigateur le demanderait : `/icône.png` devient
-    # `/ic%C3%B4ne.png`. La requête passe telle quelle.
-    try:
-        chemin = _encoder(jointe.path)
-    except UnicodeEncodeError:
+    # L'encodage ne fait que rallonger : au-delà de 1024 caractères, `chemin_admis` refuserait.
+    if len(jointe.path) + len(jointe.query) > 1024:
         return _ICONE_GENERIQUE
-    de = chemin + ("?" + jointe.query if jointe.query else "")
+    # Le chemin et la requête résolus sont encodés comme le navigateur les demanderait :
+    # `/icône.png` devient `/ic%C3%B4ne.png`, `?v=é` devient `?v=%C3%A9`, `/a+b.png` reste tel
+    # quel. Une barre oblique inverse n'est pas encodée : `chemin_admis` la refuse.
+    try:
+        chemin = quote(jointe.path, safe=_GARDES_CHEMIN)
+        requete = quote(jointe.query, safe=_GARDES_REQUETE)
+    except UnicodeEncodeError:
+        # un caractère qu'UTF-8 n'encode pas, une demi-paire venue du JSON
+        return _ICONE_GENERIQUE
+    de = chemin + ("?" + requete if requete else "")
     if not chemin_admis(de):
         return _ICONE_GENERIQUE
     return _ICONE_GENERIQUE + "?de=" + quote(de, safe="/")

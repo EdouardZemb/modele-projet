@@ -450,6 +450,20 @@ def test_lien_icone():
     assert marque.lien_icone("data:image/png;base64,AAAA", "/", "h") == "/.marque/icone"
     # le chemin résolu est encodé, comme le navigateur le demanderait : l'espace devient `%20`
     assert marque.lien_icone("/a b.png", "/", "h") == "/.marque/icone?de=/a%2520b.png"
+    # les sous-délimiteurs, `:` et `@` restent tels quels, comme dans la demande du navigateur
+    assert marque.lien_icone("/a+b(1)=c:d@e.png", "/", "h") == (
+        "/.marque/icone?de=/a%2Bb%281%29%3Dc%3Ad%40e.png"
+    )
+    # la requête est encodée comme le navigateur l'encode : `&` et `=` restent
+    assert marque.lien_icone("/i.png?v=é&a=b c", "/", "h") == (
+        "/.marque/icone?de=/i.png%3Fv%3D%25C3%25A9%26a%3Db%2520c"
+    )
+    # une barre oblique inverse, que le navigateur lirait comme `/`, donne l'icône générique
+    assert marque.lien_icone("/a\\b.png", "/", "h") == "/.marque/icone"
+    assert marque.lien_icone("/a.png?b=\\", "/", "h") == "/.marque/icone"
+    # 1024 caractères au plus, comme pour `de`
+    assert marque.lien_icone("/" + "a" * 1023, "/", None) == "/.marque/icone?de=/" + "a" * 1023
+    assert marque.lien_icone("/" + "a" * 1024, "/", None) == "/.marque/icone"
     # le relais ne demande jamais à l'application un chemin qui est le sien
     assert marque.lien_icone("/.marque/icone?de=/i.png", "/", "h") == "/.marque/icone"
     assert marque.lien_icone("https://h/.marque/sante", "/", "h") == "/.marque/icone"
@@ -477,10 +491,30 @@ def test_icone_au_chemin_non_ascii():
     assert sortie["icons"] == [{"src": relatif}]
     page = '<head><link rel="icon" href="icônes/app-192.png"></head>'.encode()
     assert f'href="{relatif}"'.encode() in marque.retoucher_page(page, "/m/page", None)
-    # un `%` qui n'ouvre pas un `%XX` est encodé ; un `%XX` reste tel quel
-    assert marque.lien_icone("/a%zz%41.png", "/", None) == "/.marque/icone?de=/a%2525zz%2541.png"
+    # un `%` reste tel quel, qu'il ouvre un `%XX` ou non, comme dans la demande du navigateur
+    assert marque.lien_icone("/a%zz%41.png", "/", None) == "/.marque/icone?de=/a%25zz%2541.png"
     # un caractère qu'UTF-8 n'encode pas, venu du JSON, donne l'icône générique
     assert marque.lien_icone("/\ud800.png", "/", None) == "/.marque/icone"
+    assert marque.lien_icone("/i.png?v=\ud800", "/", None) == "/.marque/icone"
+
+
+def test_icone_demandee_comme_le_navigateur(app, relais):
+    # ce que l'application reçoit pour chaque `href`, celui que le navigateur lui demanderait
+    attendus = {
+        "/a+b(1)=c:d@e.png": "/a+b(1)=c:d@e.png",
+        "/icône.png": "/ic%C3%B4ne.png",
+        "/a b.png": "/a%20b.png",
+        "/a%zz%41.png": "/a%zz%41.png",
+        "/i.png?v=é&a=b c": "/i.png?v=%C3%A9&a=b%20c",
+        "/i.png?v=1&a=2": "/i.png?v=1&a=2",
+        '/i.png?q="<x>`{}|^': "/i.png?q=%22%3Cx%3E`{}|^",
+        "/p`{}|^.png": "/p%60%7B%7D|^.png",
+    }
+    app.repondre = lambda r: reponse_brute(200, petit_png(5), "Content-Type: image/png")
+    for href, attendu in attendus.items():
+        lien = marque.lien_icone(href, "/", "app.exemple")
+        assert obtenir(relais, lien).corps == marque.recolorer_png(petit_png(5)), href
+        assert app.requetes[-1].chemin == attendu, href
 
 
 def test_page_sans_lien_recoit_favicon():
@@ -1518,6 +1552,9 @@ def test_chemin_reserve_normalise(app, relais, capsys):
         c.envoyer(octets_requete("GET", "/x/%2E%2E/%2Emarque/./marque.css"))
         assert c.reponse().corps == marque.FEUILLE
         c.envoyer(octets_requete("GET", "/%2Emarque/autre"))
+        assert c.reponse().statut == 404
+        # sous `/.marque/` telle qu'elle arrive, normalisée hors de lui : elle reste au relais
+        c.envoyer(octets_requete("GET", "/.marque/../x"))
         assert c.reponse().statut == 404
         c.envoyer(octets_requete("GET", "/.marque/icone?de=/%252Emarque/sante"))
         assert c.reponse().corps == marque.icone_generique()
