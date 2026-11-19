@@ -568,7 +568,7 @@
 
 > **Amendé le 2026-11-19, à la clôture du lot 19, de la même façon.** Le lot 19 n'était pas au §11 :
 > il vient de l'issue #151, ouverte le 18/11 depuis une idée d'Edouard du 21/10, distinguer d'un
-> coup d'œil le staging de la prod (PR #152, #153 et [[PR précaution]]). En cible `serveur`, le
+> coup d'œil le staging de la prod (PR #152, #153 et #154). En cible `serveur`, le
 > staging passe désormais par un relais du modèle, qui y pose trois marques, un bandeau « TEST »,
 > « test » devant le titre et le nom de l'application installée, des icônes recolorées ; la prod
 > n'en porte jamais aucune. `methode.md`, `exploitation.md`, semé, et les ADR M-0003 et M-0004

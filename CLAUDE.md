@@ -643,7 +643,7 @@ Lot 19 fait le 19/11/2026 : distinguer d'un coup d'œil le staging de la prod (#
 `v0.14.0`. Il vient d'une idée d'Edouard du 21/10, devenue l'issue #151 le 18/11 : en cible
 `serveur`, un relais du modèle, placé devant le staging seul, y pose trois marques, un bandeau
 orange « TEST », « test » devant le titre et le nom de l'application installée, des icônes
-recolorées, et la prod n'en porte jamais aucune (PR #152, #153 et [[PR précaution]]). Les PR #152
+recolorées, et la prod n'en porte jamais aucune (PR #152, #153 et #154). Les PR #152
 et #153 déclarent onze écarts à la spec, tous accordés par Edouard : quatre le 18/11, avec le
 plan, sept le 19/11.
 - **Le relais** (#152). `scripts/modele/marque.py`, géré, rendu en cible `serveur` seulement, en
@@ -717,7 +717,7 @@ plan, sept le 19/11.
   environnement bloqué et le cas limite de `create_host_path: false` ne sont prouvés que par deux
   essais de la lentille du branchement, sous Compose 2.26.1 amont, hors de la CI (B-7, C-9,
   LE-106).
-- **La précaution de l'effacement** ([[PR précaution]]), une PR `fix` décidée après la revue
+- **La précaution de l'effacement** (#154), une PR `fix` décidée après la revue
   finale. La relecture fraîche des messages a vu que l'effacement des données du site du staging,
   que la limite du service worker d'`exploitation.md` donnait sans précaution, peut effacer aussi
   celles de la prod, sous le même domaine (M-3). La limite dit désormais de faire d'abord
@@ -754,7 +754,7 @@ plan, sept le 19/11.
   constate son absence en prod ; chez `ancrage`, dont le précache garde le manifeste d'avant le
   relais, il efface les données du site du staging, après avoir fait synchroniser ce que la prod
   garde hors ligne, et s'arrête si l'écran d'effacement nomme le domaine commun ou la prod
-  ([[PR précaution]], LE-113). La session du projet note ce qu'il rapporte, sans lire le serveur.
+  (#154, LE-113). La session du projet note ce qu'il rapporte, sans lire le serveur.
   Le premier déploiement marqué tire l'image du relais de Docker Hub : un tirage en échec met le
   couple en échec, et la sonde ne le retente pas (une piste). Si ce déploiement échoue pour une
   autre cause, le retour automatique sert le staging sans marque, jusqu'au déploiement suivant.
