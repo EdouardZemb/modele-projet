@@ -9,7 +9,8 @@
 # -f <clone>/deploiement/compose.config.yml ou -f <clone>/deploiement/compose.contenu.yml : les
 # montages de l'instantané des données (M-0006, § 5) ; et, quand compose.env porte
 # {{ prefixe }}RELAIS (en staging seulement), -f <clone>/deploiement/compose.marque.yml : le relais de
-# la marque du staging (lot 19).
+# la marque du staging (lot 19), qui retire alors à `app` son port publié et ses réseaux, alias du
+# tunnel compris.
 # <état> vaut ~/.local/state/{{ nom }}/<env>, sauf si {{ prefixe }}RACINE_ETAT le déplace.
 # Pas de `name:` ici : le projet (`{{ nom }}`, `{{ nom }}-staging`, `{{ nom }}-local`…) vient de `-p`.
 # Les variables `${…:?}` sans valeur font échouer la commande : mieux vaut un arrêt net qu'un

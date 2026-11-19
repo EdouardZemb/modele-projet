@@ -928,8 +928,8 @@ main() {
   # script lu est celui du clone que la sonde vient d'avancer, celui que le `up` montera. Son
   # empreinte va dans compose.env (étape 3), et `dc` n'ajoute compose.marque.yml que sur cette
   # ligne. Le conteneur le lit sous l'utilisateur 1000:1000 : le contrôle du mode, lisible par tous,
-  # sert à tout compte qui déploie autre que celui-là. Sur la cible, ce compte a l'uid 1000, celui
-  # du conteneur ; le runner de la CI, lui, a l'uid 1001. Et `test -r` est vrai pour le
+  # ne dépend pas du compte qui déploie. Sur la cible, le compte qui déploie a l'uid 1000, celui du
+  # conteneur ; le runner de la CI, l'uid 1001. Et `test -r` est vrai pour le
   # propriétaire d'un fichier en 600 : seul le mode le voit. Le mode se lit sur la cible d'un lien
   # (`stat -L`), que Docker suit au montage : sans -L, un lien se lirait lrwxrwxrwx. Le script se
   # lit par l'entrée standard : `sha256sum` préfixe sa ligne par « \ » quand le nom porte « \ » ou

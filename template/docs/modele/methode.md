@@ -456,8 +456,10 @@ titre de l'onglet et le nom du manifeste ; des icônes recolorées en orange. Un
 rien : ses icônes sont lues dans son manifeste et dans les liens d'icône de sa page, recolorées si
 ce sont des PNG 8 bits non entrelacés de 1024 px au plus ou des SVG, et remplacées sinon par une
 icône « test » générique. Le relais répond lui-même sous `/.marque/`, un chemin que l'application
-ne reçoit jamais en staging, et la santé du staging passe par lui. Ses limites sont dans
-`docs/exploitation.md`, « La marque du staging ».
+ne reçoit jamais en staging, et la santé du staging passe par lui. En staging,
+`compose.marque.yml` retire à `app` tout port et tout réseau que le projet lui ajoute, alias
+compris, et un service `marque` du projet se fond avec le relais : le nom `marque` est donc
+réservé. Ses limites sont dans `docs/exploitation.md`, « La marque du staging ».
 
 Le secret `MOTIFS_INTERDITS` (la liste privée) est posé **deux fois** par dépôt : comme secret
 Actions et comme secret Dependabot (`gh secret set MOTIFS_INTERDITS --app dependabot`). Les
