@@ -961,7 +961,9 @@ def test_exploitation_dit_la_marque_du_staging(rendre, sauvegardes):
         "La prod n'en porte jamais aucun",
         "ESSAI_RELAIS",
         "docker logs essai-staging-marque-1",
-        "effacer les données du site",
+        ("garde sa page en cache : effacer les données du site. Accepter la mise à jour qu'elle"
+        " propose ne suffit pas toujours : un précache ne retélécharge que ce dont la révision"
+        " change, souvent pas le manifeste ni les icônes"),
         "la retirer, puis la réinstaller",
         "répond 501",
         "reçoit 400 en staging",
