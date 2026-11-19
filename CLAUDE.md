@@ -721,7 +721,12 @@ recolorées, et la prod n'en porte jamais aucune (PR #152 et #153). Ses deux PR 
   `fausse-app`, qui n'a pas l'étape « Durée du job », de 3 min 45 s à 4 min 32 s par ses
   horodatages, contre 1 min 19 s au push de `7ece86d`, avant le lot, sous son délai de 15 min.
   Seule `5298c55` a été rouge, sur `tests`, sous les deux systèmes (LE-108).
-- **Le relevé de la clôture** : [[RELEVÉ : …]]
+- **Le relevé de la clôture**, sur `3442607`, le 19/11, rend 0 : 76 dépôts examinés, 7 projets,
+  7 lus, 0 non relevé, 0 à lire ; `ancrage` et `veille-emploi` sont en `v0.13.0`. Sa ligne
+  « fichiers gérés » ne compare que 2 des 12 fichiers gérés du lot (LE-107) : la préparation des
+  messages a simulé la mise à jour des deux projets vers `3442607`, depuis leurs têtes du 19/11 ;
+  seuls `.copier-answers.yml` et les 12 fichiers gérés du lot changent, sans conflit, et
+  `docs/exploitation.md`, semé, reste inchangé.
 - **Le registre** gagne LE-102 à LE-112 ; LE-107 se clôt dans le lot. Aucune porte n'est due :
   chaque leçon va sous un motif dont la porte est écrite, ou qui n'a pas son 3e constat. Cinq
   rejoignent « mécanisme décrit sans relire son code », qui compte désormais quinze constats : des
