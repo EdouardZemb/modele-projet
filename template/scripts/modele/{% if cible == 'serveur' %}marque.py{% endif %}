@@ -5,8 +5,8 @@ HTTP/1.1 des deux côtés, et pose trois marques sur ce qu'elle sert : un bandea
 feuille `FEUILLE`), le préfixe « test » du titre et du nom de l'application installée, et une icône
 recolorée (une rampe orange sur la luminance de chaque pixel). Il répond lui-même sous `/.marque/`
 (`sante`, `marque.css`, `icone`), et ne demande jamais rien qu'à son amont. Une cible est sous
-`/.marque/` telle qu'elle arrive, ou une fois normalisée : `%2E` et `%2e` décodés, puis ses
-segments `.` et `..` retirés. Toute autre cible part telle qu'elle est arrivée.
+`/.marque/` telle qu'elle arrive, ou une fois normalisée : `%2E`, `%2e`, `%2F` et `%2f` décodés,
+puis ses segments `.` et `..` retirés. Toute autre cible part telle qu'elle est arrivée.
 
 Son environnement : `MARQUE_ENV`, qui doit valoir `staging` (sinon le code 64) ; `MARQUE_AMONT`,
 l'application, `http://<hôte>:<port>` ; `MARQUE_PORT`, son port d'écoute, de 1 à 65535 ;
@@ -43,8 +43,9 @@ Les limites connues du relais, que cette liste ne ferme pas :
   et seulement dans l'en-tête : une forme écrite autrement (`</head >`, un `<title>` après
   `<body`) n'est pas vue ;
 - un `<link>` ou un `<title>` dont la balise, ou une valeur entre guillemets, ne se ferme jamais
-  court jusqu'à la fin, comme pour le tokeniseur HTML : aucune balise de la même sorte qui le suit
-  n'est lue ; les deux recherches sont distinctes, et un `<link>` ouvert ne cache pas un `<title>` ;
+  court jusqu'à la fin, comme pour le tokeniseur HTML, qui n'ouvre une valeur entre guillemets que
+  juste après le `=` qui suit un nom : aucune balise de la même sorte qui le suit n'est lue ; les
+  deux recherches sont distinctes, et un `<link>` ouvert ne cache pas un `<title>` ;
 - les commentaires `<!-- ... -->` se lisent à la lettre : `<!-->` et `<!--->`, que HTML ferme tout de
   suite, ouvrent ici un commentaire qui cache la suite ; un CDATA, un `<script>` ou un `<style>` qui
   contient une de ces formes n'est pas distingué du reste de la page ;
@@ -52,13 +53,14 @@ Les limites connues du relais, que cette liste ne ferme pas :
   la résolution ; `<base href>` n'est pas lu : un lien d'icône relatif se résout d'après le chemin
   de la page ;
 - le chemin et la requête d'un lien d'icône sont encodés comme le navigateur les demande (WHATWG) :
-  le non ASCII en UTF-8, l'espace, les contrôles et quelques signes, le reste tel quel, `%`
-  compris ; une apostrophe de la requête, que WHATWG encode pour `http` et `https`, passe telle
-  quelle ; une barre oblique inverse, que le navigateur lit comme `/`, donne l'icône générique ; un
+  le non ASCII en UTF-8, l'espace, les contrôles et quelques signes (`^` compris dans le chemin, et
+  non dans la requête), le reste tel quel, `%` compris ; une apostrophe de la requête, que WHATWG
+  encode pour `http` et `https`, passe telle quelle ; une barre oblique inverse, que le navigateur lit comme `/`, donne l'icône générique ; un
   `href` se lit en UTF-8, quel que soit le jeu de caractères de la page ;
 - une ligne de requête ou un en-tête qu'`http.server` refuse lui-même, dont la ligne qu'une espace
   dans le chemin coupe en quatre mots, reçoit son 400, 414 ou 431, et la connexion se ferme, sans
-  lecture du corps ; le relais refuse lui-même par 400, corps lu et connexion gardée, une cible qui
+  lecture du corps ; le relais refuse lui-même par 400, corps lu et connexion gardée (en HTTP/1.1 :
+  un client HTTP/1.0 voit la connexion se fermer après chaque réponse), une cible qui
   ne commence pas par une seule `/` (la forme absolue comprise, et `//…`, lue sur la ligne de
   requête brute, qu'`http.server` réécrirait en `/…`) ou qui porte un octet hors de 0x21-0x7E, et
   une méthode qu'`http.client` ne sait pas envoyer (un octet de 0x00 à 0x1F, un caractère non
@@ -86,7 +88,8 @@ Les limites connues du relais, que cette liste ne ferme pas :
   dit l'application injoignable ;
 - un manifeste de 5 Mio fait de petits objets peut dépasser, une fois lu, la mémoire du conteneur,
   128 Mio : le relais est alors tué, puis relancé ;
-- WebSocket : le relais répond 501 ;
+- WebSocket : le relais répond 501 ; un 101 que l'application envoie sans qu'on le lui demande
+  n'est pas transmis : le client reçoit 502, et le journal dit l'application injoignable ;
 - si le premier déploiement du staging par un `deployer.sh` de la `v0.14.0` du modèle échoue, le
   retour automatique recopie un `compose.env.precedent` sans `<PREFIXE>RELAIS` : il sert le staging
   sans marque, jusqu'au déploiement suivant ;
@@ -445,7 +448,8 @@ def envelopper_svg(donnees: bytes) -> bytes | None:
 # --- les liens d'icône --------------------------------------------------------------------------
 
 _ICONE_GENERIQUE = "/.marque/icone"
-_POINT_ENCODE = re.compile(r"%2[Ee]")
+# Le point et la barre encodés, que l'application décode (uvicorn décode `%2F` dans son chemin).
+_POINT_OU_BARRE_ENCODES = re.compile(r"%2([EeFf])")
 
 
 def _sans_points(chemin: str) -> str:
@@ -466,9 +470,13 @@ def _sans_points(chemin: str) -> str:
 
 
 def chemin_normal(cible: str) -> str:
-    """Le chemin de la cible absolue `cible`, sans sa requête, `%2E` et `%2e` décodés (eux seuls),
-    puis ses segments `.` et `..` retirés."""
-    return _sans_points(_POINT_ENCODE.sub(".", cible.partition("?")[0]))
+    """Le chemin de la cible absolue `cible`, sans sa requête, `%2E`, `%2e`, `%2F` et `%2f` décodés
+    (eux seuls), puis ses segments `.` et `..` retirés. Il ne sert qu'à reconnaître le chemin
+    réservé : la cible transmise reste telle qu'elle est arrivée."""
+    chemin = _POINT_OU_BARRE_ENCODES.sub(
+        lambda m: "." if m.group(1) in "Ee" else "/", cible.partition("?")[0]
+    )
+    return _sans_points(chemin)
 
 
 def sous_le_chemin_reserve(cible: str) -> bool:
@@ -492,10 +500,11 @@ def _gardes(encodes: str) -> str:
 
 
 # Ce que le navigateur encode, d'après WHATWG : les contrôles C0, DEL, l'espace et le non ASCII (en
-# UTF-8), puis, dans le chemin (« path percent-encode set »), `"`, `#`, `<`, `>`, `?`, l'accent
-# grave, `{` et `}`, et, dans la requête (« query percent-encode set »), `"`, `#`, `<` et `>`. Tout
-# le reste passe tel quel, `%` compris, qu'il ouvre un `%XX` ou non.
-_GARDES_CHEMIN = _gardes('"#<>?`{}')
+# UTF-8), puis, dans le chemin (« path percent-encode set »), `"`, `#`, `<`, `>`, `?`, `^`,
+# l'accent grave, `{` et `}`, et, dans la requête (« query percent-encode set »), `"`, `#`, `<` et
+# `>`. Tout le reste passe tel quel, `%` compris, qu'il ouvre un `%XX` ou non, et l'apostrophe de la
+# requête, que WHATWG encode pour `http` et `https` (« special-query percent-encode set »).
+_GARDES_CHEMIN = _gardes('"#<>?^`{}')
 _GARDES_REQUETE = _gardes('"#<>')
 
 
@@ -535,7 +544,14 @@ def lien_icone(cible: str, base: str, hote: str | None) -> str:
 # Le début d'un `<link>` ou d'un `<title>`, et non d'un `<linker>` ou d'un `<titles>`.
 _DEBUT_LINK = re.compile(rb"<link(?=[\s/>])")
 _DEBUT_TITRE = re.compile(rb"<title(?=[\s/>])")
-_SIGNE = re.compile(rb"""[>"']""")
+# Les états du tokeniseur HTML dans une balise, chacun sauté d'un coup : avant un nom (les blancs et
+# `/`), un nom (son premier caractère peut être `=`, et un guillemet en fait partie), les blancs,
+# une valeur sans guillemets (un guillemet en fait partie).
+_AVANT_NOM = re.compile(rb"[\s/]*")
+_NOM = re.compile(rb"[^\s/>][^\s/>=]*")
+_BLANCS = re.compile(rb"\s*")
+_SANS_GUILLEMETS = re.compile(rb"[^\s>]*")
+_GUILLEMET = re.compile(rb"""["']""")
 _ATTRIBUT_LINK = re.compile(
     rb"""([^\s"'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'<>]+)))?"""
 )
@@ -544,17 +560,38 @@ _FAVICON = b'<link rel="icon" href="/.marque/icone?de=/favicon.ico">'
 
 def _fin_de_balise(texte: bytes, pos: int, fin: int) -> int:
     """La place qui suit le `>` d'une balise ouverte avant `pos`, les valeurs entre guillemets
-    sautées, ou -1 si la balise, ou l'une de ses valeurs, ne se ferme pas avant `fin`."""
+    sautées, ou -1 si la balise, ou l'une de ses valeurs, ne se ferme pas avant `fin`. Comme pour
+    le tokeniseur HTML, un guillemet n'ouvre une valeur que juste après le `=` qui suit un nom,
+    blancs admis autour. Chaque pas avance d'un nom ou d'une valeur : la recherche est linéaire."""
+    # Sans guillemet avant le premier `>`, la balise s'y ferme, dans tout état du tokeniseur ; et
+    # sans `>`, elle ne se ferme jamais.
+    chevron = texte.find(b">", pos, fin)
+    if chevron < 0:
+        return -1
+    if _GUILLEMET.search(texte, pos, chevron) is None:
+        return chevron + 1
     while True:
-        signe = _SIGNE.search(texte, pos, fin)
-        if signe is None:
+        pos = _AVANT_NOM.match(texte, pos, fin).end()
+        if pos >= fin:
             return -1
-        if signe.group() == b">":
-            return signe.end()
-        ferme = texte.find(signe.group(), signe.end(), fin)
-        if ferme < 0:
+        if texte[pos] == 0x3E:  # `>`
+            return pos + 1
+        pos = _BLANCS.match(texte, _NOM.match(texte, pos, fin).end(), fin).end()
+        if pos >= fin:
             return -1
-        pos = ferme + 1
+        if texte[pos] != 0x3D:  # pas de `=` : un autre nom, `/` ou `>`
+            continue
+        pos = _BLANCS.match(texte, pos + 1, fin).end()
+        if pos >= fin:
+            return -1
+        signe = texte[pos]
+        if signe in (0x22, 0x27):  # `"` ou `'` : une valeur entre guillemets
+            ferme = texte.find(texte[pos : pos + 1], pos + 1, fin)
+            if ferme < 0:
+                return -1
+            pos = ferme + 1
+        elif signe != 0x3E:  # une valeur sans guillemets ; `>` ferme la balise au tour suivant
+            pos = _SANS_GUILLEMETS.match(texte, pos, fin).end()
 
 
 def _balises(debut: re.Pattern, texte: bytes, fin: int):
@@ -619,6 +656,8 @@ def retoucher_page(corps: bytes, chemin: str, hote: str | None) -> bytes:
     if titre:
         modifs.append((titre[1], titre[1], PREFIXE_TITRE))
     liens = 0
+    # le lien retouché de chaque valeur déjà lue : un `href` répété n'est résolu qu'une fois
+    neufs: dict[bytes, bytes] = {}
     for ouverte, bout in _balises(_DEBUT_LINK, visible, fin):
         balise = corps[ouverte:bout]
         icone, href = _balise_icone(balise)
@@ -628,17 +667,26 @@ def retoucher_page(corps: bytes, chemin: str, hote: str | None) -> bytes:
         if href is None:
             continue
         debut, fin_valeur, valeur, sans_guillemets = href
-        neuf = lien_icone(html.unescape(valeur.decode("utf-8", "replace")), chemin, hote).encode(
-            "ascii"
-        )
+        neuf = neufs.get(valeur)
+        if neuf is None:
+            neuf = lien_icone(html.unescape(valeur.decode("utf-8", "replace")), chemin, hote)
+            neuf = neufs[valeur] = neuf.encode("ascii")
         if sans_guillemets:
             neuf = b'"' + neuf + b'"'
         modifs.append((ouverte + debut, ouverte + fin_valeur, neuf))
     modifs.append((fin, fin, LIEN_FEUILLE + (b"" if liens else _FAVICON)))
-    sortie = corps
-    for debut, bout, texte in sorted(modifs, key=lambda t: t[0], reverse=True):
-        sortie = sortie[:debut] + texte + sortie[bout:]
-    return sortie
+    # La page se construit une seule fois, de ses morceaux dans l'ordre. Deux retouches à la même
+    # place se posent la dernière ajoutée d'abord ; une retouche qui chevauche la précédente, un
+    # titre lu dans la valeur d'un lien, est laissée.
+    morceaux: list[bytes] = []
+    place = 0
+    for debut, bout, texte in sorted(reversed(modifs), key=lambda t: t[0]):
+        if debut < place:
+            continue
+        morceaux += (corps[place:debut], texte)
+        place = bout
+    morceaux.append(corps[place:])
+    return b"".join(morceaux)
 
 
 # --- le manifeste -------------------------------------------------------------------------------
@@ -1031,7 +1079,8 @@ class Relais(BaseHTTPRequestHandler):
         self, code: int, corps: bytes, type_contenu: str = "text/plain; charset=utf-8",
         entetes: tuple[tuple[str, str], ...] = (), fermer: bool = False,
     ) -> None:
-        """Une réponse du relais lui-même, avec sa longueur : la connexion sert encore."""
+        """Une réponse du relais lui-même, avec sa longueur : la connexion d'un client HTTP/1.1
+        sert encore, sauf `fermer` ; celle d'un client HTTP/1.0 se ferme après chaque réponse."""
         self.send_response(code)
         self.send_header("Content-Type", type_contenu)
         self.send_header("Content-Length", str(len(corps)))
@@ -1235,6 +1284,11 @@ class Relais(BaseHTTPRequestHandler):
             try:
                 reponse = conn.getresponse()
             except _ERREURS_AMONT:
+                self._injoignable()
+                return
+            if reponse.status == 101:
+                # Jamais sollicité : le relais répond 501 à toute demande d'`Upgrade`, et retire
+                # `Upgrade` des autres requêtes. L'application n'a pas rendu de réponse utilisable.
                 self._injoignable()
                 return
             self._relayer(reponse)

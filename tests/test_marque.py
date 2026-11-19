@@ -468,6 +468,11 @@ def test_lien_icone():
     assert marque.lien_icone("/.marque/icone?de=/i.png", "/", "h") == "/.marque/icone"
     assert marque.lien_icone("https://h/.marque/sante", "/", "h") == "/.marque/icone"
     assert marque.lien_icone("/%2Emarque/sante", "/", "h") == "/.marque/icone"
+    assert marque.lien_icone("/.marque%2Fsante", "/", "h") == "/.marque/icone"
+    # `^`, que WHATWG encode dans le chemin, et non dans la requête
+    assert marque.lien_icone("/p^.png?q=^", "/", "h") == (
+        "/.marque/icone?de=/p%255E.png%3Fq%3D%5E"
+    )
 
 
 def test_lien_icone_autre_schema():
@@ -507,8 +512,10 @@ def test_icone_demandee_comme_le_navigateur(app, relais):
         "/a%zz%41.png": "/a%zz%41.png",
         "/i.png?v=é&a=b c": "/i.png?v=%C3%A9&a=b%20c",
         "/i.png?v=1&a=2": "/i.png?v=1&a=2",
+        # la requête garde l'accent grave, `{`, `}` et `^`, que WHATWG n'y encode pas
         '/i.png?q="<x>`{}|^': "/i.png?q=%22%3Cx%3E`{}|^",
-        "/p`{}|^.png": "/p%60%7B%7D|^.png",
+        # le chemin les encode, `|` excepté
+        "/p`{}|^.png": "/p%60%7B%7D|%5E.png",
     }
     app.repondre = lambda r: reponse_brute(200, petit_png(5), "Content-Type: image/png")
     for href, attendu in attendus.items():
@@ -555,6 +562,29 @@ def test_balises_lues_valeurs_sautees():
     assert b"&middot;" not in titre
 
 
+def test_guillemet_hors_d_une_valeur():
+    # comme pour le tokeniseur HTML, un guillemet n'ouvre une valeur que juste après le `=` qui suit
+    # un nom, blancs admis autour ; ailleurs, c'est un caractère comme un autre
+    icone = b'<link rel=icon href="/.marque/icone?de=/i.png">'
+    for avant in (
+        b"<link rel=preload href=/fonts/O'Reilly.woff2>",  # dans une valeur sans guillemets
+        b'<link rel=stylesheet x" href=/a.css>',  # dans un nom
+        b'<link =" rel=stylesheet>',  # un `=` en tête d'un nom en fait partie
+        b'<link a==" rel=stylesheet>',  # un second `=` ouvre une valeur sans guillemets
+    ):
+        page = b"<head>" + avant + b"<link rel=icon href=/i.png></head>"
+        sortie = marque.retoucher_page(page, "/", None)
+        assert avant + icone in sortie, avant
+        assert b"/favicon.ico" not in sortie, avant
+    titre = marque.retoucher_page(b"<head><title data-x=l'a>T</title></head>", "/", None)
+    assert b"<title data-x=l'a>test &middot; T</title>" in titre
+    # après `=`, blancs admis autour, il ouvre une valeur, qui garde son `>`
+    page = b"<head><link title = 'a>b' rel=icon href=/i.png></head>"
+    assert b"<link title = 'a>b' rel=icon href=\"/.marque/icone?de=/i.png\">" in (
+        marque.retoucher_page(page, "/", None)
+    )
+
+
 # Un enfant chronomètre `retoucher_page` : une recherche quadratique tiendrait le GIL des heures,
 # et le délai de `subprocess.run` l'arrête.
 SONDE_DUREE = """
@@ -570,8 +600,8 @@ print(time.perf_counter() - debut)
 """
 
 
-@pytest.mark.parametrize("motif", [b"<link ", b"<title ", b'<link a="'])
-def test_balise_jamais_fermee_lineaire(motif):
+def duree_de_la_retouche(motif):
+    """La durée de `retoucher_page` sur 1 Mio de `motif`, mesurée dans un enfant."""
     try:
         fini = subprocess.run(
             [sys.executable, "-B", "-c", SONDE_DUREE, str(CHEMIN), motif.hex()],
@@ -581,7 +611,31 @@ def test_balise_jamais_fermee_lineaire(motif):
         )
     except subprocess.TimeoutExpired:
         pytest.fail(f"1 Mio de {motif!r} : plus de 30 s")
-    assert float(fini.stdout) < 2, motif
+    return float(fini.stdout)
+
+
+@pytest.mark.parametrize("motif", [b"<link ", b"<title ", b'<link a="'])
+def test_balise_jamais_fermee_lineaire(motif):
+    assert duree_de_la_retouche(motif) < 2, motif
+
+
+def test_liens_d_icone_fermes_lineaires():
+    # chaque lien est retouché, et la page n'est construite qu'une fois
+    assert duree_de_la_retouche(b"<link rel=icon href=/i.png>") < 2
+
+
+def test_retouches_qui_se_touchent():
+    # un `<title>` lu dans la valeur d'un lien chevauche sa retouche : seule celle du lien se pose
+    sortie = marque.retoucher_page(b'<head><link rel=icon href="/i<title>.png"></head>', "/", None)
+    assert sortie == (
+        b'<head><link rel=icon href="/.marque/icone?de=/i%253Ctitle%253E.png">'
+        b'<link rel="stylesheet" href="/.marque/marque.css"></head>'
+    )
+    # deux retouches à la même place : la dernière ajoutée d'abord, comme avant
+    assert marque.retoucher_page(b"<head><title></head>", "/", None) == (
+        b'<head><title><link rel="stylesheet" href="/.marque/marque.css">'
+        b'<link rel="icon" href="/.marque/icone?de=/favicon.ico">test &middot; </head>'
+    )
 
 
 # --- le manifeste -------------------------------------------------------------------------------
@@ -1245,6 +1299,15 @@ def test_cache_prive_garde(app, relais):
     assert obtenir(relais, "/manifest.json").tous("Cache-Control") == ["no-cache, private"]
 
 
+def test_cache_directive_entre_guillemets(app, relais):
+    # une directive dans une valeur entre guillemets n'est pas une directive
+    page = b"<html><head></head></html>"
+    app.repondre = lambda r: reponse_brute(
+        200, page, "Content-Type: text/html", 'Cache-Control: x="a, private, no-store, b"'
+    )
+    assert obtenir(relais, "/p").tous("Cache-Control") == ["no-cache"]
+
+
 def test_icone_par_le_relais(app, relais, capsys, monkeypatch):
     appels = []
     vraie = marque.recolorer_png
@@ -1566,6 +1629,28 @@ def test_chemin_reserve_normalise(app, relais, capsys):
     for refuse in ("/%2Emarque/sante", "/%2e%2E/.marque/x", "/a/../.marque/", "/.marque/."):
         assert not marque.chemin_admis(refuse), refuse
     assert marque.chemin_admis("/a/../b") and marque.chemin_admis("/%2Emarques/i.png")
+
+
+def test_barre_encodee_sous_le_chemin_reserve(app, relais, capsys):
+    # l'application lit `%2F` comme `/` (uvicorn le décode) : la cible reste au relais
+    with Connexion(relais.port) as c:
+        for cible in ("/.marque%2Fsante", "/%2Emarque%2Fsante", "/.marque%2fsante"):
+            c.envoyer(octets_requete("GET", cible))
+            rep = c.reponse()
+            assert (rep.statut, rep.corps) == (200, SANTE), cible
+        c.envoyer(octets_requete("GET", "/.marque/icone?de=/.marque%252Fsante"))
+        assert c.reponse().corps == marque.icone_generique()
+    assert app.requetes == []
+    assert capsys.readouterr().err == f"{GENERIQUE}chemin refusé\n"
+    # le décodage ne sert qu'à ce test : toute autre cible part telle qu'elle est arrivée
+    obtenir(relais, "/a%2Fb/%2F%2e")
+    assert [r.chemin for r in app.requetes] == ["/a%2Fb/%2F%2e"]
+
+
+def test_point_final_sous_le_chemin_reserve(app, relais):
+    # un `.` final laisse un `/` final : `/%2Emarque/.` est `/.marque/`, servi par le relais
+    assert obtenir(relais, "/%2Emarque/.").statut == 404
+    assert app.requetes == []
 
 
 def test_head_sur_une_page(app, relais):
@@ -2011,10 +2096,72 @@ def test_reponse_informative(app, relais, informative, entete):
         assert (rep.statut, rep.corps) == (200, b"finale")
 
 
+def test_informative_sans_entetes_d_un_saut(app, relais):
+    def ecrire(sortie):
+        sortie.write(
+            b"HTTP/1.1 103 Early Hints\r\nConnection: X-Saut\r\nX-Saut: 1\r\n"
+            b"Keep-Alive: timeout=5\r\nProxy-X: 1\r\nLink: </s.css>\r\n\r\n"
+        )
+        sortie.write(reponse_brute(200, b"finale", "Content-Type: text/plain"))
+
+    app.repondre = lambda r: ecrire
+    with Connexion(relais.port) as c:
+        c.envoyer(octets_requete("GET", "/informe"))
+        rep = c.reponse()
+        assert (rep.statut, rep.entetes) == (103, [("Link", "</s.css>")])
+        assert c.reponse().corps == b"finale"
+
+
+def test_client_parti_avant_l_informative(app, relais, capsys):
+    recue, parti = threading.Event(), app.evenement()
+
+    def ecrire(sortie):
+        parti.wait(10)
+        # jusqu'à ce que le relais ferme : sa première écriture au client parti échoue
+        for _ in range(100):
+            sortie.write(b"HTTP/1.1 103 Early Hints\r\nLink: </s.css>\r\n\r\n")
+            time.sleep(0.01)
+        sortie.write(reponse_brute(200, b"finale", "Content-Type: text/plain"))
+
+    def repondre(r):
+        recue.set()
+        return ecrire
+
+    app.repondre = repondre
+    c = Connexion(relais.port)
+    c.envoyer(octets_requete("GET", "/informe"))
+    assert recue.wait(10)
+    c.couper()
+    parti.set()
+    relais.attendre_fermetures()
+    # le client est parti : ce n'est pas l'application qui est injoignable
+    assert capsys.readouterr().err == ""
+
+
 def test_upgrade_501(app, relais):
     rep = obtenir(relais, "/ws", *UPGRADE)
     assert rep.statut == 501
     assert app.requetes == []
+
+
+def test_101_non_sollicite_502(app, relais, capsys):
+    # le relais répond 501 à toute demande d'`Upgrade` : un 101 de l'application n'est jamais
+    # sollicité, et le client reçoit 502, HTTP/1.1 comme HTTP/1.0
+    bascule = b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: x\r\nConnection: Upgrade\r\n\r\n"
+    app.repondre = lambda r: (
+        bascule if r.chemin == "/bascule" else reponse_brute(200, b"ok", "Content-Type: text/plain")
+    )
+    with Connexion(relais.port) as c:
+        c.envoyer(octets_requete("GET", "/bascule"))
+        rep = c.reponse()
+        assert (rep.statut, rep.corps) == (502, b"application injoignable\n")
+        # la connexion sert encore
+        c.envoyer(octets_requete("GET", "/suite"))
+        assert c.reponse().corps == b"ok"
+    with Connexion(relais.port) as c:
+        c.envoyer(octets_requete("GET", "/bascule", version="HTTP/1.0"))
+        assert c.reponse().statut == 502
+    assert capsys.readouterr().err == "marque : application injoignable\n" * 2
 
 
 def test_amont_injoignable(app, lancer_relais, capsys):
