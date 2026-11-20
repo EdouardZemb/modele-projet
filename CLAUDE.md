@@ -639,7 +639,7 @@ seule, la session du projet notant ce qu'il rapporte (S-6).
   l'agent de Windows : la première d'Edouard a été refusée. Le client de Windows, nommé en entier,
   passe ; un complément l'a dit à `veille-emploi` avant sa constatation (LE-101).
 
-Lot 19 fait le 19/11/2026 : distinguer d'un coup d'œil le staging de la prod (#151), étiqueté
+Lot 19 fait le 20/11/2026 : distinguer d'un coup d'œil le staging de la prod (#151), étiqueté
 `v0.14.0`. Il vient d'une idée d'Edouard du 21/10, devenue l'issue #151 le 18/11 : en cible
 `serveur`, un relais du modèle, placé devant le staging seul, y pose trois marques, un bandeau
 orange « TEST », « test » devant le titre et le nom de l'application installée, des icônes
@@ -758,7 +758,9 @@ plan, sept le 19/11.
   Le premier déploiement marqué tire l'image du relais de Docker Hub : un tirage en échec met le
   couple en échec, et la sonde ne le retente pas (une piste). Si ce déploiement échoue pour une
   autre cause, le retour automatique sert le staging sans marque, jusqu'au déploiement suivant.
-- **Les « À relire » de la clôture** : [[À RELIRE : le nombre de choix, et l'accord d'Edouard]].
+- **Les « À relire » de la clôture** : Edouard a accepté le 20/11, tels quels, les 17 choix de la
+  section « À relire » de sa PR de clôture, dont l'accord de l'écart de #153, que la session avait
+  déduit de sa réponse au message qui le décrivait.
 
 Prochain, au choix d'Edouard :
 - le second temps du travail sur la documentation, un lot « documentation » avec sa spec : l'« État »

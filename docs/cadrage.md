@@ -566,7 +566,7 @@
 >   - la relecture des corrections a pris quatre temps, et la session a écrit la troisième ronde,
 >     trois phrases de docstring, sans code.
 
-> **Amendé le 2026-11-19, à la clôture du lot 19, de la même façon.** Le lot 19 n'était pas au §11 :
+> **Amendé le 2026-11-20, à la clôture du lot 19, de la même façon.** Le lot 19 n'était pas au §11 :
 > il vient de l'issue #151, ouverte le 18/11 depuis une idée d'Edouard du 21/10, distinguer d'un
 > coup d'œil le staging de la prod (PR #152, #153 et #154). En cible `serveur`, le
 > staging passe désormais par un relais du modèle, qui y pose trois marques, un bandeau « TEST »,
@@ -599,7 +599,7 @@
 > - **onze écarts à la spec du lot**, déclarés dans #152 et #153 et accordés par Edouard, quatre
 >   le 18/11, avec le plan, et sept le 19/11 (`CLAUDE.md`, « Lot 19 ») ;
 > - **le registre** gagne LE-102 à LE-113 ; LE-107 se clôt dans le lot ;
-> - **les « À relire » de la clôture** : [[À RELIRE : le nombre de choix, et l'accord d'Edouard]].
+> - **les « À relire » de la clôture** : ses 17 choix, acceptés tels quels par Edouard le 20/11.
 
 Ce cadrage est la partie publique de la spec de conception du modèle, issue d'une séance de questions avec Edouard : 12 questions, puis 5 parties de design validées une à une. La partie qui nomme le serveur est privée et n'est pas reproduite ici.
 
