@@ -566,6 +566,41 @@
 >   - la relecture des corrections a pris quatre temps, et la session a écrit la troisième ronde,
 >     trois phrases de docstring, sans code.
 
+> **Amendé le 2026-11-20, à la clôture du lot 19, de la même façon.** Le lot 19 n'était pas au §11 :
+> il vient de l'issue #151, ouverte le 18/11 depuis une idée d'Edouard du 21/10, distinguer d'un
+> coup d'œil le staging de la prod (PR #152, #153 et #154). En cible `serveur`, le
+> staging passe désormais par un relais du modèle, qui y pose trois marques, un bandeau « TEST »,
+> « test » devant le titre et le nom de l'application installée, des icônes recolorées ; la prod
+> n'en porte jamais aucune. `methode.md`, `exploitation.md`, semé, et les ADR M-0003 et M-0004
+> sont amendés :
+>
+> - **§4** : en cible `serveur`, `scripts/modele/` porte aussi `marque.py`, le relais, et
+>   `deploiement/` porte `compose.marque.yml`, tous deux gérés ; aucune ligne de la carte ne
+>   change ;
+> - **§6.2** : le projet Compose `<nom>-staging` a un second service, `marque`, le relais, qui
+>   tient le port local du staging à la place de l'app ; la prod n'en a jamais. Son image,
+>   `python:3.12-alpine` épinglée par empreinte, vient de Docker Hub, et le ménage ne la retire
+>   jamais ;
+> - **§6.3** : en staging, `deployer.sh` écrit dans `compose.env` la ligne `<PREFIXE>RELAIS`,
+>   l'empreinte du script, `--retour` compris, et refuse, juste après le verrou et sans rien
+>   changer, un script absent, illisible ou non lisible par tous ; `dc` n'ajoute
+>   `compose.marque.yml`, en dernier, que sur cette ligne. La santé du staging passe par le relais,
+>   au déploiement comme à la sonde. Le retour automatique qui suit un premier déploiement du
+>   staging en échec par la `v0.14.0` sert le staging sans marque, jusqu'au déploiement suivant ;
+> - **§6.5** : en staging, c'est le relais qui porte l'alias `<nom>-staging` sur
+>   `tunnel-<nom>-staging`, à la place de l'app, qui n'est plus que sur le réseau `default` du
+>   projet ; le relais la joint à `http://app:<port_app>`. La route du tunnel ne change pas, et
+>   le `down` de la notice de retrait de `serveur`, lancé par le nom du projet, retire le relais ;
+> - **§10** : l'épreuve des données (§10.3) passe en staging par le relais, en cinq étapes, du
+>   staging sans marque à « Tout arrêter », et constate qu'aucun relais n'existe en prod ; le job
+>   `fausse-app` installe d'abord Compose 2.26.1, celui de la cible, d'après sa version et son
+>   empreinte. C'est prouvé sur le moteur 29.4.2 du runner, sous le binaire amont : la
+>   construction `2.26.1-4` de la cible n'est éprouvée que sur sa configuration ;
+> - **onze écarts à la spec du lot**, déclarés dans #152 et #153 et accordés par Edouard, quatre
+>   le 18/11, avec le plan, et sept le 19/11 (`CLAUDE.md`, « Lot 19 ») ;
+> - **le registre** gagne LE-102 à LE-113 ; LE-107 se clôt dans le lot ;
+> - **les « À relire » de la clôture** : ses 17 choix, acceptés tels quels par Edouard le 20/11.
+
 Ce cadrage est la partie publique de la spec de conception du modèle, issue d'une séance de questions avec Edouard : 12 questions, puis 5 parties de design validées une à une. La partie qui nomme le serveur est privée et n'est pas reproduite ici.
 
 ---
