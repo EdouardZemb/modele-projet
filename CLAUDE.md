@@ -762,6 +762,37 @@ plan, sept le 19/11.
   section « À relire » de sa PR de clôture, dont l'accord de l'écart de #153, que la session avait
   déduit de sa réponse au message qui le décrivait.
 
+Versions des projets au 21/11/2026, relevées par l'API : `ancrage` et `veille-emploi` sont en
+`v0.14.0` depuis le 21/11 (ancrage#79, veille-emploi#37). Chaque mise à jour ne change que
+`.copier-answers.yml`, les 12 fichiers gérés du lot et `docs/exploitation.md`, qui reçoit le texte
+proposé par son message et ce qui est propre au projet ; la CI de chaque fusion est verte. Les cinq
+autres projets restent en `v0.12.0`, que la `v0.13.0` et la `v0.14.0`, sans effet hors de la cible
+`serveur`, ne font pas monter. Les deux messages sont partis le 20/11, après la publication, chacun
+après un relevé neuf de son projet : `ancrage` a avancé trois fois pendant leur préparation (la
+clôture de son lot M7, puis le plan et la clôture de son lot M8), et son message a été repris trois
+fois, ses lieux relus et sa simulation refaite sur sa nouvelle tête. Les premiers déploiements
+marqués des deux projets ont réussi sur la cible, sous sa construction `2.26.1-4` de Compose : le
+relais y tourne, `init: true` compris. La marque est constatée sur le staging par les commandes de
+la session de chaque projet, puis par Edouard sur son Android, dans un onglet puis installée, avec
+son absence en prod ; chaque fois, sa réponse vaut pour les cinq étapes du message, sans détail
+étape par étape.
+- **`ancrage`**, le 21/11 : en staging, le relais répond sous `/.marque/sante`, le titre et le
+  manifeste disent « test · ancrage », et la page lie la feuille du bandeau. Sa prod, en `v0.20.0`,
+  n'en porte rien ; sous `/.marque/`, elle sert la page de l'application, comme à toute adresse
+  inconnue, ce que disait son message. Edouard a fait d'abord synchroniser la prod, puis effacé les
+  données du site du staging par le chemin que donnait le message, depuis un onglet du staging (le
+  menu ⋮, « Site controls », « Cookies », puis « Delete ») : l'écran nommait l'adresse du staging
+  seule, et la prod n'a rien perdu (LE-113). L'application du staging, réinstallée, porte le nom
+  « test ancrage » et l'icône orange : le précache ne garde plus l'ancien manifeste.
+- **`veille-emploi`**, le 21/11 : en staging, le relais répond, la page de connexion a « test · »
+  devant son titre et lie la feuille, et le manifeste dit « test Veille ». Sa prod, en `0.4.0`, n'en
+  porte rien, et `/.marque/sante` y rend 404. Son service worker ne garde aucune page : un
+  rechargement suffit, sans effacement. Le relais réécrit le manifeste avec une espace après chaque
+  deux-points, que la console sert sans : une vérification qui le lit admet les deux formes, comme
+  celle du message.
+- **Non constatés sur la cible** : un tirage en échec de l'image du relais, le retour d'un
+  déploiement marqué en échec, le retrait de ses orphelins, et les limites d'`exploitation.md`.
+
 Prochain, au choix d'Edouard :
 - le second temps du travail sur la documentation, un lot « documentation » avec sa spec : l'« État »
   réduit du `CLAUDE.md` semé et le journal des versions du modèle ; dans le README, le refus d'une
@@ -811,10 +842,8 @@ Prochain, au choix d'Edouard :
   contrôle local plus étroit que celui de la CI : le `ruff` du projet rendu) ; LE-112, avec LE-88
   et LE-97 (des valeurs et des gardes qu'aucun test ne tenait, revenues au lot suivant) ; LE-111,
   avec LE-57, LE-84, LE-87 et LE-99 (un cas limite inconnu : le chemin réservé et les balises
-  HTML, lus par le texte) ; LE-113, avec LE-101 (un comportement d'outil supposé dans un geste
-  qu'un texte donne à lancer : l'effacement des données du site du staging, sous le domaine de la
-  prod) ; LE-110, le premier constat d'un motif neuf (la sortie d'un contrôle coupée avant d'être
-  lue).
+  HTML, lus par le texte) ; LE-110, le premier constat d'un motif neuf (la sortie d'un contrôle
+  coupée avant d'être lue).
 
 Le cadrage est dans `docs/cadrage.md` ; ce que les lots ont appris, dans `docs/registre.md`.
 
