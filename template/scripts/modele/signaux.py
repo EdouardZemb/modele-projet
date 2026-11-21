@@ -333,7 +333,7 @@ def _voisins() -> None:
 
 
 def _documentation(racine: str) -> list[str]:
-    """Les avertissements de la documentation dans `racine`, sans sous-processus ; `non lue (erreur)`
+    """Les avertissements de la documentation de `racine`, sans sous-processus ; `non lue (erreur)`
     sur toute exception, celle de l'import comprise. `documentation` n'est importé qu'ici."""
     try:
         _voisins()
