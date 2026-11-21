@@ -415,6 +415,19 @@ def test_etape_de_la_documentation(rendre):
     assert sum("setup-python" in e.get("uses", "") for e in etapes) == 1
 
 
+def test_la_ci_ne_lance_pas_les_avertissements(rendre):
+    """Les avertissements de la documentation ne se lancent qu'au `SessionStart` : aucun workflow,
+    rendu ou du modèle, ne les appelle, par aucune de leurs deux options."""
+    dossiers = [rendre() / ".github/workflows", RACINE / ".github/workflows"]
+    dossiers.append(RACINE / "template/.github/workflows")
+    fichiers = [f for d in dossiers if d.is_dir() for f in d.iterdir() if f.is_file()]
+    assert fichiers
+    for f in fichiers:
+        texte = f.read_text(encoding="utf-8")
+        for option in ("--avertissements", "--gabarits-vides"):
+            assert option not in texte, (f.name, option)
+
+
 ETAPE_DES_PLANS = "Les plans (.claude/plans)"
 # Un plan conforme : il cite la ligne 2 de `src/a.py`, et chacune de ses tâches a une case.
 MECA_CONFORME = "- `src/a.py:2` — `def f(` — la fonction existe déjà."

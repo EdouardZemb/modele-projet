@@ -257,9 +257,15 @@ def test_combinaison(rendre, env_isole, cible, nature, fusion):
 
     # Le gabarit resté vide : un projet qui vient de naître ne donne rien. Pour ne pas passer à
     # vide, un document vide que le README lie donne ensuite son constat.
-    gabarits_vides = [sys.executable, "scripts/modele/documentation.py", "--gabarits-vides"]
+    gabarits_vides = [sys.executable, "scripts/modele/documentation.py", "--avertissements"]
     r = lancer(gabarits_vides, rendu, env)
     assert (r.returncode, r.stdout) == (0, ""), r.stdout + r.stderr
+    if (cible, nature, fusion) == (next(iter(CIBLES)), "code", "session"):
+        # Le synonyme, gardé pour les commandes déjà écrites : même sortie, même code, sur le
+        # premier rendu seulement.
+        ancien = [*gabarits_vides[:-1], "--gabarits-vides"]
+        r = lancer(ancien, rendu, env)
+        assert (r.returncode, r.stdout) == (0, ""), r.stdout + r.stderr
     (rendu / "docs").mkdir(exist_ok=True)
     (rendu / "docs/vide.md").write_bytes(b"")
     with (rendu / "README.md").open("a", encoding="utf-8", newline="\n") as f:
