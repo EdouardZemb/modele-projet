@@ -60,9 +60,11 @@ devenue fausse. Une recherche peut aussi donner un constat de trop : un mot fini
 de ports (`80:80`) ou un rapport (`16:10`) lus comme une heure, un numéro de section à trois nombres
 (`4.3.1`) lu comme une version, un dessin en traits (`│ boîte │`) lu comme un arbre. Un commentaire
 fermé qui enjambe un bloc de code laisse lire le bloc, que GitHub cache ; un `<!--` en tête de
-ligne, fermé seulement dans un bloc de code, cache la suite, que GitHub montre. Seul le README est
-lu : un texte vers lequel il aiguille ne l'est pas. `README.md` et `CLAUDE.md` se lisent sous ce nom
-exact, à la racine.
+ligne, fermé seulement dans un bloc de code, cache la suite, que GitHub montre. Un code en ligne
+qui porte le dernier `-->` du texte cache ce qu'il porte entre `<!--` et `-->`, que GitHub montre ;
+un `<!--` en tête de ligne qu'un accent grave ouvert plus haut paraît mettre en code laisse lire ce
+qu'il ouvre, que GitHub cache. Seul le README est lu : un texte vers lequel il aiguille ne l'est
+pas. Un `<!--` jamais fermé qui ouvre une ligne, hors du code, cache la suite, comme sur GitHub.
 
 L'issue citée. Une ligne de `README.md`, hors des blocs de code, du code en ligne et des
 commentaires, cite une issue ou une PR : `#12`, `compte/dépôt#12`, un lien dont la cible porte
@@ -72,7 +74,10 @@ autres. Ses limites, dont la liste n'est pas close : `GH-12`, que GitHub lie aus
 dans un bloc HTML que le texte ne retire pas ; une couleur en chiffres seuls (`#000000`) hors du
 code ; un chemin suivi d'une ancre en chiffres hors d'un lien (`docs/a.md#12`), lu comme
 `<compte>/<dépôt>#N` ; un chemin `…/issues/12` en prose ; une référence dans un bloc de code
-indenté, ou dans une cible de lien qui porte une parenthèse.
+indenté, ou dans une cible de lien qui porte une parenthèse ; une référence après un `<!--` en tête
+de ligne qu'un accent grave ouvert plus haut paraît mettre en code.
+
+`README.md` et `CLAUDE.md` se lisent sous ce nom exact, à la racine.
 
 Ce qui est un lien : un lien en ligne, `[…](cible)` ou `![…](cible)`, avec un titre ou des
 chevrons, son texte sur plusieurs lignes ou entre crochets au besoin, une image cliquable donnant
@@ -161,10 +166,11 @@ pas de l'UTF-8) remplacé par `?`.
 
 Bibliothèque standard seule, Python 3.10 ou plus.
 
-Usage : documentation.py [--racine DOSSIER] [--avertissements | --gabarits-vides]  (racine par défaut : le dossier
-        courant ; la CI lance la licence et la carte depuis la racine du dépôt. --racine change
-        les fichiers lus, pas la nature : hors CI, c'est celle du `reglages.py` voisin du
-        script ; en CI, celle de la branche par défaut, lue dans le dossier courant.
+Usage : documentation.py [--racine DOSSIER] [--avertissements | --gabarits-vides]
+        (racine par défaut : le dossier courant ; la CI lance la licence et la carte depuis la
+        racine du dépôt. --racine change les fichiers lus, pas la nature : hors CI, c'est
+        celle du `reglages.py` voisin du script ; en CI, celle de la branche par défaut, lue dans
+        le dossier courant.
         --avertissements lance les quatre avertissements, et imprime un constat par ligne ;
         --gabarits-vides en est le synonyme)
 
@@ -767,10 +773,6 @@ def _visible(texte: str) -> str:
     return "\n".join(lignes)
 
 
-def _replie_ligne(ligne: str) -> str:
-    return unicodedata.normalize("NFC", ligne).casefold()
-
-
 def _constat(sorte: str, lignes: list[int]) -> str:
     """Le constat d'une sorte : la première ligne touchée, et le nombre des autres."""
     constat = f"README.md, l. {lignes[0]} : {sorte}"
@@ -821,7 +823,7 @@ def copies_du_readme(racine: Path) -> list[str]:
         return []
     trouvees: dict[str, list[int]] = {"v": [], "h": [], "a": [], "m": []}
     for rang, ligne in enumerate(_visible(readme).split("\n"), start=1):
-        ligne = _replie_ligne(ligne)
+        ligne = _replie(ligne)
         if VERSION.search(ligne):
             trouvees["v"].append(rang)
         if HEURE.search(ligne):
@@ -853,7 +855,7 @@ def issues_citees(racine: Path) -> list[str]:
         return []
     trouvees: list[int] = []
     for rang, ligne in enumerate(_preparer(_visible(readme)).split("\n"), start=1):
-        ligne = _replie_ligne(ligne)
+        ligne = _replie(ligne)
         if REF_LIEN.search(ligne):
             trouvees.append(rang)
             continue
@@ -917,7 +919,9 @@ def main(argv: list[str] | None = None) -> int:
             pass
     p = _Analyseur(
         prog="documentation.py",
-        description="La licence et la carte de la racine, ou les avertissements de la documentation.",
+        description=(
+            "La licence et la carte de la racine, ou les avertissements de la documentation."
+        ),
     )
     p.add_argument(
         "--racine",

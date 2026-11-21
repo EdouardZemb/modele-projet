@@ -1,5 +1,6 @@
-"""La documentation de la racine : la licence et la carte, qui refusent en CI, et le gabarit resté
-vide, qui avertit au `SessionStart`."""
+"""La documentation de la racine : la licence et la carte, qui refusent en CI, et les quatre
+avertissements du `SessionStart` : le gabarit resté vide, l'« État » trop long, la copie dans le
+README et l'issue citée."""
 
 import itertools
 import os
@@ -1164,7 +1165,7 @@ def test_etat_sans_section(tmp_path):
 
 
 def test_etat_crlf_et_bom(tmp_path):
-    texte = "﻿" + etat(41).replace("\n", "\r\n")
+    texte = "\ufeff" + etat(41).replace("\n", "\r\n")
     ecrire(tmp_path, CLAUDE_md=texte)
     assert d.etat_trop_long(tmp_path) == [ETAT_41]
 
@@ -1288,6 +1289,24 @@ def test_copie_commentaires(tmp_path):
     assert d.copies_du_readme(tmp_path) == []
 
 
+def test_copie_code_en_ligne_et_commentaires(tmp_path):
+    """Un code en ligne reste, et protège le `<!--` qu'il porte, dans la zone des commentaires
+    (avant le dernier `-->`) comme après."""
+    ecrire(tmp_path, README_md="# E\n\n`npm i x@1.2.3`\n\n<!-- note -->\n")
+    assert d.copies_du_readme(tmp_path) == [f"README.md, l. 3 : {C_VERSION}"]
+    ecrire(tmp_path, README_md="# E\n\nTexte `<!--` ici\n4.5.6\n<!-- fin -->\n")
+    assert d.copies_du_readme(tmp_path) == [f"README.md, l. 4 : {C_VERSION}"]
+
+
+def test_copie_et_issue_apres_un_commentaire_en_tete_de_ligne_pris_pour_du_code(tmp_path):
+    """Limite connue, gardée exprès : un `<!--` en tête de ligne qu'un accent grave ouvert plus haut
+    paraît mettre en code est lu comme du code, donc ne cache rien. GitHub, lui, cache la suite."""
+    ecrire(tmp_path, README_md="# E\n\nUn `code\n<!-- jamais fermé` y\nv1.2.3\n")
+    assert d.copies_du_readme(tmp_path) == [f"README.md, l. 5 : {C_VERSION}"]
+    ecrire(tmp_path, README_md="# E\n\nUn `code\n<!-- jamais fermé` y\n#12\n")
+    assert d.issues_citees(tmp_path) == [f"README.md, l. 5 : {C_ISSUE}"]
+
+
 def test_copie_version_dans_un_bloc_de_code(tmp_path):
     ecrire(tmp_path, README_md="# E\n\n```\nnpm i x@1.2.3\n```\n")
     assert d.copies_du_readme(tmp_path) == [f"README.md, l. 4 : {C_VERSION}"]
@@ -1305,7 +1324,7 @@ def test_bloc_jamais_ferme(tmp_path):
 
 
 def test_copie_separateur_unicode(tmp_path):
-    ecrire(tmp_path, README_md="# E\n\nune ligne coupée\nv1.2.3\n")
+    ecrire(tmp_path, README_md="# E\n\nune ligne\u2028coupée\nv1.2.3\n")
     assert d.copies_du_readme(tmp_path) == [f"README.md, l. 4 : {C_VERSION}"]
 
 
@@ -1503,12 +1522,34 @@ def test_avertissements_temps(tmp_path):
         + "\n"
     )
     arbre(tmp_path, {"README.md": texte, "CLAUDE.md": etat(2000)})
-    debut = time.perf_counter()
+    debut = time.process_time()
     constats = d.avertissements(tmp_path)
-    duree = time.perf_counter() - debut
+    duree = time.process_time() - debut
     print(f"avertissements : {duree:.2f} s")
-    assert duree < 2, duree
+    assert duree < 2.0, f"{duree:.2f} s"
     assert ETAT_41.replace("41", "2000") in constats
+
+
+COMMENTAIRES_JAMAIS_FERMES = 2000
+
+
+def test_avertissements_temps_commentaires_jamais_fermes(tmp_path):
+    """La borne de la zone des commentaires : sans elle, chaque `<!--` jamais fermé relit tout le
+    reste du texte, et le coût devient quadratique. Tout ce qui suit le premier est caché."""
+    n = COMMENTAIRES_JAMAIS_FERMES
+    texte = (
+        "# E\n"
+        + "".join(f"<!-- note {i}\n" for i in range(n))
+        + "".join(f"texte {i} v1.2.3 et #12\n" for i in range(10_000 - 1 - n))
+    )
+    arbre(tmp_path, {"README.md": texte})
+    debut = time.process_time()
+    copies = d.copies_du_readme(tmp_path)
+    issues = d.issues_citees(tmp_path)
+    duree = time.process_time() - debut
+    print(f"jamais fermés : {duree:.2f} s")
+    assert duree < 2.0, f"{duree:.2f} s"
+    assert (copies, issues) == ([], [])
 
 
 def test_avertissements_en_ligne_de_commande(tmp_path, capsys, monkeypatch):
