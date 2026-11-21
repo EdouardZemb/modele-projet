@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import unicodedata
 from pathlib import PureWindowsPath
 
@@ -1085,6 +1086,447 @@ def test_gabarits_vides_en_ligne_de_commande(tmp_path, capsys, monkeypatch):
 
     monkeypatch.setattr(d, "gabarits_vides", explose, raising=False)
     assert d.main(["--racine", str(tmp_path), "--gabarits-vides"]) == 0
+    assert capsys.readouterr().out.splitlines() == [
+        "documentation : gabarit resté vide : non lu (erreur)"
+    ]
+
+
+# --- les avertissements ----------------------------------------------------------------------
+
+ETAT_41 = (
+    "CLAUDE.md : « État » de 41 lignes, au-delà de 40 "
+    "(le passé va au journal des versions ou aux publications)"
+)
+C_VERSION = "une version recopiée"
+C_HEURE = "une heure recopiée"
+C_ARBRE = "un arbre de fichiers"
+C_MOT = "un mot qui date l'état, ou un lot au futur"
+C_ISSUE = "une issue ou une PR citée"
+
+
+def etat(n, titre="## État", apres=""):
+    """Un `CLAUDE.md` dont la section « État » a `n` lignes non vides, séparées de lignes vides."""
+    return "# E\n\n" + titre + "\n\n" + "\n\n".join(f"ligne {i}" for i in range(n)) + "\n" + apres
+
+
+def readme(racine, cas):
+    """Un `README.md` dont `cas` occupe la ligne 3."""
+    return ecrire(racine, README_md="# E\n\n" + cas + "\n")
+
+
+def test_etat_quarante_lignes_rien(tmp_path):
+    ecrire(tmp_path, CLAUDE_md=etat(40))
+    assert d.etat_trop_long(tmp_path) == []
+
+
+def test_etat_quarante_et_une_lignes(tmp_path):
+    ecrire(tmp_path, CLAUDE_md=etat(41))
+    assert d.etat_trop_long(tmp_path) == [ETAT_41]
+
+
+def test_etat_compte_titres_code_et_commentaires(tmp_path):
+    corps = (
+        "\n".join(f"ligne {i}" for i in range(35))
+        + "\n### Sous-titre\n```\nun bloc\n```\n<!-- note -->\n"
+    )
+    ecrire(tmp_path, CLAUDE_md="# E\n\n## État\n\n" + corps)
+    assert d.etat_trop_long(tmp_path) == []
+    ecrire(tmp_path, CLAUDE_md="# E\n\n## État\n\n" + corps + "une de plus\n")
+    assert d.etat_trop_long(tmp_path) == [ETAT_41]
+
+
+@pytest.mark.parametrize("titre", ["## Commandes", "# Autre"])
+def test_etat_s_arrete_au_titre_suivant(tmp_path, titre):
+    suite = "\n" + titre + "\n\n" + "\n".join(f"suite {i}" for i in range(30)) + "\n"
+    ecrire(tmp_path, CLAUDE_md=etat(30, apres=suite))
+    assert d.etat_trop_long(tmp_path) == []
+
+
+def test_etat_titre_en_minuscules(tmp_path):
+    ecrire(tmp_path, CLAUDE_md=etat(41, titre="## état"))
+    assert d.etat_trop_long(tmp_path) == [ETAT_41]
+
+
+def test_etat_deux_sections_s_additionnent(tmp_path):
+    texte = etat(21) + "\n## Autre\n\nrien\n\n" + etat(21).removeprefix("# E\n\n")
+    ecrire(tmp_path, CLAUDE_md=texte)
+    assert d.etat_trop_long(tmp_path) == [ETAT_41.replace("41", "42")]
+
+
+def test_etat_sans_section(tmp_path):
+    assert d.etat_trop_long(tmp_path) == []
+    ecrire(tmp_path, CLAUDE_md="# E\n\n## Commandes\n\n" + "x\n" * 50)
+    assert d.etat_trop_long(tmp_path) == []
+    ecrire(tmp_path, CLAUDE_md=etat(50, titre="### État"))
+    assert d.etat_trop_long(tmp_path) == []
+    ecrire(tmp_path, CLAUDE_md=etat(50, titre="## Etat"))
+    assert d.etat_trop_long(tmp_path) == []
+
+
+def test_etat_crlf_et_bom(tmp_path):
+    texte = "﻿" + etat(41).replace("\n", "\r\n")
+    ecrire(tmp_path, CLAUDE_md=texte)
+    assert d.etat_trop_long(tmp_path) == [ETAT_41]
+
+
+def test_etat_ligne_d_espaces_vide(tmp_path):
+    ecrire(tmp_path, CLAUDE_md=etat(40, apres="    \n"))
+    assert d.etat_trop_long(tmp_path) == []
+
+
+def test_claude_md_en_minuscules(tmp_path):
+    ecrire(tmp_path, claude_md=etat(41))
+    assert d.etat_trop_long(tmp_path) == []
+
+
+def test_etat_dans_un_bloc_n_est_pas_une_section(tmp_path):
+    ecrire(tmp_path, CLAUDE_md="# E\n\n```\n## État\n```\n\n" + "x\n" * 50)
+    assert d.etat_trop_long(tmp_path) == []
+
+
+COPIES = [
+    (C_VERSION, "v1.2.3"),
+    (C_VERSION, "1.2.3"),
+    (C_VERSION, "Node 20.11.1"),
+    (C_VERSION, "1.2.3-rc.1"),
+    (C_VERSION, "2026.11.21"),
+    (C_VERSION, "voir 1.2.3."),
+    (C_HEURE, "7h15"),
+    (C_HEURE, "7 h 15"),
+    (C_HEURE, "19h00"),
+    (C_HEURE, "07:15"),
+    (C_HEURE, "12:30:45"),
+    (C_HEURE, "1h30"),
+    (C_HEURE, "7H15"),
+    (C_ARBRE, "├── src"),
+    (C_ARBRE, "└── x"),
+    (C_ARBRE, "│   y"),
+    (C_MOT, "actuellement"),
+    (C_MOT, "Bientôt"),
+    (C_MOT, "prochainement"),
+    (C_MOT, "pour l'instant"),
+    (C_MOT, "pour l’instant"),
+    (C_MOT, "pour le moment"),
+    (C_MOT, "à venir"),
+    (C_MOT, "À terme"),
+    (C_MOT, "prochain lot"),
+    (C_MOT, "lot suivant"),
+    (C_MOT, "prochaine version"),
+    (C_MOT, "le lot 3 ajoutera"),
+    (C_MOT, "lot #11 : les tests seront"),
+    (C_MOT, "Sahara du lot 3"),
+]
+
+
+@pytest.mark.parametrize(("libelle", "cas"), COPIES)
+def test_copie_exemples(tmp_path, libelle, cas):
+    readme(tmp_path, cas)
+    assert d.copies_du_readme(tmp_path) == [f"README.md, l. 3 : {libelle}"]
+
+
+@pytest.mark.parametrize(
+    "cas",
+    [
+        "127.0.0.1",
+        "2026.11.21.1",
+        "3.12",
+        "v1.2",
+        "1.2.3a",
+        "x1.2.3",
+        "a.1.2.3",
+        "127.0.0.1:8000",
+        "0.0.0.0:80",
+        "fe80::1:23",
+        "x:12:30",
+        "localhost:3000",
+        "16:9",
+        "123:45",
+        "2h",
+        "|-- src",
+        "actuellements",
+        "le pilot suivant",
+        "le lot 3 est fait",
+        "il ajoutera",
+        "lots suivants",
+        "le slot 3 seront",
+        "lot 3 : era",
+    ],
+)
+def test_copie_contre_exemples(tmp_path, cas):
+    readme(tmp_path, cas)
+    assert d.copies_du_readme(tmp_path) == []
+
+
+def test_copie_lignes_et_compte(tmp_path):
+    arbre_de_fichiers = "\n".join(f"├── f{i}" for i in range(12))
+    ecrire(tmp_path, README_md="# E\n\n\n\n```\n" + arbre_de_fichiers + "\n```\n")
+    assert d.copies_du_readme(tmp_path) == [f"README.md, l. 6 : {C_ARBRE} (et 11 autres lignes)"]
+    ecrire(tmp_path, README_md="# E\n\n├── a\ntexte\n├── b\n")
+    assert d.copies_du_readme(tmp_path) == [f"README.md, l. 3 : {C_ARBRE} (et 1 autre ligne)"]
+
+
+def test_copie_ordre_des_sortes(tmp_path):
+    ecrire(tmp_path, README_md="# E\n\nprochainement\n├── src\n7h15\nv1.2.3\n")
+    assert d.copies_du_readme(tmp_path) == [
+        f"README.md, l. 6 : {C_VERSION}",
+        f"README.md, l. 5 : {C_HEURE}",
+        f"README.md, l. 4 : {C_ARBRE}",
+        f"README.md, l. 3 : {C_MOT}",
+    ]
+
+
+def test_copie_commentaires(tmp_path):
+    ecrire(tmp_path, README_md="# E\n\n<!-- un\ncommentaire\nde v0.0.1 -->\nv1.2.3\n")
+    assert d.copies_du_readme(tmp_path) == [f"README.md, l. 6 : {C_VERSION}"]
+    readme(tmp_path, "<!-- v1.2.3 -->")
+    assert d.copies_du_readme(tmp_path) == []
+    ecrire(tmp_path, README_md="# E\n\n```\n<!-- 7h15 -->\n```\n")
+    assert d.copies_du_readme(tmp_path) == [f"README.md, l. 4 : {C_HEURE}"]
+    ecrire(tmp_path, README_md="# E\n\n`<!--`\n4.5.6\n")
+    assert d.copies_du_readme(tmp_path) == [f"README.md, l. 4 : {C_VERSION}"]
+    ecrire(tmp_path, README_md="# E\n\n<!-- jamais fermé\n7.8.9\n")
+    assert d.copies_du_readme(tmp_path) == []
+
+
+def test_copie_version_dans_un_bloc_de_code(tmp_path):
+    ecrire(tmp_path, README_md="# E\n\n```\nnpm i x@1.2.3\n```\n")
+    assert d.copies_du_readme(tmp_path) == [f"README.md, l. 4 : {C_VERSION}"]
+
+
+def test_copie_readme_en_crlf(tmp_path):
+    ecrire(tmp_path, README_md="# E\r\n\r\nUn.\r\n\r\nDeux.\r\n\r\n" + "x 1.2.3\r\n")
+    assert d.copies_du_readme(tmp_path) == [f"README.md, l. 7 : {C_VERSION}"]
+
+
+def test_bloc_jamais_ferme(tmp_path):
+    ecrire(tmp_path, README_md="# E\n\n```\nv1.2.3\n#12\n")
+    assert d.copies_du_readme(tmp_path) == [f"README.md, l. 4 : {C_VERSION}"]
+    assert d.issues_citees(tmp_path) == []
+
+
+def test_copie_separateur_unicode(tmp_path):
+    ecrire(tmp_path, README_md="# E\n\nune ligne coupée\nv1.2.3\n")
+    assert d.copies_du_readme(tmp_path) == [f"README.md, l. 4 : {C_VERSION}"]
+
+
+def test_copie_lettre_accentuee_voisine(tmp_path):
+    readme(tmp_path, "é1.2.3")
+    assert d.copies_du_readme(tmp_path) == []
+    readme(tmp_path, "lot 3 créera")
+    assert d.copies_du_readme(tmp_path) == [f"README.md, l. 3 : {C_MOT}"]
+
+
+def test_copie_commentaire_jamais_ferme_en_ligne(tmp_path):
+    ecrire(tmp_path, README_md="# E\n\nTexte <!-- note\n\nv1.2.3\n")
+    assert d.copies_du_readme(tmp_path) == [f"README.md, l. 5 : {C_VERSION}"]
+
+
+def test_readme_mal_encode(tmp_path):
+    arbre(tmp_path, {"README.md": b"# E\n\xff\nv1.2.3\n"})
+    assert d.copies_du_readme(tmp_path) == [f"README.md, l. 3 : {C_VERSION}"]
+
+
+@pytest.mark.parametrize(
+    "cas",
+    [
+        "#12",
+        "(#12)",
+        "voir #12.",
+        "compte/depot#55",
+        "[i](https://github.com/o/d/issues/12)",
+        "[p](../../issues/12)",
+        "https://github.com/o/d/pull/3",
+    ],
+)
+def test_issue_exemples(tmp_path, cas):
+    readme(tmp_path, cas)
+    assert d.issues_citees(tmp_path) == [f"README.md, l. 3 : {C_ISSUE}"]
+
+
+@pytest.mark.parametrize(
+    "cas",
+    [
+        "CLAUDE.md#12-intro",
+        "[1. Intro](#1-intro)",
+        "&#123;",
+        "C#7",
+        "#12a",
+        "# 12",
+        "[x](CLAUDE.md#12-intro)",
+        "[x](#12)",
+        "a/b/#12",
+        "x.#12",
+        "[r]: #12",
+        "[r]: docs/a.md#12",
+        "voir #12-intro",
+        "##12",
+        "x/o/d#12",
+        "o/d#12-x",
+    ],
+)
+def test_issue_contre_exemples(tmp_path, cas):
+    readme(tmp_path, cas)
+    assert d.issues_citees(tmp_path) == []
+
+
+def test_issue_hors_du_code_et_des_commentaires(tmp_path):
+    ecrire(tmp_path, README_md="# E\n\n```\n#000000\n```\n\n`#12`\n\n<!-- #12 -->\n")
+    assert d.issues_citees(tmp_path) == []
+
+
+def test_issue_url_nue_et_ancre_de_document(tmp_path):
+    ecrire(
+        tmp_path,
+        README_md="# E\n\nhttps://github.com/o/d/issues/12\n\n[a](docs/a.md#12)\n",
+    )
+    assert d.issues_citees(tmp_path) == [f"README.md, l. 3 : {C_ISSUE}"]
+
+
+def test_issue_compte_des_lignes(tmp_path):
+    ecrire(tmp_path, README_md="# E\n\n#1\n#2\n#3\n")
+    assert d.issues_citees(tmp_path) == [f"README.md, l. 3 : {C_ISSUE} (et 2 autres lignes)"]
+
+
+def test_issue_casefold_et_cibles(tmp_path):
+    readme(tmp_path, "ẞẞẞẞ [x](docs/a.md#12)")
+    assert d.issues_citees(tmp_path) == []
+
+
+def avertir(racine):
+    """Une racine qui donne un constat de chaque sorte, dans le README et dans `CLAUDE.md`."""
+    arbre(
+        racine,
+        {
+            "README.md": "# E\n\n[v](docs/vide.md)\n\nv9.8.7\n#4242\n",
+            "docs/vide.md": "",
+            "CLAUDE.md": etat(41),
+        },
+    )
+    return racine
+
+
+GABARIT = f"docs/vide.md : {VIDE}"
+VERSION_5 = f"README.md, l. 5 : {C_VERSION}"
+ISSUE_6 = f"README.md, l. 6 : {C_ISSUE}"
+
+
+def test_avertissements_ordre(tmp_path):
+    avertir(tmp_path)
+    assert d.avertissements(tmp_path) == [GABARIT, ETAT_41, VERSION_5, ISSUE_6]
+
+
+def test_avertissements_ne_citent_aucun_texte(tmp_path):
+    ecrire(
+        tmp_path,
+        README_md="# E\n\nv9.8.7\n23h41\nprochainement\n├──\n#4242\no/d#4343\n",
+    )
+    sortie = "\n".join(d.avertissements(tmp_path))
+    assert "README.md, l. 3" in sortie
+    for texte in ("9.8.7", "23h41", "prochainement", "├", "4242", "4343"):
+        assert texte not in sortie
+
+
+ERREURS = {
+    "gabarits_vides": "gabarit resté vide : non lu (erreur)",
+    "etat_trop_long": "« État » : non lu (erreur)",
+    "copies_du_readme": "copie dans le README : non lue (erreur)",
+    "issues_citees": "issue citée : non lue (erreur)",
+}
+
+
+@pytest.mark.parametrize("nom", list(ERREURS))
+def test_avertissements_gardes(tmp_path, monkeypatch, nom):
+    avertir(tmp_path)
+
+    def explose(racine):
+        raise RuntimeError("boum")
+
+    monkeypatch.setattr(d, nom, explose)
+    attendu = {
+        "gabarits_vides": GABARIT,
+        "etat_trop_long": ETAT_41,
+        "copies_du_readme": VERSION_5,
+        "issues_citees": ISSUE_6,
+    }
+    attendu[nom] = ERREURS[nom]
+    assert d.avertissements(tmp_path) == list(attendu.values())
+
+
+def test_avertissements_sans_sous_processus(tmp_path, monkeypatch):
+    def interdit(*_, **__):
+        raise AssertionError("sous-processus")
+
+    monkeypatch.setattr(d.subprocess, "run", interdit)
+    monkeypatch.setattr(d.subprocess, "Popen", interdit)
+    (tmp_path / ".git").mkdir()
+    avertir(tmp_path)
+    assert d.avertissements(tmp_path) == [GABARIT, ETAT_41, VERSION_5, ISSUE_6]
+
+
+def test_avertissements_en_nfd(tmp_path):
+    ecrire(
+        tmp_path,
+        README_md="# E\n\n[CLAUDE.md](CLAUDE.md)\n\n"
+        + unicodedata.normalize("NFD", "À venir")
+        + "\n",
+        CLAUDE_md=etat(41, titre=unicodedata.normalize("NFD", "## État")),
+    )
+    assert d.avertissements(tmp_path) == [ETAT_41, f"README.md, l. 5 : {C_MOT}"]
+
+
+def test_readme_en_minuscules(tmp_path):
+    ecrire(tmp_path, readme_md="# E\n\nv1.2.3\n#12\n")
+    assert d.copies_du_readme(tmp_path) == []
+    assert d.issues_citees(tmp_path) == []
+
+
+def test_avertissements_temps(tmp_path):
+    paragraphe = (
+        "v1.2.3 à 7h15, actuellement\n"
+        "`code` #12 voir o/d#3 https://github.com/o/d/issues/4\n"
+        "│   ├── src\n"
+        "<!-- une note -->\n"
+        "```\n"
+        "1.2.3 dans un bloc\n"
+        "```\n"
+        "le lot 3 ajoutera\n"
+        "[x](#1-intro) &#123; C#7 ` seul\n"
+        "texte ordinaire\n\n"
+    )
+    texte = (
+        "# E\n\n"
+        + paragraphe * 1000
+        + "`"
+        + "\n".join(f"ligne {i}" for i in range(300))
+        + "\n\n"
+        + "\n".join(f"<!-- note {i}" for i in range(1000))
+        + "\n"
+    )
+    arbre(tmp_path, {"README.md": texte, "CLAUDE.md": etat(2000)})
+    debut = time.perf_counter()
+    constats = d.avertissements(tmp_path)
+    duree = time.perf_counter() - debut
+    print(f"avertissements : {duree:.2f} s")
+    assert duree < 2, duree
+    assert ETAT_41.replace("41", "2000") in constats
+
+
+def test_avertissements_en_ligne_de_commande(tmp_path, capsys, monkeypatch):
+    avertir(tmp_path)
+    attendu = [f"documentation : {c}" for c in (GABARIT, ETAT_41, VERSION_5, ISSUE_6)]
+    for options in (
+        ["--avertissements"],
+        ["--gabarits-vides"],
+        ["--avertissements", "--gabarits-vides"],
+    ):
+        assert d.main(["--racine", str(tmp_path), *options]) == 0
+        assert capsys.readouterr().out.splitlines() == attendu
+
+    def explose(racine):
+        raise RuntimeError("boum")
+
+    monkeypatch.setattr(d, "avertissements", explose)
+    assert d.main(["--racine", str(tmp_path), "--avertissements"]) == 0
     assert capsys.readouterr().out.splitlines() == ["documentation : non lue (erreur)"]
 
 
