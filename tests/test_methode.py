@@ -1289,7 +1289,8 @@ DOCUMENTATION_ET_DOCSTRING = (
     (
         "Ses limites, dont la liste n'est pas close : un futur dit autrement (« va ajouter », "
         "« est prévu ») ; un mot qui date absent de la liste ; une version à deux nombres "
-        "(`v1.2`) ; un arbre dessiné en ASCII (`|--`) ; un nombre recopié (de tests, de lignes), qu'aucune "
+        "(`v1.2`) ; un arbre dessiné en ASCII (`|--`) ; un nombre recopié (de tests, de lignes), "
+        "qu'aucune "
         "recherche ne sépare d'un nombre utile ; une phrase de prose devenue fausse. Une recherche "
         "peut aussi donner un constat de trop : un mot fini par « ra » ou « ront » près d'un lot "
         "(« Sahara » près d'un « lot 3 », « le front du lot 3 »), une correspondance de ports "
@@ -1464,7 +1465,8 @@ def test_documentation_md(tmp_path, env_isole):
         "Quand le script ne s'importe pas, la ligne est `documentation : non lue (erreur)`",
         # comment répondre aux avertissements neufs
         (
-            "Y répondre en déplaçant le passé vers le journal des versions, ou vers les notes de la "
+            "Y répondre en déplaçant le passé vers le journal des versions, ou vers les notes "
+            "de la "
             "publication"
         ),
         "Y répondre en retirant la copie, ou en renvoyant à la source qui la tient",

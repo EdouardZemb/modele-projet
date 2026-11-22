@@ -290,8 +290,8 @@ corrige dans `modele-projet`. Pour relancer les avertissements, depuis la racine
 ligne, après `documentation : `, et rend toujours 0, hors d'une erreur d'usage (64).
 `--gabarits-vides` en reste le synonyme, pour les commandes déjà écrites. Un constat de trop se lève
 en réécrivant la ligne, ou se laisse : un avertissement ne bloque rien. Un `README.md` ou un
-`CLAUDE.md` absent ou illisible ne donne aucun constat de l'« État », de la copie ni de l'issue citée ; seul le gabarit resté
-vide dit `pas de README.md`.
+`CLAUDE.md` absent ou illisible ne donne aucun constat de l'« État », de la copie ni de l'issue
+citée ; seul le gabarit resté vide dit `pas de README.md`.
 
 #### Le gabarit resté vide
 
@@ -345,9 +345,9 @@ de niveau 3.
 Le hook lit `README.md`, à la racine, ligne par ligne, en NFC et sans égard à la casse. Le code, en
 bloc ou en ligne, est lu : un arbre de fichiers vit dans un bloc de code, une version dans une
 commande. Les commentaires HTML hors du code ne sont pas lus, mais leurs lignes comptent pour les
-numéros : ils ne se voient pas sur GitHub. Un `<!--` jamais fermé qui ouvre une ligne, hors du code, cache
-la suite, comme sur GitHub ; au milieu d'une ligne, il reste du texte, et la suite est lue. Quatre
-sortes de copie, chacune une recherche dans le texte :
+numéros : ils ne se voient pas sur GitHub. Un `<!--` jamais fermé qui ouvre une ligne, hors du
+code, cache la suite, comme sur GitHub ; au milieu d'une ligne, il reste du texte, et la suite est
+lue. Quatre sortes de copie, chacune une recherche dans le texte :
 
 - une version : trois nombres séparés par des points, précédés ou non de `v` (`v1.2.3`, `1.2.3`,
   `Node 20.11.1`, `1.2.3-rc.1`) ; `127.0.0.1`, `2026.11.21.1` et `3.12` n'en sont pas, une date en
