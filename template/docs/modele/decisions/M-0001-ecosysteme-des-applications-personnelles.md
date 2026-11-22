@@ -91,8 +91,8 @@ Dans le projet :
 - `scripts/modele/confidentialite.py` : la porte, qui refuse les données réelles et les secrets.
 
 Aucun contrôle ne tient les décisions écrites en ADR, l'identité différée, le mode démonstration
-ni le partage par événements : ils se jugent à la revue. Aucun non plus la mutation ni le test
-d'isolation des chemins de données, qui restent au projet (`docs/modele/methode.md`, « Les
+ni le partage par événements : ils se jugent à la revue. Aucun ne tient non plus la mutation ni
+le test d'isolation des chemins de données, qui restent au projet (`docs/modele/methode.md`, « Les
 familles de garde-fous de l'écosystème »).
 
 Dans `modele-projet` :

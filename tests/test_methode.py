@@ -21,6 +21,7 @@ from conftest import (
     REPONSES_SERVEUR_CODE,
     SH,
     git,
+    rendre_modele,
 )
 
 TEMPLATE = RACINE / "template"
@@ -113,6 +114,22 @@ ADR_SEPARATION = ["M-0006-code-et-donnees.md"]
 DATES_ADR = {**dict.fromkeys(ADR_SOCLE, "2026-10-16"), "M-0006-code-et-donnees.md": "2026-10-29"}
 
 
+@pytest.fixture(scope="module")
+def rendus_adr(tmp_path_factory):
+    """Donne rendus_adr(**reponses) -> Path : un rendu du modèle, fait une seule fois par jeu de
+    réponses pour tout le module. Les tests des ADR ne font que le lire."""
+    rendus = {}
+
+    def _rendus(**reponses):
+        cle = repr(sorted(reponses.items()))
+        if cle not in rendus:
+            dossier = tmp_path_factory.mktemp("adr") / "rendu"
+            rendus[cle] = rendre_modele(dossier, **reponses)
+        return rendus[cle]
+
+    return _rendus
+
+
 @pytest.mark.parametrize(
     ("reponses", "attendus"),
     [
@@ -122,8 +139,8 @@ DATES_ADR = {**dict.fromkeys(ADR_SOCLE, "2026-10-16"), "M-0006-code-et-donnees.m
     ],
     ids=["aucune", "serveur-sans-sauvegardes", "serveur-avec-sauvegardes"],
 )
-def test_adr_herites_format(rendre, reponses, attendus):
-    adr = sorted((rendre(**reponses) / "docs/modele/decisions").iterdir())
+def test_adr_herites_format(rendus_adr, reponses, attendus):
+    adr = sorted((rendus_adr(**reponses) / "docs/modele/decisions").iterdir())
     assert [a.name for a in adr] == attendus
     for chemin in adr:
         lignes = lire(chemin).splitlines()
@@ -161,16 +178,44 @@ MARQUES_ADR = {
     "cible `donnees`, avec `cible_code: serveur`": {"donnees-serveur"},
     "hors cible `donnees`": {"aucune", "serveur"},
 }
+# Les deux ADR dont la « Confirmation » dit ce qu'aucun contrôle ne tient.
+ADR_AVEC_AUCUN = [ADR_SOCLE[0], ADR_SAUVEGARDES[0]]
 PUCE_ADR = re.compile(
     r"^- `(?P<chemin>[^`]+)`(?: \((?P<marque>cible `serveur`"
     r"|cible `donnees`, avec `cible_code: serveur`|hors cible `donnees`)\))? : \S"
 )
 
 
+MOTIF_AMENDEMENT_CONFIRMATION = re.compile(
+    r"^- \*\*Amendé\*\* le \d{4}-\d{2}-\d{2}, avec le lot 20 : la section « Confirmation »",
+    re.MULTILINE,
+)
+
+
+def controler_forme_adr(nom, texte):
+    """La largeur et le retrait du texte neuf : la section « Confirmation » et la ligne
+    d'amendement du lot 20 (première ligne et suite) tiennent en 100 caractères, la suite de
+    l'amendement en retrait de deux espaces."""
+    section = texte.split("\n## Confirmation\n", 1)[1].split("\n## Révision\n", 1)[0]
+    for ligne in section.splitlines():
+        assert len(ligne) <= 100, (nom, ligne)
+    lignes = texte.split("\n## Contexte\n", 1)[0].splitlines()
+    (debut,) = [i for i, ligne in enumerate(lignes) if MOTIF_AMENDEMENT_CONFIRMATION.match(ligne)]
+    assert len(lignes[debut]) <= 100, (nom, lignes[debut])
+    for suite in lignes[debut + 1 :]:
+        if not suite.startswith(" "):
+            break
+        assert len(suite) <= 100, (nom, suite)
+        assert suite.startswith("  ") and not suite.startswith("   "), (nom, suite)
+
+
 def listes_confirmation(texte):
-    """Les deux listes de la section « Confirmation » : (chemins du projet, chemins du modèle),
+    """La section « Confirmation » : (chemins du projet, chemins du modèle, paragraphes du projet),
     chaque chemin avec sa marque. Une puce commence par un code en ligne, sa marque juste après."""
     section = texte.split("\n## Confirmation\n", 1)[1].split("\n## Révision\n", 1)[0]
+    for ligne in section.splitlines():
+        # Une seule forme de puce, `- `, jamais imbriquée : le test ne lit que celle-là.
+        assert not re.match(r"[*+] |\s+[-*+] ", ligne), ligne
     ici, modele = section.split("\nDans `modele-projet` :\n", 1)
     assert ici.lstrip("\n").startswith("Dans le projet :\n"), ici
     listes = []
@@ -183,31 +228,45 @@ def listes_confirmation(texte):
             assert m, puce
             trouvees.append((m["chemin"], m["marque"]))
         listes.append(trouvees)
-    return listes
+    paragraphes = [
+        " ".join(bloc.split())
+        for bloc in ici.split("\n\n")
+        if bloc.strip() and not bloc.lstrip().startswith(("- ", "Dans le projet :"))
+    ]
+    return (*listes, paragraphes)
 
 
-def test_adr_confirmation_chemins(rendre):
-    """Chaque chemin de « Confirmation » existe : dans le projet, dans chaque rendu où son ADR
-    paraît (ou dans ceux de sa marque), dans `modele-projet` sous la racine."""
+def test_adr_confirmation_chemins(rendus_adr):
+    """Chaque chemin de « Confirmation » existe : dans le projet, dans les rendus de sa marque et
+    dans eux seuls (parmi ceux où son ADR paraît), dans `modele-projet` sous la racine."""
     paraissent = {}
     for rendu, reponses in RENDUS_ADR.items():
-        racine = rendre(**reponses)
+        racine = rendus_adr(**reponses)
         for adr in (racine / "docs/modele/decisions").iterdir():
             paraissent.setdefault(adr.name, {})[rendu] = racine
     assert sorted(paraissent) == sorted(ADR_SOCLE + ADR_SERVEUR + ADR_SAUVEGARDES + ADR_SEPARATION)
     marques_vues = set()
     for nom, rendus in paraissent.items():
         racine = next(iter(rendus.values()))
-        ici, modele = listes_confirmation(lire(racine / "docs/modele/decisions" / nom))
+        texte = lire(racine / "docs/modele/decisions" / nom)
+        controler_forme_adr(nom, texte)
+        ici, modele, paragraphes = listes_confirmation(texte)
         for chemin, marque in ici:
             marques_vues.add(marque)
             attendus = set(rendus) if marque is None else MARQUES_ADR[marque] & set(rendus)
             assert attendus, (nom, chemin, marque)
-            for rendu in attendus:
-                assert (rendus[rendu] / chemin).is_file(), (nom, chemin, rendu)
+            portent = {r for r in rendus if (rendus[r] / chemin).is_file()}
+            assert portent == attendus, (nom, chemin, marque, portent)
         for chemin, marque in modele:
             assert marque is None, (nom, chemin)
             assert (RACINE / chemin).is_file(), (nom, chemin)
+        # Les paragraphes « Aucun contrôle ne tient » : M-0001 et M-0005, et eux seuls.
+        aucun = [p for p in paragraphes if p.startswith("Aucun contrôle ne tient")]
+        assert bool(aucun) == (nom in ADR_AVEC_AUCUN), (nom, paragraphes)
+        if nom == ADR_SOCLE[0]:
+            (paragraphe,) = aucun
+            assert "Aucun ne tient non plus la mutation" in paragraphe
+            assert "le test d'isolation des chemins de données" in paragraphe
     # Le test ne passe pas à vide : chaque marque paraît dans au moins un ADR.
     assert marques_vues == set(MARQUES_ADR), marques_vues
 
@@ -216,13 +275,11 @@ def test_adr_amendes_par_le_lot_20():
     """Chacun des six ADR dit, dans son en-tête, qu'il a reçu sa section « Confirmation »."""
     adr = sorted(p for p in DECISIONS.iterdir() if re.search(r"M-000[1-6]", p.name))
     assert len(adr) == 6
-    motif = re.compile(
-        r"^- \*\*Amendé\*\* le \d{4}-\d{2}-\d{2}, avec le lot 20 : la section « Confirmation »",
-        re.MULTILINE,
-    )
     for chemin in adr:
-        entete = lire(chemin).split("\n## Contexte\n", 1)[0]
-        assert len(motif.findall(entete)) == 1, chemin.name
+        texte = lire(chemin)
+        entete = texte.split("\n## Contexte\n", 1)[0]
+        assert len(MOTIF_AMENDEMENT_CONFIRMATION.findall(entete)) == 1, chemin.name
+        controler_forme_adr(chemin.name, texte)
 
 
 def test_m0006_fixe_le_contrat_de_l_app():

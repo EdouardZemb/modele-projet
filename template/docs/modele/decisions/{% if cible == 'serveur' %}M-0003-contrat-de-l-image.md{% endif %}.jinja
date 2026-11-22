@@ -247,8 +247,8 @@ et `instance/contenu/` du dépôt lui-même, à un dépôt.
 
 Dans le projet :
 
-- `deploiement/ci/verifier-image.sh` : la santé, la révision, l'environnement, l'instantané et
-  l'exemple de l'instance de l'image que la CI vient de lancer ;
+- `deploiement/ci/verifier-image.sh` : la santé, la révision, l'environnement et l'exemple de
+  l'instance de l'image que la CI vient de lancer, et, avec les sauvegardes, l'instantané ;
 - `.github/actions/modele-image-construire/action.yml` : le lancement de l'image comme en
   production (utilisateur 1000, lecture seule, `/tmp` en mémoire, `/donnees`) ;
 - `deploiement/deployer.sh` : la santé locale d'un déploiement, avec la version, la révision et la

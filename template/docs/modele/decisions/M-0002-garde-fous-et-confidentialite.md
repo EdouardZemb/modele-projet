@@ -192,10 +192,11 @@ Dans le projet :
 - `scripts/modele/signaux.py` : le hook `SessionStart`, qui montre ce qui est rouge ;
 - `.claude/settings.json` : le garde et les signaux, branchés ;
 - `.github/workflows/modele-socle.yml` : la confidentialité, gitleaks et la vérification du
-  branchement du garde ;
+  branchement du garde et des signaux ;
 - `.github/workflows/modele-texte-pr.yml` : le texte de la PR, écarts à la spec et tête relue ;
 - `.github/workflows/modele-historique.yml` : la relecture de l'historique chaque semaine ;
-- `scripts/modele/documentation.py` : la licence, la carte de la racine et les avertissements ;
+- `scripts/modele/documentation.py` : la licence d'un dépôt de code, la carte de la racine et les
+  avertissements ;
 - `.github/modele/ruleset-main.json` (hors cible `donnees`) : la règle de protection de la branche
   principale.
 

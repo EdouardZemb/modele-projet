@@ -337,7 +337,8 @@ Dans le projet :
 - `.github/workflows/modele-donnees.yml` (cible `donnees`, avec `cible_code: serveur`) : les secrets
   et les données, contrôlés contre le dépôt de code ;
 - `scripts/modele/verifier_secrets.py` : les secrets chiffrés, contre leur `.cles` et `.sops.yaml` ;
-- `scripts/modele/verifier_donnees.py` : les données, contre les images du dépôt de code ;
+- `scripts/modele/verifier_donnees.py` : les données, contre les images du dépôt de code ; lancé
+  par la CI du dépôt de données d'un projet `serveur` et par `deployer.sh` ;
 - `deploiement/deployer.sh` (cible `serveur`) : le couple, l'instantané des données monté en lecture
   seule, `VERIFIER_CONFIG` et `VERIFIER_CONTENU` avant tout changement.
 

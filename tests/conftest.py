@@ -123,6 +123,25 @@ REPONSES_DONNEES_SERVEUR = {
 }
 
 
+def rendre_modele(destination, **reponses):
+    """Rend le modèle depuis HEAD dans `destination`, avec les réponses par défaut et `reponses`."""
+    donnees = {**REPONSES_PAR_DEFAUT, **reponses}
+    with warnings.catch_warnings():
+        # Copier signale un dépôt local « sale » : c'est voulu, on teste le travail en cours.
+        warnings.filterwarnings("ignore", message=".*dirty.*", category=Warning)
+        warnings.filterwarnings("ignore", category=copier.errors.DirtyLocalWarning)
+        copier.run_copy(
+            str(RACINE),
+            destination,
+            data=donnees,
+            vcs_ref="HEAD",
+            defaults=True,
+            unsafe=True,
+            quiet=True,
+        )
+    return destination
+
+
 @pytest.fixture
 def rendre(tmp_path):
     """Donne rendre(**reponses) -> Path, un rendu neuf du modèle depuis HEAD."""
@@ -130,22 +149,7 @@ def rendre(tmp_path):
 
     def _rendre(**reponses):
         compteur["n"] += 1
-        destination = tmp_path / f"rendu-{compteur['n']}"
-        donnees = {**REPONSES_PAR_DEFAUT, **reponses}
-        with warnings.catch_warnings():
-            # Copier signale un dépôt local « sale » : c'est voulu, on teste le travail en cours.
-            warnings.filterwarnings("ignore", message=".*dirty.*", category=Warning)
-            warnings.filterwarnings("ignore", category=copier.errors.DirtyLocalWarning)
-            copier.run_copy(
-                str(RACINE),
-                destination,
-                data=donnees,
-                vcs_ref="HEAD",
-                defaults=True,
-                unsafe=True,
-                quiet=True,
-            )
-        return destination
+        return rendre_modele(tmp_path / f"rendu-{compteur['n']}", **reponses)
 
     return _rendre
 

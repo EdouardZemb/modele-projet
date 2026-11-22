@@ -333,6 +333,8 @@ Dans le projet :
 - `deploiement/deployer.sh` : le déploiement et le retour arrière par couple ;
 - `deploiement/nettoyer-images.sh` : le ménage des images et des instantanés ;
 - `deploiement/compose.marque.yml` : le relais de la marque, en staging seulement ;
+- `scripts/modele/verifier_secrets.py` : les secrets chiffrés, contre leur `.cles`, sans les
+  déchiffrer ;
 - `tests/deploiement/sonder.bats` : la sonde ;
 - `tests/deploiement/deployer.bats` : le déploiement, l'échec et le retour ;
 - `tests/deploiement/nettoyer-images.bats` : le ménage ;
@@ -341,6 +343,7 @@ Dans le projet :
 Dans `modele-projet` :
 
 - `tests/test_cible_serveur.py` : le rendu de la cible, ses scripts et ses textes ;
+- `tests/test_verifier_secrets.py` : le contrôle des secrets chiffrés ;
 - `tests/test_mecanique.py` : les tests bats du projet rendu, dans leur image Docker ;
 - `tests/modele/epreuve-donnees.sh` : un couple déployé, changé et revenu en arrière, sur un vrai
   Docker ;
