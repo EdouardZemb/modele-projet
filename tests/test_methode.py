@@ -16,6 +16,7 @@ from conftest import (
     RACINE,
     REGISTRE_ENTETE,
     RENVOI_AU_PLAN,
+    REPONSES_DONNEES_SERVEUR,
     REPONSES_SERVEUR,
     REPONSES_SERVEUR_CODE,
     SH,
@@ -129,8 +130,99 @@ def test_adr_herites_format(rendre, reponses, attendus):
         assert re.match(rf"^# {chemin.name[:6]} — .+ : .+$", lignes[0]), chemin.name
         date = DATES_ADR.get(chemin.name, "2026-10-18")
         assert f"- **Statut** : accepté le {date}" in lignes, chemin.name
-        for titre in ("## Contexte", "## Décision", "## Conséquences", "## Révision"):
+        for titre in (
+            "## Contexte",
+            "## Décision",
+            "## Conséquences",
+            "## Confirmation",
+            "## Révision",
+        ):
             assert titre in lignes, (chemin.name, titre)
+        # La confirmation vient après les conséquences et avant la révision.
+        assert (
+            lignes.index("## Conséquences")
+            < lignes.index("## Confirmation")
+            < lignes.index("## Révision")
+        ), chemin.name
+
+
+# Les quatre rendus où les ADR hérités paraissent : le socle seul, `serveur` en dépôt de code (avec
+# les sauvegardes, où paraît M-0005), le dépôt de données sans code, et celui d'un projet `serveur`.
+RENDUS_ADR = {
+    "aucune": {},
+    "serveur": REPONSES_SERVEUR_CODE,
+    "donnees": {"nom": "essai-donnees", "cible": "donnees"},
+    "donnees-serveur": REPONSES_DONNEES_SERVEUR,
+}
+# Les marques de cible d'un chemin de « Confirmation », et les rendus où le chemin existe.
+MARQUES_ADR = {
+    None: None,
+    "cible `serveur`": {"serveur"},
+    "cible `donnees`, avec `cible_code: serveur`": {"donnees-serveur"},
+    "hors cible `donnees`": {"aucune", "serveur"},
+}
+PUCE_ADR = re.compile(
+    r"^- `(?P<chemin>[^`]+)`(?: \((?P<marque>cible `serveur`"
+    r"|cible `donnees`, avec `cible_code: serveur`|hors cible `donnees`)\))? : \S"
+)
+
+
+def listes_confirmation(texte):
+    """Les deux listes de la section « Confirmation » : (chemins du projet, chemins du modèle),
+    chaque chemin avec sa marque. Une puce commence par un code en ligne, sa marque juste après."""
+    section = texte.split("\n## Confirmation\n", 1)[1].split("\n## Révision\n", 1)[0]
+    ici, modele = section.split("\nDans `modele-projet` :\n", 1)
+    assert ici.lstrip("\n").startswith("Dans le projet :\n"), ici
+    listes = []
+    for liste in (ici, modele):
+        puces = [ligne for ligne in liste.splitlines() if ligne.startswith("- ")]
+        assert puces, liste
+        trouvees = []
+        for puce in puces:
+            m = PUCE_ADR.match(puce)
+            assert m, puce
+            trouvees.append((m["chemin"], m["marque"]))
+        listes.append(trouvees)
+    return listes
+
+
+def test_adr_confirmation_chemins(rendre):
+    """Chaque chemin de « Confirmation » existe : dans le projet, dans chaque rendu où son ADR
+    paraît (ou dans ceux de sa marque), dans `modele-projet` sous la racine."""
+    paraissent = {}
+    for rendu, reponses in RENDUS_ADR.items():
+        racine = rendre(**reponses)
+        for adr in (racine / "docs/modele/decisions").iterdir():
+            paraissent.setdefault(adr.name, {})[rendu] = racine
+    assert sorted(paraissent) == sorted(ADR_SOCLE + ADR_SERVEUR + ADR_SAUVEGARDES + ADR_SEPARATION)
+    marques_vues = set()
+    for nom, rendus in paraissent.items():
+        racine = next(iter(rendus.values()))
+        ici, modele = listes_confirmation(lire(racine / "docs/modele/decisions" / nom))
+        for chemin, marque in ici:
+            marques_vues.add(marque)
+            attendus = set(rendus) if marque is None else MARQUES_ADR[marque] & set(rendus)
+            assert attendus, (nom, chemin, marque)
+            for rendu in attendus:
+                assert (rendus[rendu] / chemin).is_file(), (nom, chemin, rendu)
+        for chemin, marque in modele:
+            assert marque is None, (nom, chemin)
+            assert (RACINE / chemin).is_file(), (nom, chemin)
+    # Le test ne passe pas à vide : chaque marque paraît dans au moins un ADR.
+    assert marques_vues == set(MARQUES_ADR), marques_vues
+
+
+def test_adr_amendes_par_le_lot_20():
+    """Chacun des six ADR dit, dans son en-tête, qu'il a reçu sa section « Confirmation »."""
+    adr = sorted(p for p in DECISIONS.iterdir() if re.search(r"M-000[1-6]", p.name))
+    assert len(adr) == 6
+    motif = re.compile(
+        r"^- \*\*Amendé\*\* le \d{4}-\d{2}-\d{2}, avec le lot 20 : la section « Confirmation »",
+        re.MULTILINE,
+    )
+    for chemin in adr:
+        entete = lire(chemin).split("\n## Contexte\n", 1)[0]
+        assert len(motif.findall(entete)) == 1, chemin.name
 
 
 def test_m0006_fixe_le_contrat_de_l_app():
@@ -674,6 +766,7 @@ def test_m0002_amende():
         "2026-10-29",
         "2026-11-04",
         "2026-11-06",
+        "2026-11-22",
         "2026-11-22",
     ]
     assert (
@@ -2193,7 +2286,9 @@ def test_m0002_amende_par_le_lot_20():
     en_tete = [
         b
         for b in blocs(brut)
-        if re.match(r"- \*\*Amendé\*\* le \d{4}-\d{2}-\d{2}, avec le lot 20 :", b[0])
+        if re.match(
+            r"- \*\*Amendé\*\* le \d{4}-\d{2}-\d{2}, avec le lot 20 : le hook `SessionStart`", b[0]
+        )
     ]
     assert len(en_tete) == 1, en_tete
     amendement = " ".join(" ".join(en_tete[0]).split())

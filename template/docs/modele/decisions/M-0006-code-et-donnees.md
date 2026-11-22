@@ -13,6 +13,8 @@
   `serveur`, le dépôt de code est public (§ 1).
 - **Amendé** le 2026-11-04, avec le correctif modele-projet#94 : à la scission, `env/` et `cles/`
   sont rendus à neuf, et `.sops.yaml` se refait pour le nouveau chemin des secrets (§ 6).
+- **Amendé** le 2026-11-22, avec le lot 20 : la section « Confirmation » est ajoutée : le
+  test, le contrôle ou la mesure qui tient la décision, nommé par son chemin
 - **S'applique en deux temps.** D'abord la porte par nature et le gabarit de données (§ 1 à 4).
   Ensuite la chaîne à deux dépôts et les règles de chemins (§ 3, dernier point, § 5 à 7). Entre les
   deux, la chaîne lit encore tout dans le clone du code, comme avant.
@@ -324,6 +326,28 @@ décrivent l'instance et le parc, pas l'auteur.
   ni versionné ni relu.
 - **Difficile à changer** : la séparation elle-même, une fois les projets scindés ; le contrat de
   `/config` et de `/contenu`, et l'état déployé en couple.
+
+## Confirmation
+
+Dans le projet :
+
+- `scripts/modele/confidentialite.py` : la porte, selon la nature du dépôt et selon les chemins ;
+- `scripts/modele/reglages.py` : la nature du dépôt, posée au rendu ;
+- `.github/workflows/modele-historique.yml` : la relecture de l'historique d'un dépôt de code ;
+- `.github/workflows/modele-donnees.yml` (cible `donnees`, avec `cible_code: serveur`) : les secrets
+  et les données, contrôlés contre le dépôt de code ;
+- `scripts/modele/verifier_secrets.py` : les secrets chiffrés, contre leur `.cles` et `.sops.yaml` ;
+- `scripts/modele/verifier_donnees.py` : les données, contre les images du dépôt de code ;
+- `deploiement/deployer.sh` (cible `serveur`) : le couple, l'instantané des données monté en lecture
+  seule, `VERIFIER_CONFIG` et `VERIFIER_CONTENU` avant tout changement.
+
+Dans `modele-projet` :
+
+- `tests/test_confidentialite.py` : la porte par nature et par chemins ;
+- `tests/test_cible_donnees.py` : la cible `donnees` ;
+- `tests/test_verifier_secrets.py` : le contrôle des secrets chiffrés ;
+- `tests/test_verifier_donnees.py` : le contrôle des données ;
+- `tests/test_poste.py` : la naissance en deux dépôts.
 
 ## Révision
 
