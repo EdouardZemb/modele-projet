@@ -1280,15 +1280,16 @@ DOCUMENTATION_ET_DOCSTRING = (
     ),
     "dans une citation ou un élément de liste, dans un bloc ouvert par `<!--`",
     "un lien dont le texte porte un `|` dans une cellule de tableau",
+    "Un `<!--` jamais fermé qui ouvre une ligne, hors du code, cache la suite, comme sur GitHub",
     # les limites des trois avertissements neufs, dans les mêmes mots que la docstring
     (
         "Ses limites : un titre « Etat », sans accent, ou « L'état du projet » n'est pas lu, ni un "
         "« État » de niveau 3."
     ),
     (
-        "Ses limites, dont la liste n'est pas close : un futur dit autrement (« va ajouter », « est "
-        "prévu ») ; un mot qui date absent de la liste ; une version à deux nombres (`v1.2`) ; un "
-        "arbre dessiné en ASCII (`|--`) ; un nombre recopié (de tests, de lignes), qu'aucune "
+        "Ses limites, dont la liste n'est pas close : un futur dit autrement (« va ajouter », "
+        "« est prévu ») ; un mot qui date absent de la liste ; une version à deux nombres "
+        "(`v1.2`) ; un arbre dessiné en ASCII (`|--`) ; un nombre recopié (de tests, de lignes), qu'aucune "
         "recherche ne sépare d'un nombre utile ; une phrase de prose devenue fausse. Une recherche "
         "peut aussi donner un constat de trop : un mot fini par « ra » ou « ront » près d'un lot "
         "(« Sahara » près d'un « lot 3 », « le front du lot 3 »), une correspondance de ports "
@@ -1448,7 +1449,10 @@ def test_documentation_md(tmp_path, env_isole):
         "refusent quelle que soit la première ligne",
         "documentation : non lue (erreur)",
         "le titre `documentation :` puis une ligne `- <constat>` chacun",
-        "imprime un constat par ligne et rend toujours 0",
+        (
+            "imprime chaque constat sur sa ligne, après `documentation : `, et rend toujours 0, "
+            "hors d'une erreur d'usage (64)"
+        ),
         # ce que les avertissements ont de commun
         "le hook les lit sans sous-processus ni réseau",
         "seul son délai de 30 s les borne",
@@ -1459,7 +1463,10 @@ def test_documentation_md(tmp_path, env_isole):
         "`README.md` et `CLAUDE.md` se lisent sous ce nom exact, à la racine",
         "Quand le script ne s'importe pas, la ligne est `documentation : non lue (erreur)`",
         # comment répondre aux avertissements neufs
-        "Y répondre en déplaçant le passé vers les publications ou le journal des versions",
+        (
+            "Y répondre en déplaçant le passé vers le journal des versions, ou vers les notes de la "
+            "publication"
+        ),
         "Y répondre en retirant la copie, ou en renvoyant à la source qui la tient",
         "Y répondre en retirant la référence : la feuille de route est dans les issues",
         # comment répondre à chaque sortie
@@ -1574,7 +1581,7 @@ def test_documentation_md_avant_de_reecrire_un_readme():
         assert phrase in plat, phrase
 
 
-def test_documentation_md_dit_les_avertissements(tmp_path):
+def test_documentation_md_dit_les_avertissements(tmp_path, monkeypatch):
     """Chaque constat des trois avertissements neufs, tel que `documentation.py` l'écrit sur une
     racine qui donne chaque sorte, ses nombres remplacés, est dans la section « Les avertissements
     au démarrage d'une session », comme les quatre constats « non lu(e) (erreur) » et les titres de
@@ -1598,7 +1605,7 @@ def test_documentation_md_dit_les_avertissements(tmp_path):
     (racine / "README.md").write_text(
         "# R\n"
         + "".join(f"v{i}.2.3\n" for i in range(3))
-        + "".join(f"à {i}h15\n" for i in range(3))
+        + "".join(f"à {i}h15\n" for i in range(2))
         + "├ a\n├ b\n├ c\n"
         + "actuellement\nbientôt\nprochainement\n"
         + "voir #12\nvoir #13\nvoir #14\n",
@@ -1614,18 +1621,26 @@ def test_documentation_md_dit_les_avertissements(tmp_path):
     for constat in constats:
         nombres = re.sub(r"l\. \d+", "l. <n>", constat)
         nombres = re.sub(r"de \d+ lignes", "de <n> lignes", nombres)
-        nombres = re.sub(r" \(et \d+ autres lignes\)", "", nombres)
+        nombres = re.sub(r" \(et \d+ autres? lignes?\)", "", nombres)
         assert f"`{nombres}`" in plat, nombres
     # Le suffixe, que ces constats portent tous : `(et 1 autre ligne)` et `(et <k> autres lignes)`.
-    assert all(constat.endswith(" autres lignes)") for constat in constats[1:]), constats
-    assert "`(et 1 autre ligne)`" in plat
-    assert "`(et <k> autres lignes)`" in plat
-    for constat in (
-        "gabarit resté vide : non lu (erreur)",
-        "« État » : non lu (erreur)",
-        "copie dans le README : non lue (erreur)",
-        "issue citée : non lue (erreur)",
-    ):
+    # Les deux formes du suffixe viennent du code : une sorte sur 2 lignes, les autres sur 3.
+    suffixes = set()
+    for constat in constats[1:]:
+        suffixes.add(re.search(r" \(et \d+ autres? lignes?\)$", constat).group(0).strip())
+    assert len(suffixes) == 2, suffixes
+    for suffixe in suffixes:
+        montre = re.sub(r"(?<=et )[2-9]", "<k>", suffixe)
+        assert "`" + montre + "`" in plat, suffixe
+    # Les quatre constats de garde viennent du code : chaque contrôle lève.
+    def leve(*_):
+        raise RuntimeError("essai")
+
+    for nom in ("gabarits_vides", "etat_trop_long", "copies_du_readme", "issues_citees"):
+        monkeypatch.setattr(documentation, nom, leve)
+    gardes = documentation.avertissements(racine)
+    assert len(gardes) == 4, gardes
+    for constat in gardes:
         assert f"`{constat}`" in plat, constat
 
 
@@ -2032,7 +2047,8 @@ def test_m0002_amende_par_le_lot_14():
     corps = " ".join(brut.split("## Décision", 1)[1].split("## Conséquences", 1)[0].split())
     assert "la licence et la carte de la racine" in corps
     assert "gabarit resté vide" in corps
-    # Le hook lance `gh` : seul le contrôle du gabarit resté vide se passe de sous-processus.
+    # Le hook lance `gh` : seuls les avertissements de la documentation se passent de
+    # sous-processus.
     assert "Ce contrôle avertit, sans jamais refuser, et lit la copie sans lancer" in corps
     assert "Il avertit, sans jamais refuser" not in corps
     # La carte, comme le script la tient.

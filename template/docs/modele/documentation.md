@@ -286,8 +286,12 @@ Un constat donne la ligne `documentation : <constat>` ; plusieurs, le titre `doc
 une ligne `- <constat>` chacun, 20 au plus. Quand le script ne s'importe pas, la ligne est
 `documentation : non lue (erreur)` ; les signaux de la CI restent. C'est un défaut du modèle, qui se
 corrige dans `modele-projet`. Pour relancer les avertissements, depuis la racine :
-`python -B scripts/modele/documentation.py --avertissements`, qui imprime un constat par ligne et
-rend toujours 0. `--gabarits-vides` en reste le synonyme, pour les commandes déjà écrites.
+`python -B scripts/modele/documentation.py --avertissements`, qui imprime chaque constat sur sa
+ligne, après `documentation : `, et rend toujours 0, hors d'une erreur d'usage (64).
+`--gabarits-vides` en reste le synonyme, pour les commandes déjà écrites. Un constat de trop se lève
+en réécrivant la ligne, ou se laisse : un avertissement ne bloque rien. Un `README.md` ou un
+`CLAUDE.md` absent ou illisible ne donne aucun constat de l'« État », de la copie ni de l'issue citée ; seul le gabarit resté
+vide dit `pas de README.md`.
 
 #### Le gabarit resté vide
 
@@ -330,8 +334,8 @@ Son constat :
 - `CLAUDE.md : « État » de <n> lignes, au-delà de 40 (le passé va au journal des versions ou
   aux publications)`.
 
-Y répondre en déplaçant le passé vers les publications ou le journal des versions, et en réécrivant
-l'« État » au présent (voir « L'« État » et le journal »).
+Y répondre en déplaçant le passé vers le journal des versions, ou vers les notes de la publication,
+qu'écrit Edouard, et en réécrivant l'« État » au présent.
 
 Ses limites : un titre « Etat », sans accent, ou « L'état du projet » n'est pas lu, ni un « État »
 de niveau 3.
@@ -341,8 +345,9 @@ de niveau 3.
 Le hook lit `README.md`, à la racine, ligne par ligne, en NFC et sans égard à la casse. Le code, en
 bloc ou en ligne, est lu : un arbre de fichiers vit dans un bloc de code, une version dans une
 commande. Les commentaires HTML hors du code ne sont pas lus, mais leurs lignes comptent pour les
-numéros : ils ne se voient pas sur GitHub. Un `<!--` jamais fermé, hors du code, cache la suite du
-fichier. Quatre sortes de copie, chacune une recherche dans le texte :
+numéros : ils ne se voient pas sur GitHub. Un `<!--` jamais fermé qui ouvre une ligne, hors du code, cache
+la suite, comme sur GitHub ; au milieu d'une ligne, il reste du texte, et la suite est lue. Quatre
+sortes de copie, chacune une recherche dans le texte :
 
 - une version : trois nombres séparés par des points, précédés ou non de `v` (`v1.2.3`, `1.2.3`,
   `Node 20.11.1`, `1.2.3-rc.1`) ; `127.0.0.1`, `2026.11.21.1` et `3.12` n'en sont pas, une date en
@@ -386,7 +391,8 @@ lu : un texte vers lequel il aiguille ne l'est pas.
 
 Le hook lit `README.md`, à la racine, hors des blocs de code, du code en ligne et des commentaires
 HTML, leurs lignes gardées pour les numéros : GitHub n'y lie aucune référence, et une couleur
-`#000000` n'est pas une issue. Est une référence :
+en code (`` `#000000` ``) n'est pas une issue. Un `<!--` jamais fermé qui ouvre une ligne, hors du
+code, cache aussi la suite. Est une référence :
 
 - `#N`, N fait de chiffres, sans lettre, chiffre, `_`, `&`, `#`, `/` ni `.` juste avant, et sans
   lettre, chiffre, `_` ni `-` juste après, hors de la cible d'un lien : `#12`, `(#12)`,
