@@ -1247,7 +1247,9 @@ TITRES_DOCUMENTATION = [
     "## Ce qui n'y va jamais",
     "## Sur un téléphone",
     "## Un fait une fois",
+    "## L'« État » et le journal",
     "## Les textes d'un projet",
+    "## Les ADR",
     "## Retirer un texte",
     "## Les contrôles",
 ]
@@ -1486,9 +1488,43 @@ def test_documentation_md(tmp_path, env_isole):
             "Dans un dépôt de la cible `donnees`, `CLAUDE.md` dit ce que le dépôt porte, et ses "
             "leçons vont au registre du dépôt de code."
         ),
-        "Un dépôt de la cible `donnees` n'a ni registre, ni pistes, ni plans, ni ADR à lui.",
+        (
+            "Un dépôt de la cible `donnees` n'a ni registre, ni pistes, ni ADR à lui ; un lot "
+            "qu'il conduit suit la méthode, et ses leçons vont au registre du dépôt de code."
+        ),
+        # lot 20 : le README ne dit plus les versions, ni un brief « figé »
+        "Le registre de la machine",
+        "`docs/fonctionnement.md`",
+        "les publications la disent toujours juste",
+        "une issue ou une PR citée",
+        "l'histoire dans les publications",
+        (
+            "Le brief et le cadrage ne sont pas dans le README : ils disent le départ du projet, "
+            "et n'aiguillent pas un visiteur"
+        ),
+        "Il ne signale pas un nombre recopié.",
+        (
+            "Y répondre en déplaçant le passé vers le journal des versions, ou vers les notes de "
+            "la publication, qu'écrit Edouard, et en réécrivant l'« État » au présent "
+            "(voir « L'« État » et le journal »)."
+        ),
+        (
+            "| journal des versions (`CHANGELOG.md`) | référence | une session, Edouard | la "
+            "session | à chaque étiquette ou clôture |"
+        ),
     ):
         assert fragment in plat, fragment
+    # Le README naît sans le lien des publications : l'esquisse ne le porte pas, et un bloc plus
+    # loin porte la ligne de la première étiquette.
+    blocs = [bloc.group(0) for bloc in CLOTURE.finditer(texte)]
+    assert "/releases" not in blocs[0]
+    assert "L'état du projet est dans [CLAUDE.md](CLAUDE.md#état)." in blocs[0]
+    premiere_etiquette = (
+        "L'état du projet est dans [CLAUDE.md](CLAUDE.md#état), les versions dans "
+        "[les publications](https://github.com/<compte>/<nom>/releases)."
+    )
+    assert any(premiere_etiquette in bloc for bloc in blocs[1:])
+    assert "à sa première étiquette, le projet complète la ligne de l'état" in plat.lower()
     for ancien in (
         "trois contrôles",
         "Les trois contrôles",
@@ -1499,6 +1535,10 @@ def test_documentation_md(tmp_path, env_isole):
         "Deux autres laissent passer",
         "Un dernier ne touche que le gabarit resté vide",
         "Un dépôt de données n'a ni registre",
+        "ni plans, ni ADR à lui",
+        "figés depuis la phase 0",
+        "le lien vers les publications la dit toujours juste",
+        "ne se supprime ni ne se réécrit",
         "Dans un dépôt de données, `CLAUDE.md` dit",
         # « Un dernier » dans une liste qui n'est pas close, un lien lu « dans le gabarit », et le
         # remède des seuls liens (relecture des corrections de la revue finale du lot 17)
@@ -1554,6 +1594,74 @@ def test_documentation_md(tmp_path, env_isole):
     (tmp_path / "docs/modele/documentation.md").write_text(texte, encoding="utf-8")
     (tmp_path / "README.md").write_text("[d](docs/modele/documentation.md)\n", encoding="utf-8")
     assert documentation.avertissements(tmp_path) == []
+
+
+def _section_de_documentation(titre):
+    """Le texte d'une section de niveau 2 de `documentation.md`, hors des blocs de code, aux
+    blancs réduits."""
+    hors_du_code = CLOTURE.sub("", lire(DOCUMENTATION))
+    section = hors_du_code.split(f"\n## {titre}\n", 1)[1].split("\n## ", 1)[0]
+    return " ".join(section.split())
+
+
+def test_documentation_md_l_etat_et_le_journal():
+    """L'« État » dit le présent et tient en 40 lignes ; le passé va aux publications ou au journal
+    des versions, `CHANGELOG.md`, dont la forme est dite ; « Un fait une fois » y renvoie."""
+    plat = _section_de_documentation("L'« État » et le journal")
+    for fragment in (
+        "40 lignes non vides au plus",
+        "le passé va aux publications",
+        "`CHANGELOG.md` à la racine, lié depuis « Ce qui fait foi »",
+        "`## Lot 3 — AAAA-MM-JJ`",
+        "la plus récente d'abord",
+        "tel quel",
+    ):
+        assert fragment in plat, fragment
+    fait = _section_de_documentation("Un fait une fois")
+    for ligne in (
+        "| l'histoire et les versions | les publications de GitHub, ou le journal des versions |",
+        "| où en est le projet | `CLAUDE.md`, « État », au présent |",
+    ):
+        assert ligne in fait, ligne
+    assert "| les versions |" not in fait
+
+
+def test_documentation_md_les_adr():
+    """La règle commune des ADR : ni suppression, ni réécriture muette ; l'amendement en place ou
+    par un nouvel ADR, le remplacement ; la section « Confirmation » entre « Conséquences » et
+    « Révision » ; « Retirer un texte » y renvoie."""
+    plat = _section_de_documentation("Les ADR")
+    for fragment in (
+        "Un ADR ne se supprime pas.",
+        "`- **Amendé** le AAAA-MM-JJ : <ce qui change>`",
+        "amendé par ADR-NNNN le AAAA-MM-JJ",
+        "remplacé par ADR-NNNN",
+        "ou « Aucun », avec sa raison",
+        "Un ADR écrit avant la `v0.15.0` n'a pas à recevoir sa section",
+        "`NNNN-titre.md`",
+    ):
+        assert fragment in plat, fragment
+    positions = [
+        plat.index(f"**{section}**")
+        for section in (
+            "Contexte",
+            "Options",
+            "Décision",
+            "Conséquences",
+            "Confirmation",
+            "Révision",
+        )
+    ]
+    assert positions == sorted(positions), positions
+    retirer = _section_de_documentation("Retirer un texte")
+    assert "la règle de « Les ADR »" in retirer
+    assert "ne se supprime ni ne se réécrit" not in retirer
+
+
+def test_methode_point_5_au_present():
+    """Le point 5 du cycle fait reporter dans `CLAUDE.md` ce qui doit survivre, au présent."""
+    plat = " ".join(lire(METHODE).split())
+    assert "reporte dans `CLAUDE.md`, au présent, ou dans un ADR ce qui doit survivre" in plat
 
 
 def test_documentation_md_avant_de_reecrire_un_readme():

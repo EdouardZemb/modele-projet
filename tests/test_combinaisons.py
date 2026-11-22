@@ -119,7 +119,7 @@ def verifier_readme(rendu: Path, cible: str, nature: str) -> None:
             attendus.append("Licence")
         assert titres == attendus
         assert ("](docs/exploitation.md)" in texte) == cible.startswith("serveur")
-        assert "https://github.com/EdouardZemb/essai/releases" in liens
+        assert "https://github.com/EdouardZemb/essai/releases" not in liens
         assert len(relatifs) >= 6, relatifs
         assert sum("#" in lien for lien in relatifs) >= 2, relatifs
     assert (rendu / "LICENSE").exists() == ("Licence" in titres)

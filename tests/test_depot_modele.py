@@ -1699,6 +1699,11 @@ def test_liste_d_alignement():
         assert fragment in texte, fragment
     a_plat = " ".join(texte.split())
     for regle in (
+        # lot 20 : l'« État » de `CLAUDE.md` se réécrit au présent, en 40 lignes
+        (
+            "L'« État » au présent, 40 lignes non vides au plus : le passé va aux publications ou "
+            "au journal des versions (`docs/modele/documentation.md`, « L'« État » et le journal »)."
+        ),
         # la CI du code exige l'exemple de chaque commande déclarée
         "La CI du code y lance la commande, et refuse une commande déclarée sans son exemple",
         # à deux dépôts, la CI des données clone le code sans jeton : il est public avant elle

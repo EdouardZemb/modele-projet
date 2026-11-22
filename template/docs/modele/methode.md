@@ -13,12 +13,12 @@ modifie pas dans le projet. Un défaut se corrige dans `modele-projet`, pour tou
 3. Une ou plusieurs PR d'implémentation.
 4. Une PR de revue finale.
 5. Une PR de clôture : elle **supprime le plan** (dans un lot en tranches, le plan maître et les
-   plans de tranche), reporte dans `CLAUDE.md` ou dans un ADR ce qui doit survivre, relit le
-   README d'après `docs/modele/documentation.md`, et porte au registre du dépôt les leçons du lot
-   encore sans ligne ; un dépôt de la cible `donnees`, qui n'a pas de registre à lui, les porte au
-   registre de son dépôt de code (voir « Le registre »). Elle seule porte « Closes #N », les autres
-   PR du lot disant « Partie de #N », et elle nomme la tête relue (voir « Le texte de la PR »).
-   L'unité de clôture du plan nomme ces gestes (voir « La clôture d'un plan »).
+   plans de tranche), reporte dans `CLAUDE.md`, au présent, ou dans un ADR ce qui doit survivre,
+   relit le README d'après `docs/modele/documentation.md`, et porte au registre du dépôt les leçons
+   du lot encore sans ligne ; un dépôt de la cible `donnees`, qui n'a pas de registre à lui, les
+   porte au registre de son dépôt de code (voir « Le registre »). Elle seule porte « Closes #N »,
+   les autres PR du lot disant « Partie de #N », et elle nomme la tête relue (voir « Le texte de la
+   PR »). L'unité de clôture du plan nomme ces gestes (voir « La clôture d'un plan »).
 6. L'étiquette `vX.Y.Z`, **avec l'accord d'Edouard**.
 
 ## Les outils

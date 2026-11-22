@@ -65,7 +65,9 @@ Chaque case se coche dans la PR d'alignement. Une case qui ne s'applique pas au 
 
 - [ ] **`CLAUDE.md`** : la ligne 1 devient `@docs/modele/methode.md`, suivie d'une ligne vide. Retirer
       ce que `methode.md` couvre désormais (le cycle d'un lot, « Fini », les commits, les questions
-      groupées) ; garder ce qui est propre au projet.
+      groupées) ; garder ce qui est propre au projet. L'« État » au présent, 40 lignes non vides au
+      plus : le passé va aux publications ou au journal des versions (`docs/modele/documentation.md`,
+      « L'« État » et le journal »).
 - [ ] **`README.md`** à la forme de sa variante, code ou données (`docs/modele/documentation.md`,
       « Le README ») : il lie `CLAUDE.md` par un lien Markdown, et chaque autre `.md` de la racine
       est lié par le README ou par « Ce qui fait foi » de `CLAUDE.md`. En nature `code`, `LICENSE`

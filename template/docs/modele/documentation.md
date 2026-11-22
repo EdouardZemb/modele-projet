@@ -26,7 +26,7 @@ Pour les cibles `aucune` et `serveur`, quelle que soit la nature :
 
 <!-- Trois à sept lignes : le besoin, ce que le projet fait, ce qu'il ne fait pas. -->
 
-L'état du projet est dans [CLAUDE.md](CLAUDE.md#état), les versions dans [les publications](https://github.com/<compte>/<nom>/releases).
+L'état du projet est dans [CLAUDE.md](CLAUDE.md#état).
 
 ## Démarrer
 
@@ -59,17 +59,17 @@ Ce que dit chaque partie :
   servir aussi de description du dépôt sur GitHub.
 - **La capture d'écran**, pour une application, à fond opaque.
 - **« Pourquoi »** : trois à sept lignes, le besoin, ce que le projet fait, ce qu'il ne fait pas.
-  L'état vit dans `CLAUDE.md`, les versions dans les publications : le README y renvoie, sans les
-  recopier.
+  L'état vit dans `CLAUDE.md` : le README y renvoie, sans le recopier.
 - **« Démarrer »** : la commande qui lance le projet. Les autres sont dans `CLAUDE.md`.
 - **« Où lire quoi »** : un tableau qui aiguille, avec une colonne « À lire quand ». La ligne de
-  l'exploitation ne paraît qu'en cible `serveur`.
+  l'exploitation ne paraît qu'en cible `serveur`. Deux textes du même nom s'y distinguent par ce
+  qu'ils portent : « Le registre de la machine », à côté du registre des constats.
 - **« Contribuer »** : une ligne, sans fichier `CONTRIBUTING`.
 - **« Licence »**, en nature `code` seulement, en dernier.
 
 Les commentaires HTML ne se voient pas sur GitHub : ils disent quoi écrire, et le texte les
-remplace. Le brief et le cadrage ne sont pas dans le README : figés depuis la phase 0, ils
-n'aiguillent pas un visiteur, et « Ce qui fait foi », dans `CLAUDE.md`, les lie.
+remplace. Le brief et le cadrage ne sont pas dans le README : ils disent le départ du projet, et
+n'aiguillent pas un visiteur ; « Ce qui fait foi », dans `CLAUDE.md`, les lie.
 
 **Un renvoi mène à un document qui existe**, jamais à un gabarit resté vide : le démarrage d'une
 session le signale (voir « Les contrôles »). C'est pourquoi le README naît sans ligne vers
@@ -78,6 +78,13 @@ tableau « Où lire quoi », après la ligne du registre :
 
 ```markdown
 | [Les décisions](docs/decisions/) | pour ce qui a été décidé, et pourquoi |
+```
+
+Pour la même raison, le README naît sans le lien des publications, qui mènerait à une page vide. À
+sa première étiquette, le projet complète la ligne de l'état de « Pourquoi » :
+
+```markdown
+L'état du projet est dans [CLAUDE.md](CLAUDE.md#état), les versions dans [les publications](https://github.com/<compte>/<nom>/releases).
 ```
 
 ### La variante « données »
@@ -115,9 +122,12 @@ ne portent pas de lien : à la naissance, `config/` et `contenu/` n'ont que leur
 
 Avant de réécrire un README, chercher dans tout le dépôt `README.md#` et tout renvoi au README,
 ceux d'un texte figé compris. Une ancre suit son titre, et aucun des contrôles ne lit l'ancre
-d'un lien. Ce que seul le README porte se déplace ailleurs avant d'en être retiré. Un projet de
-code né avant la `v0.9.0` met la section « Licence » dans la PR de mise à jour, qui apporte
-`LICENSE`. Dans une PR à part, le lien `[MIT](LICENSE)` mènerait à un fichier absent.
+d'un lien. Ce que seul le README porte se déplace ailleurs avant d'en être retiré. Il va dans le
+texte qui en tient la source (« Un fait une fois ») ; quand aucun ne peut l'accueillir, dans un
+texte d'explication du projet, sous `docs/` (par exemple `docs/fonctionnement.md`), lié depuis
+« Où lire quoi » et tenu à la même règle, « Ce qui n'y va jamais », qu'aucun avertissement n'y lit.
+Un projet de code né avant la `v0.9.0` met la section « Licence » dans la PR de mise à jour, qui
+apporte `LICENSE`. Dans une PR à part, le lien `[MIT](LICENSE)` mènerait à un fichier absent.
 
 ## Ce qui n'y va jamais
 
@@ -125,12 +135,19 @@ Un README ne porte pas ce qui se périme sans que personne le voie, parce que sa
 ailleurs :
 
 - **une heure** (`7h15`) : elle vit dans la configuration ou dans le code ;
-- **une version** (`v1.2.3`) : le lien vers les publications la dit toujours juste ;
+- **une version** (`v1.2.3`) : les publications la disent toujours juste ;
 - **un lot au futur** (« le prochain lot ajoutera… »), ou un mot qui date un état
   (« actuellement », « bientôt ») : l'état est dans `CLAUDE.md`, la feuille de route dans les
   issues et les pistes ;
 - **un arbre de fichiers** (`├──`) : le dépôt le montre, et le tableau « Où lire quoi » aiguille ;
+- **une issue ou une PR citée** (`#12`) : la feuille de route est dans les issues et les pistes,
+  l'histoire dans les publications ;
 - **un nombre recopié** (de tests, de fichiers, de lignes) : il change à chaque PR.
+
+Le démarrage d'une session signale une version, une heure, un arbre de fichiers, un mot qui date
+l'état, un lot au futur et une issue ou une PR citée, par une recherche dans le texte qui ne voit
+pas tout (voir « La copie dans le README » et « L'issue ou la PR citée », sous « Les contrôles »).
+Il ne signale pas un nombre recopié.
 
 Aucun contrôle n'attrape une phrase de prose devenue fausse : c'est le rôle de la relecture du
 README, à la clôture de chaque lot.
@@ -153,9 +170,9 @@ est pire qu'un texte absent.
 | Le fait | Son endroit |
 |---|---|
 | ce qu'est le projet, et pour qui | la première phrase du README |
-| où en est le projet | `CLAUDE.md`, « État » |
+| où en est le projet | `CLAUDE.md`, « État », au présent |
 | les commandes | `CLAUDE.md`, « Commandes » |
-| les versions | les publications de GitHub |
+| l'histoire et les versions | les publications de GitHub, ou le journal des versions |
 | le comportement | le code et les tests |
 | la façon de travailler | `docs/modele/methode.md` |
 | les décisions | les ADR, dans `docs/decisions/` et `docs/modele/decisions/` |
@@ -166,12 +183,25 @@ est pire qu'un texte absent.
 Dans un dépôt de la cible `donnees`, `CLAUDE.md` dit ce que le dépôt porte, et ses leçons vont au
 registre du dépôt de code.
 
+## L'« État » et le journal
+
+- l'« État » de `CLAUDE.md` dit le présent : l'étape en cours, la dernière chose faite, la
+  prochaine, ce qui est en service ; 40 lignes non vides au plus, que le démarrage d'une session
+  vérifie (voir « L'« État » trop long », sous « Les contrôles ») ;
+- le passé va aux publications, que GitHub tient à chaque étiquette ; un projet sans étiquette, ou
+  qui veut garder son histoire lisible, tient un journal, `CHANGELOG.md` à la racine, lié depuis
+  « Ce qui fait foi », comme l'exige la carte de la racine ;
+- le journal : une entrée par version, ou par lot dans un projet sans étiquette
+  (`## Lot 3 — AAAA-MM-JJ`), la plus récente d'abord ; le texte qui sort de l'« État » y va tel
+  quel.
+
 ## Les textes d'un projet
 
 | Texte | Forme | Qui le lit | Qui le tient | Quand on le relit |
 |---|---|---|---|---|
 | README | accueil | un visiteur, Edouard | la session | à la clôture de chaque lot |
 | `CLAUDE.md` | référence | une session | la session | à la PR qui change une règle |
+| journal des versions (`CHANGELOG.md`) | référence | une session, Edouard | la session | à chaque étiquette ou clôture |
 | `docs/modele/methode.md` | guide et référence | une session | le modèle | à chaque lot du modèle |
 | ADR | explication | une session, Edouard | le lot qui décide | à leur révision |
 | registre, pistes | conduite | une session, Edouard | la session | au 3e constat, à la clôture |
@@ -180,7 +210,41 @@ registre du dépôt de code.
 | brief, cadrage | explication | Edouard, une session | figés | jamais |
 
 Les fichiers de `docs/modele/`, ce texte compris, sont tenus par le modèle. Un dépôt de la cible
-`donnees` n'a ni registre, ni pistes, ni plans, ni ADR à lui.
+`donnees` n'a ni registre, ni pistes, ni ADR à lui ; un lot qu'il conduit suit la méthode, et ses
+leçons vont au registre du dépôt de code.
+
+## Les ADR
+
+Un ADR est un fichier de `docs/decisions/`, nommé `NNNN-titre.md` et numéroté à partir de `0001`.
+Les décisions héritées du modèle sont à part, dans `docs/modele/decisions/` (préfixe `M-`), pour que
+leurs numéros ne se heurtent pas à ceux du projet.
+
+Le titre : `# ADR-NNNN — <Sujet> : <décision en une phrase>`.
+
+L'en-tête :
+
+- le statut, daté : proposé, accepté, remplacé par ADR-NNNN ;
+- le contexte amont : l'ADR, l'issue ou le document dont celui-ci découle ;
+- les amendements, une ligne chacun (voir la règle plus bas).
+
+Les sections, dans cet ordre :
+
+1. **Contexte** : ce qui force à décider ;
+2. **Options** : les choix envisagés, avec leurs mérites et leurs défauts ;
+3. **Décision** : ce qui est retenu, et pourquoi ;
+4. **Conséquences** : ce qui change, dont une rubrique « Difficile à changer » ;
+5. **Confirmation** : le test, le contrôle ou la mesure qui tient la décision, nommé par son chemin,
+   ou « Aucun », avec sa raison ;
+6. **Révision** : quand et sur quel signe on reconsidérera la décision.
+
+**Un ADR ne se supprime pas.** Il s'amende en place : une ligne
+`- **Amendé** le AAAA-MM-JJ : <ce qui change>` dans son en-tête, et son corps dit ce qui est en
+vigueur. Ou un nouvel ADR l'amende, et le dit en tête de son contexte : l'ancien garde son texte, et
+son en-tête le nomme (« amendé par ADR-NNNN le AAAA-MM-JJ »). Quand la décision change de
+direction, un nouvel ADR la remplace : l'ancien ne change que de statut, « remplacé par ADR-NNNN ».
+
+Un ADR écrit avant la `v0.15.0` n'a pas à recevoir sa section « Confirmation » : elle vient à son
+prochain amendement.
 
 ## Retirer un texte
 
@@ -199,8 +263,7 @@ d'`exploitation.md` et de `LICENSE`.
   `LICENSE` absent ou vide.
 - **Un plan** se supprime à la clôture du lot, après le report dans `CLAUDE.md` ou dans un ADR de ce
   qui doit survivre.
-- **Un ADR** ne se supprime ni ne se réécrit : un nouvel ADR le remplace, et l'ancien ne change que
-  de statut.
+- **Un ADR** ne se supprime pas : il s'amende ou se remplace, d'après la règle de « Les ADR ».
 - **Un fichier géré**, sous `docs/modele/`, ne se retire pas du projet : un défaut se corrige dans
   `modele-projet`.
 - **Un texte propre au projet**, ni semé ni géré, se supprime, avec les liens qui y menaient.
@@ -335,7 +398,7 @@ Son constat :
   aux publications)`.
 
 Y répondre en déplaçant le passé vers le journal des versions, ou vers les notes de la publication,
-qu'écrit Edouard, et en réécrivant l'« État » au présent.
+qu'écrit Edouard, et en réécrivant l'« État » au présent (voir « L'« État » et le journal »).
 
 Ses limites : un titre « Etat », sans accent, ou « L'état du projet » n'est pas lu, ni un « État »
 de niveau 3.
