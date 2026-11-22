@@ -10,7 +10,7 @@ garde-fous qu'il distribue : hooks git, garde de Claude, CI, règle de protectio
 Version en service : `v0.14.0`, publiée le 20/11/2026. Lot en cours : le lot 20, le second temps
 de la documentation (#157).
 
-Les projets nés du modèle, d'après le relevé du 22/11/2026 :
+Les projets nés du modèle, d'après le relevé du 21/11/2026 :
 
 | Projet | Version | Cible | Nature |
 |---|---|---|---|

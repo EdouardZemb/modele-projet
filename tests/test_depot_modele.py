@@ -1336,8 +1336,8 @@ def test_depot_modele_passe_sa_porte(env_isole):
 def test_documentation_du_depot_modele(env_isole):
     """La licence et la carte passent sur ce dépôt, lancées comme en CI, depuis la racine : son
     README lie `CLAUDE.md` et `CHANGELOG.md`, les seuls autres `.md` de sa racine, et son `LICENSE`
-    est là. Un `CLAUDE.local.md` posé dans un clone du modèle (par `/memory`) n'y est pas compté : le
-    `.gitignore` de ce dépôt l'exclut, comme celui des projets, sans l'ignore global du poste."""
+    est là. Un `CLAUDE.local.md` posé dans un clone du modèle (par `/memory`) n'y est pas compté :
+    le `.gitignore` de ce dépôt l'exclut, comme celui des projets, sans l'ignore global du poste."""
     ignores = (RACINE / ".gitignore").read_text(encoding="utf-8").splitlines()
     assert "CLAUDE.local.md" in ignores
     git = subprocess.run(
@@ -1371,8 +1371,9 @@ def test_changelog_forme():
     """Le journal des versions : son titre, une entrée `## [X.Y.Z] — AAAA-MM-JJ` par version, de la
     plus récente à la plus ancienne, sans doublon, chacune avec sa définition vers sa publication
     et chaque définition avec son entrée (le texte brut : les paragraphes citent des `<!--`, que
-    `visible` prendrait pour un commentaire jamais fermé) ; les 22 versions de `0.1.0` à `0.14.0` y sont (la
-    clôture d'un lot en ajoute une) ; le fichier est en LF, comme le veut `.gitattributes`."""
+    `visible` prendrait pour un commentaire jamais fermé) ; les 22 versions de `0.1.0` à `0.14.0` y
+    sont (la clôture d'un lot en ajoute une) ; le fichier est en LF, comme le veut
+    `.gitattributes`."""
     brut = (RACINE / "CHANGELOG.md").read_bytes()
     assert b"\r" not in brut
     texte = brut.decode("utf-8")
