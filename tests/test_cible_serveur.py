@@ -1389,6 +1389,8 @@ def test_compte_rendu_partout(rendre):
 # dépôt que le modèle, où `#94` nommerait une issue du projet. Un renvoi au modèle s'écrit
 # `modele-projet#94`. Ce n'est pas une porte des projets : dans un projet, `#12` nomme à bon droit
 # sa propre issue.
+# Le code en ligne est exempté : GitHub n'y lie aucune référence, et les exemples de l'avertissement
+# « l'issue ou la PR citée » (`#12`, `lot #11`) ne peuvent pas s'écrire sans `#N`.
 RENDUS_DE_LA_CHAINE = {
     "un-depot-avec-sauvegardes": REPONSES_SERVEUR,
     "un-depot-sans-sauvegardes": {**REPONSES_SERVEUR, "sauvegardes": False},
@@ -1411,18 +1413,38 @@ def renvois_au_plan(racine):
 
 
 RENVOI_NU = re.compile(r"(^|[^\w&#/-])#\d{1,5}\b(?!;)")
+# Une suite d'accents graves, le texte, la même suite qui ferme, sur la même ligne : un accent grave
+# seul, jamais fermé, ne retire rien.
+CODE_EN_LIGNE_DU_TEST = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)")
 
 
 def renvois_nus(racine):
-    """Les lignes des fichiers texte de `racine` qui portent un renvoi nu à une issue (`#94`)."""
+    """Les lignes des fichiers texte de `racine` qui portent un renvoi nu à une issue (`#94`).
+
+    Le renvoi se cherche hors du code en ligne, que la ligne d'origine garde dans le message.
+    """
     return [
         f"{chemin.relative_to(racine).as_posix()}:{numero}: {ligne.strip()}"
         for chemin in fichiers_texte(racine)
         for numero, ligne in enumerate(
             chemin.read_bytes().decode("utf-8", errors="replace").splitlines(), start=1
         )
-        if RENVOI_NU.search(ligne)
+        if RENVOI_NU.search(CODE_EN_LIGNE_DU_TEST.sub(" ", ligne))
     ]
+
+
+def test_renvois_nus_hors_du_code_en_ligne(tmp_path):
+    cas = {
+        "pris-nu.md": ("voir #94", True),
+        "code.md": ("voir `#12`", False),
+        "apres-code.md": ("le `code` puis #94", True),
+        "double.md": ("une ``#12`` double", False),
+        "seul.md": ("voir `#94", True),
+    }
+    for nom, (texte, _) in cas.items():
+        (tmp_path / nom).write_text(texte + "\n", encoding="utf-8", newline="\n")
+    pris = {ligne.split(":", 1)[0] for ligne in renvois_nus(tmp_path)}
+    assert pris == {"pris-nu.md", "apres-code.md", "seul.md"}
 
 
 @pytest.mark.parametrize("reponses", RENDUS_DE_LA_CHAINE.values(), ids=RENDUS_DE_LA_CHAINE.keys())
