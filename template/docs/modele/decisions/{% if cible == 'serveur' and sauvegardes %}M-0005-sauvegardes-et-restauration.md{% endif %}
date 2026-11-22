@@ -8,8 +8,7 @@
   (§ 2, § 3 et § 6, M-0004 § 8)
 - **Amendé** le 2026-11-01, avec la v0.7.1 : tant que la prod n'a rien déployé, `serveur` peut
   dire « non » aux heures des sauvegardes (§ 2)
-- **Amendé** le 2026-11-22, avec le lot 20 : la section « Confirmation » est ajoutée : le
-  test, le contrôle ou la mesure qui tient la décision, nommé par son chemin
+- **Amendé** le 2026-11-22, avec le lot 20 : la section « Confirmation »
 - **Contexte amont** : les sauvegardes d'`ancrage` (son ADR-0007, §4 et §5), dont la mécanique
   est extraite ; M-0003 (le contrat de l'instantané) ; M-0004 (la chaîne de livraison)
 

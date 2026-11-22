@@ -10,8 +10,7 @@
   (`compose.marque.yml`) tient l'alias du tunnel et le port de la boucle locale, et `app` ne les
   porte qu'en prod (§ 5 ; la boucle locale, M-0003 § 1), et le ménage ne retire jamais l'image du
   relais (§ 3)
-- **Amendé** le 2026-11-22, avec le lot 20 : la section « Confirmation » est ajoutée : le
-  test, le contrôle ou la mesure qui tient la décision, nommé par son chemin
+- **Amendé** le 2026-11-22, avec le lot 20 : la section « Confirmation »
 - **Contexte amont** : la chaîne de livraison d'`ancrage` (son ADR-0006), généralisée par le
   modèle ; M-0002 (les étiquettes sont à Edouard) ; M-0003 (le contrat de l'image) ; M-0006 (le
   code et les données)
@@ -333,8 +332,8 @@ Dans le projet :
 - `deploiement/deployer.sh` : le déploiement et le retour arrière par couple ;
 - `deploiement/nettoyer-images.sh` : le ménage des images et des instantanés ;
 - `deploiement/compose.marque.yml` : le relais de la marque, en staging seulement ;
-- `scripts/modele/verifier_secrets.py` : les secrets chiffrés, contre leur `.cles`, sans les
-  déchiffrer ;
+- `scripts/modele/verifier_secrets.py` : les `.cles` du dépôt et, à un dépôt, les secrets chiffrés
+  contre eux, sans les déchiffrer ;
 - `tests/deploiement/sonder.bats` : la sonde ;
 - `tests/deploiement/deployer.bats` : le déploiement, l'échec et le retour ;
 - `tests/deploiement/nettoyer-images.bats` : le ménage ;

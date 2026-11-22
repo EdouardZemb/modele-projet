@@ -19,8 +19,7 @@
   et le hook `SessionStart` signale un gabarit resté vide que le README lie
 - **Amendé** le 2026-11-22, avec le lot 20 : le hook `SessionStart` signale aussi un « État »
   trop long, et la copie ou l'issue citée du README
-- **Amendé** le 2026-11-22, avec le lot 20 : la section « Confirmation » est ajoutée : le
-  test, le contrôle ou la mesure qui tient la décision, nommé par son chemin
+- **Amendé** le 2026-11-22, avec le lot 20 : la section « Confirmation »
 - **Contexte amont** : M-0001 (les garde-fous de qualité comme condition d'entrée)
 
 ## Contexte

@@ -13,8 +13,7 @@
   `serveur`, le dépôt de code est public (§ 1).
 - **Amendé** le 2026-11-04, avec le correctif modele-projet#94 : à la scission, `env/` et `cles/`
   sont rendus à neuf, et `.sops.yaml` se refait pour le nouveau chemin des secrets (§ 6).
-- **Amendé** le 2026-11-22, avec le lot 20 : la section « Confirmation » est ajoutée : le
-  test, le contrôle ou la mesure qui tient la décision, nommé par son chemin
+- **Amendé** le 2026-11-22, avec le lot 20 : la section « Confirmation »
 - **S'applique en deux temps.** D'abord la porte par nature et le gabarit de données (§ 1 à 4).
   Ensuite la chaîne à deux dépôts et les règles de chemins (§ 3, dernier point, § 5 à 7). Entre les
   deux, la chaîne lit encore tout dans le clone du code, comme avant.
@@ -336,7 +335,9 @@ Dans le projet :
 - `.github/workflows/modele-historique.yml` : la relecture de l'historique d'un dépôt de code ;
 - `.github/workflows/modele-donnees.yml` (cible `donnees`, avec `cible_code: serveur`) : les secrets
   et les données, contrôlés contre le dépôt de code ;
-- `scripts/modele/verifier_secrets.py` : les secrets chiffrés, contre leur `.cles` et `.sops.yaml` ;
+- `scripts/modele/verifier_secrets.py` : les secrets chiffrés d'un dépôt de données, ou d'un projet
+  `serveur` à un dépôt, contre leur `.cles` et `.sops.yaml` ; dans le dépôt de code d'un projet à
+  deux dépôts, ses seuls `.cles`, contre les clés qu'exige la mécanique ;
 - `scripts/modele/verifier_donnees.py` : les données, contre les images du dépôt de code ; lancé
   par la CI du dépôt de données d'un projet `serveur` et par `deployer.sh` ;
 - `deploiement/deployer.sh` (cible `serveur`) : le couple, l'instantané des données monté en lecture
