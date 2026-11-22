@@ -485,8 +485,8 @@ def test_exception_interne_rend_zero(monkeypatch, capsys):
 
 
 def test_main_passe_la_racine_au_controle(tmp_path, monkeypatch, capsys):
-    """Le gabarit resté vide se lit dans la racine du dépôt où tourne le script : ici, le clone. Le
-    dossier courant n'est pas la racine."""
+    """Les avertissements de la documentation se lisent dans la racine du dépôt où tourne le
+    script : ici, le clone. Le dossier courant n'est pas la racine."""
     racines = []
 
     def faux(racine):
@@ -494,7 +494,7 @@ def test_main_passe_la_racine_au_controle(tmp_path, monkeypatch, capsys):
         return ["x : y"]
 
     monkeypatch.setattr(signaux, "_documentation", VRAIE_DOCUMENTATION)
-    monkeypatch.setattr(documentation, "gabarits_vides", faux, raising=False)
+    monkeypatch.setattr(documentation, "avertissements", faux, raising=False)
     faux_gh(tmp_path, sorties())
     gh_en_tete(monkeypatch, tmp_path)
     # Un autre dossier que celui du faux gh : sous Windows, sans NoDefaultCurrentDirectoryInExePath
@@ -518,13 +518,33 @@ def test_erreur_du_controle_laisse_les_signaux(tmp_path, monkeypatch, capsys):
         raise RuntimeError("boum")
 
     monkeypatch.setattr(signaux, "_documentation", VRAIE_DOCUMENTATION)
-    monkeypatch.setattr(documentation, "gabarits_vides", explose, raising=False)
+    monkeypatch.setattr(documentation, "avertissements", explose, raising=False)
     faux_gh(tmp_path, sorties())
     gh_en_tete(monkeypatch, tmp_path)
     code, texte = lancer(capsys)
     assert code == 0
     assert texte == RIEN_DE_ROUGE + "\ndocumentation : non lue (erreur)"
     assert len(appels) == 1  # le faux a tourné : l'erreur est la sienne
+
+
+def test_main_affiche_les_avertissements(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(signaux, "_documentation", VRAIE_DOCUMENTATION)
+    monkeypatch.setattr(documentation, "avertissements", lambda racine: ["a : b", "c : d"])
+    faux_gh(tmp_path, sorties())
+    gh_en_tete(monkeypatch, tmp_path)
+    code, texte = lancer(capsys)
+    assert code == 0
+    assert texte.endswith("\ndocumentation :\n- a : b\n- c : d"), texte
+
+
+def test_import_de_documentation_en_echec(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(signaux, "_documentation", VRAIE_DOCUMENTATION)
+    monkeypatch.setitem(sys.modules, "documentation", None)
+    faux_gh(tmp_path, sorties())
+    gh_en_tete(monkeypatch, tmp_path)
+    code, texte = lancer(capsys)
+    assert code == 0
+    assert texte.endswith("\ndocumentation : non lue (erreur)"), texte
 
 
 def test_documentation_importee_a_l_appel_seulement():
