@@ -14,6 +14,7 @@ from conftest import (
     REPONSES_SERVEUR,
     REPONSES_SERVEUR_CODE,
     git,
+    slug_github,
 )
 
 
@@ -47,10 +48,44 @@ def test_ce_qui_fait_foi_cite_par_des_liens(rendre):
     section = texte.split("## Ce qui fait foi\n", 1)[1].split("\n## ", 1)[0]
     assert "Un fichier de la racine s'y cite par un lien." in section
     assert "[le brief](docs/00-brief-initial.md)" in section
-    assert "[le cadrage](docs/cadrage.md)" in section
+    assert "[le cadrage](docs/cadrage.md)." in section
+    assert "figés" not in section
     assert "`docs/" not in section
     for cible in re.findall(r"\]\(([^)]+)\)", section):
         assert (rendu / cible).exists(), cible
+
+
+# L'« État » dit le présent et tient en quarante lignes : la consigne du gabarit le dit, et renvoie
+# à la section de `documentation.md` qui dit où va le passé.
+def test_claude_md_etat_au_present(rendre):
+    rendu = rendre()
+    texte = lire(rendu, "CLAUDE.md")
+    section = texte.split("## État\n", 1)[1].split("\n## ", 1)[0]
+    assert (
+        "*Où en est le projet, au présent : l'étape en cours, la dernière chose faite, la "
+        "prochaine. Quarante lignes au plus : le passé va aux publications, ou au journal des "
+        "versions (`docs/modele/documentation.md`, « L'« État » et le journal »).*"
+    ) in section
+    assert "À tenir à jour à chaque fusion" not in texte
+    documentation = lire(rendu, "docs/modele/documentation.md")
+    assert "\n## L'« État » et le journal\n" in documentation
+
+
+# Le README des décisions renvoie à `documentation.md` pour la règle, le format et la section
+# « Confirmation » : un fait une fois. L'ancre du renvoi est le titre d'une section du texte rendu.
+def test_readme_des_decisions_renvoie_a_documentation(rendre):
+    rendu = rendre()
+    texte = lire(rendu, "docs/decisions/README.md")
+    assert (
+        "La règle, le format et la section « Confirmation » sont dans "
+        "[Documenter un projet](../modele/documentation.md#les-adr)."
+    ) in texte
+    documentation = lire(rendu, "docs/modele/documentation.md")
+    ancres = {slug_github(titre) for titre in titres(documentation, 2)}
+    assert "les-adr" in ancres
+    assert "## Format" not in texte
+    assert "ne se réécrit" not in texte
+    assert (rendu / "docs/modele/documentation.md").exists()
 
 
 def test_registre_entete(rendre):
@@ -148,10 +183,11 @@ def test_claude_local_md_ignore(rendre, env_isole, reponses):
 
 
 # Le README semé fait foi à l'octet près : le texte archivé le 05/11, essayé sur un téléphone et
-# accepté, est celui du gabarit. Une empreinte, pour qu'un échec n'imprime pas les deux textes.
+# accepté, est celui du gabarit, puis sans le lien des publications, au lot 20. Une empreinte, pour
+# qu'un échec n'imprime pas les deux textes.
 def test_readme_seme_est_le_gabarit_archive():
     empreinte = hashlib.sha256((RACINE / "template/README.md.jinja").read_bytes()).hexdigest()
-    assert empreinte == "570f96113f97683a610e45be092c54c75836feeb5034589f1f4047a5f83ae2c1"
+    assert empreinte == "e9b5a264438d308219c9cab2022145f50dd7aef06ca797ea0bd90830c1eb3f1c"
 
 
 # Lot 12 (M-0006, § 9) : les fichiers de l'instance sont semés. Un projet à un dépôt garde ses clés,

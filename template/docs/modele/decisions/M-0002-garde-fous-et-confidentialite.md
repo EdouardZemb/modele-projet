@@ -19,6 +19,8 @@
   et le hook `SessionStart` signale un gabarit resté vide que le README lie
 - **Amendé** le 2026-11-22, avec le lot 20 : le hook `SessionStart` signale aussi un « État »
   trop long, et la copie ou l'issue citée du README
+- **Amendé** le 2026-11-22, avec le lot 20 : la section « Confirmation » est ajoutée : le
+  test, le contrôle ou la mesure qui tient la décision, nommé par son chemin
 - **Contexte amont** : M-0001 (les garde-fous de qualité comme condition d'entrée)
 
 ## Contexte
@@ -176,6 +178,38 @@ pas de la discipline de celui qui travaille ?
 - Une mise en production attend toujours Edouard, quel que soit le mode : la session prépare
   l'étiquette, il l'envoie.
 - **Difficile à changer** : la nature d'un dépôt, et sa visibilité une fois son historique publié.
+
+## Confirmation
+
+Dans le projet :
+
+- `.githooks/pre-commit` : la porte de confidentialité et celle des fichiers masqués, avant chaque
+  commit ;
+- `.githooks/commit-msg` : le format et la confidentialité du message ;
+- `.githooks/pre-push` : le refus d'envoyer sur la branche principale ;
+- `scripts/modele/masques.py` : le refus d'un fichier du modèle que le `.gitignore` masque ;
+- `scripts/modele/garde_claude.py` : le garde de Claude (envois, fusions, étiquettes, hooks) ;
+- `scripts/modele/signaux.py` : le hook `SessionStart`, qui montre ce qui est rouge ;
+- `.claude/settings.json` : le garde et les signaux, branchés ;
+- `.github/workflows/modele-socle.yml` : la confidentialité, gitleaks et la vérification du
+  branchement du garde et des signaux ;
+- `.github/workflows/modele-texte-pr.yml` : le texte de la PR, écarts à la spec et tête relue ;
+- `.github/workflows/modele-historique.yml` : la relecture de l'historique chaque semaine ;
+- `scripts/modele/documentation.py` : la licence d'un dépôt de code, la carte de la racine et les
+  avertissements ;
+- `.github/modele/ruleset-main.json` (hors cible `donnees`) : la règle de protection de la branche
+  principale.
+
+Dans `modele-projet` :
+
+- `tests/test_hooks.py` : les hooks git ;
+- `tests/test_garde_claude.py` : le garde de Claude ;
+- `tests/test_signaux.py` : le hook `SessionStart` ;
+- `tests/test_confidentialite.py` : la porte de confidentialité ;
+- `tests/test_masques.py` : la porte des fichiers masqués ;
+- `tests/test_documentation.py` : la licence, la carte de la racine et les avertissements ;
+- `tests/test_texte_pr.py` : le texte de la PR ;
+- `tests/test_ci_socle.py` : le socle de la CI et la règle de protection.
 
 ## Révision
 

@@ -170,7 +170,11 @@ def test_textes_du_depot_de_donnees(rendre):
             )
         ],
         "CLAUDE.md": [
-            "Les leçons de ce dépôt vont au registre du dépôt de code.",
+            (
+                "Il n'a ni cadrage, ni pistes, ni registre, ni décisions à lui : un lot qu'il "
+                "conduit suit la méthode, et ses leçons vont au registre du dépôt de code. Les "
+                "décisions du modèle sont dans `docs/modele/decisions/`."
+            ),
             "Le contenu d'un secret est un geste 👤 d'Edouard.",
             "mode `session` par défaut",
             "avertit sur ce qui identifie",
@@ -203,6 +207,7 @@ def test_textes_du_depot_de_donnees(rendre):
         assert "{%" not in texte and "{{" not in texte, fichier
         # les textes semés disent ce qui est, sans renvoyer au lot qui l'a apporté
         assert "lot 12" not in texte, fichier
+    assert "Il ne conduit pas de lots" not in aplati(rendu / "CLAUDE.md")
     # ce qui ne vaut qu'avec un serveur vient sous son en-tête, le reste avant lui
     for fichier, avant in (
         ("config/README.md", "Ce qui se règle au téléphone vit en base"),

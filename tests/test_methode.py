@@ -16,10 +16,12 @@ from conftest import (
     RACINE,
     REGISTRE_ENTETE,
     RENVOI_AU_PLAN,
+    REPONSES_DONNEES_SERVEUR,
     REPONSES_SERVEUR,
     REPONSES_SERVEUR_CODE,
     SH,
     git,
+    rendre_modele,
 )
 
 TEMPLATE = RACINE / "template"
@@ -112,6 +114,22 @@ ADR_SEPARATION = ["M-0006-code-et-donnees.md"]
 DATES_ADR = {**dict.fromkeys(ADR_SOCLE, "2026-10-16"), "M-0006-code-et-donnees.md": "2026-10-29"}
 
 
+@pytest.fixture(scope="module")
+def rendus_adr(tmp_path_factory):
+    """Donne rendus_adr(**reponses) -> Path : un rendu du modèle, fait une seule fois par jeu de
+    réponses pour tout le module. Les tests des ADR ne font que le lire."""
+    rendus = {}
+
+    def _rendus(**reponses):
+        cle = repr(sorted(reponses.items()))
+        if cle not in rendus:
+            dossier = tmp_path_factory.mktemp("adr") / "rendu"
+            rendus[cle] = rendre_modele(dossier, **reponses)
+        return rendus[cle]
+
+    return _rendus
+
+
 @pytest.mark.parametrize(
     ("reponses", "attendus"),
     [
@@ -121,16 +139,147 @@ DATES_ADR = {**dict.fromkeys(ADR_SOCLE, "2026-10-16"), "M-0006-code-et-donnees.m
     ],
     ids=["aucune", "serveur-sans-sauvegardes", "serveur-avec-sauvegardes"],
 )
-def test_adr_herites_format(rendre, reponses, attendus):
-    adr = sorted((rendre(**reponses) / "docs/modele/decisions").iterdir())
+def test_adr_herites_format(rendus_adr, reponses, attendus):
+    adr = sorted((rendus_adr(**reponses) / "docs/modele/decisions").iterdir())
     assert [a.name for a in adr] == attendus
     for chemin in adr:
         lignes = lire(chemin).splitlines()
         assert re.match(rf"^# {chemin.name[:6]} — .+ : .+$", lignes[0]), chemin.name
         date = DATES_ADR.get(chemin.name, "2026-10-18")
         assert f"- **Statut** : accepté le {date}" in lignes, chemin.name
-        for titre in ("## Contexte", "## Décision", "## Conséquences", "## Révision"):
+        for titre in (
+            "## Contexte",
+            "## Décision",
+            "## Conséquences",
+            "## Confirmation",
+            "## Révision",
+        ):
             assert titre in lignes, (chemin.name, titre)
+        # La confirmation vient après les conséquences et avant la révision.
+        assert (
+            lignes.index("## Conséquences")
+            < lignes.index("## Confirmation")
+            < lignes.index("## Révision")
+        ), chemin.name
+
+
+# Les quatre rendus où les ADR hérités paraissent : le socle seul, `serveur` en dépôt de code (avec
+# les sauvegardes, où paraît M-0005), le dépôt de données sans code, et celui d'un projet `serveur`.
+RENDUS_ADR = {
+    "aucune": {},
+    "serveur": REPONSES_SERVEUR_CODE,
+    "donnees": {"nom": "essai-donnees", "cible": "donnees"},
+    "donnees-serveur": REPONSES_DONNEES_SERVEUR,
+}
+# Les marques de cible d'un chemin de « Confirmation », et les rendus où le chemin existe.
+MARQUES_ADR = {
+    None: None,
+    "cible `serveur`": {"serveur"},
+    "cible `donnees`, avec `cible_code: serveur`": {"donnees-serveur"},
+    "hors cible `donnees`": {"aucune", "serveur"},
+}
+# Les deux ADR dont la « Confirmation » dit ce qu'aucun contrôle ne tient.
+ADR_AVEC_AUCUN = [ADR_SOCLE[0], ADR_SAUVEGARDES[0]]
+PUCE_ADR = re.compile(
+    r"^- `(?P<chemin>[^`]+)`(?: \((?P<marque>cible `serveur`"
+    r"|cible `donnees`, avec `cible_code: serveur`|hors cible `donnees`)\))? : \S"
+)
+
+
+MOTIF_AMENDEMENT_CONFIRMATION = re.compile(
+    r"^- \*\*Amendé\*\* le \d{4}-\d{2}-\d{2}, avec le lot 20 : la section « Confirmation »",
+    re.MULTILINE,
+)
+
+
+def controler_forme_adr(nom, texte):
+    """La largeur et le retrait du texte neuf : la section « Confirmation » et la ligne
+    d'amendement du lot 20 (première ligne et suite) tiennent en 100 caractères, la suite de
+    l'amendement en retrait de deux espaces."""
+    section = texte.split("\n## Confirmation\n", 1)[1].split("\n## Révision\n", 1)[0]
+    for ligne in section.splitlines():
+        assert len(ligne) <= 100, (nom, ligne)
+    lignes = texte.split("\n## Contexte\n", 1)[0].splitlines()
+    (debut,) = [i for i, ligne in enumerate(lignes) if MOTIF_AMENDEMENT_CONFIRMATION.match(ligne)]
+    assert len(lignes[debut]) <= 100, (nom, lignes[debut])
+    for suite in lignes[debut + 1 :]:
+        if not suite.startswith(" "):
+            break
+        assert len(suite) <= 100, (nom, suite)
+        assert suite.startswith("  ") and not suite.startswith("   "), (nom, suite)
+
+
+def listes_confirmation(texte):
+    """La section « Confirmation » : (chemins du projet, chemins du modèle, paragraphes du projet),
+    chaque chemin avec sa marque. Une puce commence par un code en ligne, sa marque juste après."""
+    section = texte.split("\n## Confirmation\n", 1)[1].split("\n## Révision\n", 1)[0]
+    for ligne in section.splitlines():
+        # Une seule forme de puce, `- `, jamais imbriquée : le test ne lit que celle-là.
+        assert not re.match(r"[*+] |\s+[-*+] ", ligne), ligne
+    ici, modele = section.split("\nDans `modele-projet` :\n", 1)
+    assert ici.lstrip("\n").startswith("Dans le projet :\n"), ici
+    listes = []
+    for liste in (ici, modele):
+        puces = [ligne for ligne in liste.splitlines() if ligne.startswith("- ")]
+        assert puces, liste
+        trouvees = []
+        for puce in puces:
+            m = PUCE_ADR.match(puce)
+            assert m, puce
+            trouvees.append((m["chemin"], m["marque"]))
+        listes.append(trouvees)
+    paragraphes = [
+        " ".join(bloc.split())
+        for bloc in ici.split("\n\n")
+        if bloc.strip() and not bloc.lstrip().startswith(("- ", "Dans le projet :"))
+    ]
+    return (*listes, paragraphes)
+
+
+def test_adr_confirmation_chemins(rendus_adr):
+    """Chaque chemin de « Confirmation » existe : dans le projet, dans les rendus de sa marque et
+    dans eux seuls (parmi ceux où son ADR paraît), dans `modele-projet` sous la racine."""
+    paraissent = {}
+    for rendu, reponses in RENDUS_ADR.items():
+        racine = rendus_adr(**reponses)
+        for adr in (racine / "docs/modele/decisions").iterdir():
+            paraissent.setdefault(adr.name, {})[rendu] = racine
+    assert sorted(paraissent) == sorted(ADR_SOCLE + ADR_SERVEUR + ADR_SAUVEGARDES + ADR_SEPARATION)
+    marques_vues = set()
+    for nom, rendus in paraissent.items():
+        racine = next(iter(rendus.values()))
+        texte = lire(racine / "docs/modele/decisions" / nom)
+        controler_forme_adr(nom, texte)
+        ici, modele, paragraphes = listes_confirmation(texte)
+        for chemin, marque in ici:
+            marques_vues.add(marque)
+            attendus = set(rendus) if marque is None else MARQUES_ADR[marque] & set(rendus)
+            assert attendus, (nom, chemin, marque)
+            portent = {r for r in rendus if (rendus[r] / chemin).is_file()}
+            assert portent == attendus, (nom, chemin, marque, portent)
+        for chemin, marque in modele:
+            assert marque is None, (nom, chemin)
+            assert (RACINE / chemin).is_file(), (nom, chemin)
+        # Les paragraphes « Aucun contrôle ne tient » : M-0001 et M-0005, et eux seuls.
+        aucun = [p for p in paragraphes if p.startswith("Aucun contrôle ne tient")]
+        assert bool(aucun) == (nom in ADR_AVEC_AUCUN), (nom, paragraphes)
+        if nom == ADR_SOCLE[0]:
+            (paragraphe,) = aucun
+            assert "Aucun ne tient non plus la mutation" in paragraphe
+            assert "le test d'isolation des chemins de données" in paragraphe
+    # Le test ne passe pas à vide : chaque marque paraît dans au moins un ADR.
+    assert marques_vues == set(MARQUES_ADR), marques_vues
+
+
+def test_adr_amendes_par_le_lot_20():
+    """Chacun des six ADR dit, dans son en-tête, qu'il a reçu sa section « Confirmation »."""
+    adr = sorted(p for p in DECISIONS.iterdir() if re.search(r"M-000[1-6]", p.name))
+    assert len(adr) == 6
+    for chemin in adr:
+        texte = lire(chemin)
+        entete = texte.split("\n## Contexte\n", 1)[0]
+        assert len(MOTIF_AMENDEMENT_CONFIRMATION.findall(entete)) == 1, chemin.name
+        controler_forme_adr(chemin.name, texte)
 
 
 def test_m0006_fixe_le_contrat_de_l_app():
@@ -674,6 +823,7 @@ def test_m0002_amende():
         "2026-10-29",
         "2026-11-04",
         "2026-11-06",
+        "2026-11-22",
         "2026-11-22",
     ]
     assert (
@@ -1247,7 +1397,9 @@ TITRES_DOCUMENTATION = [
     "## Ce qui n'y va jamais",
     "## Sur un téléphone",
     "## Un fait une fois",
+    "## L'« État » et le journal",
     "## Les textes d'un projet",
+    "## Les ADR",
     "## Retirer un texte",
     "## Les contrôles",
 ]
@@ -1486,9 +1638,44 @@ def test_documentation_md(tmp_path, env_isole):
             "Dans un dépôt de la cible `donnees`, `CLAUDE.md` dit ce que le dépôt porte, et ses "
             "leçons vont au registre du dépôt de code."
         ),
-        "Un dépôt de la cible `donnees` n'a ni registre, ni pistes, ni plans, ni ADR à lui.",
+        (
+            "Un dépôt de la cible `donnees` n'a ni registre, ni pistes, ni ADR à lui ; un lot "
+            "qu'il conduit suit la méthode, et ses leçons vont au registre du dépôt de code."
+        ),
+        # lot 20 : le README ne dit plus les versions, ni un brief « figé »
+        "Le registre de la machine",
+        "`docs/fonctionnement.md`",
+        "les publications la disent toujours juste",
+        "par une recherche dans le texte qui ne voit pas tout",
+        "une issue ou une PR citée",
+        "l'histoire dans les publications",
+        (
+            "Le brief et le cadrage ne sont pas dans le README : ils disent le départ du projet, "
+            "et n'aiguillent pas un visiteur"
+        ),
+        "Il ne signale pas un nombre recopié.",
+        (
+            "Y répondre en déplaçant le passé vers le journal des versions, ou vers les notes de "
+            "la publication, qu'écrit Edouard, et en réécrivant l'« État » au présent "
+            "(voir « L'« État » et le journal »)."
+        ),
+        (
+            "| journal des versions (`CHANGELOG.md`) | référence | une session, Edouard | la "
+            "session | à chaque étiquette ou clôture |"
+        ),
     ):
         assert fragment in plat, fragment
+    # Le README naît sans le lien des publications : l'esquisse ne le porte pas, et un bloc plus
+    # loin porte la ligne de la première étiquette.
+    blocs = [bloc.group(0) for bloc in CLOTURE.finditer(texte)]
+    assert "/releases" not in blocs[0]
+    assert "L'état du projet est dans [CLAUDE.md](CLAUDE.md#état)." in blocs[0]
+    premiere_etiquette = (
+        "L'état du projet est dans [CLAUDE.md](CLAUDE.md#état), les versions dans "
+        "[les publications](https://github.com/<compte>/<nom>/releases)."
+    )
+    assert any(premiere_etiquette in bloc for bloc in blocs[1:])
+    assert "à sa première étiquette, le projet complète la ligne de l'état" in plat.lower()
     for ancien in (
         "trois contrôles",
         "Les trois contrôles",
@@ -1499,6 +1686,11 @@ def test_documentation_md(tmp_path, env_isole):
         "Deux autres laissent passer",
         "Un dernier ne touche que le gabarit resté vide",
         "Un dépôt de données n'a ni registre",
+        "ni plans, ni ADR à lui",
+        "figés depuis la phase 0",
+        "le lien vers les publications la dit toujours juste",
+        "les versions dans les publications",
+        "ne se supprime ni ne se réécrit",
         "Dans un dépôt de données, `CLAUDE.md` dit",
         # « Un dernier » dans une liste qui n'est pas close, un lien lu « dans le gabarit », et le
         # remède des seuls liens (relecture des corrections de la revue finale du lot 17)
@@ -1554,6 +1746,85 @@ def test_documentation_md(tmp_path, env_isole):
     (tmp_path / "docs/modele/documentation.md").write_text(texte, encoding="utf-8")
     (tmp_path / "README.md").write_text("[d](docs/modele/documentation.md)\n", encoding="utf-8")
     assert documentation.avertissements(tmp_path) == []
+
+
+def _section_de_documentation(titre):
+    """Le texte d'une section de niveau 2 de `documentation.md`, hors des blocs de code, aux
+    blancs réduits."""
+    hors_du_code = CLOTURE.sub("", lire(DOCUMENTATION))
+    section = hors_du_code.split(f"\n## {titre}\n", 1)[1].split("\n## ", 1)[0]
+    return " ".join(section.split())
+
+
+def test_documentation_md_l_etat_et_le_journal():
+    """L'« État » dit le présent et tient en 40 lignes ; le passé va aux publications ou au journal
+    des versions, `CHANGELOG.md`, dont la forme est dite ; « Un fait une fois » y renvoie."""
+    plat = _section_de_documentation("L'« État » et le journal")
+    for fragment in (
+        "40 lignes non vides au plus",
+        "le passé va aux publications",
+        "`CHANGELOG.md` à la racine, lié depuis « Ce qui fait foi »",
+        "`## Lot 3 — AAAA-MM-JJ`",
+        "la plus récente d'abord",
+        "tel quel",
+    ):
+        assert fragment in plat, fragment
+    fait = _section_de_documentation("Un fait une fois")
+    for ligne in (
+        "| l'histoire et les versions | les publications de GitHub, ou le journal des versions |",
+        "| où en est le projet | `CLAUDE.md`, « État », au présent |",
+    ):
+        assert ligne in fait, ligne
+    assert "| les versions |" not in fait
+
+
+def test_documentation_md_les_adr():
+    """La règle commune des ADR : ni suppression, ni réécriture muette ; l'amendement en place ou
+    par un nouvel ADR, le remplacement ; la section « Confirmation » entre « Conséquences » et
+    « Révision » ; « Retirer un texte » y renvoie."""
+    plat = _section_de_documentation("Les ADR")
+    for fragment in (
+        "Un ADR ne se supprime pas.",
+        "`- **Amendé** le AAAA-MM-JJ : <ce qui change>`",
+        "amendé par ADR-NNNN le AAAA-MM-JJ",
+        "remplacé par ADR-NNNN",
+        "ou « Aucun », avec sa raison",
+        "Un ADR écrit avant la `v0.15.0` n'a pas à recevoir sa section",
+        "`NNNN-titre.md`",
+    ):
+        assert fragment in plat, fragment
+    positions = [
+        plat.index(f"**{section}**")
+        for section in (
+            "Contexte",
+            "Options",
+            "Décision",
+            "Conséquences",
+            "Confirmation",
+            "Révision",
+        )
+    ]
+    assert positions == sorted(positions), positions
+    # La règle entière, d'un seul tenant : un fragment seul laisserait passer la perte de sa
+    # dernière phrase.
+    regle = (
+        "**Un ADR ne se supprime pas.** Il s'amende en place : une ligne "
+        "`- **Amendé** le AAAA-MM-JJ : <ce qui change>` dans son en-tête, et son corps dit ce qui "
+        "est en vigueur. Ou un nouvel ADR l'amende, et le dit en tête de son contexte : l'ancien "
+        "garde son texte, et son en-tête le nomme (« amendé par ADR-NNNN le AAAA-MM-JJ »). Quand "
+        "la décision change de direction, un nouvel ADR la remplace : l'ancien ne change que de "
+        "statut, « remplacé par ADR-NNNN »."
+    )
+    assert regle in plat
+    retirer = _section_de_documentation("Retirer un texte")
+    assert "la règle de « Les ADR »" in retirer
+    assert "ne se supprime ni ne se réécrit" not in retirer
+
+
+def test_methode_point_5_au_present():
+    """Le point 5 du cycle fait reporter dans `CLAUDE.md` ce qui doit survivre, au présent."""
+    plat = " ".join(lire(METHODE).split())
+    assert "reporte dans `CLAUDE.md`, au présent, ou dans un ADR ce qui doit survivre" in plat
 
 
 def test_documentation_md_avant_de_reecrire_un_readme():
@@ -2072,7 +2343,9 @@ def test_m0002_amende_par_le_lot_20():
     en_tete = [
         b
         for b in blocs(brut)
-        if re.match(r"- \*\*Amendé\*\* le \d{4}-\d{2}-\d{2}, avec le lot 20 :", b[0])
+        if re.match(
+            r"- \*\*Amendé\*\* le \d{4}-\d{2}-\d{2}, avec le lot 20 : le hook `SessionStart`", b[0]
+        )
     ]
     assert len(en_tete) == 1, en_tete
     amendement = " ".join(" ".join(en_tete[0]).split())
