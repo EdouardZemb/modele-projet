@@ -674,6 +674,7 @@ def test_m0002_amende():
         "2026-10-29",
         "2026-11-04",
         "2026-11-06",
+        "2026-11-22",
     ]
     assert (
         "- **Amendé** le 2026-10-29, avec le lot 11 : la porte suit la nature du dépôt, de code ou "
@@ -799,7 +800,9 @@ def test_methode_ligne_signaux():
         "| hook Claude `SessionStart` (au démarrage et à la reprise) | affiche ce qui est rouge sur "
         "GitHub : les exécutions de la branche principale, les PR ouvertes et les workflows "
         "désactivés. Il ne bloque jamais. Il signale aussi un gabarit resté vide que le README lie, "
-        "et un README qui ne lie aucun document du dépôt. Ce que n'importe qui écrit depuis un fork "
+        "un README qui ne lie aucun document du dépôt, un « État » de `CLAUDE.md` de plus de 40 "
+        "lignes, et, dans le README, une copie qui se périme (une version, une heure, un arbre de "
+        "fichiers, un lot au futur) ou une issue citée. Ce que n'importe qui écrit depuis un fork "
         "n'entre pas dans le contexte de Claude : "
     )
     for phrase in (
@@ -1246,7 +1249,7 @@ TITRES_DOCUMENTATION = [
     "## Un fait une fois",
     "## Les textes d'un projet",
     "## Retirer un texte",
-    "## Les trois contrôles",
+    "## Les contrôles",
 ]
 # Ce que le texte géré et la docstring de `documentation.py` disent dans les mêmes mots : ce que
 # la carte ne compte pas, ce qu'un lancement local dit de la CI, et les écarts connus à GitHub.
@@ -1277,6 +1280,36 @@ DOCUMENTATION_ET_DOCSTRING = (
     ),
     "dans une citation ou un élément de liste, dans un bloc ouvert par `<!--`",
     "un lien dont le texte porte un `|` dans une cellule de tableau",
+    # les limites des trois avertissements neufs, dans les mêmes mots que la docstring
+    (
+        "Ses limites : un titre « Etat », sans accent, ou « L'état du projet » n'est pas lu, ni un "
+        "« État » de niveau 3."
+    ),
+    (
+        "Ses limites, dont la liste n'est pas close : un futur dit autrement (« va ajouter », « est "
+        "prévu ») ; un mot qui date absent de la liste ; une version à deux nombres (`v1.2`) ; un "
+        "arbre dessiné en ASCII (`|--`) ; un nombre recopié (de tests, de lignes), qu'aucune "
+        "recherche ne sépare d'un nombre utile ; une phrase de prose devenue fausse. Une recherche "
+        "peut aussi donner un constat de trop : un mot fini par « ra » ou « ront » près d'un lot "
+        "(« Sahara » près d'un « lot 3 », « le front du lot 3 »), une correspondance de ports "
+        "(`80:80`) ou un rapport (`16:10`) lus comme une heure, un numéro de section à trois "
+        "nombres (`4.3.1`) lu comme une version, un dessin en traits (`│ boîte │`) lu comme un "
+        "arbre. Un commentaire fermé qui enjambe un bloc de code laisse lire le bloc, que GitHub "
+        "cache ; un `<!--` en tête de ligne, fermé seulement dans un bloc de code, cache la suite, "
+        "que GitHub montre. Un code en ligne qui porte le dernier `-->` du texte cache ce qu'il "
+        "porte entre `<!--` et `-->`, que GitHub montre ; un `<!--` en tête de ligne qu'un accent "
+        "grave ouvert plus haut paraît mettre en code laisse lire ce qu'il ouvre, que GitHub "
+        "cache. Seul le README est lu : un texte vers lequel il aiguille ne l'est pas."
+    ),
+    (
+        "Ses limites, dont la liste n'est pas close : `GH-12`, que GitHub lie aussi ; une "
+        "référence dans un bloc HTML que le texte ne retire pas ; une couleur en chiffres seuls "
+        "(`#000000`) hors du code ; un chemin suivi d'une ancre en chiffres hors d'un lien "
+        "(`docs/a.md#12`), lu comme `<compte>/<dépôt>#N` ; un chemin `…/issues/12` en prose ; une "
+        "référence dans un bloc de code indenté, ou dans une cible de lien qui porte une "
+        "parenthèse ; une référence après un `<!--` en tête de ligne qu'un accent grave ouvert "
+        "plus haut paraît mettre en code."
+    ),
     # les liens seulement : un titre qui suit coupe le paragraphe, et reste lu, comme sur GitHub
     "un commentaire HTML ouvert dans un paragraphe cache les liens jusqu'à sa fermeture, plus loin",
     (
@@ -1375,7 +1408,7 @@ ECARTS_DE_LA_CLOTURE = (
 
 def test_documentation_md(tmp_path, env_isole):
     """Le texte géré de la documentation (spec du lot 14, § 4) : sans Jinja ni renvoi au plan, ses
-    sections, la règle du semé, les sorties des trois contrôles telles que `documentation.py` les
+    sections, la règle du semé, les sorties des contrôles telles que `documentation.py` les
     écrit, et la ligne des décisions dans un bloc de code : hors de lui, elle serait un lien mort
     depuis `docs/modele/`."""
     import documentation
@@ -1393,7 +1426,8 @@ def test_documentation_md(tmp_path, env_isole):
     for fragment in (
         "semé se vide ou se réécrit, il ne se supprime pas",
         "fichier de la racine se cite par un lien",
-        "`python -B scripts/modele/documentation.py --gabarits-vides`",
+        "`python -B scripts/modele/documentation.py --avertissements`",
+        "`--gabarits-vides` en reste le synonyme",
         "La documentation de la racine (licence, carte)",
         # un lancement local, et ce qu'il dit de la CI : trois écarts, la licence comme en CI
         "`python -B scripts/modele/documentation.py`, lancé depuis la racine",
@@ -1415,6 +1449,19 @@ def test_documentation_md(tmp_path, env_isole):
         "documentation : non lue (erreur)",
         "le titre `documentation :` puis une ligne `- <constat>` chacun",
         "imprime un constat par ligne et rend toujours 0",
+        # ce que les avertissements ont de commun
+        "le hook les lit sans sous-processus ni réseau",
+        "seul son délai de 30 s les borne",
+        "aucun ne refuse, et la CI n'en lance aucun",
+        "chacun tourne sous sa garde, et son erreur donne son constat",
+        "Un constat donne la ligne `documentation : <constat>`",
+        "20 au plus",
+        "`README.md` et `CLAUDE.md` se lisent sous ce nom exact, à la racine",
+        "Quand le script ne s'importe pas, la ligne est `documentation : non lue (erreur)`",
+        # comment répondre aux avertissements neufs
+        "Y répondre en déplaçant le passé vers les publications ou le journal des versions",
+        "Y répondre en retirant la copie, ou en renvoyant à la source qui la tient",
+        "Y répondre en retirant la référence : la feuille de route est dans les issues",
         # comment répondre à chaque sortie
         "À `carte : README.md absent` ou `carte : CLAUDE.md absent`, rendre le fichier",
         "À `pas de README.md`, de même",
@@ -1434,6 +1481,8 @@ def test_documentation_md(tmp_path, env_isole):
     ):
         assert fragment in plat, fragment
     for ancien in (
+        "trois contrôles",
+        "Les trois contrôles",
         "donne les mêmes lignes que la CI",
         "comme `CLAUDE.local.md`, n'est pas compté",
         "Quatre laissent passer",
@@ -1451,7 +1500,9 @@ def test_documentation_md(tmp_path, env_isole):
         assert ancien not in plat, ancien
     # Les lignes de la licence et de la carte, telles que le script les écrit sur une racine, sont
     # chacune dans la liste de leur contrôle.
-    section = texte.split("### La licence", 1)[1].split("### Le gabarit resté vide", 1)[0]
+    section = texte.split("### La licence", 1)[1].split(
+        "### Les avertissements au démarrage d'une session", 1
+    )[0]
     listes = " ".join(ligne for ligne in section.splitlines() if ligne.startswith("- `"))
     racine = tmp_path / "racine"
     racine.mkdir()
@@ -1493,7 +1544,7 @@ def test_documentation_md(tmp_path, env_isole):
     (tmp_path / "docs/modele").mkdir(parents=True)
     (tmp_path / "docs/modele/documentation.md").write_text(texte, encoding="utf-8")
     (tmp_path / "README.md").write_text("[d](docs/modele/documentation.md)\n", encoding="utf-8")
-    assert documentation.gabarits_vides(tmp_path) == []
+    assert documentation.avertissements(tmp_path) == []
 
 
 def test_documentation_md_avant_de_reecrire_un_readme():
@@ -1521,6 +1572,61 @@ def test_documentation_md_avant_de_reecrire_un_readme():
         ),
     ):
         assert phrase in plat, phrase
+
+
+def test_documentation_md_dit_les_avertissements(tmp_path):
+    """Chaque constat des trois avertissements neufs, tel que `documentation.py` l'écrit sur une
+    racine qui donne chaque sorte, ses nombres remplacés, est dans la section « Les avertissements
+    au démarrage d'une session », comme les quatre constats « non lu(e) (erreur) » et les titres de
+    niveau 4. Le texte suit le code."""
+    import documentation
+
+    hors_du_code = CLOTURE.sub("", lire(DOCUMENTATION))
+    section = hors_du_code.split("\n### Les avertissements au démarrage d'une session\n", 1)[1]
+    section = section.split("\n### ", 1)[0]
+    plat = " ".join(section.split())
+    assert [ligne for ligne in section.splitlines() if ligne.startswith("#### ")] == [
+        "#### Le gabarit resté vide",
+        "#### L'« État » trop long",
+        "#### La copie dans le README",
+        "#### L'issue ou la PR citée",
+    ]
+    racine = tmp_path / "racine"
+    racine.mkdir()
+    etat = "".join(f"ligne {i}\n" for i in range(41))
+    (racine / "CLAUDE.md").write_text("# C\n\n## État\n\n" + etat, encoding="utf-8")
+    (racine / "README.md").write_text(
+        "# R\n"
+        + "".join(f"v{i}.2.3\n" for i in range(3))
+        + "".join(f"à {i}h15\n" for i in range(3))
+        + "├ a\n├ b\n├ c\n"
+        + "actuellement\nbientôt\nprochainement\n"
+        + "voir #12\nvoir #13\nvoir #14\n",
+        encoding="utf-8",
+    )
+    constats = [
+        *documentation.etat_trop_long(racine),
+        *documentation.copies_du_readme(racine),
+        *documentation.issues_citees(racine),
+    ]
+    assert len(constats) == 6, constats
+    assert len(set(constats)) == 6, constats
+    for constat in constats:
+        nombres = re.sub(r"l\. \d+", "l. <n>", constat)
+        nombres = re.sub(r"de \d+ lignes", "de <n> lignes", nombres)
+        nombres = re.sub(r" \(et \d+ autres lignes\)", "", nombres)
+        assert f"`{nombres}`" in plat, nombres
+    # Le suffixe, que ces constats portent tous : `(et 1 autre ligne)` et `(et <k> autres lignes)`.
+    assert all(constat.endswith(" autres lignes)") for constat in constats[1:]), constats
+    assert "`(et 1 autre ligne)`" in plat
+    assert "`(et <k> autres lignes)`" in plat
+    for constat in (
+        "gabarit resté vide : non lu (erreur)",
+        "« État » : non lu (erreur)",
+        "copie dans le README : non lue (erreur)",
+        "issue citée : non lue (erreur)",
+    ):
+        assert f"`{constat}`" in plat, constat
 
 
 def test_docstring_suit_documentation_md():
@@ -1938,6 +2044,40 @@ def test_m0002_amende_par_le_lot_14():
     ]
     longues = [ligne for ligne in amendement if len(ligne) > 100]
     assert not longues, longues
+
+
+def test_m0002_amende_par_le_lot_20():
+    """Le hook `SessionStart` signale aussi un « État » trop long, et la copie ou l'issue citée du
+    README ; la « Décision » le dit à la suite du gabarit resté vide, sans toucher la phrase de
+    l'amendement du lot 14. L'amendement est daté, sans numéro du plan, coupé à 100 colonnes."""
+    brut = lire(M0002)
+    en_tete = [
+        b
+        for b in blocs(brut)
+        if re.match(r"- \*\*Amendé\*\* le \d{4}-\d{2}-\d{2}, avec le lot 20 :", b[0])
+    ]
+    assert len(en_tete) == 1, en_tete
+    amendement = " ".join(" ".join(en_tete[0]).split())
+    assert re.fullmatch(
+        r"- \*\*Amendé\*\* le \d{4}-\d{2}-\d{2}, avec le lot 20 : le hook `SessionStart` signale "
+        r"aussi un « État » trop long, et la copie ou l'issue citée du README",
+        amendement,
+    ), amendement
+    assert [ligne for ligne in en_tete[0] if len(ligne) > 100] == []
+    assert all(ligne.startswith("  ") for ligne in en_tete[0][1:])
+    corps = " ".join(brut.split("## Décision", 1)[1].split("## Conséquences", 1)[0].split())
+    assert re.search(
+        r"lit la copie sans lancer de sous-processus\. Il signale encore un « État » de "
+        r"`CLAUDE\.md` de plus de 40 lignes, et, dans le README, une copie qui se périme \(une "
+        r"version, une heure, un arbre de fichiers, un lot au futur\) ou une issue citée "
+        r"\(amendement du \d{4}-\d{2}-\d{2}\) : des recherches dans le texte, qui avertissent de "
+        r"même et ne lisent pas le réseau\.",
+        corps,
+    )
+    # La date de la phrase de la « Décision » est celle de l'en-tête.
+    date_en_tete = re.search(r"le (\d{4}-\d{2}-\d{2}), avec le lot 20", amendement).group(1)
+    assert f"(amendement du {date_en_tete})" in corps
+    assert not RENVOI_AU_PLAN.search(" ".join(brut.split()))
 
 
 @pytest.mark.skipif(SH is None, reason="aucun sh trouvé")

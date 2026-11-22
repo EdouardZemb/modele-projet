@@ -17,6 +17,8 @@
   qu'elle examine, par des lignes ancrées
 - **Amendé** le 2026-11-06, avec le lot 14 : la CI refuse aussi la licence et la carte de la racine,
   et le hook `SessionStart` signale un gabarit resté vide que le README lie
+- **Amendé** le 2026-11-22, avec le lot 20 : le hook `SessionStart` signale aussi un « État »
+  trop long, et la copie ou l'issue citée du README
 - **Contexte amont** : M-0001 (les garde-fous de qualité comme condition d'entrée)
 
 ## Contexte
@@ -140,7 +142,10 @@ pas de la discipline de celui qui travaille ?
   inaperçu jusqu'à la prochaine PR. Il signale aussi un gabarit resté vide que le README lie, et un
   README qui ne lie aucun document du dépôt (amendement du 2026-11-06) : personne n'ouvre une
   exécution verte, et ce hook est le seul canal qu'une session lit. Ce contrôle avertit, sans
-  jamais refuser, et lit la copie sans lancer de sous-processus.
+  jamais refuser, et lit la copie sans lancer de sous-processus. Il signale encore un « État » de
+  `CLAUDE.md` de plus de 40 lignes, et, dans le README, une copie qui se périme (une version, une
+  heure, un arbre de fichiers, un lot au futur) ou une issue citée (amendement du 2026-11-22) : des
+  recherches dans le texte, qui avertissent de même et ne lisent pas le réseau.
 - **La CI refuse la licence et la carte de la racine** (amendement du 2026-11-06), par
   `scripts/modele/documentation.py`, à la dernière étape du job `confidentialite` du socle, déjà
   requis par la règle de protection. En nature `code`, `LICENSE` doit être présent et non vide ; la

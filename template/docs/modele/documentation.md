@@ -72,7 +72,7 @@ remplace. Le brief et le cadrage ne sont pas dans le README : figés depuis la p
 n'aiguillent pas un visiteur, et « Ce qui fait foi », dans `CLAUDE.md`, les lie.
 
 **Un renvoi mène à un document qui existe**, jamais à un gabarit resté vide : le démarrage d'une
-session le signale (voir « Les trois contrôles »). C'est pourquoi le README naît sans ligne vers
+session le signale (voir « Les contrôles »). C'est pourquoi le README naît sans ligne vers
 `docs/decisions/`, qui ne porte alors que son `README.md`. Au premier ADR, le projet ajoute au
 tableau « Où lire quoi », après la ligne du registre :
 
@@ -114,7 +114,7 @@ ne portent pas de lien : à la naissance, `config/` et `contenu/` n'ont que leur
 ### Réécrire un README
 
 Avant de réécrire un README, chercher dans tout le dépôt `README.md#` et tout renvoi au README,
-ceux d'un texte figé compris. Une ancre suit son titre, et aucun des trois contrôles ne lit l'ancre
+ceux d'un texte figé compris. Une ancre suit son titre, et aucun des contrôles ne lit l'ancre
 d'un lien. Ce que seul le README porte se déplace ailleurs avant d'en être retiré. Un projet de
 code né avant la `v0.9.0` met la section « Licence » dans la PR de mise à jour, qui apporte
 `LICENSE`. Dans une PR à part, le lien `[MIT](LICENSE)` mènerait à un fichier absent.
@@ -205,12 +205,12 @@ d'`exploitation.md` et de `LICENSE`.
   `modele-projet`.
 - **Un texte propre au projet**, ni semé ni géré, se supprime, avec les liens qui y menaient.
 
-## Les trois contrôles
+## Les contrôles
 
-`scripts/modele/documentation.py` porte trois contrôles. Les deux premiers refusent, en CI, à la
-dernière étape du job `confidentialite` du socle, « La documentation de la racine (licence,
-carte) ». Le troisième avertit, au démarrage d'une session. Chacun dit ce qu'il a vu. Les sorties
-citent des chemins, jamais le contenu d'un fichier.
+`scripts/modele/documentation.py` porte deux contrôles qui refusent en CI, la licence et la carte
+de la racine, à la dernière étape du job `confidentialite` du socle, « La documentation de la
+racine (licence, carte) », et quatre avertissements, au démarrage d'une session. Chacun dit ce
+qu'il a vu. Les sorties citent des chemins, jamais le contenu d'un fichier.
 
 ### La licence (refuse en CI)
 
@@ -267,7 +267,29 @@ ou change la nature d'un dépôt privé y est donc jugée sous l'ancienne : en r
 branche par défaut ne porte pas encore `NATURE`, et la licence y est exigée. La licence, elle, ne
 compte en local qu'un `LICENSE` suivi, comme la CI.
 
-### Le gabarit resté vide (avertit au démarrage d'une session)
+### Les avertissements au démarrage d'une session
+
+Quatre contrôles avertissent : le gabarit resté vide, l'« État » trop long, la copie dans le README
+et l'issue ou la PR citée. Le hook `SessionStart` les lance et les montre à la session. Ce qu'ils
+ont de commun :
+
+- le hook les lit sans sous-processus ni réseau, dans les fichiers de la copie, pendant les
+  lectures de `gh` ; seul son délai de 30 s les borne ;
+- aucun ne refuse, et la CI n'en lance aucun : un avertissement se lit, il ne bloque rien ;
+- chacun tourne sous sa garde, et son erreur donne son constat, sans arrêter les autres :
+  `gabarit resté vide : non lu (erreur)`, `« État » : non lu (erreur)`,
+  `copie dans le README : non lue (erreur)`, `issue citée : non lue (erreur)` ;
+- `README.md` et `CLAUDE.md` se lisent sous ce nom exact, à la racine ;
+- les constats citent des chemins et des numéros de ligne, jamais le contenu d'un fichier.
+
+Un constat donne la ligne `documentation : <constat>` ; plusieurs, le titre `documentation :` puis
+une ligne `- <constat>` chacun, 20 au plus. Quand le script ne s'importe pas, la ligne est
+`documentation : non lue (erreur)` ; les signaux de la CI restent. C'est un défaut du modèle, qui se
+corrige dans `modele-projet`. Pour relancer les avertissements, depuis la racine :
+`python -B scripts/modele/documentation.py --avertissements`, qui imprime un constat par ligne et
+rend toujours 0. `--gabarits-vides` en reste le synonyme, pour les commandes déjà écrites.
+
+#### Le gabarit resté vide
 
 Le hook `SessionStart` lit chaque fichier `.md` et chaque dossier que le README lie, et qui
 existent dans le dépôt. Le reste est ignoré : une image, un script, un lien externe, une cible
@@ -287,18 +309,108 @@ les fichiers d'ADR (sous `docs/decisions/` ou `docs/adr/`, sauf leur `README.md`
 premières, et leur dossier relève de la troisième. Deux constats viennent sans règle :
 `le README ne lie aucun document du dépôt`, et `pas de README.md`. Rien à signaler ne donne rien.
 
-Un constat donne la ligne `documentation : <constat>` ; plusieurs, le titre `documentation :` puis
-une ligne `- <constat>` chacun. Une erreur du contrôle donne `documentation : non lue (erreur)`, et
-laisse les signaux de la CI : c'est un défaut du modèle, qui se corrige dans `modele-projet`. Ce
-contrôle ne refuse jamais, et la CI ne le lance pas. Pour le relancer, depuis la racine :
-`python -B scripts/modele/documentation.py --gabarits-vides`, qui imprime un constat par ligne et
-rend toujours 0.
-
 Y répondre en remplissant le document, ou en retirant son lien du README tant qu'il est vide ; pour
 un dossier, en y posant son premier fichier ; pour le marqueur, en écrivant la date qu'il réserve.
 À un README qui ne lie aucun document du dépôt, ajouter au moins le lien de `CLAUDE.md`. À
 `pas de README.md`, de même que pour la carte : rendre le fichier, que le `copier update` suivant
 sème à neuf.
+
+#### L'« État » trop long
+
+Le hook lit `CLAUDE.md`, à la racine : ses sections de niveau 2 dont le titre est « État » (comparé
+en NFC, sans égard à la casse), chacune jusqu'au titre suivant de niveau 1 ou 2. Plusieurs sections
+« État » s'additionnent. Il compte les lignes non vides, telles qu'elles sont : le code, les
+commentaires et les sous-titres comptent, puisque `CLAUDE.md` se charge en entier ; une ligne
+d'espaces est vide. Le seuil est de 40 lignes : 40 ne donnent rien, 41 donnent le constat. Un
+`CLAUDE.md` absent, ou sans section « État », ne donne rien : celui de la cible `donnees` n'en a
+pas.
+
+Son constat :
+
+- `CLAUDE.md : « État » de <n> lignes, au-delà de 40 (le passé va au journal des versions ou
+  aux publications)`.
+
+Y répondre en déplaçant le passé vers les publications ou le journal des versions, et en réécrivant
+l'« État » au présent (voir « L'« État » et le journal »).
+
+Ses limites : un titre « Etat », sans accent, ou « L'état du projet » n'est pas lu, ni un « État »
+de niveau 3.
+
+#### La copie dans le README
+
+Le hook lit `README.md`, à la racine, ligne par ligne, en NFC et sans égard à la casse. Le code, en
+bloc ou en ligne, est lu : un arbre de fichiers vit dans un bloc de code, une version dans une
+commande. Les commentaires HTML hors du code ne sont pas lus, mais leurs lignes comptent pour les
+numéros : ils ne se voient pas sur GitHub. Un `<!--` jamais fermé, hors du code, cache la suite du
+fichier. Quatre sortes de copie, chacune une recherche dans le texte :
+
+- une version : trois nombres séparés par des points, précédés ou non de `v` (`v1.2.3`, `1.2.3`,
+  `Node 20.11.1`, `1.2.3-rc.1`) ; `127.0.0.1`, `2026.11.21.1` et `3.12` n'en sont pas, une date en
+  points (`2026.11.21`) en est une ;
+- une heure : `7h15`, `7 h 15`, `19h00`, `07:15`, `12:30:45` ; `127.0.0.1:8000`, `localhost:3000`
+  et `16:9` n'en sont pas, une durée (`1h30`) en est une ;
+- un arbre de fichiers : une ligne qui porte `├`, `└` ou `│` ;
+- un mot qui date l'état, ou un lot au futur : `actuellement`, `bientôt`, `prochainement`,
+  `pour l'instant`, `pour le moment`, `à venir`, `à terme`, `prochain lot`, `lot suivant`,
+  `prochaine version` ; ou une ligne qui nomme un lot par son numéro (`lot 3`, `lot #11`) et porte
+  un mot de quatre lettres ou plus fini par `ra` ou `ront` (« ajoutera », « seront »).
+
+Ses constats, un par sorte, dans cet ordre, au plus quatre :
+
+- `README.md, l. <n> : une version recopiée` ;
+- `README.md, l. <n> : une heure recopiée` ;
+- `README.md, l. <n> : un arbre de fichiers` ;
+- `README.md, l. <n> : un mot qui date l'état, ou un lot au futur`.
+
+Chacun nomme la première ligne touchée, un numéro du fichier à partir de 1. Quand d'autres lignes
+ont la même sorte, il finit par `(et 1 autre ligne)` ou `(et <k> autres lignes)`.
+
+Y répondre en retirant la copie, ou en renvoyant à la source qui la tient : les publications pour
+une version, `CLAUDE.md` pour l'état.
+
+Ses limites, dont la liste n'est pas close : un futur dit autrement (« va ajouter », « est
+prévu ») ; un mot qui date absent de la liste ; une version à deux nombres (`v1.2`) ; un arbre
+dessiné en ASCII (`|--`) ; un nombre recopié (de tests, de lignes), qu'aucune recherche ne sépare
+d'un nombre utile ; une phrase de prose devenue fausse. Une recherche peut aussi donner un constat
+de trop : un mot fini par « ra » ou « ront » près d'un lot (« Sahara » près d'un « lot 3 », « le
+front du lot 3 »), une correspondance de ports (`80:80`) ou un rapport (`16:10`) lus comme une
+heure, un numéro de section à trois nombres (`4.3.1`) lu comme une version, un dessin en traits
+(`│ boîte │`) lu comme un arbre. Un commentaire fermé qui enjambe un bloc de code laisse lire le
+bloc, que GitHub cache ; un `<!--` en tête de ligne, fermé seulement dans un bloc de code, cache la
+suite, que GitHub montre. Un code en ligne qui porte le dernier `-->` du texte cache ce qu'il porte
+entre `<!--` et `-->`, que GitHub montre ; un `<!--` en tête de ligne qu'un accent grave ouvert
+plus haut paraît mettre en code laisse lire ce qu'il ouvre, que GitHub cache. Seul le README est
+lu : un texte vers lequel il aiguille ne l'est pas.
+
+#### L'issue ou la PR citée
+
+Le hook lit `README.md`, à la racine, hors des blocs de code, du code en ligne et des commentaires
+HTML, leurs lignes gardées pour les numéros : GitHub n'y lie aucune référence, et une couleur
+`#000000` n'est pas une issue. Est une référence :
+
+- `#N`, N fait de chiffres, sans lettre, chiffre, `_`, `&`, `#`, `/` ni `.` juste avant, et sans
+  lettre, chiffre, `_` ni `-` juste après, hors de la cible d'un lien : `#12`, `(#12)`,
+  `voir #12.` ;
+- `<compte>/<dépôt>#N`, comme GitHub le lie ;
+- un lien dont la cible porte `/issues/N` ou `/pull/N`, absolue ou relative (`../../issues/12`).
+
+`CLAUDE.md#12-intro`, l'ancre d'un sommaire (`[1. Intro](#1-intro)`), `&#123;`, `C#7`, `#12a` et
+`# 12` n'en sont pas. La cible d'un lien ne se lit que pour `/issues/N` et `/pull/N`.
+
+Son constat :
+
+- `README.md, l. <n> : une issue ou une PR citée`, suivi de `(et 1 autre ligne)` ou
+  `(et <k> autres lignes)` quand d'autres lignes en citent.
+
+Y répondre en retirant la référence : la feuille de route est dans les issues et les pistes,
+l'histoire dans les publications.
+
+Ses limites, dont la liste n'est pas close : `GH-12`, que GitHub lie aussi ; une référence dans un
+bloc HTML que le texte ne retire pas ; une couleur en chiffres seuls (`#000000`) hors du code ; un
+chemin suivi d'une ancre en chiffres hors d'un lien (`docs/a.md#12`), lu comme `<compte>/<dépôt>#N`
+; un chemin `…/issues/12` en prose ; une référence dans un bloc de code indenté, ou dans une cible
+de lien qui porte une parenthèse ; une référence après un `<!--` en tête de ligne qu'un accent grave
+ouvert plus haut paraît mettre en code.
 
 ### Ce qui compte comme un lien
 
