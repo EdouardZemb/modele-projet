@@ -1347,8 +1347,8 @@ def _puce_des_masques_de_m0002():
     return _aplati(" ".join(puce))
 
 
-def _correctif_dans_claude_md():
-    brut = lire(RACINE / "CLAUDE.md")
+def _correctif_dans_le_journal():
+    brut = lire(RACINE / "CHANGELOG.md")
     return _aplati(brut.split("Correctif du 04/11 : la scission", 1)[1].split("\n\n", 1)[0])
 
 
@@ -1372,12 +1372,12 @@ def _correctif_dans_claude_md():
             ("Exclu, ce dossier se lève", "un dossier exclu qui en contient un"),
         ),
         (
-            _correctif_dans_claude_md,
+            _correctif_dans_le_journal,
             f"le remède {PRINCIPE_DU_REMEDE}",
             ("et de même après l'exception d'un dossier exclu qui le contient",),
         ),
     ],
-    ids=["docstring", "pre-commit", "changer-de-cible", "m0002", "claude-md"],
+    ids=["docstring", "pre-commit", "changer-de-cible", "m0002", "journal"],
 )
 def test_le_principe_du_remede_dit_une_fois(texte, fragment, anciens):
     lu = texte()

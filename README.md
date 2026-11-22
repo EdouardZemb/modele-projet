@@ -80,6 +80,7 @@ de contrôle est dans [`docs/aligner.md`](docs/aligner.md).
 | [Aligner un projet](docs/aligner.md) | pour aligner un projet existant, case par case |
 | [Les pistes](docs/pistes.md) | pour ce qui est noté sans être engagé |
 | [Le registre](docs/registre.md) | pour ce que les lots ont appris |
+| [Le journal des versions](CHANGELOG.md) | pour l'histoire du modèle, version par version |
 
 ## Contribuer
 

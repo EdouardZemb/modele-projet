@@ -88,3 +88,44 @@ Notées, pas engagées. Une piste devient une issue le jour où on la travaille,
 - **La barre d'état orange.** Le relais pourrait aussi passer `theme_color` en orange dans le manifeste, une quatrième marque, dans l'application installée ; Edouard l'a écartée du lot 19 le 18/11 (question 5 de sa spec). Vient du § 11 de la spec du lot 19 et de sa revue finale (S-12). Déclencheur : Edouard la demande après la constatation des trois marques.
 - **L'épreuve du relais sur le Docker de la cible.** L'épreuve des données tourne sur le moteur du runner, sous le binaire amont de Compose 2.26.1 ; sur la cible (Docker 29.5.3, Compose `2.26.1-4`), seule la configuration de `!reset` et `!override` est éprouvée, par le geste en lecture seule du plan du lot 19. Le retrait des orphelins avant la recréation d'`app`, les deux temps de Compose (créer, puis démarrer), le `stop app` du geste de l'environnement bloqué et `docker-init`, que demande `init: true`, le premier du modèle, n'y sont pas prouvés. Depuis le 21/11, les premiers déploiements marqués d'`ancrage` et de `veille-emploi` y ont réussi : `docker-init` et les deux temps de Compose y tournent ; restent à prouver le retrait des orphelins et le `stop app`. Un échec y serait sûr : le `up` échoue, le couple est mis en échec et le retour revient sans marque. Un job comme `menage-cible`, dans le Docker de la cible, pourrait lancer aussi le point 6 de l'épreuve. Vient de la revue finale du lot 19 (B-6, C-10) et du § 11 de sa spec. Déclencheur : un premier déploiement marqué qui échoue sur la cible pour une cause que le runner ne montre pas.
 - **L'effacement des données du site du staging, et la prod du même domaine.** Le staging et la prod d'un projet partagent leur domaine : effacer les données du site du staging, le seul geste qui marque une application installée derrière un précache (`exploitation.md`, LE-104), peut effacer aussi, sous Chrome pour Android, ce que la prod garde sur le téléphone, sa session et ce qu'elle n'a pas encore envoyé. Depuis #154, `exploitation.md` dit de faire d'abord synchroniser ce que la prod garde hors ligne, et de ne pas confirmer si l'écran d'effacement nomme le domaine commun ou la prod. Éprouvé une fois, le 21/11, à la constatation d'`ancrage` : depuis un onglet ouvert sur le staging, par le menu ⋮, « Site controls », « Cookies », puis « Delete », le chemin de l'aide de Chrome que donnait son message, l'écran nommait l'adresse du staging seule, et la prod n'a rien perdu (LE-113, close). Un autre chemin de Chrome n'est pas éprouvé. L'idée : écrire ce chemin dans `exploitation.md` (semé : dans le modèle, avec son test, et par message aux projets déjà nés), la précaution gardée pour les autres chemins. Vient de M-3 de la relecture fraîche des messages du lot 19 (LE-113). Déclencheur : un lot qui retouche `exploitation.md`, ou un effacement qui touche la prod.
+- **Les constats que les portes laissent ouverts.** Les constats que les portes des lots 15 à 19 laissent ouverts, dont un lot pèse les motifs, tels que « Prochain » les listait jusqu'au lot 20 :
+  - les constats que les portes du lot 15 laissent ouverts, dont un lot suivant pèse les motifs :
+    LE-49 (un écart que son auteur ne reconnaît pas), LE-50 (le retrait des images, dans `serveur`),
+    LE-54 et LE-61 (des textes que la section du plan ne couvre pas : une piste, un texte de clôture,
+    une docstring, `documentation.md`), LE-57 (un cas limite inconnu), LE-65 et LE-66 (une commande
+    que `CLAUDE.md` prescrit à une session), LE-74 (un comportement d'outil annoncé hors de la section
+    du plan), LE-58 et LE-75 (un contrôle local qui diffère de celui de la CI) ; LE-64, né de la
+    revue finale, avec la porte que propose le registre ; et LE-69 (une épreuve renvoyée après le
+    lot, qui n'exerce pas le cas), né de la relecture de la clôture ;
+  - ceux que le lot 17 laisse ouverts, de même : LE-83, avec LE-49 (un écart que son auteur ne
+    reconnaît pas) ; LE-80 et LE-86 (un texte que « Mécanismes annoncés » ne couvre pas : la
+    troisième pièce d'une ligne de plan, le remède d'une revue de tâche) ; LE-84 et LE-87 (un
+    comportement d'outil supposé, hors de ce que le plan nommait : un `gh` jamais connecté, quatre
+    formes du rendu de GitHub) ; LE-81, LE-85, LE-88 et LE-89 (un contrôle qui passe sans voir ce
+    qu'il doit voir : une recherche trop étroite, des tests que leur environnement rendait vains, des
+    changements qu'aucun test ne tenait, un échec lu comme un résultat) ; AM-5 (ce qu'une clôture
+    livre de plus que ses gestes, avec sa piste) et AM-6 (le garde et la simple lecture de la clé des
+    hooks) ;
+  - ceux que le lot 18 laisse ouverts, de même : LE-92, avec LE-49 et LE-83 (un écart que son auteur
+    ne reconnaît pas : une liste du plan qui rend une promesse de la spec) ; LE-91 (un chemin
+    d'exécution qu'« Effets cherchés » n'a pas nommé, le premier constat du motif depuis sa porte) ;
+    LE-93 et LE-96, avec LE-86 et LE-90 (un texte que « Mécanismes annoncés » ne couvre pas : une
+    phrase de la spec qui résume un comportement, un Ruling écrit sans essayer le cas) ; LE-99, avec
+    LE-57, LE-84 et LE-87 (un cas limite inconnu : la grammaire du shell, lue par le texte) ; LE-97
+    et LE-100, avec LE-88 et LE-89 (un contrôle qui passe sans voir ce qu'il doit voir : des gardes
+    qu'aucun test ne tenait, une horloge en échec lue comme un horodatage, deux mécanismes revenus
+    d'un lot à l'autre) ; LE-101, avec LE-57, LE-84, LE-87 et LE-99 (un comportement d'outil supposé
+    dans un geste qu'un message donne à lancer : le `ssh` de Git Bash, sans l'agent de Windows) ;
+  - ceux que le lot 19 laisse ouverts, de même : LE-102, LE-103 et LE-104, avec LE-86, LE-90 et
+    LE-93 (un texte que « Mécanismes annoncés » ne couvre pas : des phrases de la spec qui résument
+    un comportement, dont la limite du service worker passée dans un gabarit, et l'ordre de son
+    épreuve) ; LE-106, avec LE-80 (la troisième pièce d'une ligne de plan : deux tests et le relevé
+    auxquels le plan prêtait ce qu'ils ne font pas) ; LE-109, avec LE-86 et LE-96 (un remède écrit
+    dans une consigne sans essayer le cas) ; LE-105, avec LE-49, LE-83 et LE-92 (un écart que son
+    auteur ne reconnaît pas : quatre écarts tus, deux mal décrits) ; LE-108, avec LE-58 et LE-75 (un
+    contrôle local plus étroit que celui de la CI : le `ruff` du projet rendu) ; LE-112, avec LE-88
+    et LE-97 (des valeurs et des gardes qu'aucun test ne tenait, revenues au lot suivant) ; LE-111,
+    avec LE-57, LE-84, LE-87 et LE-99 (un cas limite inconnu : le chemin réservé et les balises
+    HTML, lus par le texte) ; LE-110, le premier constat d'un motif neuf (la sortie d'un contrôle
+    coupée avant d'être lue).
+  Déclencheur : un lot qu'Edouard choisit sur ces motifs.
