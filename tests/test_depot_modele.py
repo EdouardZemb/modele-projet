@@ -1335,9 +1335,9 @@ def test_depot_modele_passe_sa_porte(env_isole):
 
 def test_documentation_du_depot_modele(env_isole):
     """La licence et la carte passent sur ce dépôt, lancées comme en CI, depuis la racine : son
-    README lie `CLAUDE.md`, le seul autre `.md` de sa racine, et son `LICENSE` est là. Un
-    `CLAUDE.local.md` posé dans un clone du modèle (par `/memory`) n'y est pas compté : le
-    `.gitignore` de ce dépôt l'exclut, comme celui des projets, sans l'ignore global du poste."""
+    README lie `CLAUDE.md` et `CHANGELOG.md`, les seuls autres `.md` de sa racine, et son `LICENSE`
+    est là. Un `CLAUDE.local.md` posé dans un clone du modèle (par `/memory`) n'y est pas compté :
+    le `.gitignore` de ce dépôt l'exclut, comme celui des projets, sans l'ignore global du poste."""
     ignores = (RACINE / ".gitignore").read_text(encoding="utf-8").splitlines()
     assert "CLAUDE.local.md" in ignores
     git = subprocess.run(
@@ -1356,8 +1356,58 @@ def test_documentation_du_depot_modele(env_isole):
     assert r.returncode == 0, r.stdout + r.stderr
     assert r.stdout.splitlines() == [
         "documentation : licence : LICENSE présent (nature code)",
-        "documentation : carte : 1 fichier .md à la racine, lié",
+        "documentation : carte : 2 fichiers .md à la racine, tous liés",
     ]
+
+
+VERSIONS_DU_MODELE = [
+    (0, 1, 0), (0, 1, 1), (0, 2, 0), (0, 2, 1), (0, 2, 2), (0, 2, 3), (0, 3, 0), (0, 4, 0),
+    (0, 5, 0), (0, 6, 0), (0, 7, 0), (0, 7, 1), (0, 7, 2), (0, 8, 0), (0, 8, 1), (0, 9, 0),
+    (0, 10, 0), (0, 11, 0), (0, 11, 1), (0, 12, 0), (0, 13, 0), (0, 14, 0),
+]  # fmt: skip
+
+
+def test_changelog_forme():
+    """Le journal des versions : son titre, une entrée `## [X.Y.Z] — AAAA-MM-JJ` par version, de la
+    plus récente à la plus ancienne, sans doublon, chacune avec sa définition vers sa publication
+    et chaque définition avec son entrée (le texte brut : les paragraphes citent des `<!--`, que
+    `visible` prendrait pour un commentaire jamais fermé) ; les 22 versions de `0.1.0` à `0.14.0` y
+    sont (la clôture d'un lot en ajoute une) ; le fichier est en LF, comme le veut
+    `.gitattributes`."""
+    brut = (RACINE / "CHANGELOG.md").read_bytes()
+    assert b"\r" not in brut
+    texte = brut.decode("utf-8")
+    assert texte.splitlines()[0] == "# Journal des versions"
+    titres = re.findall(r"^## .*$", texte, flags=re.MULTILINE)
+    entrees = []
+    for titre in titres:
+        m = re.fullmatch(r"## \[(\d+)\.(\d+)\.(\d+)\] — (\d{4}-\d{2}-\d{2})", titre)
+        assert m, titre
+        entrees.append(tuple(int(n) for n in m.groups()[:3]))
+    assert entrees == sorted(set(entrees), reverse=True), entrees
+    definitions = re.findall(r"^\[(\d+\.\d+\.\d+)\]: (\S+)$", texte, flags=re.MULTILINE)
+    assert [tuple(int(n) for n in v.split(".")) for v, _ in definitions] == entrees
+    for version, url in definitions:
+        base = "https://github.com/EdouardZemb/modele-projet/releases/tag"
+        assert url == f"{base}/v{version}", (version, url)
+    assert set(VERSIONS_DU_MODELE) <= set(entrees), set(VERSIONS_DU_MODELE) - set(entrees)
+
+
+def test_changelog_lie():
+    """`CHANGELOG.md` est un `.md` de la racine : la carte exige qu'un lien le mène, et le README
+    comme « Ce qui fait foi » de `CLAUDE.md` le lient (§ 5.7 de la spec du lot 20)."""
+    readme = documentation.liens((RACINE / "README.md").read_text(encoding="utf-8"))
+    assert "CHANGELOG.md" in {documentation.cible_locale(lien, RACINE) for lien in readme}, readme
+    claude = (RACINE / "CLAUDE.md").read_text(encoding="utf-8")
+    fait_foi = claude.split("\n## Ce qui fait foi\n", 1)[1].split("\n## ", 1)[0]
+    cibles = {documentation.cible_locale(lien, RACINE) for lien in documentation.liens(fait_foi)}
+    assert "CHANGELOG.md" in cibles, cibles
+
+
+def test_avertissements_du_depot_modele():
+    """Le démarrage d'une session du modèle ne montre aucun avertissement de la documentation :
+    son « État » tient en 40 lignes non vides et le README ne copie rien qui se périme."""
+    assert documentation.avertissements(RACINE) == []
 
 
 def test_licence_du_depot_modele(rendre):
@@ -1449,7 +1499,7 @@ def test_readme_du_depot_modele():
     liens = documentation.liens(texte)
     relatifs = [lien for lien in liens if not SCHEMA.match(lien)]
     locaux = {documentation.cible_locale(lien, RACINE) for lien in relatifs}
-    assert {"CLAUDE.md", "docs/aligner.md", "LICENSE"} <= locaux, locaux
+    assert {"CLAUDE.md", "CHANGELOG.md", "docs/aligner.md", "LICENSE"} <= locaux, locaux
     assert any("#" in lien for lien in relatifs), relatifs
     casses = [lien for lien in relatifs if lien_casse(RACINE, "README.md", lien)]
     assert not casses, casses
