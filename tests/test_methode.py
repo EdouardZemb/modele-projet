@@ -1433,6 +1433,15 @@ DOCUMENTATION_ET_DOCSTRING = (
     "dans une citation ou un élément de liste, dans un bloc ouvert par `<!--`",
     "un lien dont le texte porte un `|` dans une cellule de tableau",
     "Un `<!--` jamais fermé qui ouvre une ligne, hors du code, cache la suite, comme sur GitHub",
+    # revue finale du lot 20 : la limite de la copie, puis celle de l'issue citée
+    (
+        "que GitHub cache ; un `<!--` ouvert au milieu d'une ligne et fermé plus bas, au-delà de "
+        "son paragraphe, cache ce qui le sépare de sa fermeture, que GitHub montre"
+    ),
+    (
+        "paraît mettre en code ; un `<!--` ouvert au milieu d'une ligne et fermé plus bas, "
+        "au-delà de son paragraphe, cache ce qui le sépare de sa fermeture, que GitHub montre"
+    ),
     # les limites des trois avertissements neufs, dans les mêmes mots que la docstring
     (
         "Ses limites : un titre « Etat », sans accent, ou « L'état du projet » n'est pas lu, ni un "
@@ -1453,7 +1462,9 @@ DOCUMENTATION_ET_DOCSTRING = (
         "que GitHub montre. Un code en ligne qui porte le dernier `-->` du texte cache ce qu'il "
         "porte entre `<!--` et `-->`, que GitHub montre ; un `<!--` en tête de ligne qu'un accent "
         "grave ouvert plus haut paraît mettre en code laisse lire ce qu'il ouvre, que GitHub "
-        "cache. Seul le README est lu : un texte vers lequel il aiguille ne l'est pas."
+        "cache ; un `<!--` ouvert au milieu d'une ligne et fermé plus bas, au-delà de son "
+        "paragraphe, cache ce qui le sépare de sa fermeture, que GitHub montre. Seul le README est "
+        "lu : un texte vers lequel il aiguille ne l'est pas."
     ),
     (
         "Ses limites, dont la liste n'est pas close : `GH-12`, que GitHub lie aussi ; une "
@@ -1462,7 +1473,9 @@ DOCUMENTATION_ET_DOCSTRING = (
         "(`docs/a.md#12`), lu comme `<compte>/<dépôt>#N` ; un chemin `…/issues/12` en prose ; une "
         "référence dans un bloc de code indenté, ou dans une cible de lien qui porte une "
         "parenthèse ; une référence après un `<!--` en tête de ligne qu'un accent grave ouvert "
-        "plus haut paraît mettre en code."
+        "plus haut paraît mettre en code ; un `<!--` ouvert au milieu d'une ligne et fermé plus "
+        "bas, au-delà de son paragraphe, cache ce qui le sépare de sa fermeture, que GitHub "
+        "montre."
     ),
     # les liens seulement : un titre qui suit coupe le paragraphe, et reste lu, comme sur GitHub
     "un commentaire HTML ouvert dans un paragraphe cache les liens jusqu'à sa fermeture, plus loin",

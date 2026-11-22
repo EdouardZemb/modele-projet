@@ -63,8 +63,10 @@ fermé qui enjambe un bloc de code laisse lire le bloc, que GitHub cache ; un `<
 ligne, fermé seulement dans un bloc de code, cache la suite, que GitHub montre. Un code en ligne
 qui porte le dernier `-->` du texte cache ce qu'il porte entre `<!--` et `-->`, que GitHub montre ;
 un `<!--` en tête de ligne qu'un accent grave ouvert plus haut paraît mettre en code laisse lire ce
-qu'il ouvre, que GitHub cache. Seul le README est lu : un texte vers lequel il aiguille ne l'est
-pas. Un `<!--` jamais fermé qui ouvre une ligne, hors du code, cache la suite, comme sur GitHub.
+qu'il ouvre, que GitHub cache ; un `<!--` ouvert au milieu d'une ligne et fermé plus bas, au-delà
+de son paragraphe, cache ce qui le sépare de sa fermeture, que GitHub montre. Seul le README est
+lu : un texte vers lequel il aiguille ne l'est pas. Un `<!--` jamais fermé qui ouvre une ligne,
+hors du code, cache la suite, comme sur GitHub.
 
 L'issue citée. Une ligne de `README.md`, hors des blocs de code, du code en ligne et des
 commentaires, cite une issue ou une PR : `#12`, `compte/dépôt#12`, un lien dont la cible porte
@@ -75,7 +77,9 @@ dans un bloc HTML que le texte ne retire pas ; une couleur en chiffres seuls (`#
 code ; un chemin suivi d'une ancre en chiffres hors d'un lien (`docs/a.md#12`), lu comme
 `<compte>/<dépôt>#N` ; un chemin `…/issues/12` en prose ; une référence dans un bloc de code
 indenté, ou dans une cible de lien qui porte une parenthèse ; une référence après un `<!--` en tête
-de ligne qu'un accent grave ouvert plus haut paraît mettre en code.
+de ligne qu'un accent grave ouvert plus haut paraît mettre en code ; un `<!--` ouvert au milieu
+d'une ligne et fermé plus bas, au-delà de son paragraphe, cache ce qui le sépare de sa fermeture,
+que GitHub montre.
 
 `README.md` et `CLAUDE.md` se lisent sous ce nom exact, à la racine.
 
