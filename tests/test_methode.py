@@ -1496,6 +1496,7 @@ def test_documentation_md(tmp_path, env_isole):
         "Le registre de la machine",
         "`docs/fonctionnement.md`",
         "les publications la disent toujours juste",
+        "par une recherche dans le texte qui ne voit pas tout",
         "une issue ou une PR citée",
         "l'histoire dans les publications",
         (
@@ -1538,6 +1539,7 @@ def test_documentation_md(tmp_path, env_isole):
         "ni plans, ni ADR à lui",
         "figés depuis la phase 0",
         "le lien vers les publications la dit toujours juste",
+        "les versions dans les publications",
         "ne se supprime ni ne se réécrit",
         "Dans un dépôt de données, `CLAUDE.md` dit",
         # « Un dernier » dans une liste qui n'est pas close, un lien lu « dans le gabarit », et le
@@ -1653,6 +1655,17 @@ def test_documentation_md_les_adr():
         )
     ]
     assert positions == sorted(positions), positions
+    # La règle entière, d'un seul tenant : un fragment seul laisserait passer la perte de sa
+    # dernière phrase.
+    regle = (
+        "**Un ADR ne se supprime pas.** Il s'amende en place : une ligne "
+        "`- **Amendé** le AAAA-MM-JJ : <ce qui change>` dans son en-tête, et son corps dit ce qui "
+        "est en vigueur. Ou un nouvel ADR l'amende, et le dit en tête de son contexte : l'ancien "
+        "garde son texte, et son en-tête le nomme (« amendé par ADR-NNNN le AAAA-MM-JJ »). Quand "
+        "la décision change de direction, un nouvel ADR la remplace : l'ancien ne change que de "
+        "statut, « remplacé par ADR-NNNN »."
+    )
+    assert regle in plat
     retirer = _section_de_documentation("Retirer un texte")
     assert "la règle de « Les ADR »" in retirer
     assert "ne se supprime ni ne se réécrit" not in retirer
