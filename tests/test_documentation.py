@@ -1731,7 +1731,7 @@ def test_lancement_sans_b_n_ecrit_aucun_cache(tmp_path, env_isole):
 
 def test_confidentialite_importee_a_l_appel_seulement():
     """`documentation` n'importe `confidentialite` que dans `_nature()` : le `SessionStart`, qui ne
-    lance que le gabarit resté vide, ne paie pas cet import, et une erreur d'import de la porte ne
+    lance que les avertissements, ne paie pas cet import, et une erreur d'import de la porte ne
     fait pas taire l'avertissement."""
     code = "import sys, documentation; print('confidentialite' in sys.modules)"
     r = subprocess.run(

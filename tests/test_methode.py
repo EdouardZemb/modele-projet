@@ -944,7 +944,8 @@ def test_methode_ligne_signaux():
     texte = lire(METHODE)
     assert "| hook Claude `SessionStart`" in texte
     assert "le garde de Claude **et les signaux** toujours branchés" in texte
-    # lot 14 : le gabarit resté vide, après « Il ne bloque jamais. », avant les phrases des forks
+    # lot 14, puis lot 20 : le gabarit resté vide, puis les trois avertissements neufs, après
+    # « Il ne bloque jamais. », avant les phrases des forks
     (ligne,) = [lig for lig in texte.splitlines() if lig.startswith("| hook Claude `SessionStart`")]
     assert ligne.startswith(
         "| hook Claude `SessionStart` (au démarrage et à la reprise) | affiche ce qui est rouge sur "
