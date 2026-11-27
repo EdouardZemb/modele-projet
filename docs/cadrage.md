@@ -632,7 +632,7 @@
 >   commune admet l'amendement par un nouvel ADR (P16, déclaré dans #159), et ce bloc amende le
 >   cadrage par ajout, sans réécrire ses lignes sur les ADR au §5.3, que la spec faisait devenir la
 >   règle (P12, déclaré dans la PR de clôture) ;
-> - **le registre** gagne LE-114 à LE-124.
+> - **le registre** gagne LE-114 à LE-125.
 
 Ce cadrage est la partie publique de la spec de conception du modèle, issue d'une séance de questions avec Edouard : 12 questions, puis 5 parties de design validées une à une. La partie qui nomme le serveur est privée et n'est pas reproduite ici.
 

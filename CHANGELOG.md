@@ -106,20 +106,22 @@ ce qui vieillit (PR #158 à #161). La spec et le plan sont acceptés par Edouard
   verdict, aucun texte de PR n'en change, et les fichiers gérés comparés sont identiques. Les
   avertissements de la tête, sur un clone de chaque projet, ne signalent que l'« État »
   d'`ancrage`, de 306 lignes, et de `serveur`, de 288. Le relevé de la clôture : [[RELEVÉ : …]].
-- **Le registre** gagne LE-114 à LE-124, toutes ouvertes. Deux portes sont dues, chacune au
-  3e constat de son motif, et leur forme revient à Edouard : « état des autres dépôts repris d'un
-  texte, pas relu » (LE-122, les ADR des projets, que la spec comptait 19 et qui sont 47) et
-  « dénombrement fait à la main, repris sans recompter » (LE-124). Les autres vont sous des motifs
-  dont la porte est écrite : trois sous « mécanisme décrit sans relire son code », qui compte
-  désormais dix-huit constats (LE-116, le test d'une ligne d'« Outils et cas limites » qui
-  n'exerce qu'un de ses deux cas ; LE-118, des descriptions écrites pour une seule variante du
-  rendu ; LE-119, un remède écrit dans une consigne sans essai) ; deux sous « contrôle passé à
-  vide », qui en compte dix-neuf (LE-115, la suite entière jamais lancée avant une PR ; LE-120,
-  des gardes, des valeurs et des phrases qu'aucun test ne tenait, un troisième lot de suite) ;
-  LE-114 sous « décision appliquée sans en chercher les effets », LE-117 sous « écart à la spec
-  mal pesé », LE-123 sous « comportement d'un outil supposé ». LE-121 est le 2e constat de
-  « sortie d'un contrôle coupée avant d'être lue ». Les critères de sortie de LE-110 et de LE-112,
-  qui visaient ce lot, ne sont pas tenus.
+- **Le registre** gagne LE-114 à LE-125, toutes ouvertes. Deux portes sont dues, chacune au
+  3e constat de son motif, et leur forme revient à Edouard : « état des autres dépôts repris
+  d'un texte, pas relu » (LE-122, les ADR des projets, que la spec comptait 19 et qui sont
+  47) et « dénombrement fait à la main, repris sans recompter » (LE-124). Neuf autres vont
+  sous des motifs dont la porte est écrite : trois sous « mécanisme décrit sans relire son
+  code », qui compte désormais dix-huit constats (LE-116, le test d'une ligne d'« Outils et
+  cas limites » qui n'exerce qu'un de ses deux cas ; LE-118, des descriptions écrites pour
+  une seule variante du rendu ; LE-119, un remède écrit dans une consigne sans essai) ; deux
+  sous « contrôle passé à vide », qui en compte dix-neuf (LE-115, la suite entière jamais
+  lancée avant une PR ; LE-120, des gardes, des valeurs et des phrases qu'aucun test ne
+  tenait, un troisième lot de suite) ; deux sous « décision appliquée sans en chercher les
+  effets », qui en compte dix (LE-114, deux tests que le plan n'a pas nommés ; LE-125,
+  quatre textes que le lot a rendus faux sans en retirer un mot) ; LE-117 sous « écart à la
+  spec mal pesé », LE-123 sous « comportement d'un outil supposé ». LE-121 est le 2e constat
+  de « sortie d'un contrôle coupée avant d'être lue ». Les critères de sortie de LE-110 et
+  de LE-112, qui visaient ce lot, ne sont pas tenus.
 - **Vers les projets**, la `v0.15.0` part vers les huit projets après la publication, chacun avec
   son message, préparé à l'aide d'un relevé neuf : `serveur` d'abord, puis les sept autres après
   sa fusion (§ 9 de la spec).

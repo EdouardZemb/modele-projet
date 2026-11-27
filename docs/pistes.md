@@ -128,19 +128,19 @@ Notées, pas engagées. Une piste devient une issue le jour où on la travaille,
     avec LE-57, LE-84, LE-87 et LE-99 (un cas limite inconnu : le chemin réservé et les balises
     HTML, lus par le texte) ; LE-110, le premier constat d'un motif neuf (la sortie d'un contrôle
     coupée avant d'être lue) ;
-  - ceux que le lot 20 laisse ouverts, de même : LE-114, avec LE-91 (un lieu qu'« Effets
-    cherchés » n'a pas nommé : deux tests qui lisent chaque rendu ou toute la racine) ; LE-115, avec
-    LE-58, LE-75 et LE-108 (un contrôle local plus étroit que celui de la CI : la suite entière
-    jamais lancée avant une PR) ; LE-116, avec LE-80 et LE-106 (la troisième pièce d'une ligne de
-    plan : un test qui n'exerce qu'un des deux cas qu'elle nomme) ; LE-117, avec LE-49, LE-83,
-    LE-92 et LE-105 (un écart que son auteur ne reconnaît pas : une liste du plan qui rend une
-    promesse de la spec) ; LE-118, avec LE-54 et LE-61 (un texte livré décrit pour une seule
-    variante du rendu) ; LE-119, avec LE-86, LE-96 et LE-109 (un remède écrit dans une consigne
-    sans essai) ; LE-120, avec LE-88, LE-97 et LE-112 (des gardes, des valeurs et des phrases
-    qu'aucun test ne tenait, un troisième lot de suite) ; LE-121, avec LE-110 (le nom d'un échec
-    perdu) ; LE-123, avec LE-57, LE-84, LE-87, LE-99 et LE-111 (un cas limite inconnu : les
-    commentaires HTML, lus par le texte) ; LE-122 et LE-124, chacune le 3e constat de son motif,
-    dont la porte due attend sa forme (l'état des autres dépôts, lu dans un seul lieu ; des nombres
-    comptés à la main).
+  - ceux que le lot 20 laisse ouverts, de même : LE-114 et LE-125, avec LE-91 (un lieu qu'« Effets
+    cherchés » n'a pas nommé : deux tests qui lisent chaque rendu ou toute la racine, et quatre
+    textes que le lot a rendus faux sans en retirer un mot) ; LE-115, avec LE-58, LE-75 et LE-108
+    (un contrôle local plus étroit que celui de la CI : la suite entière jamais lancée avant une
+    PR) ; LE-116, avec LE-80 et LE-106 (la troisième pièce d'une ligne de plan : un test qui
+    n'exerce qu'un des deux cas qu'elle nomme) ; LE-117, avec LE-49, LE-83, LE-92 et LE-105 (un
+    écart que son auteur ne reconnaît pas : une liste du plan qui rend une promesse de la spec) ;
+    LE-118, avec LE-54 et LE-61 (un texte livré décrit pour une seule variante du rendu) ; LE-119,
+    avec LE-86, LE-96 et LE-109 (un remède écrit dans une consigne sans essai) ; LE-120, avec
+    LE-88, LE-97 et LE-112 (des gardes, des valeurs et des phrases qu'aucun test ne tenait, un
+    troisième lot de suite) ; LE-121, avec LE-110 (le nom d'un échec perdu) ; LE-123, avec LE-57,
+    LE-84, LE-87, LE-99 et LE-111 (un cas limite inconnu : les commentaires HTML, lus par le
+    texte) ; LE-122 et LE-124, chacune le 3e constat de son motif, dont la porte due attend sa
+    forme (l'état des autres dépôts, lu dans un seul lieu ; des nombres comptés à la main).
 
   Déclencheur : un lot qu'Edouard choisit sur ces motifs.
