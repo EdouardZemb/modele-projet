@@ -91,9 +91,9 @@ ce qui vieillit (PR #158 à #161). La spec et le plan sont acceptés par Edouard
   constat : tout est corrigé, rien de critique ni d'important introduit, et son seul mineur, la
   puce de `deployer.sh` dans M-0001, qui ne dit pas que le staging ne prend l'exemple qu'avec un
   commit de données, va aux « À relire ».
-- **Les durées** : aucun job coupé ni avertissement de durée dans les huit exécutions de `ci.yml`
+- **Les durées** : aucun job coupé ni avertissement de durée dans les neuf exécutions de `ci.yml`
   du lot, une tentative chacune : cinq sur les PR, à `01a4e92` et `639739d` pour #158, puis aux
-  têtes de #159, #160 et #161, et trois aux push des fusions de #158 à #160. Sous Windows, le job
+  têtes de #159, #160 et #161, et quatre aux push des fusions de #158 à #161. Sous Windows, le job
   `tests` a duré au plus 38 min 30 s (au push de `e429367`), sous le seuil de 45 min, contre
   37 min 44 s au lot 19 ; `mecanique`, au plus 11 min 41 s (#158), sous 15 min ; `menage-cible`,
   au plus 55 s, sous 1 min 30 s ; `fausse-app`, de 3 min 40 s à 4 min 03 s, sous son délai de
