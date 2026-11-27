@@ -1,8 +1,7 @@
 # M-0001 — Écosystème des applications personnelles : identité différée, silos, démonstration factice, garde-fous, partage par événements
 
 - **Statut** : accepté le 2026-10-16
-- **Amendé** le 2026-11-22, avec le lot 20 : la section « Confirmation » est ajoutée : le
-  test, le contrôle ou la mesure qui tient la décision, nommé par son chemin
+- **Amendé** le 2026-11-22, avec le lot 20 : la section « Confirmation »
 - **Contexte amont** : ADR-0010 de `creche-planner`, dont ce texte reprend les règles 2 à 5. La
   règle 1 (le référentiel de compétences, possédé par la veille emploi) est propre à la veille et
   reste là-bas :
@@ -88,12 +87,16 @@ Dans le projet :
 - `.github/workflows/modele-socle.yml` : la CI qui refuse de passer, et la recherche de secrets ;
 - `.github/workflows/modele-historique.yml` : la relecture de tout l'historique chaque semaine ;
 - `.githooks/pre-commit` : la porte de confidentialité, avant chaque commit ;
-- `scripts/modele/confidentialite.py` : la porte, qui refuse les données réelles et les secrets.
+- `deploiement/deployer.sh` (cible `serveur`) : le staging servi sur l'exemple, jamais sur
+  `/config`, quand le projet déclare `VERIFIER_CONFIG` ;
+- `scripts/modele/confidentialite.py` : la porte, qui refuse ce qui identifie dans un dépôt de code,
+  et partout les secrets.
 
-Aucun contrôle ne tient les décisions écrites en ADR, l'identité différée, le mode démonstration
-ni le partage par événements : ils se jugent à la revue. Aucun ne tient non plus la mutation ni
-le test d'isolation des chemins de données, qui restent au projet (`docs/modele/methode.md`, « Les
-familles de garde-fous de l'écosystème »).
+Aucun contrôle ne tient les décisions écrites en ADR, l'identité différée ni le partage par
+événements : ils se jugent à la revue, comme le mode démonstration, dont `deployer.sh` ne tient, en
+cible `serveur`, que le staging servi sur l'exemple. Aucun ne tient non plus la mutation ni le test
+d'isolation des chemins de données, qui restent au projet (`docs/modele/methode.md`, « Les familles
+de garde-fous de l'écosystème »).
 
 Dans `modele-projet` :
 

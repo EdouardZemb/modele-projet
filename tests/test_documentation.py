@@ -1307,6 +1307,26 @@ def test_copie_et_issue_apres_un_commentaire_en_tete_de_ligne_pris_pour_du_code(
     assert d.issues_citees(tmp_path) == [f"README.md, l. 5 : {C_ISSUE}"]
 
 
+def test_zone_des_commentaires_des_avertissements(tmp_path):
+    """Garde la zone des commentaires de la copie et de l'issue citée : le bloc qui suit un `<!--`
+    jamais fermé en tête de ligne est caché ; une ligne qui cite deux fois une issue compte une
+    fois ; et les deux limites écrites, un commentaire fermé qui enjambe un bloc laisse lire le
+    bloc, et un `<!--` en tête de ligne fermé seulement dans un bloc cache la suite. Garde aussi
+    la limite gardée exprès : un `<!--` ouvert au milieu d'une ligne et fermé plus bas, au-delà de
+    son paragraphe, cache ce qui le sépare de sa fermeture, que GitHub montre."""
+    ecrire(tmp_path, README_md="# E\n\n<!-- jamais fermé\n\n```\nv1.2.3\n```\n")
+    assert d.copies_du_readme(tmp_path) == []
+    ecrire(tmp_path, README_md="# E\n\nvoir #12 et https://github.com/o/d/issues/13\n")
+    assert d.issues_citees(tmp_path) == ["README.md, l. 3 : une issue ou une PR citée"]
+    ecrire(tmp_path, README_md="# E\n\n<!--\n```\nv1.2.3\n```\n-->\n")
+    assert d.copies_du_readme(tmp_path) == ["README.md, l. 5 : une version recopiée"]
+    ecrire(tmp_path, README_md="# E\n\n<!-- x\n```\n-->\n```\nv1.2.3\n")
+    assert d.copies_du_readme(tmp_path) == []
+    ecrire(tmp_path, README_md="# E\n\nTexte <!-- note\n\nv1.2.3 et #12\n\n<!-- consigne -->\n")
+    assert d.copies_du_readme(tmp_path) == []
+    assert d.issues_citees(tmp_path) == []
+
+
 def test_copie_version_dans_un_bloc_de_code(tmp_path):
     ecrire(tmp_path, README_md="# E\n\n```\nnpm i x@1.2.3\n```\n")
     assert d.copies_du_readme(tmp_path) == [f"README.md, l. 4 : {C_VERSION}"]
@@ -1711,7 +1731,7 @@ def test_lancement_sans_b_n_ecrit_aucun_cache(tmp_path, env_isole):
 
 def test_confidentialite_importee_a_l_appel_seulement():
     """`documentation` n'importe `confidentialite` que dans `_nature()` : le `SessionStart`, qui ne
-    lance que le gabarit resté vide, ne paie pas cet import, et une erreur d'import de la porte ne
+    lance que les avertissements, ne paie pas cet import, et une erreur d'import de la porte ne
     fait pas taire l'avertissement."""
     code = "import sys, documentation; print('confidentialite' in sys.modules)"
     r = subprocess.run(

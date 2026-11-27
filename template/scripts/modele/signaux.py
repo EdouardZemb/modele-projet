@@ -15,8 +15,10 @@ long, la copie dans le README, l'issue citée), lus dans la racine du dépôt sa
 BUDGET ne les borne pas : seul le délai du hook, 30 s, le fait. Un constat donne la ligne
 `documentation : <constat>`, plusieurs un titre `documentation :` et une ligne `- <constat>`
 chacun, au plus MAX_ELEMENTS ; rien à signaler n'ajoute rien. Ses lignes suivent celles de la CI et
-nomment des chemins, jamais un contenu. Une erreur du contrôle donne
-`documentation : non lue (erreur)`, et laisse les signaux de la CI.
+nomment des chemins, jamais un contenu. Une erreur d'un des quatre avertissements donne sa ligne
+« non lu(e) (erreur) », à sa place ; l'import de `documentation` en échec, ou une erreur
+d'`avertissements` lui-même, donne `documentation : non lue (erreur)`, et laisse les signaux de la
+CI.
 
 Le script écrit sur la sortie standard un seul objet JSON (`systemMessage` pour l'utilisateur,
 `additionalContext` pour Claude) et rend toujours 0 : il ne bloque jamais une session, exception

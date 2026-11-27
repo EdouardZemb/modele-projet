@@ -447,8 +447,10 @@ heure, un numéro de section à trois nombres (`4.3.1`) lu comme une version, un
 bloc, que GitHub cache ; un `<!--` en tête de ligne, fermé seulement dans un bloc de code, cache la
 suite, que GitHub montre. Un code en ligne qui porte le dernier `-->` du texte cache ce qu'il porte
 entre `<!--` et `-->`, que GitHub montre ; un `<!--` en tête de ligne qu'un accent grave ouvert
-plus haut paraît mettre en code laisse lire ce qu'il ouvre, que GitHub cache. Seul le README est
-lu : un texte vers lequel il aiguille ne l'est pas.
+plus haut paraît mettre en code laisse lire ce qu'il ouvre, que GitHub cache ; un `<!--` ouvert au
+milieu d'une ligne et fermé plus bas, au-delà de son paragraphe, cache ce qui le sépare de sa
+fermeture, que GitHub montre. Seul le README est lu : un texte vers lequel il aiguille ne l'est
+pas.
 
 #### L'issue ou la PR citée
 
@@ -479,7 +481,8 @@ bloc HTML que le texte ne retire pas ; une couleur en chiffres seuls (`#000000`)
 chemin suivi d'une ancre en chiffres hors d'un lien (`docs/a.md#12`), lu comme `<compte>/<dépôt>#N`
 ; un chemin `…/issues/12` en prose ; une référence dans un bloc de code indenté, ou dans une cible
 de lien qui porte une parenthèse ; une référence après un `<!--` en tête de ligne qu'un accent grave
-ouvert plus haut paraît mettre en code.
+ouvert plus haut paraît mettre en code ; un `<!--` ouvert au milieu d'une ligne et fermé plus bas,
+au-delà de son paragraphe, cache ce qui le sépare de sa fermeture, que GitHub montre.
 
 ### Ce qui compte comme un lien
 

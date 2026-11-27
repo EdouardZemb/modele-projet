@@ -255,7 +255,7 @@ def test_combinaison(rendre, env_isole, cible, nature, fusion):
     else:
         assert "documentation : licence : non exigée (nature donnees)" in sortie, sortie
 
-    # Le gabarit resté vide : un projet qui vient de naître ne donne rien. Pour ne pas passer à
+    # Les avertissements : un projet qui vient de naître ne donne rien. Pour ne pas passer à
     # vide, un document vide que le README lie donne ensuite son constat.
     gabarits_vides = [sys.executable, "scripts/modele/documentation.py", "--avertissements"]
     r = lancer(gabarits_vides, rendu, env)

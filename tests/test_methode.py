@@ -178,8 +178,8 @@ MARQUES_ADR = {
     "cible `donnees`, avec `cible_code: serveur`": {"donnees-serveur"},
     "hors cible `donnees`": {"aucune", "serveur"},
 }
-# Les deux ADR dont la « Confirmation » dit ce qu'aucun contrôle ne tient.
-ADR_AVEC_AUCUN = [ADR_SOCLE[0], ADR_SAUVEGARDES[0]]
+# Les trois ADR dont la « Confirmation » dit ce qu'aucun contrôle ne tient.
+ADR_AVEC_AUCUN = [ADR_SOCLE[0], ADR_SERVEUR[0], ADR_SAUVEGARDES[0]]
 PUCE_ADR = re.compile(
     r"^- `(?P<chemin>[^`]+)`(?: \((?P<marque>cible `serveur`"
     r"|cible `donnees`, avec `cible_code: serveur`|hors cible `donnees`)\))? : \S"
@@ -187,26 +187,22 @@ PUCE_ADR = re.compile(
 
 
 MOTIF_AMENDEMENT_CONFIRMATION = re.compile(
-    r"^- \*\*Amendé\*\* le \d{4}-\d{2}-\d{2}, avec le lot 20 : la section « Confirmation »",
+    r"^- \*\*Amendé\*\* le \d{4}-\d{2}-\d{2}, avec le lot 20 : la section « Confirmation »$",
     re.MULTILINE,
 )
 
 
 def controler_forme_adr(nom, texte):
-    """La largeur et le retrait du texte neuf : la section « Confirmation » et la ligne
-    d'amendement du lot 20 (première ligne et suite) tiennent en 100 caractères, la suite de
-    l'amendement en retrait de deux espaces."""
+    """La largeur du texte neuf : la section « Confirmation » et la ligne d'amendement du lot 20
+    tiennent en 100 caractères ; la ligne d'amendement est celle du § 5.5 de la spec, seule, sans
+    ligne de suite."""
     section = texte.split("\n## Confirmation\n", 1)[1].split("\n## Révision\n", 1)[0]
     for ligne in section.splitlines():
         assert len(ligne) <= 100, (nom, ligne)
     lignes = texte.split("\n## Contexte\n", 1)[0].splitlines()
     (debut,) = [i for i, ligne in enumerate(lignes) if MOTIF_AMENDEMENT_CONFIRMATION.match(ligne)]
     assert len(lignes[debut]) <= 100, (nom, lignes[debut])
-    for suite in lignes[debut + 1 :]:
-        if not suite.startswith(" "):
-            break
-        assert len(suite) <= 100, (nom, suite)
-        assert suite.startswith("  ") and not suite.startswith("   "), (nom, suite)
+    assert not lignes[debut + 1].startswith(" "), (nom, lignes[debut + 1])
 
 
 def listes_confirmation(texte):
@@ -260,7 +256,7 @@ def test_adr_confirmation_chemins(rendus_adr):
         for chemin, marque in modele:
             assert marque is None, (nom, chemin)
             assert (RACINE / chemin).is_file(), (nom, chemin)
-        # Les paragraphes « Aucun contrôle ne tient » : M-0001 et M-0005, et eux seuls.
+        # Les paragraphes « Aucun contrôle ne tient » : M-0001, M-0003 et M-0005, et eux seuls.
         aucun = [p for p in paragraphes if p.startswith("Aucun contrôle ne tient")]
         assert bool(aucun) == (nom in ADR_AVEC_AUCUN), (nom, paragraphes)
         if nom == ADR_SOCLE[0]:
@@ -944,7 +940,8 @@ def test_methode_ligne_signaux():
     texte = lire(METHODE)
     assert "| hook Claude `SessionStart`" in texte
     assert "le garde de Claude **et les signaux** toujours branchés" in texte
-    # lot 14 : le gabarit resté vide, après « Il ne bloque jamais. », avant les phrases des forks
+    # lot 14, puis lot 20 : le gabarit resté vide, puis les trois avertissements neufs, après
+    # « Il ne bloque jamais. », avant les phrases des forks
     (ligne,) = [lig for lig in texte.splitlines() if lig.startswith("| hook Claude `SessionStart`")]
     assert ligne.startswith(
         "| hook Claude `SessionStart` (au démarrage et à la reprise) | affiche ce qui est rouge sur "
@@ -1433,6 +1430,15 @@ DOCUMENTATION_ET_DOCSTRING = (
     "dans une citation ou un élément de liste, dans un bloc ouvert par `<!--`",
     "un lien dont le texte porte un `|` dans une cellule de tableau",
     "Un `<!--` jamais fermé qui ouvre une ligne, hors du code, cache la suite, comme sur GitHub",
+    # revue finale du lot 20 : la limite de la copie, puis celle de l'issue citée
+    (
+        "que GitHub cache ; un `<!--` ouvert au milieu d'une ligne et fermé plus bas, au-delà de "
+        "son paragraphe, cache ce qui le sépare de sa fermeture, que GitHub montre"
+    ),
+    (
+        "paraît mettre en code ; un `<!--` ouvert au milieu d'une ligne et fermé plus bas, "
+        "au-delà de son paragraphe, cache ce qui le sépare de sa fermeture, que GitHub montre"
+    ),
     # les limites des trois avertissements neufs, dans les mêmes mots que la docstring
     (
         "Ses limites : un titre « Etat », sans accent, ou « L'état du projet » n'est pas lu, ni un "
@@ -1453,7 +1459,9 @@ DOCUMENTATION_ET_DOCSTRING = (
         "que GitHub montre. Un code en ligne qui porte le dernier `-->` du texte cache ce qu'il "
         "porte entre `<!--` et `-->`, que GitHub montre ; un `<!--` en tête de ligne qu'un accent "
         "grave ouvert plus haut paraît mettre en code laisse lire ce qu'il ouvre, que GitHub "
-        "cache. Seul le README est lu : un texte vers lequel il aiguille ne l'est pas."
+        "cache ; un `<!--` ouvert au milieu d'une ligne et fermé plus bas, au-delà de son "
+        "paragraphe, cache ce qui le sépare de sa fermeture, que GitHub montre. Seul le README est "
+        "lu : un texte vers lequel il aiguille ne l'est pas."
     ),
     (
         "Ses limites, dont la liste n'est pas close : `GH-12`, que GitHub lie aussi ; une "
@@ -1462,7 +1470,9 @@ DOCUMENTATION_ET_DOCSTRING = (
         "(`docs/a.md#12`), lu comme `<compte>/<dépôt>#N` ; un chemin `…/issues/12` en prose ; une "
         "référence dans un bloc de code indenté, ou dans une cible de lien qui porte une "
         "parenthèse ; une référence après un `<!--` en tête de ligne qu'un accent grave ouvert "
-        "plus haut paraît mettre en code."
+        "plus haut paraît mettre en code ; un `<!--` ouvert au milieu d'une ligne et fermé plus "
+        "bas, au-delà de son paragraphe, cache ce qui le sépare de sa fermeture, que GitHub "
+        "montre."
     ),
     # les liens seulement : un titre qui suit coupe le paragraphe, et reste lu, comme sur GitHub
     "un commentaire HTML ouvert dans un paragraphe cache les liens jusqu'à sa fermeture, plus loin",

@@ -22,8 +22,9 @@ VRAIE_DOCUMENTATION = getattr(signaux, "_documentation", None)
 
 @pytest.fixture(autouse=True)
 def sans_constat_de_documentation(monkeypatch):
-    """Les tests de `main` lisent le vrai clone, que le gabarit resté vide lirait aussi : ils
-    reçoivent un contrôle sans constat. Ceux du contrôle remettent la vraie fonction."""
+    """Les tests de `main` lisent le vrai clone, que les avertissements de la documentation
+    liraient aussi : ils reçoivent un contrôle sans constat. Ceux du contrôle remettent la vraie
+    fonction."""
     monkeypatch.setattr(signaux, "_documentation", lambda racine: [], raising=False)
 
 
@@ -562,7 +563,7 @@ def test_documentation_importee_a_l_appel_seulement():
 
 
 def test_controle_pendant_les_lectures(monkeypatch, capsys):
-    """Le gabarit resté vide se lit pendant que les lectures de gh tournent, ni avant ni après :
+    """Les avertissements se lisent pendant que les lectures de gh tournent, ni avant ni après :
     chaque lecture attend la fin du contrôle, et le contrôle attend qu'une lecture ait commencé."""
     lecture_commencee = threading.Event()
     controle_fait = threading.Event()
