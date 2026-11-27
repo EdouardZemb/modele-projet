@@ -601,6 +601,39 @@
 > - **le registre** gagne LE-102 à LE-113 ; LE-107 se clôt dans le lot ;
 > - **les « À relire » de la clôture** : ses 17 choix, acceptés tels quels par Edouard le 20/11.
 
+> **Amendé le 2026-11-28, à la clôture du lot 20, de la même façon.** Le lot 20 n'était pas au §11 :
+> il vient de la piste « Le second temps de la documentation », devenue l'issue #157 le 21/11 (PR
+> #158 à #161). Les textes d'un projet disent le présent et ne recopient pas ce qui vieillit : trois
+> avertissements neufs au démarrage d'une session, la règle commune des ADR et leur section
+> « Confirmation », les textes semés retouchés ; le modèle tient son histoire dans un journal des
+> versions. `methode.md`, `docs/modele/documentation.md`, `docs/aligner.md` et les six ADR hérités
+> sont amendés :
+>
+> - **§5.1** : l'« État » de `CLAUDE.md` [S] dit le présent, en 40 lignes non vides au plus ; le
+>   passé va aux publications, ou à un journal des versions, `CHANGELOG.md` à la racine, lié depuis
+>   « Ce qui fait foi » (`documentation.md`, « L'« État » et le journal ») ;
+> - **§5.2** : le point 5 du cycle reporte dans `CLAUDE.md`, au présent, ou dans un ADR ce qui doit
+>   survivre ;
+> - **§5.3** : les sections d'un ADR du projet gagnent « Confirmation », entre « Conséquences » et
+>   « Révision » : le test, le contrôle ou la mesure qui tient la décision, nommé par son chemin, ou
+>   « Aucun », avec sa raison ; un ADR écrit avant la `v0.15.0` la reçoit à son prochain
+>   amendement. « Un ADR ne se réécrit pas : un nouveau le remplace » cède la place à la règle
+>   commune de `docs/modele/documentation.md` (« Les ADR ») : un ADR ne se supprime pas ; il
+>   s'amende en place, par une ligne datée dans son en-tête, ou par un nouvel ADR qui le dit ; quand
+>   la décision change de direction, un nouvel ADR le remplace, et l'ancien ne change que de statut.
+>   Le README des décisions [S] y renvoie, et les six ADR hérités ont leur « Confirmation » ;
+> - **§5.5** : le hook `SessionStart` signale aussi, sans bloquer, un « État » de `CLAUDE.md` de
+>   plus de 40 lignes, et, dans le README, une copie qui se périme (une version, une heure, un arbre
+>   de fichiers, un lot au futur) ou une issue citée ; la CI n'en lance aucun ;
+> - **le dépôt modèle** : son « État » se réécrit au présent ; son histoire est dans
+>   `CHANGELOG.md`, à sa racine, qui n'arrive dans aucun projet, et la clôture de chaque lot y ouvre
+>   l'entrée de sa version, à la date de la clôture ;
+> - **deux écarts à la spec du lot**, accordés par Edouard le 21/11, avec le plan : la règle
+>   commune admet l'amendement par un nouvel ADR (P16, déclaré dans #159), et ce bloc amende le
+>   cadrage par ajout, sans réécrire ses lignes sur les ADR au §5.3, que la spec faisait devenir la
+>   règle (P12, déclaré dans la PR de clôture) ;
+> - **le registre** gagne LE-114 à LE-124.
+
 Ce cadrage est la partie publique de la spec de conception du modèle, issue d'une séance de questions avec Edouard : 12 questions, puis 5 parties de design validées une à une. La partie qui nomme le serveur est privée et n'est pas reproduite ici.
 
 ---

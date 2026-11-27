@@ -7,10 +7,11 @@ garde-fous qu'il distribue : hooks git, garde de Claude, CI, règle de protectio
 
 ## État
 
-Version en service : `v0.14.0`, publiée le 20/11/2026. Lot en cours : le lot 20, le second temps
-de la documentation (#157).
+Version en service : `v0.14.0`, publiée le 20/11/2026. Aucun lot en cours : le lot 20, le second
+temps de la documentation (#157), est clos, et la `v0.15.0` est à étiqueter, sur l'accord
+d'Edouard ; elle part ensuite vers les huit projets, `serveur` d'abord, chacun avec son message.
 
-Les projets nés du modèle, d'après le relevé du 21/11/2026 :
+Les projets nés du modèle, d'après le relevé du 27/11/2026 :
 
 | Projet | Version | Cible | Nature |
 |---|---|---|---|
@@ -25,8 +26,10 @@ Les projets nés du modèle, d'après le relevé du 21/11/2026 :
 
 L'histoire du modèle, lot par lot et version par version, est dans
 [le journal des versions](CHANGELOG.md). À la clôture d'un lot, son paragraphe y va, sous sa
-version, en tête, avec celui des versions des projets quand il vient ; l'« État » se réécrit au
-présent, en 40 lignes non vides au plus, que le démarrage d'une session tient.
+version, en tête, avec celui des versions des projets quand il vient ; l'entrée porte la date de
+la clôture, puisque l'étiquette suit la fusion (les 22 premières, celle de leur étiquette).
+L'« État » se réécrit au présent, en 40 lignes non vides au plus, que le démarrage d'une session
+tient.
 
 Prochain, au choix d'Edouard :
 - le lot 3 (la cible `statique`) ;
