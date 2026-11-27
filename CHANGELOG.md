@@ -5,8 +5,9 @@ lot et chaque correctif ont fait, et les versions des projets qui ont suivi. Les
 publication disent ce que reçoit un projet ; le présent est dans l'« État » de
 [CLAUDE.md](CLAUDE.md#état). Le format suit
 [Keep a Changelog 1.1.0](https://keepachangelog.com/fr/1.1.0/), sans ses catégories ni sa section
-« Unreleased », avec un tiret cadratin dans les titres : le texte de chaque entrée vient de
-l'« État », tel qu'il était écrit, et ses phrases au présent gardent la date de leur lot.
+« Unreleased », avec un tiret cadratin dans les titres. Jusqu'à la `v0.14.0`, le texte de chaque
+entrée vient de l'« État », tel qu'il était écrit, et ses phrases au présent gardent la date de
+leur lot ; depuis la `v0.15.0`, les paragraphes s'écrivent directement ici, sous leur version.
 
 ## [0.15.0] — 2026-11-28
 
