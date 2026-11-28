@@ -130,6 +130,9 @@ ce qui vieillit (PR #158 à #161). La spec et le plan sont acceptés par Edouard
 - **Vers les projets**, la `v0.15.0` part vers les huit projets après la publication, chacun avec
   son message, préparé à l'aide d'un relevé neuf : `serveur` d'abord, puis les sept autres après
   sa fusion (§ 9 de la spec).
+- **Les « À relire » de la clôture** : Edouard a accepté le 28/11, tels quels, les neuf choix de la
+  section « À relire » de sa PR de clôture, dont l'en-tête du journal (T-8) et LE-125 ; la forme
+  des deux portes dues reste ouverte, à trancher dans un lot sur ces motifs.
 
 ## [0.14.0] — 2026-11-20
 
