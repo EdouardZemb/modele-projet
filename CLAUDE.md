@@ -7,22 +7,22 @@ garde-fous qu'il distribue : hooks git, garde de Claude, CI, règle de protectio
 
 ## État
 
-Version en service : `v0.14.0`, publiée le 20/11/2026. Aucun lot en cours : le lot 20, le second
-temps de la documentation (#157), est clos, et la `v0.15.0` est à étiqueter, sur l'accord
-d'Edouard ; elle part ensuite vers les huit projets, `serveur` d'abord, chacun avec son message.
+Version en service : `v0.15.0`, publiée le 28/11/2026, arrivée le même jour dans les huit
+projets, chacun par sa session. Aucun lot en cours : le lot 20, le second temps de la
+documentation (#157), est clos.
 
-Les projets nés du modèle, d'après le relevé du 27/11/2026 :
+Les projets nés du modèle, d'après le relevé du 28/11/2026 :
 
 | Projet | Version | Cible | Nature |
 |---|---|---|---|
-| `ancrage` | `v0.14.0` | `serveur` | code |
-| `ancrage-donnees` | `v0.12.0` | `donnees`, avec `cible_code: serveur` | données |
-| `pilote` | `v0.14.0` | `aucune` | code |
-| `pupitre` | `v0.12.0` | `aucune` | code |
-| `pupitre-donnees` | `v0.12.0` | `aucune` | données |
-| `serveur` | `v0.12.0` | `aucune` | données |
-| `veille-emploi` | `v0.14.0` | `serveur` | code |
-| `veille-emploi-donnees` | `v0.12.0` | `donnees`, avec `cible_code: serveur` | données |
+| `ancrage` | `v0.15.0` | `serveur` | code |
+| `ancrage-donnees` | `v0.15.0` | `donnees`, avec `cible_code: serveur` | données |
+| `pilote` | `v0.15.0` | `aucune` | code |
+| `pupitre` | `v0.15.0` | `aucune` | code |
+| `pupitre-donnees` | `v0.15.0` | `aucune` | données |
+| `serveur` | `v0.15.0` | `aucune` | données |
+| `veille-emploi` | `v0.15.0` | `serveur` | code |
+| `veille-emploi-donnees` | `v0.15.0` | `donnees`, avec `cible_code: serveur` | données |
 
 L'histoire du modèle, lot par lot et version par version, est dans
 [le journal des versions](CHANGELOG.md). À la clôture d'un lot, son paragraphe y va, sous sa
