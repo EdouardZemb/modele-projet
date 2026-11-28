@@ -134,6 +134,39 @@ ce qui vieillit (PR #158 à #161). La spec et le plan sont acceptés par Edouard
   section « À relire » de sa PR de clôture, dont l'en-tête du journal (T-8) et LE-125 ; la forme
   des deux portes dues reste ouverte, à trancher dans un lot sur ces motifs.
 
+Versions des projets au 28/11/2026, relevées par l'API : les huit projets sont en `v0.15.0`, mis à
+jour le 28/11, chacun par sa session, sur son message, préparé à l'aide d'un relevé neuf :
+`serveur` d'abord, fusionné à 08:17 UTC, puis les sept autres. Chaque mise à jour ne change que
+`.copier-answers.yml` et les fichiers gérés que la version change depuis celle du projet, sans
+conflit ni `.rej` : sept chez `pilote`, parti de la `v0.14.0` hors de la cible `serveur` ; huit
+chez les cinq projets partis de la `v0.12.0` ; dix chez `ancrage` et `veille-emploi`, de la cible
+`serveur` (ancrage#98, veille-emploi#39). La CI du push de chaque mise à jour est verte,
+`deploiement` et `image` compris dans la cible `serveur` ; le staging de `veille-emploi` a pris sa
+fusion, et sa prod reste sur son étiquette. Le message d'`ancrage` a été repris le 28/11, après la
+clôture de son lot M10 et sa `v0.22.0`, sa simulation refaite sur sa nouvelle tête ;
+`pupitre-donnees` a vu revenir en `??` les deux semés que sa scission avait retirés, effacés hors
+du commit, comme son message l'annonçait.
+- **Les textes semés**, que chaque message proposait : `docs/decisions/README.md` reprend le texte
+  rendu chez `serveur`, `pilote`, `veille-emploi` et `ancrage`, dans leur PR de mise à jour ;
+  `pilote` retire aussi « figés depuis la phase 0 » de son `CLAUDE.md`, dans une PR à part, sur
+  l'accord d'Edouard donné dans sa session. La puce de la cible `donnees` n'est reprise ni chez
+  `veille-emploi-donnees` ni chez `ancrage-donnees` : leur session ne modifie pas son `CLAUDE.md`
+  sur une demande relayée, et l'a proposée à Edouard dans sa session (LE-127).
+- **Les « État »** : `ancrage` (ancrage#99) et `serveur`, sur l'accord d'Edouard, réécrivent le
+  leur au présent, dans une PR à part, après leur mise à jour : de 332 lignes non vides à 31, et de
+  293 à 29, leur passé dans un `CHANGELOG.md` neuf, lié depuis « Ce qui fait foi ». Les
+  avertissements de la `v0.15.0`, lancés le 28/11 sur un clone de la tête de chaque projet,
+  rendent 0, sans aucune ligne, dans les huit. Celui de `veille-emploi` reste sous le seuil, en 15
+  lignes non vides, mais de 13 718 caractères ; sa session propose à Edouard de le réécrire.
+- **Le relevé**, sur `4705a37`, après les mises à jour, rend 0 : 77 dépôts examinés, 8 projets, 8
+  lus, 0 non relevé, 0 à lire ; les huit en `v0.15.0`, aucun fichier géré changé depuis elle ; 13
+  plans en cours, chacun au même verdict à sa version et à la tête, dont 5 refuseraient s'ils
+  étaient neufs, une information ; 3 PR ouvertes, aucune n'ajoute de plan ; 310 textes de PR lus,
+  aucun verdict changé.
+- **Ce que les projets ont trouvé** pour le modèle, deux pistes : « L'« État » long en peu de
+  lignes », du rapport de `veille-emploi`, et « Les cas que « L'« État » et le journal » ne
+  tranche pas », des rapports de `serveur` et d'`ancrage`.
+
 ## [0.14.0] — 2026-11-20
 
 Lot 19 fait le 20/11/2026 : distinguer d'un coup d'œil le staging de la prod (#151), étiqueté
