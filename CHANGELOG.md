@@ -5,8 +5,134 @@ lot et chaque correctif ont fait, et les versions des projets qui ont suivi. Les
 publication disent ce que reçoit un projet ; le présent est dans l'« État » de
 [CLAUDE.md](CLAUDE.md#état). Le format suit
 [Keep a Changelog 1.1.0](https://keepachangelog.com/fr/1.1.0/), sans ses catégories ni sa section
-« Unreleased », avec un tiret cadratin dans les titres : le texte de chaque entrée vient de
-l'« État », tel qu'il était écrit, et ses phrases au présent gardent la date de leur lot.
+« Unreleased », avec un tiret cadratin dans les titres. Jusqu'à la `v0.14.0`, le texte de chaque
+entrée vient de l'« État », tel qu'il était écrit, et ses phrases au présent gardent la date de
+leur lot ; depuis la `v0.15.0`, les paragraphes s'écrivent directement ici, sous leur version.
+
+## [0.15.0] — 2026-11-28
+
+Lot 20 fait le 28/11/2026 : le second temps de la documentation (#157), pour la `v0.15.0`. Il vient
+de la piste « Le second temps de la documentation » et du « temps 2 » du cadrage de la
+documentation du 05/11 : les textes d'un projet né du modèle disent le présent et ne recopient pas
+ce qui vieillit (PR #158 à #161). La spec et le plan sont acceptés par Edouard le 21/11, avec deux
+écarts à la spec, P16 et P12, accordés le même jour.
+- **Les avertissements** (#158). `scripts/modele/documentation.py`, géré, gagne
+  `avertissements(racine)`, que le hook `SessionStart` appelle par `signaux.py` au lieu du seul
+  gabarit resté vide : après lui, trois avertissements neufs, chacun sous sa garde. L'« État »
+  trop long : les sections « État » de `CLAUDE.md` au-delà de 40 lignes non vides. La copie dans
+  le README : une version, une heure, un arbre de fichiers, un mot qui date l'état ou un lot au
+  futur, code compris, commentaires HTML retirés. L'issue ou la PR citée : `#N`,
+  `<compte>/<dépôt>#N`, ou un lien vers `/issues/N` ou `/pull/N`, hors du code et des
+  commentaires. Aucun ne refuse, aucun ne lit le réseau, la CI n'en lance aucun ; l'erreur de l'un
+  donne sa ligne « non lu(e) (erreur) », et les autres tournent. La ligne de commande prend
+  `--avertissements`, dont `--gabarits-vides` reste le synonyme. Les limites de chaque recherche
+  sont écrites en listes non closes, avec les mêmes mots dans la docstring et dans
+  `documentation.md`, dont « Les trois contrôles » devient « Les contrôles ». `methode.md` et
+  M-0002 nomment les trois avertissements. Le test du temps mesure le temps processeur, 2 s pour
+  un README de plus de 10 000 lignes, et un second tient la borne qui garde linéaire la lecture
+  des commentaires. La règle des renvois nus de `tests/test_cible_serveur.py` se cherche désormais
+  hors du code en ligne : les exemples de l'issue citée, en code, l'ont fait échouer à la
+  première CI de #158 (LE-114, LE-115).
+- **Les textes** (#159). `documentation.md`, géré, gagne « L'« État » et le journal »
+  (l'« État » au présent, en 40 lignes non vides au plus ; le passé aux publications, ou à un
+  journal, `CHANGELOG.md` à la racine, lié depuis « Ce qui fait foi ») et « Les ADR » (le nom, le
+  titre, l'en-tête, six sections dont « Confirmation », entre « Conséquences » et « Révision », et
+  la règle commune : un ADR ne se supprime pas, il s'amende en place ou par un nouvel ADR, et un
+  nouvel ADR le remplace quand la décision change de direction). Le README qu'elle décrit naît sans
+  le lien des publications, que le projet ajoute à sa première étiquette, et deux registres s'y
+  nomment par ce qu'ils portent ; « Ce qui n'y va jamais » gagne l'issue ou la PR citée ; « Un
+  fait une fois » et « Réécrire un README » disent où va ce qui sort du README ; un lot que conduit
+  un dépôt de la cible `donnees` suit la méthode. `methode.md` : le point 5 du cycle reporte dans
+  `CLAUDE.md`, au présent. Les semés, d'après leur diff : le `CLAUDE.md` semé dit son « État » au
+  présent, en quarante lignes au plus, le passé aux publications ou au journal ; « Ce qui fait
+  foi » y cite le cadrage sans « figés depuis la phase 0 » ; dans la cible `donnees`, ses deux
+  puces des leçons et des lots n'en font qu'une, « Il n'a ni cadrage, ni pistes, ni registre, ni
+  décisions à lui : un lot qu'il conduit suit la méthode, et ses leçons vont au registre du dépôt
+  de code » ; le README semé perd le lien des publications ; le README des décisions garde son
+  premier paragraphe et renvoie à « Les ADR », sans sa règle ni son « Format ». Les six ADR du
+  modèle, gérés, reçoivent leur section « Confirmation » : les chemins qui tiennent la décision
+  dans le projet, marqués quand ils ne sont rendus que dans certaines cibles, puis les tests de
+  `modele-projet` ; M-0001 et M-0005 disent ce qu'aucun contrôle ne tient. `docs/aligner.md` finit
+  la case de `CLAUDE.md` par l'« État » au présent. Un projet déjà né reçoit les gérés par sa mise
+  à jour, les semés par son message.
+- **Le journal** (#160). `CHANGELOG.md`, à la racine du modèle, n'arrive dans aucun projet : une
+  entrée par étiquette, les 22 de `v0.1.0` à `v0.14.0`, à la date de l'étiquette, sous lesquelles se
+  répartissent, tels quels, les 32 paragraphes de l'ancien « État », d'après la table du § 3.1 de la
+  spec. Un script hors du dépôt l'a construit, et une vérification indépendante l'a retrouvé octet
+  pour octet. L'« État » de `CLAUDE.md` passe de 806 lignes non vides à 26, au présent ; « Ce qui
+  fait foi » et le README lient le journal ; les quatre listes de constats de « Prochain »
+  deviennent la piste « Les constats que les portes laissent ouverts ».
+- **Les corrections de la revue finale** (#161) : un test de la zone des commentaires des
+  avertissements, en cinq cas, et une limite de plus dans les deux listes et la docstring ; la
+  phrase des erreurs de `signaux.py`, et les textes de tests qui ne nommaient que le gabarit resté
+  vide ; dans les ADR, la ligne d'amendement « Confirmation » ramenée à la forme de la spec,
+  `deploiement/deployer.sh` (cible `serveur`) dans M-0001, les descriptions de la porte dans
+  M-0001 et de `verifier_secrets.py` dans M-0004 et M-0006, et, dans M-0003, avec les
+  sauvegardes, ce qu'aucun contrôle ne tient : la commande `REPORTER` de l'image. Ce sont des
+  changements du plan (P9), non de la spec.
+- **Les écarts à la spec**, deux, accordés par Edouard le 21/11/2026, avec le plan. P16, déclaré
+  dans #159 : la règle commune des ADR admet aussi l'amendement par un nouvel ADR, qui le dit en
+  tête de son contexte, l'ancien gardant son texte ; le § 5.1 ne nommait que l'amendement en place
+  et le remplacement, mais le § 8 promettait d'admettre ce que font les projets, dont la précision
+  d'un ADR par un autre (`ancrage`, `pupitre`). P12, déclaré par la PR de clôture :
+  `docs/cadrage.md` s'amende par un bloc ajouté, à la clôture du lot 20, sans réécrire ses lignes
+  sur les ADR, que le § 5.7 faisait devenir la règle commune dans la PR des textes.
+- **La revue finale** a lu `4028c2c..d7c4f00` en trois lentilles, la spec et le plan, les
+  avertissements, les textes, par des agents, chacune contre-vérifiée ; la session a fait le
+  relevé et les mesures ; une lecture de complétude a cherché ce qui manquait et contre-vérifié le
+  relevé, les mesures et le journal. 24 constats, 21 sans leurs trois doublons, aucun critique ;
+  deux importants, S-1 et T-1, ramenés à mineur par leur contre-vérification ; A-5 réfuté, et la
+  part (c) de T-3. Dix sont allés aux corrections (#161), huit à cette clôture (S-2, S-3, S-4,
+  T-6, T-7, T-8, A-4, A-7), et deux restent tels quels : la liste des limites de l'« État »,
+  écrite close, qui est le texte du § 4.2 (A-8, T-9), et les quatre rendus du test des chemins,
+  que fixe le § 7 (T-10) ; M-0004 reste aussi sans « Aucun contrôle ne tient », ses gestes du
+  poste étant des clauses de son § 4 (la part de T-4 qui le touche). Les corrections, interrompues
+  du 22 au 27/11 à la demande d'Edouard, ont eu une relecture par un relecteur neuf, constat par
+  constat : tout est corrigé, rien de critique ni d'important introduit, et son seul mineur, la
+  puce de `deployer.sh` dans M-0001, qui ne dit pas que le staging ne prend l'exemple qu'avec un
+  commit de données, va aux « À relire ».
+- **Les durées** : aucun job coupé ni avertissement de durée dans les neuf exécutions de `ci.yml`
+  du lot, une tentative chacune : cinq sur les PR, à `01a4e92` et `639739d` pour #158, puis aux
+  têtes de #159, #160 et #161, et quatre aux push des fusions de #158 à #161. Sous Windows, le job
+  `tests` a duré au plus 38 min 30 s (au push de `e429367`), sous le seuil de 45 min, contre
+  37 min 44 s au lot 19 ; `mecanique`, au plus 11 min 41 s (#158), sous 15 min ; `menage-cible`,
+  au plus 55 s, sous 1 min 30 s ; `fausse-app`, de 3 min 40 s à 4 min 03 s, sous son délai de
+  15 min. Seule l'exécution de `01a4e92` a été rouge, sur `tests`, sous les deux systèmes : la
+  règle des renvois nus (LE-114).
+- **Le relevé** de la revue finale, sur `d7c4f00`, et celui du 27/11, sur `4a79719`, dont `77ff1c3`
+  est le squash, à contenu égal, rendent 0 : 77 dépôts examinés, 8 projets, 8 lus, 0 non relevé, 0 à
+  lire. Les versions n'ont pas bougé depuis le 21/11 : `ancrage`, `pilote` et `veille-emploi` en
+  `v0.14.0`, les cinq autres en `v0.12.0`. Les plans en cours gardent leur verdict, aucun texte de
+  PR n'en change, et les fichiers gérés comparés sont identiques. Les avertissements de la tête, sur
+  un clone de chaque projet, ne signalent à la revue finale que l'« État » d'`ancrage`, de 306
+  lignes, et de `serveur`, de 288 ; 293 le 27/11, à la préparation des messages. Le relevé de la
+  clôture, sur `41b0a88`, le 28/11, rend 0, comme celui du 27/11 : 77 dépôts examinés, 8 projets, 8
+  lus, 0 non relevé, 0 à lire ; 13 plans en cours, chacun au même verdict à sa version et à la tête,
+  dont 5 refuseraient s'ils étaient neufs, une information ; 3 PR ouvertes, aucune n'ajoute de
+  plan ; 304 textes de PR lus, aucun verdict changé ; les fichiers gérés comparés, tous identiques.
+- **Le registre** gagne LE-114 à LE-126, toutes ouvertes. Deux portes sont dues, chacune depuis le
+  3e constat de son motif, et leur forme revient à Edouard : « état des autres dépôts repris d'un
+  texte, pas relu », qui compte quatre constats (LE-122, les ADR des projets, que la spec comptait
+  19 et qui étaient 47 au 21/11 ; LE-126, la formule « figés depuis la phase 0 », que la spec
+  prêtait au `CLAUDE.md` de quatre projets, quand seul celui de `pilote` la porte), et
+  « dénombrement fait à la main, repris sans recompter » (LE-124). Neuf autres vont sous des motifs
+  dont la porte est écrite : trois sous « mécanisme décrit sans relire son code », qui compte
+  désormais dix-huit constats (LE-116, le test d'une ligne d'« Outils et cas limites » qui n'exerce
+  qu'un de ses deux cas ; LE-118, des descriptions écrites pour une seule variante du rendu ;
+  LE-119, un remède écrit dans une consigne sans essai) ; deux sous « contrôle passé à vide », qui
+  en compte dix-neuf (LE-115, la suite entière jamais lancée avant une PR ; LE-120, des gardes, des
+  valeurs et des phrases qu'aucun test ne tenait, un troisième lot de suite) ; deux sous « décision
+  appliquée sans en chercher les effets », qui en compte dix (LE-114, deux tests que le plan n'a pas
+  nommés ; LE-125, neuf textes que le lot a rendus faux sans en retirer un mot) ; LE-117 sous
+  « écart à la spec mal pesé », LE-123 sous « comportement d'un outil supposé ». LE-121 est le 2e
+  constat de « sortie d'un contrôle coupée avant d'être lue ». Les critères de sortie de LE-110 et
+  de LE-112, qui visaient ce lot, ne sont pas tenus.
+- **Vers les projets**, la `v0.15.0` part vers les huit projets après la publication, chacun avec
+  son message, préparé à l'aide d'un relevé neuf : `serveur` d'abord, puis les sept autres après
+  sa fusion (§ 9 de la spec).
+- **Les « À relire » de la clôture** : Edouard a accepté le 28/11, tels quels, les neuf choix de la
+  section « À relire » de sa PR de clôture, dont l'en-tête du journal (T-8) et LE-125 ; la forme
+  des deux portes dues reste ouverte, à trancher dans un lot sur ces motifs.
 
 ## [0.14.0] — 2026-11-20
 
@@ -846,6 +972,7 @@ Lot 1 fait le 17/10/2026 : le socle (cible `aucune`), étiqueté `v0.1.1`. Lot 6
 
 Aucun paragraphe de l'« État » : ses notes sont dans sa publication.
 
+[0.15.0]: https://github.com/EdouardZemb/modele-projet/releases/tag/v0.15.0
 [0.14.0]: https://github.com/EdouardZemb/modele-projet/releases/tag/v0.14.0
 [0.13.0]: https://github.com/EdouardZemb/modele-projet/releases/tag/v0.13.0
 [0.12.0]: https://github.com/EdouardZemb/modele-projet/releases/tag/v0.12.0

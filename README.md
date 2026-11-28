@@ -76,7 +76,7 @@ de contrôle est dans [`docs/aligner.md`](docs/aligner.md).
 | [Le cadrage](docs/cadrage.md) | pour les décisions, le contrat, les cibles |
 | [La méthode](template/docs/modele/methode.md) | pour la façon de travailler, distribuée aux projets |
 | [Les décisions héritées](template/docs/modele/decisions/) | pour ce que les projets héritent du modèle, et pourquoi |
-| [Documenter un projet](template/docs/modele/documentation.md) | pour écrire ou relire le README d'un projet |
+| [Documenter un projet](template/docs/modele/documentation.md) | pour écrire ou relire les textes d'un projet, du README aux ADR |
 | [Aligner un projet](docs/aligner.md) | pour aligner un projet existant, case par case |
 | [Les pistes](docs/pistes.md) | pour ce qui est noté sans être engagé |
 | [Le registre](docs/registre.md) | pour ce que les lots ont appris |
