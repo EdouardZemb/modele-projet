@@ -106,7 +106,10 @@ ce qui vieillit (PR #158 à #161). La spec et le plan sont acceptés par Edouard
   PR n'en change, et les fichiers gérés comparés sont identiques. Les avertissements de la tête, sur
   un clone de chaque projet, ne signalent à la revue finale que l'« État » d'`ancrage`, de 306
   lignes, et de `serveur`, de 288 ; 293 le 27/11, à la préparation des messages. Le relevé de la
-  clôture : [[RELEVÉ : …]].
+  clôture, sur `41b0a88`, le 28/11, rend 0, comme celui du 27/11 : 77 dépôts examinés, 8 projets, 8
+  lus, 0 non relevé, 0 à lire ; 13 plans en cours, chacun au même verdict à sa version et à la tête,
+  dont 5 refuseraient s'ils étaient neufs, une information ; 3 PR ouvertes, aucune n'ajoute de
+  plan ; 304 textes de PR lus, aucun verdict changé ; les fichiers gérés comparés, tous identiques.
 - **Le registre** gagne LE-114 à LE-126, toutes ouvertes. Deux portes sont dues, chacune depuis le
   3e constat de son motif, et leur forme revient à Edouard : « état des autres dépôts repris d'un
   texte, pas relu », qui compte quatre constats (LE-122, les ADR des projets, que la spec comptait
