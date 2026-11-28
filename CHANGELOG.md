@@ -56,12 +56,12 @@ ce qui vieillit (PR #158 à #161). La spec et le plan sont acceptés par Edouard
   la case de `CLAUDE.md` par l'« État » au présent. Un projet déjà né reçoit les gérés par sa mise
   à jour, les semés par son message.
 - **Le journal** (#160). `CHANGELOG.md`, à la racine du modèle, n'arrive dans aucun projet : une
-  entrée par étiquette, les 22 de `v0.1.0` à `v0.14.0`, à la date de l'étiquette, sous laquelle
-  vont tels quels les 32 paragraphes de l'ancien « État », d'après la table du § 3.1 de la spec.
-  Un script hors du dépôt l'a construit, et une vérification indépendante l'a retrouvé octet pour
-  octet. L'« État » de `CLAUDE.md` passe de 806 lignes non vides à 26, au présent ; « Ce qui fait
-  foi » et le README lient le journal ; les quatre listes de constats de « Prochain » deviennent
-  la piste « Les constats que les portes laissent ouverts ».
+  entrée par étiquette, les 22 de `v0.1.0` à `v0.14.0`, à la date de l'étiquette, sous lesquelles se
+  répartissent, tels quels, les 32 paragraphes de l'ancien « État », d'après la table du § 3.1 de la
+  spec. Un script hors du dépôt l'a construit, et une vérification indépendante l'a retrouvé octet
+  pour octet. L'« État » de `CLAUDE.md` passe de 806 lignes non vides à 26, au présent ; « Ce qui
+  fait foi » et le README lient le journal ; les quatre listes de constats de « Prochain »
+  deviennent la piste « Les constats que les portes laissent ouverts ».
 - **Les corrections de la revue finale** (#161) : un test de la zone des commentaires des
   avertissements, en cinq cas, et une limite de plus dans les deux listes et la docstring ; la
   phrase des erreurs de `signaux.py`, et les textes de tests qui ne nommaient que le gabarit resté
@@ -99,28 +99,30 @@ ce qui vieillit (PR #158 à #161). La spec et le plan sont acceptés par Edouard
   au plus 55 s, sous 1 min 30 s ; `fausse-app`, de 3 min 40 s à 4 min 03 s, sous son délai de
   15 min. Seule l'exécution de `01a4e92` a été rouge, sur `tests`, sous les deux systèmes : la
   règle des renvois nus (LE-114).
-- **Le relevé** de la revue finale, sur `d7c4f00`, et celui du 27/11, sur `4a79719`, dont
-  `77ff1c3` est le squash, à contenu égal, rendent 0 : 77 dépôts examinés, 8 projets, 8 lus,
-  0 non relevé, 0 à lire. Les versions n'ont pas bougé depuis le 21/11 : `ancrage`, `pilote` et
-  `veille-emploi` en `v0.14.0`, les cinq autres en `v0.12.0`. Les plans en cours gardent leur
-  verdict, aucun texte de PR n'en change, et les fichiers gérés comparés sont identiques. Les
-  avertissements de la tête, sur un clone de chaque projet, ne signalent que l'« État »
-  d'`ancrage`, de 306 lignes, et de `serveur`, de 288. Le relevé de la clôture : [[RELEVÉ : …]].
-- **Le registre** gagne LE-114 à LE-125, toutes ouvertes. Deux portes sont dues, chacune au
-  3e constat de son motif, et leur forme revient à Edouard : « état des autres dépôts repris
-  d'un texte, pas relu » (LE-122, les ADR des projets, que la spec comptait 19 et qui sont
-  47) et « dénombrement fait à la main, repris sans recompter » (LE-124). Neuf autres vont
-  sous des motifs dont la porte est écrite : trois sous « mécanisme décrit sans relire son
-  code », qui compte désormais dix-huit constats (LE-116, le test d'une ligne d'« Outils et
-  cas limites » qui n'exerce qu'un de ses deux cas ; LE-118, des descriptions écrites pour
-  une seule variante du rendu ; LE-119, un remède écrit dans une consigne sans essai) ; deux
-  sous « contrôle passé à vide », qui en compte dix-neuf (LE-115, la suite entière jamais
-  lancée avant une PR ; LE-120, des gardes, des valeurs et des phrases qu'aucun test ne
-  tenait, un troisième lot de suite) ; deux sous « décision appliquée sans en chercher les
-  effets », qui en compte dix (LE-114, deux tests que le plan n'a pas nommés ; LE-125,
-  quatre textes que le lot a rendus faux sans en retirer un mot) ; LE-117 sous « écart à la
-  spec mal pesé », LE-123 sous « comportement d'un outil supposé ». LE-121 est le 2e constat
-  de « sortie d'un contrôle coupée avant d'être lue ». Les critères de sortie de LE-110 et
+- **Le relevé** de la revue finale, sur `d7c4f00`, et celui du 27/11, sur `4a79719`, dont `77ff1c3`
+  est le squash, à contenu égal, rendent 0 : 77 dépôts examinés, 8 projets, 8 lus, 0 non relevé, 0 à
+  lire. Les versions n'ont pas bougé depuis le 21/11 : `ancrage`, `pilote` et `veille-emploi` en
+  `v0.14.0`, les cinq autres en `v0.12.0`. Les plans en cours gardent leur verdict, aucun texte de
+  PR n'en change, et les fichiers gérés comparés sont identiques. Les avertissements de la tête, sur
+  un clone de chaque projet, ne signalent à la revue finale que l'« État » d'`ancrage`, de 306
+  lignes, et de `serveur`, de 288 ; 293 le 27/11, à la préparation des messages. Le relevé de la
+  clôture : [[RELEVÉ : …]].
+- **Le registre** gagne LE-114 à LE-126, toutes ouvertes. Deux portes sont dues, chacune depuis le
+  3e constat de son motif, et leur forme revient à Edouard : « état des autres dépôts repris d'un
+  texte, pas relu », qui compte quatre constats (LE-122, les ADR des projets, que la spec comptait
+  19 et qui étaient 47 au 21/11 ; LE-126, la formule « figés depuis la phase 0 », que la spec
+  prêtait au `CLAUDE.md` de quatre projets, quand seul celui de `pilote` la porte), et
+  « dénombrement fait à la main, repris sans recompter » (LE-124). Neuf autres vont sous des motifs
+  dont la porte est écrite : trois sous « mécanisme décrit sans relire son code », qui compte
+  désormais dix-huit constats (LE-116, le test d'une ligne d'« Outils et cas limites » qui n'exerce
+  qu'un de ses deux cas ; LE-118, des descriptions écrites pour une seule variante du rendu ;
+  LE-119, un remède écrit dans une consigne sans essai) ; deux sous « contrôle passé à vide », qui
+  en compte dix-neuf (LE-115, la suite entière jamais lancée avant une PR ; LE-120, des gardes, des
+  valeurs et des phrases qu'aucun test ne tenait, un troisième lot de suite) ; deux sous « décision
+  appliquée sans en chercher les effets », qui en compte dix (LE-114, deux tests que le plan n'a pas
+  nommés ; LE-125, neuf textes que le lot a rendus faux sans en retirer un mot) ; LE-117 sous
+  « écart à la spec mal pesé », LE-123 sous « comportement d'un outil supposé ». LE-121 est le 2e
+  constat de « sortie d'un contrôle coupée avant d'être lue ». Les critères de sortie de LE-110 et
   de LE-112, qui visaient ce lot, ne sont pas tenus.
 - **Vers les projets**, la `v0.15.0` part vers les huit projets après la publication, chacun avec
   son message, préparé à l'aide d'un relevé neuf : `serveur` d'abord, puis les sept autres après

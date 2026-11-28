@@ -627,12 +627,14 @@
 >   de fichiers, un lot au futur) ou une issue citée ; la CI n'en lance aucun ;
 > - **le dépôt modèle** : son « État » se réécrit au présent ; son histoire est dans
 >   `CHANGELOG.md`, à sa racine, qui n'arrive dans aucun projet, et la clôture de chaque lot y ouvre
->   l'entrée de sa version, à la date de la clôture ;
+>   l'entrée de sa version, à la date de la clôture. Le renvoi du bloc du lot 19 à « `CLAUDE.md`,
+>   « Lot 19 » » mène désormais à ce journal, sous `[0.14.0]`, où le paragraphe « Lot 19 fait le
+>   … » est allé tel quel (#160) ;
 > - **deux écarts à la spec du lot**, accordés par Edouard le 21/11, avec le plan : la règle
 >   commune admet l'amendement par un nouvel ADR (P16, déclaré dans #159), et ce bloc amende le
 >   cadrage par ajout, sans réécrire ses lignes sur les ADR au §5.3, que la spec faisait devenir la
 >   règle (P12, déclaré dans la PR de clôture) ;
-> - **le registre** gagne LE-114 à LE-125.
+> - **le registre** gagne LE-114 à LE-126.
 
 Ce cadrage est la partie publique de la spec de conception du modèle, issue d'une séance de questions avec Edouard : 12 questions, puis 5 parties de design validées une à une. La partie qui nomme le serveur est privée et n'est pas reproduite ici.
 
